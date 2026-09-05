@@ -22,7 +22,8 @@ Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jeky
 
 - `worker.js` turns the seed into a hash, a PRNG, and seeded simplex noise. It builds an icosphere, raises terrain, paints biomes per face, places flora and fauna, and condenses clouds. It runs off the main thread and reports progress.
 - `app.js` renders the result with three.js (flat-shaded vertex colours, instanced flora, fauna and clouds, atmosphere shaders, rings, moons). It saves each world's seed, type, and a thumbnail to `localStorage`.
-- `fauna.js` holds the creature geometry, their vertex-shader animation, the steering model, the species lore, and the inspector card.
+- `species.js` rolls a set of species per world: class, niche, body plan, limbs, head, extras, gait, movement, colours, and modular lore. It runs inside the worker.
+- `fauna.js` builds a creature from a genome, rigs it for the vertex shader, steers it, and runs the inspector card.
 - Worlds are stored as seeds, not meshes. A saved world regenerates in about a second and the store stays small.
 - Small or coarse-pointer devices get a lower mesh detail, fewer plants, and no shadows.
 
@@ -32,6 +33,18 @@ Drag to spin and tilt. Scroll or pinch to zoom. Zoom in close and the view tilts
 
 ## Fauna
 
-Eight creature kinds, placed by biome: sail-backed stilt-striders on meadows, moss-backed grazers in forests, bladder drifters over open land, shell crawlers on deserts and cooled lava, lantern stalkers on ice, shard swarms and tide worms on coasts, and sky whales over oceans and in gas giant clouds.
+Every world rolls its own species, two to four of them, from the seed. Each species is a genome:
+
+- a class: land, air, or sub-surface, chosen to fit a niche (meadow, forest, beach, lowland, dune, snow, ash, open sea, cloud deck);
+- a locomotion: monopod, biped, tripod, quadruped, hexapod, serpent; gas sac, wings, fins; or a breathing arch, a periscope neck, or a plough that swims under the ground;
+- a body plan: blob, spindle, chain, dome, disc, or a swarm of shards around a core;
+- a head: beak, mandibles, eye stalks, lure, crest, tusks, or none;
+- extras: sail, spikes, lamp beads, tendrils, garden, plates, tail, flukes, antennae, mounds.
+
+The geometry is built from those parts. Every vertex carries a rig record (mode, phase, amplitude, weight) and a pivot, and one shader animates all species: legs swing about the hip and lift on the forward stroke, wings roll at the root, tendrils and tails sway, lures and beads pulse, heads nod, flukes lag the body. A per-species carriage moves the whole body: a walk bob, a hop, a wave, a float, an arch pulse, or a rise and sink. Legs only swing while the animal actually moves.
+
+The lore is modular too. The name, the binomial, the habitat, the size, the diet, the manner, and the story are all assembled from the parts the animal really has, so a lantern-headed tripod waits in ambush and a plated hexapod licks minerals from the rock.
+
+See `docs/fauna.md` for the architecture: the genome fields, the rig modes, the carriages, and the placement rules.
 
 Creatures roam on procedural paths. Two slow oscillators with per-creature random frequencies steer each one, a leash pulls it back toward its home spot, and grazers stop and start on a third oscillator. Land creatures follow a coarse height map from the worker and turn back at the shoreline. Click a creature, or a species chip in the info card, to open the inspector: a live turntable with the path trace and the species backstory.

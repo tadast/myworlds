@@ -3,6 +3,7 @@
 // The same seed string always produces the same world.
 
 'use strict';
+importScripts('./species.js'); // species genomes and lore (self.Species)
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -254,11 +255,7 @@ const TYPE_LABEL = {
   lava: 'Volcanic Hellscape', gas: 'Gas Giant', exotic: 'Exotic Alien World',
 };
 const FLORA = { TREE: 0, PINE: 1, CACTUS: 2, CRYSTAL: 3, MUSHROOM: 4, BOULDER: 5, PALM: 6 };
-// fauna kinds: see faunaGeometry() in app.js for their shapes
-const FAUNA = { STILTER: 0, DRIFTER: 1, SHELLBACK: 2, LANTERN: 3, MOSSBACK: 4, SWARM: 5, TIDEWORM: 6, SKYWHALE: 7 };
-const FAUNA_NAME = ['sail-backed stilt-striders', 'bladder drifters', 'shell crawlers', 'lantern stalkers', 'moss-backed grazers', 'shard swarms', 'tide worms', 'sky whales'];
-// hover above the ground (world units, before terrain radius)
-const FAUNA_HOVER = [0, 0.014, 0, 0, 0, 0.02, 0, 0.03];
+// fauna: each world rolls its own species set (species.js); a creature's kind is its species index
 
 function chooseType(rng) {
   const total = TYPES.reduce((s, t) => s + t[1], 0);
@@ -390,6 +387,7 @@ function generate(seed, opts) {
     hasAtmosphere: true, atmoStrength: 1, seaLevel: 0, hasOcean: false, amp: 0,
     rings: null, moons: [], stats: {},
   };
+  world.species = Species.makeSpeciesSet(makeRng(seed + '|species'), type, world, P);
 
   if (type === 'gas') return generateGas(world, rng, noise, P, detail, post, frng, maxFauna);
 
@@ -663,55 +661,28 @@ function packFauna(list, maxFauna) {
 
 function makeFauna(rng, type, pos, vCount, H, T, M, FM, R, beachW, snowLine, maxFauna, world) {
   const list = [];
+  const seaR = 1 + world.amp * 0.004;
   for (let v = 0; v < vCount; v++) {
     const h = H[v], t = T[v], m = M[v], f = FM[v];
-    let kind = -1, p = 0, scale = 1;
     const beach = h > 0 && h < beachW;
     const lowland = h > beachW && h < 0.3;
-    const meadow = lowland && m > -0.2 && m < 0.22 && f < 0.1;
-    const forest = lowland && m > 0.22 && f > 0.05;
-    switch (type) {
-      case 'terran':
-        if (t < 0.15) break;
-        if (beach) { kind = rng() < 0.5 ? FAUNA.TIDEWORM : FAUNA.SWARM; p = 0.05; scale = 1.5; }
-        else if (meadow && t > 0.35) { kind = FAUNA.STILTER; p = 0.018; scale = 1.5; }
-        else if (forest) { kind = FAUNA.MOSSBACK; p = 0.008; scale = 1.45; }
-        else if (lowland && f < -0.2) { kind = FAUNA.DRIFTER; p = 0.006; scale = 1.3; }
-        break;
-      case 'ocean':
-        if (h < -0.08 && f > 0.3) { kind = FAUNA.SKYWHALE; p = 0.0025; scale = 2.2; }
-        else if (beach) { kind = rng() < 0.6 ? FAUNA.TIDEWORM : FAUNA.SWARM; p = 0.06; scale = 1.5; }
-        else if (lowland && t > 0.3) { kind = rng() < 0.7 ? FAUNA.STILTER : FAUNA.DRIFTER; p = 0.015; scale = 1.4; }
-        break;
-      case 'desert': {
-        const flat = h > beachW && h < 0.6;
-        if (flat && f > 0.05) { kind = FAUNA.SHELLBACK; p = 0.012; scale = 1.2; }
-        else if (flat && m > 0.25) { kind = FAUNA.STILTER; p = 0.02; scale = 1.6; }
-        else if (flat && f < -0.3) { kind = FAUNA.DRIFTER; p = 0.008; scale = 1.3; }
-        break;
-      }
-        break;
-      case 'ice':
-        if (h > beachW && h < 0.35 && t > -0.05 && f > -0.1) { kind = FAUNA.LANTERN; p = 0.014; scale = 1.35; }
-        else if (lowland && f < -0.3) { kind = FAUNA.SHELLBACK; p = 0.01; scale = 1.1; }
-        break;
-      case 'lava':
-        if (h > 0.15 && h < 0.6 && f > 0.1) { kind = FAUNA.SHELLBACK; p = 0.012; scale = 1.25; }
-        else if (h > 0.1 && f < -0.35) { kind = FAUNA.LANTERN; p = 0.008; scale = 1.4; }
-        break;
-      case 'exotic':
-        if (t < 0.1) break;
-        if (beach) { kind = FAUNA.TIDEWORM; p = 0.05; scale = 1.5; }
-        else if (h < -0.08 && f > 0.35) { kind = FAUNA.SKYWHALE; p = 0.002; scale = 2; }
-        else if (meadow) { kind = rng() < 0.6 ? FAUNA.STILTER : FAUNA.LANTERN; p = 0.018; scale = 1.5; }
-        else if (forest) { kind = rng() < 0.5 ? FAUNA.MOSSBACK : FAUNA.SWARM; p = 0.01; scale = 1.4; }
-        else if (lowland) { kind = FAUNA.DRIFTER; p = 0.008; scale = 1.3; }
-        break;
+    // which niches this vertex belongs to
+    const ok = {
+      beach: beach && t > 0.1,
+      meadow: lowland && m > -0.2 && m < 0.22 && f < 0.1 && t > 0.35,
+      forest: lowland && m > 0.22 && f > 0.05,
+      lowland: lowland && t > 0.15,
+      dune: h > beachW && h < 0.6,
+      snow: h > beachW && h < 0.35 && t > -0.05,
+      ash: h > 0.15 && h < 0.6,
+      sea: h < -0.08,
+    };
+    for (const G of world.species) {
+      if (!ok[G.niche] || f * G.fsign < G.fcut || rng() >= G.density) continue;
+      const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+      const r = (h < 0 ? seaR : R[v]) + G.hover;
+      list.push([x * r, y * r, z * r, x, y, z, G.size * rrange(rng, 0.85, 1.2), G.id, rng() * Math.PI * 2]);
     }
-    if (kind < 0 || rng() >= p) continue;
-    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
-    const r = (h < 0 ? 1 + world.amp * 0.004 : R[v]) + FAUNA_HOVER[kind];
-    list.push([x * r, y * r, z * r, x, y, z, scale * rrange(rng, 0.85, 1.2), kind, rng() * Math.PI * 2]);
   }
   const packed = packFauna(list, maxFauna);
   world.faunaCount = packed.count;
@@ -724,10 +695,9 @@ function makeGasFauna(rng, maxFauna, world) {
   const n = Math.round(rrange(rng, 18, 34));
   for (let i = 0; i < n; i++) {
     const [x, y, z] = randDir(rng);
-    const whale = rng() < 0.55;
-    const kind = whale ? FAUNA.SKYWHALE : FAUNA.DRIFTER;
+    const G = rng() < 0.55 ? world.species[0] : world.species[world.species.length - 1];
     const r = 1 + rrange(rng, 0.03, 0.07);
-    list.push([x * r, y * r, z * r, x, y, z, whale ? rrange(rng, 2.5, 4) : rrange(rng, 1.6, 2.4), kind, rng() * Math.PI * 2]);
+    list.push([x * r, y * r, z * r, x, y, z, G.size * rrange(rng, 0.9, 1.2), G.id, rng() * Math.PI * 2]);
   }
   const packed = packFauna(list, maxFauna);
   world.faunaCount = packed.count;
@@ -752,7 +722,7 @@ function makeStats(rng, type, world, floraCount) {
     case 'gas': life = pick(rng, ['Endless storms', 'Ammonia cloud bands', 'Winds of 1,400 km/h']); break;
     case 'exotic': life = pick(rng, ['Glowing mushroom groves', 'Singing crystals', 'Luminous alien flora']); break;
   }
-  const fauna = (world.faunaKinds || []).map((k) => FAUNA_NAME[k]);
+  const fauna = (world.faunaKinds || []).map((k) => world.species[k].lore.plural);
   const faunaText = fauna.length ? fauna.slice(0, 3).join(", ") : "none seen";
   return {
     radius: `${km.toLocaleString()} km`, gravity: `${g.toFixed(2)} g`, day: `${day.toFixed(1)} h`,

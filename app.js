@@ -1,7 +1,7 @@
 // myworlds — main thread: rendering, controls, UI, storage.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { BASE_SCALE, MOVE, LORE, faunaGeometry, faunaMaterial, mergeGeos, M4, makeMover, stepMover, Inspector } from './fauna.js';
+import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, Inspector } from './fauna.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -276,7 +276,7 @@ function buildWorld(res) {
     }
   }
 
-  // fauna (instanced per kind, animated in the vertex shader, roaming on the CPU)
+  // fauna (one instanced mesh per species, animated in the vertex shader, roaming on the CPU)
   const faunaMats = [], movers = [], faunaMeshes = [];
   if (world.faunaCount > 0 && fauna) {
     const kinds = new Map();
@@ -289,15 +289,17 @@ function buildWorld(res) {
     const q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), s = new THREE.Vector3(), m = new THREE.Matrix4();
     const rng = mulberry32(11);
     for (const [kind, list] of kinds) {
-      const geo = faunaGeometry(kind, world.palette.fauna, world.palette.flora);
+      const G = world.species[kind];
+      const geo = buildCreature(G, world.palette, world.palette.flora);
       const phases = new Float32Array(list.length);
       list.forEach((i, j) => { phases[j] = fauna[i * 9 + 8]; });
       geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
-      const mat = faunaMaterial(kind, world.palette.fauna);
+      geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(list.length).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
+      const mat = faunaMaterial(G);
       faunaMats.push(mat);
       const inst = new THREE.InstancedMesh(geo, mat, list.length);
       inst.userData.kind = kind;
-      inst.castShadow = Q.shadows && MOVE[kind].shadow; inst.receiveShadow = Q.shadows;
+      inst.castShadow = Q.shadows && G.move.shadow; inst.receiveShadow = Q.shadows;
       inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       list.forEach((i, j) => {
         const o = i * 9;
@@ -310,11 +312,11 @@ function buildWorld(res) {
         s.set(sc, sc, sc);
         m.compose(pos, q, s);
         inst.setMatrixAt(j, m);
-        if (MOVE[kind].leash > 0) {
+        if (G.move.leash > 0) {
           // tangent basis for roaming; hover is the gap between the home point and the ground under it
           const t1 = new THREE.Vector3().crossVectors(nrm, Math.abs(nrm.y) < 0.9 ? up : new THREE.Vector3(1, 0, 0)).normalize();
           const t2 = new THREE.Vector3().crossVectors(nrm, t1).normalize();
-          const st = makeMover(rng, kind);
+          const st = makeMover(rng, G.move);
           st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
           const g0 = sampleGround(world, heightMap, nrm);
           st.hover = pos.length() - g0;
@@ -504,9 +506,10 @@ function updateMovers(t, dt) {
     _m.makeBasis(_r.multiplyScalar(mv.sc), _u.multiplyScalar(mv.sc), _f.multiplyScalar(mv.sc));
     _m.setPosition(_p);
     mv.inst.setMatrixAt(mv.j, _m);
+    if (!mv.flies) mv.inst.geometry.attributes.aMove.setX(mv.j, moverActivity(mv)); // legs only swing while it walks
     dirty.add(mv.inst);
   }
-  for (const inst of dirty) inst.instanceMatrix.needsUpdate = true;
+  for (const inst of dirty) { inst.instanceMatrix.needsUpdate = true; inst.geometry.attributes.aMove.needsUpdate = true; }
 }
 // ---------------------------------------------------------------- worker / generation
 let worker = null;
@@ -637,7 +640,7 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
-      <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(LORE[k].name)}</button>`).join('') : 'none seen'}</dd>
+      <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
     </dl>`;
   infoEl.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
   infoEl.classList.add('show');
@@ -650,7 +653,7 @@ function inspect(kind) {
   if (!current) return;
   const pal = current.world.palette;
   const ground = current.world.type === 'gas' ? pal.atmo : (pal.ground || '#7fa860');
-  inspector.show(kind, pal, ground, 3 + kind);
+  inspector.show(current.world.species[kind], pal, ground, 3 + kind);
   creatureCard.dataset.kind = kind;
 }
 creatureCard.querySelector('.cclose').addEventListener('click', () => inspector.hide());
