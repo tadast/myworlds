@@ -26,6 +26,8 @@ const input = $('#seed');
 const diceBtn = $('#dice');
 const worldsEl = $('#worlds');
 const infoEl = $('#info');
+const infoPill = $('#info-pill');
+let infoHidden = false; // the user closed the world card; new worlds keep it closed
 const overlay = $('#overlay');
 const overlayLabel = $('#overlay-label');
 const overlayBar = $('#overlay-bar');
@@ -631,6 +633,7 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&a
 function renderInfo(w) {
   const s = w.stats;
   infoEl.innerHTML = `
+    <button type="button" class="iclose" aria-label="Hide world card">×</button>
     <div class="iname">${escapeHtml(w.seed)}</div>
     <div class="itype">${escapeHtml(w.designation)} · ${escapeHtml(w.typeLabel)}</div>
     <dl>
@@ -643,8 +646,16 @@ function renderInfo(w) {
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
     </dl>`;
   infoEl.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
-  infoEl.classList.add('show');
+  infoEl.querySelector('.iclose').addEventListener('click', () => setInfoHidden(true));
+  infoPill.textContent = `${w.seed} · ${w.typeLabel}`;
+  setInfoHidden(infoHidden);
 }
+function setInfoHidden(hidden) {
+  infoHidden = hidden;
+  infoEl.classList.toggle('show', !hidden);
+  infoPill.hidden = !hidden;
+}
+infoPill.addEventListener('click', () => setInfoHidden(false));
 
 // ---------------------------------------------------------------- creature inspector
 const creatureCard = $('#creature');
