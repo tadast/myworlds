@@ -708,6 +708,7 @@ function makeGasFauna(rng, maxFauna, world) {
 function makeStats(rng, type, world, floraCount) {
   const km = type === 'gas' ? Math.round(rrange(rng, 24000, 75000)) : Math.round(rrange(rng, 3200, 9800));
   const g = type === 'gas' ? rrange(rng, 0.9, 2.6) : (km / 6371) * rrange(rng, 0.8, 1.2);
+  world.gravity = g; for (const s of world.species) s.gravity = g; // the hop of a monopod depends on it
   const day = type === 'gas' ? rrange(rng, 8, 16) : rrange(rng, 14, 60);
   const tempByType = { terran: [-5, 28], ocean: [5, 32], desert: [30, 75], ice: [-120, -40], lava: [420, 900], gas: [-190, -90], exotic: [-30, 60] };
   const [tLo, tHi] = tempByType[type];

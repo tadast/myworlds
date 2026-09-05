@@ -74,6 +74,7 @@ A genome `G` is plain data. `fauna.js` reads these fields:
 | `hover` | Height above the ground in world units (air only) |
 | `move` | `{ leash, speed, turn, pause, flies, shadow }` for the steering model |
 | `density`, `fsign`, `fcut` | Placement rules (see stage 2) |
+| `gravity` | The world gravity in g. `makeStats()` in the worker writes it on every species after the roll |
 | `colors` | `{ body, body2, accent, glow }` as hex strings |
 | `lore` | `{ name, latin, habitat, size, diet, temperament, story, plural }` |
 
@@ -152,7 +153,7 @@ A carriage moves the whole body. `rigConstants(G)` picks it from the locomotion 
 | Carriage | Locomotions | Motion |
 |---|---|---|
 | `WALK` | biped, tripod, quad, hexapod | Body bob at the gait rate, not applied to legs. Scaled by the activity |
-| `HOP` | monopod | Body lifts. The leg stretches from the foot to the hip |
+| `HOP` | monopod | A crouch on the ground for `HOPG` of the cycle, then a parabola of height `HOPH`. `HOPH` is `0.45 / gravity`, clamped to 0.15 to 0.9, and the hop rate is `hopGait(G)`, which grows with the square root of the gravity. The bellows leg stretches by `EXT` (a quarter of its length) at take-off, then the foot leaves the ground and the leg tucks under the body at the apex. Any movement gives a full hop. `hopBurst()` makes the mover cover ground only in the air, in step with the shader |
 | `WAVE` | serpent | A lateral wave runs from the head to the tail. Its amplitude grows toward the tail, and the head end moves as one piece. `FRONT` and `LEN` give the body extents |
 | `FLOAT` | sac, wings, fins | Slow vertical drift, plus a heave on each wing beat (`HEAVE`) and a tail wave for fins |
 | `ARCH` | arch | The loop rises and sinks in place |
@@ -176,9 +177,10 @@ Uniforms and instance attributes:
 
 `makeMover(rng, G.move)` makes a state per creature. `stepMover(st, t, dt)` moves it on the tangent plane of its home point:
 
-- Two sine oscillators with random frequencies drive the turn rate.
-- A leash pulls the animal home once it is past 60 percent of its range.
-- The speed breathes on a third oscillator. Grazers stop on a fourth one.
+- Two slow sine oscillators with random frequencies give the target turn rate.
+- A leash pulls the animal home once it is past 50 percent of its range. The pull is capped near the species turn rate, or at what a fast animal needs to turn round inside its leash, and the sum of the wander and the pull is capped too. The way home is an arc, not a snap.
+- The real turn rate eases toward the target with a time constant of half a second, so the heading has no kinks.
+- The speed breathes on a third oscillator. Grazers stop on a fourth one. A monopod moves only while it is in the air (`hopBurst()`).
 
 `updateMovers()` in `app.js` samples the height map under the new position, keeps walkers out of the sea, builds the instance matrix from the surface normal and the heading, and writes `aMove`. Far from the camera it steps every fourth frame.
 

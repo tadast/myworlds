@@ -249,6 +249,17 @@ export function buildCreature(G, pal, flora) {
       knee = [hip[0] + dx * h * kOut, insect ? hy + h * 0.15 : h * 0.55, hip[2] + dz * h * kOut + h * (insect ? 0.05 : 0.22)];
     } else knee = [(hip[0] + foot[0]) / 2, (hip[1] + foot[1]) / 2, (hip[2] + foot[2]) / 2];
     const rig = (w) => ({ rig: [RIG.LEG, L.phase, stride, w * bend], pivot: hip, pivot2: knee });
+    if (G.loco === 'monopod') {
+      // a bellows spring: a thin core and a stack of tapered rings. The hop carriage stretches it from the foot.
+      PS(seg(hip, foot, th * 0.3, body2, th * 0.3, 5), rig(0));
+      const n = 7, y0 = th * 0.45, hgt = (h - y0) / n;
+      for (let i = 0; i < n; i++) {
+        const big = th * 1.05, small = th * 0.55, flip = i % 2 === 1;
+        P(cyl(flip ? small : big, flip ? big : small, hgt * 0.98, 6), flip ? accent : body2, M4(hip[0], y0 + (i + 0.5) * hgt, hip[2]), rig(0));
+      }
+      P(ico(th * 1.3), body2, M4(foot[0], th * 0.35, foot[2], 1.4, 0.4, 1.6), rig(0));
+      continue;
+    }
     PS(seg(hip, knee, th, body2, th * 1.15, heavy ? 5 : 4), rig(0));
     PS(seg(knee, foot, th * 0.75, body2, th * (knees ? 0.95 : 1.0), heavy ? 5 : 4), rig(1));
     if (knees) P(ico(th * 1.3), body2, M4(...knee), rig(1));
@@ -483,8 +494,18 @@ const RIG_GLSL = `
   #if CARRY == 0
     if (mode != 1.0) transformed.y += BOB * abs(sin(gb)) * mv + 0.01 * sin(sb);
   #elif CARRY == 1
-    float lift = mode == 1.0 ? clamp(position.y / max(aPivot.y, 0.01), 0.0, 1.0) : 1.0;
-    transformed.y += BOB * max(sin(gb), 0.0) * lift * mv;
+    // a hop: a crouch on the ground (HOPG of the cycle), then a parabola of height HOPH set by the gravity.
+    // The spring leg follows the body up to EXT, then the foot leaves the ground.
+    // Any movement gives a full hop; the spring extends by EXT at take-off, then tucks under the body at the apex.
+    float hp = fract(gb / 6.2832), act = smoothstep(0.0, 0.3, mv), yb, stx;
+    if (hp < HOPG) { yb = -CROUCH * sin(hp / HOPG * 3.1416) * act; stx = yb; }
+    else {
+      float a = (hp - HOPG) / (1.0 - HOPG), arc = sin(a * 3.1416);
+      yb = HOPH * 4.0 * a * (1.0 - a) * act;
+      stx = min(yb, EXT) - (EXT + CROUCH * 0.6) * arc * arc * act;
+    }
+    if (mode == 1.0) transformed.y += stx * clamp(position.y / max(aPivot.y, 0.01), 0.0, 1.0) + (yb - stx);
+    else transformed.y += yb;
   #elif CARRY == 2
     // a lateral wave runs from the head to the tail and grows on the way; the head end stays rigid
     float u = clamp((FRONT - transformed.z) / LEN, 0.0, 1.0), zc = min(transformed.z, FRONT * 0.9);
@@ -502,10 +523,23 @@ const RIG_GLSL = `
   }
 `;
 
+// the hop rate of a monopod: quick short hops in high gravity, slow long ones in low gravity
+export const hopGait = (G) => G.gait * clamp(Math.sqrt(G.gravity || 1), 0.6, 1.6);
+// speed factor for a hopper at real time t: it covers ground in the air and not on the ground. The mean is 1.
+export function hopBurst(gait, t, phase) {
+  const hp = ((t * gait + phase * 7) / (2 * Math.PI)) % 1;
+  const air = clamp((hp - HOP_GROUND) / 0.04, 0, 1) * clamp((1 - hp) / 0.04, 0, 1);
+  return 0.25 + air * 1.25;
+}
+const HOP_GROUND = 0.4;
+
 function rigConstants(G) {
   const carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? CARRY.WALK;
   const B = bodySections(G), len = B.front - B.back;
-  const bob = { biped: 0.03, tripod: 0.02, quad: 0.02, hexapod: 0.008, monopod: 0.12, serpent: G.bodyR * 0.9, sac: 0.1, wings: 0.05, fins: 0.06 }[G.loco] || 0;
+  const grav = G.gravity || 1;
+  const gait = G.loco === 'monopod' ? hopGait(G) : G.gait;
+  const hopH = clamp(0.45 / grav, 0.15, 0.9), crouch = G.legLen * 0.25, ext = G.legLen * 0.25;
+  const bob = { biped: 0.03, tripod: 0.02, quad: 0.02, hexapod: 0.008, serpent: G.bodyR * 0.9, sac: 0.1, wings: 0.05, fins: 0.06 }[G.loco] || 0;
   const wave = G.loco === 'fins' ? 0.08 : 0;
   const wavek = G.loco === 'fins' ? 2.0 : G.loco === 'serpent' ? (2 * Math.PI) / (len * 1.1) : 5.0;
   const rise = G.loco === 'periscope' ? 0.05 + (G.segs - 1) * G.bodyR * 1.15 + G.bodyR * 2.4 : G.loco === 'plough' ? G.bodyR * 1.1 : 0;
@@ -513,8 +547,9 @@ function rigConstants(G) {
   const heave = G.loco === 'wings' ? 0.03 : 0; // body lift on each wing beat
   const glide = G.loco === 'wings' ? 0 : 1; // only true wings hold still and glide now and then
   const fx = (v) => Number(v).toFixed(4);
-  return [['CARRY', carry], ['GAIT', G.gait], ['FLAP', G.flap], ['SLOW', G.slow], ['BOB', bob], ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
-    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len]].map(([k, v]) => `#define ${k} ${k === 'CARRY' ? v : fx(v)}\n`).join('');
+  return [['CARRY', carry], ['GAIT', gait], ['FLAP', G.flap], ['SLOW', G.slow], ['BOB', bob], ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
+    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['HOPG', HOP_GROUND], ['CROUCH', crouch], ['EXT', ext]]
+    .map(([k, v]) => `#define ${k} ${k === 'CARRY' ? v : fx(v)}\n`).join('');
 }
 
 export function faunaMaterial(G) {
@@ -550,32 +585,39 @@ export function cardHover(G) {
 // back toward home, and grazers stop and start on a third oscillator. No two creatures share a rhythm.
 export function makeMover(rng, mv) {
   return {
-    u: 0, v: 0, heading: rng() * Math.PI * 2, spd: 0,
-    f1: 0.15 + rng() * 0.25, p1: rng() * 6.28, f2: 0.5 + rng() * 0.6, p2: rng() * 6.28, f3: 0.08 + rng() * 0.12, p3: rng() * 6.28,
+    u: 0, v: 0, heading: rng() * Math.PI * 2, spd: 0, rate: 0,
+    f1: 0.15 + rng() * 0.25, p1: rng() * 6.28, f2: 0.25 + rng() * 0.3, p2: rng() * 6.28, f3: 0.08 + rng() * 0.12, p3: rng() * 6.28,
     fp: 0.05 + rng() * 0.08, pp: rng() * 6.28,
     leash: mv.leash * (0.7 + rng() * 0.6), speed: mv.speed * (0.75 + rng() * 0.5), turn: mv.turn, pause: mv.pause, flies: mv.flies,
   };
 }
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-export function stepMover(st, t, dt) {
+export function stepMover(st, t, dt, burst = 1) {
+  // burst: speed factor for this step (a hopper moves in the air, not on the ground)
   if (st.leash <= 0) return false;
-  // wander: slow drift plus a quicker jitter
-  let turn = Math.sin(t * st.f1 + st.p1) * 0.9 + Math.sin(t * st.f2 + st.p2) * 0.35;
+  // wander: a slow drift plus a slower, smaller second drift
+  let turn = Math.sin(t * st.f1 + st.p1) * 0.9 + Math.sin(t * st.f2 + st.p2) * 0.25;
   turn *= st.turn;
-  // leash: the further out, the harder it steers home
+  // leash: the further out, the harder it steers home, in a wide arc
   const d = Math.hypot(st.u, st.v);
-  if (d > st.leash * 0.6) {
+  if (d > st.leash * 0.5) {
     const home = Math.atan2(-st.v, -st.u);
-    const k = Math.min(1, (d - st.leash * 0.6) / (st.leash * 0.4));
-    turn += wrapAngle(home - st.heading) * k * 3.0;
+    const k = Math.min(2, (d - st.leash * 0.5) / (st.leash * 0.5));
+    // the pull is capped near the species' own turn rate, so the way home is an arc, not a snap;
+    // a fast animal gets a cap that still turns it round inside its leash
+    const cap = Math.max(st.turn * 1.2, 2.5 * st.speed / st.leash);
+    turn += clamp(wrapAngle(home - st.heading), -1.2, 1.2) * cap * k;
+    turn = clamp(turn, -cap * 1.3, cap * 1.3); // the wander and the pull together stay a smooth arc
   }
-  st.heading += turn * dt;
+  // the turn rate eases toward its target, so the heading has no kinks
+  st.rate += (turn - st.rate) * Math.min(1, dt * 2.0);
+  st.heading += st.rate * dt;
   // speed: breathes slowly; grazers stop for a while when the pause oscillator dips
   let target = st.speed * (0.65 + 0.35 * Math.sin(t * st.f3 + st.p3));
   if (st.pause > 0 && Math.sin(t * st.fp + st.pp) < -1 + st.pause * 0.9) target = 0;
   st.spd += (target - st.spd) * Math.min(1, dt * 1.5);
-  st.u += Math.cos(st.heading) * st.spd * dt;
-  st.v += Math.sin(st.heading) * st.spd * dt;
+  st.u += Math.cos(st.heading) * st.spd * burst * dt;
+  st.v += Math.sin(st.heading) * st.spd * burst * dt;
   return st.spd > st.speed * 0.05;
 }
 // 0..1 activity for the rig: legs swing only while the animal actually moves
@@ -639,9 +681,12 @@ export class Inspector {
     // so it walks long arcs instead of wheeling on the spot
     let s = rngSeed; const rng = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
     this.mover = makeMover(rng, G.move);
-    this.mover.leash = G.move.leash * 1.4; // no per-creature leash jitter on the card; the pull home starts near the disc edge
+    this.mover.leash = G.move.leash * 0.8; // no per-creature leash jitter on the card; the wide arcs of the pull home still fit the disc
     this.mover.turn = G.move.turn * 0.5;
     this.pathScale = G.move.leash > 0 ? this.walkR / G.move.leash : 0;
+    // time factor: every species crosses the card at about 1.2 units per second, whatever its planet speed
+    this.timeK = G.move.speed > 0 ? clamp(1.2 / (G.move.speed * this.pathScale), 0.5, 2.5) : 1;
+    this.hop = G.loco === 'monopod' ? hopGait(G) : 0; // the hop clock runs on real time, like the shader
     this.trailPts = [];
     this.trail.geometry.attributes.position.array.fill(0);
     this.trail.geometry.attributes.position.needsUpdate = true;
@@ -676,8 +721,8 @@ export class Inspector {
     const mv = this.mover;
     let x = 0, z = 0, yaw = t * 0.4;
     if (mv.leash > 0) {
-      // run the same steering as on the planet, with time sped up a little so a lap fits on the card
-      stepMover(mv, t * 2.5, dt * 2.5);
+      // run the same steering as on the planet, with time scaled so the walk reads well on the card
+      stepMover(mv, t * this.timeK, dt * this.timeK, this.hop ? hopBurst(this.hop, t, 0) : 1);
       x = mv.u * this.pathScale; z = mv.v * this.pathScale;
       const rr = Math.hypot(x, z), rMax = this.groundR - 0.35;
       if (rr > rMax) { x *= rMax / rr; z *= rMax / rr; }

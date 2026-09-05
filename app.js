@@ -1,7 +1,7 @@
 // myworlds — main thread: rendering, controls, UI, storage.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, Inspector } from './fauna.js';
+import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -320,6 +320,7 @@ function buildWorld(res) {
           const t2 = new THREE.Vector3().crossVectors(nrm, t1).normalize();
           const st = makeMover(rng, G.move);
           st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
+          if (G.loco === 'monopod') { st.hop = hopGait(G); st.phase = phases[j]; } // a hopper moves in bursts, in step with its shader hop
           const g0 = sampleGround(world, heightMap, nrm);
           st.hover = pos.length() - g0;
           st.dry = !world.seaRadius || g0 > world.seaRadius + 0.0005;
@@ -491,7 +492,7 @@ function updateMovers(t, dt) {
   const seaR = world.seaRadius || 0;
   for (const mv of movers) {
     const pu = mv.u, pv = mv.v;
-    stepMover(mv, t, dt);
+    stepMover(mv, t, dt, mv.hop ? hopBurst(mv.hop, t, mv.phase) : 1);
     _u.copy(mv.n).addScaledVector(mv.t1, mv.u).addScaledVector(mv.t2, mv.v).normalize();
     let ground = sampleGround(world, heightMap, _u);
     if (!mv.flies && mv.dry && ground < seaR + 0.0005) {
