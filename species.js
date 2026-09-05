@@ -126,7 +126,7 @@
       fsign: rng() < 0.5 ? -1 : 1, fcut: rr(rng, -0.35, 0.05),
     };
     G.gait = { monopod: rr(rng, 1.4, 2.2), biped: rr(rng, 2.2, 3.2), tripod: rr(rng, 2.0, 2.8), quad: rr(rng, 1.6, 2.4), hexapod: rr(rng, 4, 5.5), serpent: rr(rng, 2.5, 3.5) }[loco] || 1.5;
-    G.flap = { wings: rr(rng, 9, 15), fins: rr(rng, 1.1, 1.7), sac: 1 }[loco] || 2;
+    G.flap = { wings: rr(rng, 3.6, 5.2) * Math.sqrt(0.3 / G.bodyR), fins: rr(rng, 1.1, 1.7), sac: 1 }[loco] || 2; // big wings beat slowly
     G.size = { monopod: rr(rng, 1.2, 1.6), biped: rr(rng, 1.3, 1.7), tripod: rr(rng, 1.3, 1.6), quad: rr(rng, 1.4, 1.8), hexapod: rr(rng, 1.1, 1.4), serpent: rr(rng, 1.3, 1.7),
       sac: rr(rng, 1.2, 1.5), wings: plan === 'swarm' ? rr(rng, 1.3, 1.6) : rr(rng, 1.0, 1.4), fins: type === 'gas' ? rr(rng, 2.6, 3.6) : rr(rng, 2.0, 2.5),
       arch: rr(rng, 1.4, 1.7), periscope: rr(rng, 1.3, 1.6), plough: rr(rng, 1.1, 1.4) }[loco];

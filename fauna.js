@@ -35,10 +35,11 @@ function seg(a, b, r, color, r2 = r, sides = 4, glow = 0) {
 }
 
 export function mergeGeos(parts) {
-  // parts: [{geo, color, matrix, glow?, rig?, pivot?}] → one non-indexed geometry with colour, glow, rig, pivot attributes
-  const pos = [], nor = [], col = [], glo = [], rig = [], piv = [];
+  // parts: [{geo, color, matrix, glow?, rig?, pivot?, pivot2?}] → one non-indexed geometry with colour, glow, rig, pivot attributes
+  // pivot2 is the second joint of a leg (the knee); it defaults to the pivot
+  const pos = [], nor = [], col = [], glo = [], rig = [], piv = [], piv2 = [];
   const n = V3(), p = V3();
-  for (const { geo, color, matrix, glow = 0, rig: rg = [0, 0, 0, 1], pivot = [0, 0, 0] } of parts) {
+  for (const { geo, color, matrix, glow = 0, rig: rg = [0, 0, 0, 1], pivot = [0, 0, 0], pivot2 = pivot } of parts) {
     const g = geo.index ? geo.toNonIndexed() : geo;
     g.computeVertexNormals();
     const pa = g.attributes.position, na = g.attributes.normal;
@@ -48,7 +49,7 @@ export function mergeGeos(parts) {
       p.fromBufferAttribute(pa, i).applyMatrix4(matrix);
       n.fromBufferAttribute(na, i).applyMatrix3(nm).normalize();
       pos.push(p.x, p.y, p.z); nor.push(n.x, n.y, n.z); col.push(c.r, c.g, c.b); glo.push(glow);
-      rig.push(rg[0], rg[1], rg[2], rg[3]); piv.push(pivot[0], pivot[1], pivot[2]);
+      rig.push(rg[0], rg[1], rg[2], rg[3]); piv.push(pivot[0], pivot[1], pivot[2]); piv2.push(pivot2[0], pivot2[1], pivot2[2]);
     }
     if (g !== geo) g.dispose();
     geo.dispose();
@@ -60,7 +61,46 @@ export function mergeGeos(parts) {
   out.setAttribute('glow', new THREE.Float32BufferAttribute(glo, 1));
   out.setAttribute('aRig', new THREE.Float32BufferAttribute(rig, 4));
   out.setAttribute('aPivot', new THREE.Float32BufferAttribute(piv, 3));
+  out.setAttribute('aPivot2', new THREE.Float32BufferAttribute(piv2, 3));
   return out;
+}
+
+// a tapered two-sided wing sheet along +x with the root at the origin; the tip sweeps back
+function wingGeo(span, chord, n = 5, sweep = 0.4) {
+  const pos = [];
+  const edge = (u) => {
+    const c = chord * Math.sqrt(Math.max(0, 1 - u * u)) * (0.7 + 0.3 * Math.min(1, u * 4)), zc = -sweep * chord * u * u;
+    return [zc + c * 0.5, zc - c * 0.5];
+  };
+  for (let i = 0; i < n; i++) {
+    const u0 = i / n, u1 = (i + 1) / n, x0 = u0 * span, x1 = u1 * span;
+    const [l0, t0] = edge(u0), [l1, t1] = edge(u1);
+    const a = [x0, 0, l0], b = [x1, 0, l1], c = [x1, 0, t1], d = [x0, 0, t0];
+    pos.push(...a, ...b, ...c, ...a, ...c, ...d); // top face
+    pos.push(...a, ...c, ...b, ...a, ...d, ...c); // bottom face
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return g;
+}
+
+// the body as a set of ellipsoids: half-width at (y, z), and the top or bottom surface at (x, z)
+function bodyProbe(secs, yc) {
+  const els = secs.map((s) => ({ cy: yc + s.y, cz: s.z, rx: s.r * s.s[0], ry: s.r * s.s[1], rz: s.r * s.s[2] }));
+  const hw = (y, z) => {
+    let m = 0;
+    for (const e of els) { const q = 1 - ((y - e.cy) / e.ry) ** 2 - ((z - e.cz) / e.rz) ** 2; if (q > 0) m = Math.max(m, e.rx * Math.sqrt(q)); }
+    return m;
+  };
+  const yAt = (x, z, sign) => {
+    let m = null;
+    for (const e of els) {
+      const q = 1 - (x / e.rx) ** 2 - ((z - e.cz) / e.rz) ** 2;
+      if (q > 0) { const y = e.cy + sign * e.ry * Math.sqrt(q); m = m === null ? y : sign > 0 ? Math.max(m, y) : Math.min(m, y); }
+    }
+    return m;
+  };
+  return { hw, top: (x, z) => yAt(x, z, 1), bot: (x, z) => yAt(x, z, -1) };
 }
 
 // ---------------------------------------------------------------- body plans (sections relative to the body centre; +z is forward)
@@ -107,15 +147,15 @@ function bodySections(G) {
   return { secs: [], front: R, back: -R, top: R, bot: -R };
 }
 
-// legs: hip positions, outward direction, and gait phase per locomotion
+// legs: hip z, outward direction (x, z), and gait phase per locomotion; the hip x comes from the body width
 function legPlan(G, len) {
-  const R = G.bodyR, h = G.legLen, out = [];
+  const out = [];
   switch (G.loco) {
-    case 'monopod': out.push({ hip: [0, h, 0], dir: [0, 0], phase: 0 }); break;
-    case 'biped': for (const sx of [-1, 1]) out.push({ hip: [sx * Math.max(0.07, R * 0.5), h, 0], dir: [sx, 0], phase: sx < 0 ? 0 : Math.PI }); break;
-    case 'tripod': for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2 + 0.5; out.push({ hip: [Math.cos(a) * R * 0.5, h, Math.sin(a) * R * 0.5], dir: [Math.cos(a), Math.sin(a)], phase: i * 2.09 }); } break;
-    case 'quad': for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) out.push({ hip: [sx * R * 0.7, h, sz * len * 0.28], dir: [sx, 0], phase: sx * sz > 0 ? 0 : Math.PI }); break;
-    case 'hexapod': { let i = 0; for (const sz of [0.32, 0, -0.32]) for (const sx of [-1, 1]) out.push({ hip: [sx * R * 0.8, h, sz * len], dir: [sx, 0], phase: (i++ % 2) * Math.PI + (sz === 0 ? Math.PI : 0) }); break; }
+    case 'monopod': out.push({ z: 0, dir: [0, 0], phase: 0 }); break;
+    case 'biped': for (const sx of [-1, 1]) out.push({ z: 0, dir: [sx, 0], phase: sx < 0 ? 0 : Math.PI }); break;
+    case 'tripod': for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2 + 0.5; out.push({ z: Math.sin(a) * len * 0.22, dir: [Math.cos(a), Math.sin(a)], phase: i * 2.09 }); } break;
+    case 'quad': for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) out.push({ z: sz * len * 0.3, dir: [sx, 0], phase: sx * sz > 0 ? 0 : Math.PI }); break;
+    case 'hexapod': { let i = 0; for (const sz of [0.32, 0, -0.32]) for (const sx of [-1, 1]) out.push({ z: sz * len, dir: [sx, 0], phase: (i++ % 2) * Math.PI + (sz === 0 ? Math.PI : 0) }); break; }
   }
   return out;
 }
@@ -126,16 +166,16 @@ export function buildCreature(G, pal, flora) {
   const sand = (pal && pal.fauna && pal.fauna.sand) || body2;
   const moss = flora ? flora.canopy : accent, trunk = flora ? flora.trunk : body2;
   const parts = [];
-  const P = (geo, color, matrix, o = {}) => parts.push({ geo, color, matrix, glow: o.glow || 0, rig: o.rig || [RIG.NONE, 0, 0, 1], pivot: o.pivot || [0, 0, 0] });
+  const P = (geo, color, matrix, o = {}) => parts.push({ geo, color, matrix, glow: o.glow || 0, rig: o.rig || [RIG.NONE, 0, 0, 1], pivot: o.pivot || [0, 0, 0], pivot2: o.pivot2 || o.pivot || [0, 0, 0] });
   const PS = (sg, o) => P(sg.geo, sg.color, sg.matrix, o);
   const R = G.bodyR, land = G.cls === 'land', air = G.cls === 'air', sub = G.cls === 'sub';
   const B = bodySections(G);
   const len = B.front - B.back;
   const heavy = G.loco === 'quad' || G.loco === 'hexapod';
 
-  // ---- body centre height
+  // ---- body centre height (walkers: the belly sits at the hip height, the hips are inside the belly)
   let yc;
-  if (land) yc = G.legLen > 0 ? G.legLen - B.bot * 0.85 : -B.bot * 0.95;
+  if (land) yc = G.legLen > 0 ? G.legLen - B.bot : -B.bot * 0.95;
   else if (air) yc = 0.5;
   else yc = G.loco === 'plough' ? -B.bot * 0.55 : 0;
 
@@ -155,19 +195,23 @@ export function buildCreature(G, pal, flora) {
   if (G.loco === 'arch') {
     // a chain bent into a breathing loop; the ends dive into the ground
     const n = G.segs, span = (n - 1) * 1.3 * R, peak = Math.min(0.6, span * 0.55);
+    B.secs = [];
     for (let i = 0; i < n; i++) {
-      const u = i / (n - 1), z = (0.5 - u) * span, y = Math.sin(u * Math.PI) * peak;
-      P(ico(R * (0.75 + 0.25 * Math.sin(u * Math.PI))), i % 2 ? accent : body, M4(0, y, z), { glow: i % 2 ? 0.15 : 0 });
+      const u = i / (n - 1), z = (0.5 - u) * span, y = Math.sin(u * Math.PI) * peak, r = R * (0.75 + 0.25 * Math.sin(u * Math.PI));
+      P(ico(r), i % 2 ? accent : body, M4(0, y, z), { glow: i % 2 ? 0.15 : 0 });
+      B.secs.push({ z, y, r, s: [1, 1, 1] });
     }
     B.front = span / 2 + R; B.back = -span / 2 - R; B.top = R; yc = 0;
   } else if (G.loco === 'periscope') {
     // a neck rising out of the ground; the carriage sinks it out of sight now and then
     const n = G.segs, step = R * 1.15;
+    yc = 0.05 + (n - 1) * step; B.secs = [];
     for (let i = 0; i < n; i++) {
-      const u = i / (n - 1), y = 0.05 + i * step;
-      P(ico(R * (0.85 - 0.3 * u)), i % 2 ? body2 : body, M4(0, y, 0, 1, 1.1, 1));
+      const u = i / (n - 1), y = 0.05 + i * step, r = R * (0.85 - 0.3 * u);
+      P(ico(r), i % 2 ? body2 : body, M4(0, y, 0, 1, 1.1, 1));
+      B.secs.push({ z: 0, y: y - yc, r, s: [1, 1.1, 1] });
     }
-    yc = 0.05 + (n - 1) * step; B.front = R * 0.5; B.back = -R * 0.5; B.top = R * 0.55; B.bot = -R * 0.55;
+    B.front = R * 0.5; B.back = -R * 0.5; B.top = R * 0.55; B.bot = -R * 0.55;
   } else {
     for (const s of B.secs) {
       const color = s.second || s.alt ? body2 : (G.loco === 'sac' ? accent : body);
@@ -177,24 +221,37 @@ export function buildCreature(G, pal, flora) {
     }
   }
 
-  // ---- legs (LEG mode swings about the hip; the foot lifts by its weight)
+  // the body as ellipsoids, so parts can be put on its surface
+  const probe = bodyProbe(B.secs, yc);
+
+  // ---- legs: two bones per leg. LEG mode swings the leg about the hip and folds the shin about the knee
+  // while the foot is in the air. The hip is inside the belly, so the thigh never leaves the body.
   const legs = legPlan(G, len);
   const th = clamp(0.02 + R * 0.1, 0.02, 0.07) * (G.loco === 'quad' ? 1.6 : 1) * (G.loco === 'monopod' ? 2.4 : 1);
-  const stride = { biped: 0.45, quad: 0.35, tripod: 0.4, hexapod: 0.3, monopod: 0 }[G.loco] || 0;
+  const stride = { biped: 0.5, quad: 0.4, tripod: 0.45, hexapod: 0.35, monopod: 0 }[G.loco] || 0;
+  const knees = G.jointed && G.loco !== 'monopod';
+  const bend = G.loco === 'monopod' ? 0 : knees ? 1.0 : 0.55; // knee fold in radians at the top of the swing
+  const insect = G.loco === 'hexapod';
   for (const L of legs) {
-    const h = G.legLen, [dx, dz] = L.dir, hip = L.hip;
-    const rig = (w) => ({ rig: [RIG.LEG, L.phase, stride, w], pivot: hip });
-    const splay = G.loco === 'hexapod' ? 0.9 : G.loco === 'tripod' ? 0.55 : 0.2;
+    const h = G.legLen, [dx, dz] = L.dir;
+    let hy = yc + B.bot * 0.55;
+    let hw = 0;
+    for (let k = 0; k <= 4; k++) hw = Math.max(hw, probe.hw(hy + (yc - hy) * k * 0.25, L.z));
+    const hx = dx * Math.max(hw * 0.75, th);
+    const hb = probe.bot(hx, L.z), ht = probe.top(hx, L.z);
+    if (hb !== null && hb > hy) hy = hb + (ht - hb) * 0.35; // the hull is thin here: lift the hip into it
+    const hip = [hx, hy, L.z];
+    const splay = { hexapod: 1.0, tripod: 0.7, quad: 0.25, biped: 0.2, monopod: 0 }[G.loco];
     const foot = [hip[0] + dx * h * splay, 0, hip[2] + dz * h * splay + h * 0.05];
-    if (G.jointed && G.loco !== 'monopod') {
-      const kOut = G.loco === 'hexapod' ? 0.7 : 0.38;
-      const knee = [hip[0] + dx * h * kOut, h * 0.52, hip[2] + dz * h * kOut + h * 0.18];
-      PS(seg(hip, knee, th, body2, th * 1.2), rig(0.5));
-      PS(seg(knee, foot, th * 0.75, body2, th), rig(0.85));
-      P(ico(th * 1.3), body2, M4(...knee), rig(0.6));
-    } else {
-      PS(seg(hip, foot, th * 0.85, body2, th * 1.1, heavy ? 5 : 4), rig(0.7));
-    }
+    let knee;
+    if (knees) {
+      const kOut = insect ? 0.8 : G.loco === 'tripod' ? 0.5 : 0.35;
+      knee = [hip[0] + dx * h * kOut, insect ? hy + h * 0.15 : h * 0.55, hip[2] + dz * h * kOut + h * (insect ? 0.05 : 0.22)];
+    } else knee = [(hip[0] + foot[0]) / 2, (hip[1] + foot[1]) / 2, (hip[2] + foot[2]) / 2];
+    const rig = (w) => ({ rig: [RIG.LEG, L.phase, stride, w * bend], pivot: hip, pivot2: knee });
+    PS(seg(hip, knee, th, body2, th * 1.15, heavy ? 5 : 4), rig(0));
+    PS(seg(knee, foot, th * 0.75, body2, th * (knees ? 0.95 : 1.0), heavy ? 5 : 4), rig(1));
+    if (knees) P(ico(th * 1.3), body2, M4(...knee), rig(1));
     P(ico(th * 1.15), body2, M4(foot[0], th * 0.4, foot[2], 1.2, 0.45, 1.4), rig(1));
   }
 
@@ -246,18 +303,27 @@ export function buildCreature(G, pal, flora) {
 
   // ---- locomotion extras: wings, fins, the sac's vent
   if (G.loco === 'wings') {
-    const pairs = G.plan === 'spindle' ? [B.front * 0.35, B.back * 0.35] : [0];
-    for (const z of pairs) for (const sx of [-1, 1]) {
-      const root = [sx * R * 0.6, yc + B.top * 0.3, z];
-      P(cone(R * 0.9, R * 2.6, 4), accent, M4(sx * R * 1.7, root[1], z, 0.15, 1, 1, 0, -sx * Math.PI / 2), { glow: 0.3, rig: [RIG.WING, 0, 0.6, sx], pivot: root });
+    // wing sheets rooted in the flank, with a bone along the leading edge. A spindle gets a second, smaller pair.
+    const pairs = G.plan === 'spindle' ? [[B.front * 0.3, 1, 0], [B.back * 0.3, 0.72, 1.4]] : [[B.front * 0.05, 1, 0]];
+    for (const [z, k, ph] of pairs) for (const sx of [-1, 1]) {
+      const yw = yc + B.top * 0.35, span = R * 3.6 * k, chord = R * 1.5 * k;
+      const root = [sx * Math.max(probe.hw(yw, z) * 0.8, R * 0.3), yw, z];
+      const m = M4(root[0], root[1], root[2], sx, 1, 1, 0, sx * 0.12);
+      const o = { glow: 0.3, rig: [RIG.WING, ph, 0.55, sx * span], pivot: root };
+      P(wingGeo(span, chord), accent, m, o);
+      const bone = seg([0, 0.004, 0], [span * 0.95, 0.004, -chord * 0.2], 0.012, body2, 0.02, 4);
+      P(bone.geo, bone.color, bone.matrix.premultiply(m), { ...o, glow: 0 });
     }
   }
   if (G.loco === 'fins') {
     for (const sx of [-1, 1]) {
       const root = [sx * R * 0.7, yc, B.front * 0.15];
-      P(cone(R * 0.9, R * 2, 4), accent, M4(sx * R * 1.8, yc, B.front * 0.15, 0.14, 1, 1, 0, -sx * 1.4), { glow: 0.3, rig: [RIG.WING, 0, 0.2, sx], pivot: root });
+      P(cone(R * 0.9, R * 2, 4), accent, M4(sx * R * 1.8, yc, B.front * 0.15, 0.14, 1, 1, 0, -sx * 1.4), { glow: 0.3, rig: [RIG.WING, 0, 0.2, sx * R * 2.2], pivot: root });
     }
-    for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) P(ico(R * 0.1), body2, M4(sx * R * 1.05, yc - R * 0.15, B.front * 0.55 + i * R * 0.3, 0.6, 1, 1));
+    for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) {
+      const y = yc - R * 0.15, z = B.front * 0.55 + i * R * 0.3;
+      P(ico(R * 0.1), body2, M4(sx * probe.hw(y, z) * 0.97, y, z, 0.6, 1, 1));
+    }
     P(ico(R * 0.65, 1), glow, M4(0, yc - R * 0.65, B.front * 0.2, 0.7, 0.35, 1.9), { glow: 0.8 });
   }
   if (G.loco === 'sac') {
@@ -273,7 +339,7 @@ export function buildCreature(G, pal, flora) {
   for (const e of G.extras) {
     switch (e) {
       case 'sail': {
-        const base = [0, top * 0.98, B.back * 0.15 + B.front * 0.1], sh = 0.35 + R;
+        const bz = B.back * 0.15 + B.front * 0.1, base = [0, (probe.top(0, bz) ?? top) - 0.02, bz], sh = 0.35 + R;
         P(cone(R * 1.1, sh, 4), accent, M4(base[0], base[1] + sh * 0.45, base[2], 0.1, 1, 1.5, -0.25, 0), { glow: 0.45, rig: [RIG.SWAY, 0, 0.04, 1], pivot: base });
         for (const zk of [0.3, -0.05, -0.4]) {
           const z = base[2] + zk * R * 1.5, s = seg([0, base[1], z], [0, base[1] + sh * 0.85 * (1 - Math.abs(zk) * 0.5), z * 1.2 - 0.05], 0.008, body2, 0.006);
@@ -285,14 +351,17 @@ export function buildCreature(G, pal, flora) {
         const n = 3 + (G.segs > 4 ? 2 : (R > 0.24 ? 1 : 0));
         for (let i = 0; i < n; i++) {
           const u = i / Math.max(1, n - 1), z = B.front * 0.5 + (B.back * 0.7 - B.front * 0.5) * u;
-          P(cone(R * 0.18, R * 0.7, 4), accent, M4(0, top * 0.92, z, 1, 1, 1, z * 0.6, 0), { glow: 0.4 });
+          const yb = probe.top(0, z); if (yb === null) continue;
+          P(cone(R * 0.18, R * 0.7, 4), accent, M4(0, yb + R * 0.27, z, 1, 1, 1, z * 0.6, 0), { glow: 0.4 });
         }
         break;
       }
       case 'beads': {
         const r = clamp(R * 0.12, 0.02, 0.045);
         for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) {
-          const z = B.front * 0.45 + (B.back * 0.45 - B.front * 0.45) * (i / 2), p = [sx * R * (G.plan === 'dome' ? 1.05 : 0.95) * (B.secs[0] ? B.secs[0].s[0] : 1), yc + B.top * 0.1, z];
+          const z = B.front * 0.45 + (B.back * 0.45 - B.front * 0.45) * (i / 2), y = yc + B.top * 0.1, hw = probe.hw(y, z);
+          if (hw < r) continue;
+          const p = [sx * hw * 0.92, y, z];
           P(ico(r), glow, M4(...p), { glow: 0.9, rig: [RIG.PULSE, i * 1.1 + (sx > 0 ? 0.5 : 0), 0.35, 1], pivot: p });
         }
         break;
@@ -302,7 +371,8 @@ export function buildCreature(G, pal, flora) {
           const n = G.loco === 'sac' ? 6 : 4, lenT = (G.loco === 'sac' ? 0.5 : 0.25) + R;
           for (let i = 0; i < n; i++) {
             const a = (i / n) * Math.PI * 2 + 0.3, zoff = G.loco === 'sac' ? 0 : B.back * 0.6;
-            const t0 = [Math.cos(a) * R * 0.3, yc + B.bot * 0.9, Math.sin(a) * R * 0.3 + zoff], t1 = [Math.cos(a) * R * 0.6, t0[1] - lenT - (i % 3) * 0.08, Math.sin(a) * R * 0.6 + zoff];
+            const tx = Math.cos(a) * R * 0.3, tz = Math.sin(a) * R * 0.3 + zoff;
+            const t0 = [tx, (probe.bot(tx, tz) ?? yc + B.bot * 0.9) + 0.02, tz], t1 = [Math.cos(a) * R * 0.6, t0[1] - lenT - (i % 3) * 0.08, Math.sin(a) * R * 0.6 + zoff];
             const s = seg(t0, t1, 0.009, body, 0.014, 3);
             P(s.geo, s.color, s.matrix, { rig: [RIG.SWAY, i, 0.14, 1], pivot: t0 });
             if (i % 2 === 0) P(ico(0.022), body2, M4((t0[0] + t1[0]) / 2, (t0[1] + t1[1]) / 2, (t0[2] + t1[2]) / 2), { rig: [RIG.SWAY, i, 0.14, 1], pivot: t0 });
@@ -310,7 +380,7 @@ export function buildCreature(G, pal, flora) {
           }
         } else {
           // trailing feelers from the rear, or from the neck of a periscope
-          const from = G.loco === 'periscope' ? [0, yc, 0] : [0, yc, B.back];
+          const from = G.loco === 'periscope' ? [0, yc, 0] : [0, yc, B.back * 0.85];
           for (const sx of [-1, 0, 1]) {
             const t0 = add(from, [sx * 0.05, 0, 0]), t1 = add(from, [sx * 0.2, G.loco === 'periscope' ? 0.25 : -yc * 0.6, -0.3 - R]);
             const s = seg(t0, t1, 0.01, body2, 0.014, 3);
@@ -321,11 +391,12 @@ export function buildCreature(G, pal, flora) {
         break;
       }
       case 'garden': {
-        for (const [x, z, r] of [[-0.3, -0.2, 0.4], [0.35, 0.3, 0.32], [0.1, -0.8, 0.28]]) P(ico(R * r), moss, M4(x * R, top * 0.95, z * R, 1, 0.7, 1));
-        const tz = -0.35 * R, th2 = 0.2 + R * 0.3;
-        P(cyl(0.02, 0.025, th2, 4), trunk, M4(-0.12 * R, top + th2 * 0.5, tz));
-        P(ico(0.1 + R * 0.15), moss, M4(-0.12 * R, top + th2, tz));
-        P(cone(R * 0.15, R * 0.6, 4), accent, M4(0.45 * R, top + R * 0.2, 0.1 * R), { glow: 0.35 });
+        const at = (x, z) => (probe.top(x, z) ?? top) - R * 0.05;
+        for (const [x, z, r] of [[-0.3, -0.2, 0.4], [0.35, 0.3, 0.32], [0.1, -0.8, 0.28]]) P(ico(R * r), moss, M4(x * R, at(x * R, z * R), z * R, 1, 0.7, 1));
+        const tz = -0.35 * R, tb = at(-0.12 * R, tz), th2 = 0.2 + R * 0.3;
+        P(cyl(0.02, 0.025, th2, 4), trunk, M4(-0.12 * R, tb + th2 * 0.5, tz));
+        P(ico(0.1 + R * 0.15), moss, M4(-0.12 * R, tb + th2, tz));
+        P(cone(R * 0.15, R * 0.6, 4), accent, M4(0.45 * R, at(0.45 * R, 0.1 * R) + R * 0.25, 0.1 * R), { glow: 0.35 });
         break;
       }
       case 'plates':
@@ -333,13 +404,13 @@ export function buildCreature(G, pal, flora) {
         P(dodeca(R * 0.65), body, M4(0, yc + B.top * 0.55, B.back * 0.3, 1, 0.4, 0.85));
         break;
       case 'tail': {
-        const tl = 0.35 + R * 1.2, root = [0, yc + B.top * 0.2, B.back];
-        P(cone(R * 0.25, tl, 4), air ? accent : body2, M4(0, root[1], B.back - tl * 0.45, 1, 1, 1, -1.5, 0), { glow: air ? 0.3 : 0, rig: [RIG.SWAY, 0, 0.1, 1.5], pivot: root });
+        const tl = 0.35 + R * 1.2, tz = B.back * 0.8, root = [0, yc + B.top * 0.2, tz];
+        P(cone(R * 0.25, tl, 4), air ? accent : body2, M4(0, root[1], tz - tl * 0.45, 1, 1, 1, -1.5, 0), { glow: air ? 0.3 : 0, rig: [RIG.SWAY, 0, 0.1, 1.5], pivot: root });
         break;
       }
       case 'flukes': {
-        const root = [0, yc, B.back + R * 0.3];
-        for (const sx of [-1, 1]) P(cone(R * 0.75, R * 1.7, 4), accent, M4(sx * R * 0.65, yc + B.top * 0.2, B.back - R * 0.3, 1, 1, 0.12, 1.2, sx * 0.7), { glow: 0.3, rig: [RIG.FLUKE, 0, 0.25, 1], pivot: root });
+        const root = [0, yc, B.back * 0.85];
+        for (const sx of [-1, 1]) P(cone(R * 0.75, R * 1.7, 4), accent, M4(sx * R * 0.6, yc + B.top * 0.2, B.back * 0.85 - R * 0.45, 1, 1, 0.12, 1.2, sx * 0.7), { glow: 0.3, rig: [RIG.FLUKE, 0, 0.25, 1], pivot: root });
         break;
       }
       case 'antennae':
@@ -366,16 +437,26 @@ export function buildCreature(G, pal, flora) {
 const RIG_GLSL = `
   float mode = aRig.x, ph = aRig.y + aPhase * 7.0, amp = aRig.z, w = aRig.w;
   float g = uTime * GAIT + ph, f = uTime * FLAP + ph, s = uTime * SLOW + ph;
+  // body-wide clocks (no part phase), so the carriage moves every part of one animal together
+  float gb = uTime * GAIT + aPhase * 7.0, fb = uTime * FLAP + aPhase * 7.0, sb = uTime * SLOW + aPhase * 7.0;
   float mv = aMove;
+  float gl = max(GLIDE, smoothstep(-0.25, 0.25, sin(sb * 0.33 + 1.0))); // 1 = wings beat, 0 = wings held out
   vec3 d = transformed - aPivot;
   float c, sn, th;
-  if (mode == 1.0) {            // LEG: swing about the hip, foot lifts on the forward swing
+  if (mode == 1.0) {            // LEG: fold the shin about the knee while the foot is in the air, then swing about the hip
+    float sw = max(-cos(g), 0.0);
+    vec3 d2 = transformed - aPivot2;
+    th = sw * sw * w * mv; c = cos(th); sn = sin(th);
+    d2.yz = vec2(d2.y * c - d2.z * sn, d2.y * sn + d2.z * c);
+    d = aPivot2 + d2 - aPivot;
     th = sin(g) * amp * mv; c = cos(th); sn = sin(th);
     d.yz = vec2(d.y * c - d.z * sn, d.y * sn + d.z * c);
     transformed = aPivot + d;
-    transformed.y += max(-cos(g), 0.0) * amp * 0.3 * w * mv;
-  } else if (mode == 2.0) {     // WING: roll about the root at the wing beat
-    th = sin(f) * amp * w; c = cos(th); sn = sin(th);
+  } else if (mode == 2.0) {     // WING: roll about the root; the tip trails the root and bends further
+    float span = abs(w), side = w < 0.0 ? -1.0 : 1.0;
+    float u = clamp(length(d.xz) / span, 0.0, 1.0);
+    float beat = sin(f - u * 1.1) * amp * (0.5 + 0.9 * u);
+    th = mix(0.2 + 0.25 * u, beat, gl) * side; c = cos(th); sn = sin(th);
     d.xy = vec2(d.x * c - d.y * sn, d.x * sn + d.y * c);
     transformed = aPivot + d;
   } else if (mode == 3.0) {     // SWAY: drift that grows with distance from the root
@@ -400,33 +481,40 @@ const RIG_GLSL = `
   }
   if (mode != 7.0) {
   #if CARRY == 0
-    if (mode != 1.0) transformed.y += BOB * abs(sin(g)) * mv + 0.01 * sin(s);
+    if (mode != 1.0) transformed.y += BOB * abs(sin(gb)) * mv + 0.01 * sin(sb);
   #elif CARRY == 1
     float lift = mode == 1.0 ? clamp(position.y / max(aPivot.y, 0.01), 0.0, 1.0) : 1.0;
-    transformed.y += BOB * max(sin(g), 0.0) * lift * mv;
+    transformed.y += BOB * max(sin(gb), 0.0) * lift * mv;
   #elif CARRY == 2
-    transformed.x += BOB * sin(g - transformed.z * WAVEK) * mv;
-    transformed.y += BOB * 0.3 * abs(sin(g * 0.5 - transformed.z * WAVEK * 0.5)) * mv;
+    // a lateral wave runs from the head to the tail and grows on the way; the head end stays rigid
+    float u = clamp((FRONT - transformed.z) / LEN, 0.0, 1.0), zc = min(transformed.z, FRONT * 0.9);
+    transformed.x += BOB * (0.2 + 0.8 * u) * sin(gb + zc * WAVEK) * mv;
+    transformed.y += BOB * 0.2 * max(0.0, sin(gb + zc * WAVEK + 1.2)) * u * mv;
   #elif CARRY == 3
-    transformed.y += BOB * sin(s * 0.8);
-    transformed.x += WAVE * sin(f - transformed.z * WAVEK) * clamp(-transformed.z, 0.0, 2.0);
+    transformed.y += BOB * sin(sb * 0.8) + HEAVE * sin(fb - 1.0) * gl;
+    transformed.x += WAVE * sin(fb - transformed.z * WAVEK) * clamp(-transformed.z, 0.0, 2.0);
   #elif CARRY == 4
-    transformed.y *= 0.85 + 0.15 * sin(s);
-    transformed.x += 0.05 * sin(s * 0.6) * clamp(transformed.y, 0.0, 1.0);
+    transformed.y *= 0.85 + 0.15 * sin(sb);
+    transformed.x += 0.05 * sin(sb * 0.6) * clamp(transformed.y, 0.0, 1.0);
   #elif CARRY == 5
-    transformed.y -= RISE * (1.0 - smoothstep(SINK, SINK + 0.4, sin(s * 0.35)));
+    transformed.y -= RISE * (1.0 - smoothstep(SINK, SINK + 0.4, sin(sb * 0.35)));
   #endif
   }
 `;
 
 function rigConstants(G) {
   const carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? CARRY.WALK;
-  const bob = { biped: 0.03, tripod: 0.02, quad: 0.02, hexapod: 0.008, monopod: 0.12, serpent: 0.08, sac: 0.1, wings: 0.05, fins: 0.06 }[G.loco] || 0;
+  const B = bodySections(G), len = B.front - B.back;
+  const bob = { biped: 0.03, tripod: 0.02, quad: 0.02, hexapod: 0.008, monopod: 0.12, serpent: G.bodyR * 0.9, sac: 0.1, wings: 0.05, fins: 0.06 }[G.loco] || 0;
   const wave = G.loco === 'fins' ? 0.08 : 0;
+  const wavek = G.loco === 'fins' ? 2.0 : G.loco === 'serpent' ? (2 * Math.PI) / (len * 1.1) : 5.0;
   const rise = G.loco === 'periscope' ? 0.05 + (G.segs - 1) * G.bodyR * 1.15 + G.bodyR * 2.4 : G.loco === 'plough' ? G.bodyR * 1.1 : 0;
   const sink = G.loco === 'plough' ? -0.97 : -0.3; // the plough dives only now and then; the periscope hides half the time
+  const heave = G.loco === 'wings' ? 0.03 : 0; // body lift on each wing beat
+  const glide = G.loco === 'wings' ? 0 : 1; // only true wings hold still and glide now and then
   const fx = (v) => Number(v).toFixed(4);
-  return `#define CARRY ${carry}\n#define GAIT ${fx(G.gait)}\n#define FLAP ${fx(G.flap)}\n#define SLOW ${fx(G.slow)}\n#define BOB ${fx(bob)}\n#define WAVE ${fx(wave)}\n#define WAVEK ${fx(G.loco === 'fins' ? 2.0 : 5.0)}\n#define RISE ${fx(rise)}\n#define SINK ${fx(sink)}\n`;
+  return [['CARRY', carry], ['GAIT', G.gait], ['FLAP', G.flap], ['SLOW', G.slow], ['BOB', bob], ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
+    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len]].map(([k, v]) => `#define ${k} ${k === 'CARRY' ? v : fx(v)}\n`).join('');
 }
 
 export function faunaMaterial(G) {
@@ -439,7 +527,7 @@ export function faunaMaterial(G) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\n${consts}uniform float uTime; attribute float aPhase; attribute float aMove; attribute float glow; attribute vec4 aRig; attribute vec3 aPivot; varying float vGlow;`)
+      .replace('#include <common>', `#include <common>\n${consts}uniform float uTime; attribute float aPhase; attribute float aMove; attribute float glow; attribute vec4 aRig; attribute vec3 aPivot; attribute vec3 aPivot2; varying float vGlow;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n vGlow = glow;\n{${RIG_GLSL}}`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vGlow;')
@@ -511,7 +599,8 @@ export class Inspector {
     const sc = sun.shadow.camera; sc.left = -4; sc.right = 4; sc.top = 4; sc.bottom = -4; sc.near = 1; sc.far = 14;
     this.scene.add(sun, new THREE.HemisphereLight('#9fbfff', '#3a2a1a', 0.7));
     this.fill = new THREE.DirectionalLight('#6a86d8', 0.5); this.fill.position.set(-3, 1, -2); this.scene.add(this.fill);
-    this.ground = new THREE.Mesh(new THREE.CircleGeometry(3.6, 28), new THREE.MeshStandardMaterial({ color: '#6fa85a', roughness: 1, flatShading: true }));
+    this.groundR = 3.6; this.walkR = 3.0; // the leash reaches walkR; the animal is clamped just inside the disc edge
+    this.ground = new THREE.Mesh(new THREE.CircleGeometry(this.groundR, 28), new THREE.MeshStandardMaterial({ color: '#6fa85a', roughness: 1, flatShading: true }));
     this.ground.rotation.x = -Math.PI / 2; this.ground.receiveShadow = true;
     this.scene.add(this.ground);
     this.trailN = 160;
@@ -546,11 +635,13 @@ export class Inspector {
     this.scene.add(this.mesh);
     this.ground.material.color.set(groundColor);
     this.trail.material.color.set(G.colors.glow);
-    // steering in card units: the leash maps to ~2.5 units of ground
+    // steering in card units: the leash maps to the whole ground disc, and the animal turns less than on the planet,
+    // so it walks long arcs instead of wheeling on the spot
     let s = rngSeed; const rng = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
     this.mover = makeMover(rng, G.move);
-    this.mover.leash = G.move.leash; // no per-creature leash jitter on the card, so the path stays in frame
-    this.pathScale = G.move.leash > 0 ? 1.6 / G.move.leash : 0;
+    this.mover.leash = G.move.leash * 1.4; // no per-creature leash jitter on the card; the pull home starts near the disc edge
+    this.mover.turn = G.move.turn * 0.5;
+    this.pathScale = G.move.leash > 0 ? this.walkR / G.move.leash : 0;
     this.trailPts = [];
     this.trail.geometry.attributes.position.array.fill(0);
     this.trail.geometry.attributes.position.needsUpdate = true;
@@ -588,6 +679,8 @@ export class Inspector {
       // run the same steering as on the planet, with time sped up a little so a lap fits on the card
       stepMover(mv, t * 2.5, dt * 2.5);
       x = mv.u * this.pathScale; z = mv.v * this.pathScale;
+      const rr = Math.hypot(x, z), rMax = this.groundR - 0.35;
+      if (rr > rMax) { x *= rMax / rr; z *= rMax / rr; }
       yaw = Math.atan2(Math.cos(mv.heading), Math.sin(mv.heading)); // model faces +z
       this.trailPts.push(x, this.hover * 0.02 + 0.01, z);
       if (this.trailPts.length > this.trailN * 3) this.trailPts.splice(0, 3);

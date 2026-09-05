@@ -69,7 +69,7 @@ A genome `G` is plain data. `fauna.js` reads these fields:
 | `stretch` | Length factor for a `spindle` on land |
 | `legLen` | Hip height. Zero for animals without legs |
 | `jointed` | Legs have a knee |
-| `gait`, `flap`, `slow` | Frequencies for the walk cycle, the wing beat, and slow rhythms |
+| `gait`, `flap`, `slow` | Frequencies for the walk cycle, the wing beat, and slow rhythms. The wing beat is slower for a large body |
 | `size` | Scale factor used at placement |
 | `hover` | Height above the ground in world units (air only) |
 | `move` | `{ leash, speed, turn, pause, flies, shadow }` for the steering model |
@@ -116,16 +116,18 @@ The builder makes a list of parts. Each part is `{ geo, color, matrix, glow, rig
 - `glow` (float): gates the emissive term per vertex
 - `aRig` (vec4): `[mode, phase, amplitude, weight]`
 - `aPivot` (vec3): the point a part rotates or scales about
+- `aPivot2` (vec3): the second joint of a leg (the knee). For other parts it equals `aPivot`.
 
 The build order is:
 
-1. **Body**: `bodySections(G)` returns sections and the extents `front`, `back`, `top`, `bot`. `arch`, `periscope`, and `swarm` build their own bodies.
-2. **Legs**: `legPlan(G, len)` returns hip positions, an outward direction, and a gait phase per leg. Each leg is a hip-to-knee and a knee-to-foot cylinder, or one straight cylinder, plus a foot pad.
-3. **Head**: attached at `front`. Tall walkers get a neck. Head parts use the `NOD` mode with the neck base as pivot.
-4. **Locomotion parts**: wing blades, pectoral fins and a belly glow, or the sac's vent and core.
-5. **Extras**: placed relative to the body extents.
+1. **Body**: `bodySections(G)` returns sections and the extents `front`, `back`, `top`, `bot`. `arch`, `periscope`, and `swarm` build their own bodies. `arch` and `periscope` also fill `secs`, so the probe below works for them.
+2. **Probe**: `bodyProbe(secs, yc)` treats each section as an ellipsoid. It gives the half-width of the body at a `(y, z)`, and the top or bottom surface at an `(x, z)`. Every part that touches the body gets its root from the probe. Do not place a part with a fixed multiple of `bodyR`; the body is not that wide everywhere.
+3. **Legs**: `legPlan(G, len)` returns the hip `z`, an outward direction, and a gait phase per leg. The hip `x` comes from the probe, and the hip sits inside the belly, so the thigh never shows a gap. Each leg is a thigh (hip to knee), a shin (knee to foot), a knee ball when `jointed`, and a foot pad. A leg without a knee has its knee point on the straight line, and a smaller fold.
+4. **Head**: attached at `front`. Tall walkers get a neck. Head parts use the `NOD` mode with the neck base as pivot.
+5. **Locomotion parts**: wing sheets from `wingGeo()` with a bone on the leading edge, pectoral fins and a belly glow, or the sac's vent and core. A spindle flyer gets a second, smaller pair of wings with a phase offset.
+6. **Extras**: placed on the body surface with the probe. A bead or a spike is skipped when the probe finds no body at its place.
 
-Add a new extra by adding a `case` in the extras loop and its name to `EXTRAS`, `ADJ`, `EPITHET`, and `FEATURE` in `species.js`.
+Add a new extra by adding a `case` in the extras loop and its name to `EXTRAS`, `ADJ`, `EPITHET`, and `FEATURE` in `species.js`. Use the probe for its root.
 
 ### Rig modes
 
@@ -134,8 +136,8 @@ The rig record tells the shader what a part does. The modes are in `RIG`:
 | Mode | Value | Motion |
 |---|---|---|
 | `NONE` | 0 | Only the carriage |
-| `LEG` | 1 | Pitch about the hip at the gait rate. The foot lifts by `weight` on the forward swing. Scaled by the activity |
-| `WING` | 2 | Roll about the root at the flap rate. `weight` is the side sign |
+| `LEG` | 1 | Two bones. While the foot is in the air, the shin folds about the knee (`aPivot2`) by `weight` radians. Then the whole leg pitches about the hip (`aPivot`) by `amplitude` at the gait rate. Scaled by the activity |
+| `WING` | 2 | Roll about the root at the flap rate. `weight` is the side sign times the span. The angle grows with the distance from the root, and the tip lags the root, so the sheet bends. When `GLIDE` is 0 the wing holds still on a slow cycle |
 | `SWAY` | 3 | Lateral drift that grows with the distance from the pivot |
 | `PULSE` | 4 | Scale about the pivot on a slow rhythm |
 | `NOD` | 5 | Slow pitch about the pivot |
@@ -151,14 +153,16 @@ A carriage moves the whole body. `rigConstants(G)` picks it from the locomotion 
 |---|---|---|
 | `WALK` | biped, tripod, quad, hexapod | Body bob at the gait rate, not applied to legs. Scaled by the activity |
 | `HOP` | monopod | Body lifts. The leg stretches from the foot to the hip |
-| `WAVE` | serpent | A lateral wave runs down the body |
-| `FLOAT` | sac, wings, fins | Slow vertical drift, plus a tail wave for fins |
+| `WAVE` | serpent | A lateral wave runs from the head to the tail. Its amplitude grows toward the tail, and the head end moves as one piece. `FRONT` and `LEN` give the body extents |
+| `FLOAT` | sac, wings, fins | Slow vertical drift, plus a heave on each wing beat (`HEAVE`) and a tail wave for fins |
 | `ARCH` | arch | The loop rises and sinks in place |
 | `RISE` | periscope, plough | The body sinks below the ground on a slow cycle. `SINK` sets how often |
 
 ### Shader
 
 `faunaMaterial(G)` makes a `MeshStandardMaterial` with `onBeforeCompile`. The vertex shader gets the constants, the attributes, and `RIG_GLSL`. `customProgramCacheKey` returns the constants, so each species gets its own program.
+
+The shader has two sets of clocks. `g`, `f`, and `s` include the part phase from `aRig.y`, and drive the part modes. `gb`, `fb`, and `sb` include only the instance phase, and drive the carriages. Use the body-wide clocks for anything that must move every part of one animal together. If a carriage used a part clock, the parts would drift apart.
 
 Uniforms and instance attributes:
 
@@ -180,7 +184,7 @@ Uniforms and instance attributes:
 
 ### Inspector card (`fauna.js`)
 
-`Inspector.show(G, palette, groundColor, seed)` builds the creature again as an `InstancedMesh` with one instance, so the same shader and the same `aMove` attribute apply. It runs the same steering model with time sped up by 2.5, draws a trail of the last 160 points, and fills the card from `G.lore`. `cardHover(G)` lifts flyers off the ground disc.
+`Inspector.show(G, palette, groundColor, seed)` builds the creature again as an `InstancedMesh` with one instance, so the same shader and the same `aMove` attribute apply. It runs the same steering model with time sped up by 2.5 and the turn rate halved. The leash maps to `walkR` (3.0 units) of the ground disc (`groundR`, 3.6 units), and the position is clamped just inside the disc edge, so the animal walks long arcs over the whole disc. It draws a trail of the last 160 points and fills the card from `G.lore`. `cardHover(G)` lifts flyers off the ground disc.
 
 ## Checklist for changes
 
