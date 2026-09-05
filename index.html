@@ -38,7 +38,21 @@
 
   <section id="info" aria-live="polite"></section>
 
-  <div id="hint">drag to spin and tilt · scroll or pinch to zoom</div>
+  <section id="creature" hidden aria-live="polite">
+    <div class="ccard">
+      <button type="button" class="cclose" aria-label="Close">×</button>
+      <div class="cview"><canvas id="ccv"></canvas><span class="cpath">path trace, time sped up</span></div>
+      <div class="ctext">
+        <div class="cname"></div>
+        <div class="clatin"></div>
+        <dl class="ctags"></dl>
+        <p class="cstory"></p>
+        <div class="cnav"><button type="button" class="ghost cprev">‹ Previous</button><button type="button" class="ghost cnext">Next ›</button></div>
+      </div>
+    </div>
+  </section>
+
+  <div id="hint">drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife</div>
 
   <div id="overlay">
     <div class="box">

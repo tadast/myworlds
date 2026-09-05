@@ -1,6 +1,7 @@
 // myworlds — main thread: rendering, controls, UI, storage.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { BASE_SCALE, MOVE, LORE, faunaGeometry, faunaMaterial, mergeGeos, M4, makeMover, stepMover, Inspector } from './fauna.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -9,12 +10,13 @@ const LOW = isCoarse || isSmall || (navigator.hardwareConcurrency || 4) <= 4;
 const Q = {
   detail: LOW ? 64 : 100,
   maxFlora: LOW ? 2500 : 7000,
+  maxFauna: LOW ? 70 : 160,
   shadows: !LOW,
   dpr: Math.min(devicePixelRatio || 1, LOW ? 1.5 : 2),
 };
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
-const CAM_MIN = 1.28, CAM_MAX = 8, CAM_HOME = 3.3;
+const CAM_MIN = 1.11, CAM_MAX = 8, CAM_HOME = 3.3;
 
 // ---------------------------------------------------------------- dom
 const $ = (s) => document.querySelector(s);
@@ -131,32 +133,6 @@ const atmoInnerMat = (color, strength) => new THREE.ShaderMaterial({
 });
 
 // ---------------------------------------------------------------- geometry helpers
-function mergeGeos(parts) {
-  // parts: [{geo, color, matrix}] → single non-indexed geometry with vertex colours
-  const pos = [], nor = [], col = [];
-  const n = new THREE.Vector3(), p = new THREE.Vector3();
-  for (const { geo, color, matrix } of parts) {
-    const g = geo.index ? geo.toNonIndexed() : geo;
-    g.computeVertexNormals();
-    const pa = g.attributes.position, na = g.attributes.normal;
-    const nm = new THREE.Matrix3().getNormalMatrix(matrix);
-    const c = new THREE.Color(color);
-    for (let i = 0; i < pa.count; i++) {
-      p.fromBufferAttribute(pa, i).applyMatrix4(matrix);
-      n.fromBufferAttribute(na, i).applyMatrix3(nm).normalize();
-      pos.push(p.x, p.y, p.z); nor.push(n.x, n.y, n.z); col.push(c.r, c.g, c.b);
-    }
-    if (g !== geo) g.dispose();
-    geo.dispose();
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  return out;
-}
-const M4 = (x, y, z, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) =>
-  new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, 0, rz)), new THREE.Vector3(sx, sy, sz));
 
 // unit-height flora, base at origin, y up
 function floraGeometry(kind, fc) {
@@ -216,7 +192,7 @@ function disposeWorld() {
 
 function buildWorld(res) {
   disposeWorld();
-  const { world, terrain, flora, clouds } = res;
+  const { world, terrain, flora, clouds, fauna, heightMap } = res;
   const group = new THREE.Group();
   const planet = new THREE.Group();          // spins
   planet.rotation.z = world.tilt;
@@ -300,7 +276,59 @@ function buildWorld(res) {
     }
   }
 
+  // fauna (instanced per kind, animated in the vertex shader, roaming on the CPU)
+  const faunaMats = [], movers = [], faunaMeshes = [];
+  if (world.faunaCount > 0 && fauna) {
+    const kinds = new Map();
+    for (let i = 0; i < world.faunaCount; i++) {
+      const k = fauna[i * 9 + 7];
+      if (!kinds.has(k)) kinds.set(k, []);
+      kinds.get(k).push(i);
+    }
+    const up = new THREE.Vector3(0, 1, 0), nrm = new THREE.Vector3(), pos = new THREE.Vector3();
+    const q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), s = new THREE.Vector3(), m = new THREE.Matrix4();
+    const rng = mulberry32(11);
+    for (const [kind, list] of kinds) {
+      const geo = faunaGeometry(kind, world.palette.fauna, world.palette.flora);
+      const phases = new Float32Array(list.length);
+      list.forEach((i, j) => { phases[j] = fauna[i * 9 + 8]; });
+      geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
+      const mat = faunaMaterial(kind, world.palette.fauna);
+      faunaMats.push(mat);
+      const inst = new THREE.InstancedMesh(geo, mat, list.length);
+      inst.userData.kind = kind;
+      inst.castShadow = Q.shadows && MOVE[kind].shadow; inst.receiveShadow = Q.shadows;
+      inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      list.forEach((i, j) => {
+        const o = i * 9;
+        pos.set(fauna[o], fauna[o + 1], fauna[o + 2]);
+        nrm.set(fauna[o + 3], fauna[o + 4], fauna[o + 5]);
+        q.setFromUnitVectors(up, nrm);
+        q2.setFromAxisAngle(up, rng() * Math.PI * 2);
+        q.multiply(q2);
+        const sc = BASE_SCALE * fauna[o + 6];
+        s.set(sc, sc, sc);
+        m.compose(pos, q, s);
+        inst.setMatrixAt(j, m);
+        if (MOVE[kind].leash > 0) {
+          // tangent basis for roaming; hover is the gap between the home point and the ground under it
+          const t1 = new THREE.Vector3().crossVectors(nrm, Math.abs(nrm.y) < 0.9 ? up : new THREE.Vector3(1, 0, 0)).normalize();
+          const t2 = new THREE.Vector3().crossVectors(nrm, t1).normalize();
+          const st = makeMover(rng, kind);
+          st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
+          const g0 = sampleGround(world, heightMap, nrm);
+          st.hover = pos.length() - g0;
+          st.dry = !world.seaRadius || g0 > world.seaRadius + 0.0005;
+          movers.push(st);
+        }
+      });
+      faunaMeshes.push(inst);
+      planet.add(inst);
+    }
+  }
+
   // clouds
+  let cloudMat = null;
   const cloudGroup = new THREE.Group();
   cloudGroup.rotation.z = world.tilt;
   if (world.hasClouds && clouds.length) {
@@ -322,14 +350,15 @@ function buildWorld(res) {
     }
     inst.renderOrder = 2;
     cloudGroup.add(inst);
+    cloudMat = mat;
   }
   group.add(cloudGroup);
 
   // atmosphere
   if (world.hasAtmosphere) {
-    const outer = new THREE.Mesh(new THREE.IcosahedronGeometry(1.17, 4), atmoOuterMat(world.palette.atmo, world.atmoStrength));
+    const outer = new THREE.Mesh(new THREE.IcosahedronGeometry(1.17, 5), atmoOuterMat(world.palette.atmo, world.atmoStrength));
     outer.renderOrder = 3;
-    const inner = new THREE.Mesh(new THREE.IcosahedronGeometry(1.115, 4), atmoInnerMat(world.palette.atmo, world.atmoStrength));
+    const inner = new THREE.Mesh(new THREE.IcosahedronGeometry(1.115, 5), atmoInnerMat(world.palette.atmo, world.atmoStrength));
     inner.renderOrder = 3;
     group.add(outer, inner);
   }
@@ -387,7 +416,7 @@ function buildWorld(res) {
   }
 
   scene.add(group);
-  current = { group, planet, cloudGroup, oceanMat, moons, ringMesh, world, spin: world.spin };
+  current = { group, planet, cloudGroup, oceanMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap };
 }
 
 // ---------------------------------------------------------------- render loop
@@ -398,32 +427,87 @@ function frame() {
   const t = clock.elapsedTime;
   if (current) {
     const dist = camera.position.length();
-    const zoomFactor = THREE.MathUtils.clamp((dist - CAM_MIN) / 1.6, 0.06, 1);
+    const zoomFactor = THREE.MathUtils.clamp((dist - CAM_MIN) / 1.6, 0.015, 1); // near the ground the world must hold still
     const spin = current.spin * zoomFactor * (userActive ? 0.15 : 1);
     current.planet.rotation.y += spin * dt;
     current.cloudGroup.rotation.y += spin * 1.25 * dt;
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
+    for (const fm of current.faunaMats) if (fm.userData.shader) fm.userData.shader.uniforms.uTime.value = t;
+    updateMovers(t, dt);
+    // the camera can sit inside the cloud layer when close: fade the puffs out
+    if (current.cloudMat) {
+      const op = 0.92 * THREE.MathUtils.smoothstep(camera.position.length(), 1.14, 1.32);
+      current.cloudMat.opacity = op;
+      current.cloudMat.depthWrite = op > 0.9; // faded puffs must not punch holes in the atmosphere
+      current.cloudGroup.visible = op > 0.02;
+    }
     for (const m of current.moons) {
       m.angle += m.speed * dt;
       m.mesh.position.set(Math.cos(m.angle) * m.dist, 0, Math.sin(m.angle) * m.dist);
       m.mesh.rotation.y += dt * 0.3;
     }
   }
+  // near the surface, drags and wheel steps must move the camera much less
+  const near = THREE.MathUtils.clamp((camera.position.length() - 1) / 2.3, 0.08, 1);
+  controls.rotateSpeed = 0.7 * near;
+  controls.zoomSpeed = 0.9 * Math.max(near, 0.2);
   controls.update();
   // near the surface, tilt the view toward the horizon so relief reads in profile
   const d = camera.position.length();
-  const pitch = (1 - THREE.MathUtils.smoothstep(d, CAM_MIN, 2.3)) * 0.8;
+  const pitch = (1 - THREE.MathUtils.smoothstep(d, CAM_MIN, 2.3)) * 0.95;
   if (pitch > 0) camera.rotateX(pitch);
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
+// ground radius under a unit direction (planet space), from the worker's lat/lon height map
+function sampleGround(world, hm, dir) {
+  if (!hm || !world.heightMapSize) return 1;
+  const [W, H] = world.heightMapSize;
+  const u = (Math.atan2(dir.z, dir.x) / (Math.PI * 2) + 0.5) * W - 0.5;
+  const v = (Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) / Math.PI + 0.5) * H - 0.5;
+  const x0 = Math.floor(u), y0 = THREE.MathUtils.clamp(Math.floor(v), 0, H - 2);
+  const fx = u - x0, fy = THREE.MathUtils.clamp(v - y0, 0, 1);
+  const xa = ((x0 % W) + W) % W, xb = (xa + 1) % W;
+  const a = hm[xa + y0 * W], b = hm[xb + y0 * W], c = hm[xa + (y0 + 1) * W], d = hm[xb + (y0 + 1) * W];
+  return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+}
 
+// creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
+const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _m = new THREE.Matrix4();
+let moverFrame = 0;
+function updateMovers(t, dt) {
+  const { movers, world, heightMap } = current;
+  if (!movers.length) return;
+  moverFrame++;
+  const far = camera.position.length() > 2.6; // sub-pixel from far away: step at ~15 Hz
+  if (far && moverFrame % 4) return;
+  if (far) dt *= 4;
+  const dirty = new Set();
+  const seaR = world.seaRadius || 0;
+  for (const mv of movers) {
+    const pu = mv.u, pv = mv.v;
+    stepMover(mv, t, dt);
+    _u.copy(mv.n).addScaledVector(mv.t1, mv.u).addScaledVector(mv.t2, mv.v).normalize();
+    let ground = sampleGround(world, heightMap, _u);
+    if (!mv.flies && mv.dry && ground < seaR + 0.0005) {
+      // water ahead: step back and turn around
+      mv.u = pu; mv.v = pv; mv.heading += Math.PI * 0.75; mv.spd = 0;
+      _u.copy(mv.n).addScaledVector(mv.t1, mv.u).addScaledVector(mv.t2, mv.v).normalize();
+      ground = sampleGround(world, heightMap, _u);
+    }
+    if (mv.flies) ground = Math.max(ground, seaR);
+    _p.copy(_u).multiplyScalar(ground + mv.hover);
+    _f.copy(mv.t1).multiplyScalar(Math.cos(mv.heading)).addScaledVector(mv.t2, Math.sin(mv.heading));
+    _f.addScaledVector(_u, -_f.dot(_u)).normalize();
+    _r.crossVectors(_u, _f).normalize();
+    _m.makeBasis(_r.multiplyScalar(mv.sc), _u.multiplyScalar(mv.sc), _f.multiplyScalar(mv.sc));
+    _m.setPosition(_p);
+    mv.inst.setMatrixAt(mv.j, _m);
+    dirty.add(mv.inst);
+  }
+  for (const inst of dirty) inst.instanceMatrix.needsUpdate = true;
+}
 // ---------------------------------------------------------------- worker / generation
 let worker = null;
 let busy = false;
@@ -470,7 +554,7 @@ function generate(seed, { save = true } = {}) {
     overlayLabel.textContent = 'Worker failed to load. Serve over http, not file://.';
     setTimeout(() => { overlay.classList.remove('show'); busy = false; }, 2500);
   };
-  w.postMessage({ type: 'generate', seed, opts: { detail: Q.detail, maxFlora: Q.maxFlora } });
+  w.postMessage({ type: 'generate', seed, opts: { detail: Q.detail, maxFlora: Q.maxFlora, maxFauna: Q.maxFauna } });
 }
 
 function resetCamera() {
@@ -553,9 +637,77 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
+      <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(LORE[k].name)}</button>`).join('') : 'none seen'}</dd>
     </dl>`;
+  infoEl.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
   infoEl.classList.add('show');
 }
+
+// ---------------------------------------------------------------- creature inspector
+const creatureCard = $('#creature');
+const inspector = new Inspector({ card: creatureCard, canvas: $('#ccv') });
+function inspect(kind) {
+  if (!current) return;
+  const pal = current.world.palette;
+  const ground = current.world.type === 'gas' ? pal.atmo : (pal.ground || '#7fa860');
+  inspector.show(kind, pal, ground, 3 + kind);
+  creatureCard.dataset.kind = kind;
+}
+creatureCard.querySelector('.cclose').addEventListener('click', () => inspector.hide());
+creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) inspector.hide(); });
+creatureCard.querySelector('.cprev').addEventListener('click', () => cycleInspect(-1));
+creatureCard.querySelector('.cnext').addEventListener('click', () => cycleInspect(1));
+function cycleInspect(dir) {
+  const kinds = current?.world.faunaKinds || [];
+  if (!kinds.length) return;
+  const i = kinds.indexOf(+creatureCard.dataset.kind);
+  inspect(kinds[(i + dir + kinds.length) % kinds.length]);
+}
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && inspector.open) inspector.hide(); });
+addEventListener('resize', () => { if (inspector.open) inspector.resize(); });
+
+// pick a creature under a screen point: nearest projected instance on the visible hemisphere
+const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pn = new THREE.Vector3(), _pm = new THREE.Matrix4();
+function creatureAt(px, py, tolerance = 26) {
+  if (!current) return null;
+  let best = null, bestD = tolerance;
+  const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  for (const inst of current.faunaMeshes) {
+    inst.updateWorldMatrix(true, false);
+    for (let j = 0; j < inst.count; j++) {
+      inst.getMatrixAt(j, _pm);
+      _pv.setFromMatrixPosition(_pm).applyMatrix4(inst.matrixWorld);
+      // hidden behind the planet if the surface normal there faces away from the camera
+      if (_pv.x * (_pv.x - camera.position.x) + _pv.y * (_pv.y - camera.position.y) + _pv.z * (_pv.z - camera.position.z) > 0) continue;
+      // project the base and a point one body-height up, then measure to that segment
+      const sc = Math.hypot(_pm.elements[0], _pm.elements[1], _pm.elements[2]);
+      _pt.copy(_pv).addScaledVector(_pn.copy(_pv).normalize(), sc * 1.1);
+      _pv.project(camera); _pt.project(camera);
+      if (_pv.z > 1) continue;
+      const ax = (_pv.x + 1) / 2 * w, ay = (1 - _pv.y) / 2 * h, bx = (_pt.x + 1) / 2 * w, by = (1 - _pt.y) / 2 * h;
+      const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1;
+      const u = THREE.MathUtils.clamp(((px - ax) * lx + (py - ay) * ly) / ll, 0, 1);
+      const d = Math.hypot(ax + lx * u - px, ay + ly * u - py) - Math.sqrt(ll) * 0.25;
+      if (d < bestD) { bestD = d; best = inst.userData.kind; }
+    }
+  }
+  return best;
+}
+let downAt = null;
+canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointerup', (e) => {
+  if (!downAt) return;
+  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+  downAt = null;
+  if (moved > 6 || busy) return;
+  const kind = creatureAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 36 : 26);
+  if (kind !== null) inspect(kind);
+});
+let hoverTick = 0;
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch' || downAt || (++hoverTick & 3)) return;
+  canvas.style.cursor = creatureAt(e.clientX, e.clientY) !== null ? 'pointer' : '';
+});
 
 // ---------------------------------------------------------------- ui
 const WORDS = ['Aurora', 'Pebble', 'Nimbus', 'Tadas', 'Juniper', 'Comet', 'Marble', 'Saffron', 'Willow', 'Quasar', 'Pumpkin', 'Zephyr', 'Lumen', 'Basil', 'Orchid', 'Tundra', 'Kepler', 'Mango', 'Fjord', 'Nova'];
@@ -591,3 +743,6 @@ renderWorlds();
   const seed = fromHash || (saved.length ? saved[saved.length - 1].seed : WORDS[Math.floor(Math.random() * WORDS.length)]);
   generate(seed);
 }
+
+// debug handle (harmless in production)
+window.__mw = { scene, camera, controls, renderer, get current() { return current; }, generate, inspect, inspector };
