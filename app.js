@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Music } from './music.js';
+import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
 
 // ---------------------------------------------------------------- config
@@ -336,7 +337,7 @@ function buildWorld(res) {
   }
 
   // clouds
-  let cloudMat = null;
+  let cloudMat = null, cloudInst = null;
   const cloudGroup = new THREE.Group();
   cloudGroup.rotation.z = world.tilt;
   if (world.hasClouds && clouds.length) {
@@ -358,9 +359,12 @@ function buildWorld(res) {
     }
     inst.renderOrder = 2;
     cloudGroup.add(inst);
-    cloudMat = mat;
+    cloudMat = mat; cloudInst = inst;
   }
   group.add(cloudGroup);
+
+  // natural activity: at most one per world
+  const activity = buildActivity(world, planet, cloudGroup, cloudInst, (dir) => sampleGround(world, heightMap, dir));
 
   // atmosphere
   if (world.hasAtmosphere) {
@@ -424,7 +428,7 @@ function buildWorld(res) {
   }
 
   scene.add(group);
-  current = { group, planet, cloudGroup, oceanMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap };
+  current = { group, planet, cloudGroup, oceanMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity };
 }
 
 // ---------------------------------------------------------------- render loop
@@ -442,6 +446,7 @@ function frame() {
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
     for (const fm of current.faunaMats) if (fm.userData.shader) fm.userData.shader.uniforms.uTime.value = t;
     updateMovers(t, dt);
+    if (current.activity) current.activity.update(t, innerHeight * Q.dpr * 0.5 / Math.tan(camera.fov * Math.PI / 360));
     // the camera can sit inside the cloud layer when close: fade the puffs out
     if (current.cloudMat) {
       const op = 0.92 * THREE.MathUtils.smoothstep(camera.position.length(), 1.14, 1.32);
@@ -646,6 +651,7 @@ function renderInfo(w) {
       <dt>Day</dt><dd>${s.day}</dd>
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
+      ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
