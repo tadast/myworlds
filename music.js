@@ -21,26 +21,52 @@ function mulberry32(a) {
   };
 }
 
-// Scale choices per world type. Degrees are semitones from the root.
-const SCALES = {
-  terran: [[0, 2, 4, 7, 9], [0, 2, 4, 5, 7, 9]],
-  ocean: [[0, 2, 4, 6, 7, 9, 11], [0, 4, 7, 9, 11]],
-  desert: [[0, 1, 4, 5, 7, 8], [0, 1, 4, 5, 7, 10]],
-  ice: [[0, 2, 3, 7, 10], [0, 3, 5, 7, 10]],
-  lava: [[0, 1, 3, 5, 7, 10], [0, 1, 3, 6, 7, 10]],
-  gas: [[0, 2, 4, 6, 8, 10]],
-  exotic: [[0, 3, 6, 9], [0, 2, 4, 6, 8, 11], [0, 1, 5, 6, 10]],
+// Modes are 7-note scales, so every chord is a diatonic triad and every progression is functional.
+const MODES = {
+  major: [0, 2, 4, 5, 7, 9, 11], lydian: [0, 2, 4, 6, 7, 9, 11], mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  dorian: [0, 2, 3, 5, 7, 9, 10], minor: [0, 2, 3, 5, 7, 8, 10], phrygian: [0, 1, 3, 5, 7, 8, 10],
+  harmonicMinor: [0, 2, 3, 5, 7, 8, 11], phrygianDom: [0, 1, 4, 5, 7, 8, 10],
 };
-// Mood per world type: how busy the arpeggio is, the bass style, sparkle notes, the wind.
+// Chord progressions per mode, as 0-based scale degrees. Each one loops well and ends on a pull back to I.
+const PROGS = {
+  major: [[0, 4, 5, 3], [0, 5, 3, 4], [5, 3, 0, 4], [0, 3, 4, 3], [0, 2, 5, 3], [3, 4, 5, 0]],
+  lydian: [[0, 1, 0, 1], [0, 1, 5, 1], [0, 4, 1, 0], [0, 1, 2, 1]],
+  mixolydian: [[0, 6, 3, 0], [0, 3, 6, 3], [0, 6, 0, 3], [0, 3, 0, 6]],
+  dorian: [[0, 3, 0, 3], [0, 3, 6, 0], [0, 1, 3, 6], [0, 6, 3, 0]],
+  minor: [[0, 5, 2, 6], [0, 6, 5, 4], [0, 3, 4, 0], [5, 6, 0, 4], [0, 5, 3, 4]],
+  phrygian: [[0, 1, 0, 1], [0, 1, 6, 0], [0, 6, 1, 0], [0, 3, 1, 0]],
+  harmonicMinor: [[0, 3, 4, 0], [0, 5, 3, 4], [0, 4, 0, 4], [0, 5, 4, 0]],
+  phrygianDom: [[0, 1, 0, 1], [0, 1, 3, 0], [0, 6, 1, 0], [0, 3, 1, 0]],
+};
+// Rhythms for one bar of eight steps. A negative number is a rest.
+const RHYTHMS = [
+  [2, 2, 2, 2], [1, 1, 2, 4], [2, 1, 1, 4], [3, 1, 4], [1, 1, 2, 2, 2], [2, 2, 1, 1, 2], [4, 2, 2], [2, 2, 4],
+  [3, 3, 2], [1, 1, 1, 1, 4], [6, 2], [2, 6], [1, 2, 1, 4], [-1, 1, 2, 4], [-2, 2, 4], [3, 1, 2, 2], [2, 1, 1, 2, 2],
+];
+const CADENCES = [[8], [2, 6], [3, 5], [1, 1, 6], [4, 4]];
+// Bass patterns: step, chord-relative degree, length. 7 is the octave.
+const BASS = {
+  drone: [[0, 0, 8]],
+  lift: [[0, 0, 5], [5, 7, 1], [6, 4, 2]],
+  pulse: [[0, 0, 2], [2, 7, 2], [4, 4, 2], [6, 7, 2]],
+  walk: [[0, 0, 2], [2, 0, 1], [3, 2, 1], [4, 4, 2], [6, 7, 1], [7, 4, 1]],
+};
+// Arpeggio patterns: chord-relative degrees per step, null is a rest.
+const ARPS = {
+  up: [0, 2, 4, 7, 0, 2, 4, 7], updown: [0, 2, 4, 7, 4, 2, 0, 2], sparse: [0, null, 4, null, 7, null, 4, null],
+  roll: [0, 4, 2, 7, 0, 4, 2, 7], air: [0, null, null, 4, null, 7, null, null], low: [0, 2, 4, 2, 0, 2, 4, 2],
+};
+// Mood per world type: the modes and patterns to choose from, the wind, the voices.
 const MOOD = {
-  terran: { density: 0.7, bass: 'drone', spark: 0, wind: { f: 500, q: 0.8, g: 0.5, lfo: 0.05 }, arp: 'p25', lead: 'p50' },
-  ocean: { density: 0.55, bass: 'drone', spark: 0.04, wind: { f: 700, q: 0.5, g: 0.8, lfo: 0.08 }, arp: 'p50', lead: 'triangle' },
-  desert: { density: 0.5, bass: 'pulse', spark: 0, wind: { f: 450, q: 0.9, g: 0.6, lfo: 0.04 }, arp: 'p12', lead: 'p25' },
-  ice: { density: 0.35, bass: 'drone', spark: 0.09, wind: { f: 2200, q: 6, g: 0.35, lfo: 0.06 }, arp: 'p12', lead: 'p12' },
-  lava: { density: 0.7, bass: 'pulse', spark: 0, wind: { f: 260, q: 0.6, g: 0.9, lfo: 0.11, low: true }, arp: 'p50', lead: 'p25' },
-  gas: { density: 0.3, bass: 'drone', spark: 0.03, wind: { f: 160, q: 0.5, g: 1.1, lfo: 0.03, low: true }, arp: 'p50', lead: 'triangle' },
-  exotic: { density: 0.5, bass: 'drone', spark: 0.07, wind: { f: 1200, q: 3, g: 0.5, lfo: 0.07 }, arp: 'p25', lead: 'p12' },
+  terran: { modes: ['major', 'mixolydian'], bass: ['lift', 'walk'], arp: ['updown', 'low'], spark: 0, wind: { f: 500, q: 0.8, g: 0.5, lfo: 0.05 }, arpWave: 'p25', lead: 'p50' },
+  ocean: { modes: ['lydian', 'major'], bass: ['drone', 'lift'], arp: ['roll', 'updown'], spark: 0.04, wind: { f: 700, q: 0.5, g: 0.8, lfo: 0.08 }, arpWave: 'p50', lead: 'triangle' },
+  desert: { modes: ['phrygianDom', 'harmonicMinor'], bass: ['pulse', 'walk'], arp: ['sparse', 'low'], spark: 0, wind: { f: 450, q: 0.9, g: 0.6, lfo: 0.04 }, arpWave: 'p12', lead: 'p25' },
+  ice: { modes: ['minor', 'dorian'], bass: ['drone', 'lift'], arp: ['air', 'sparse'], spark: 0.08, wind: { f: 2200, q: 6, g: 0.35, lfo: 0.06 }, arpWave: 'p12', lead: 'p12' },
+  lava: { modes: ['phrygian', 'minor'], bass: ['pulse', 'walk'], arp: ['up', 'low'], spark: 0, wind: { f: 260, q: 0.6, g: 0.9, lfo: 0.11, low: true }, arpWave: 'p50', lead: 'p25' },
+  gas: { modes: ['lydian', 'dorian'], bass: ['drone'], arp: ['air', 'sparse'], spark: 0.03, wind: { f: 160, q: 0.5, g: 1.1, lfo: 0.03, low: true }, arpWave: 'p50', lead: 'triangle' },
+  exotic: { modes: ['harmonicMinor', 'lydian', 'phrygian'], bass: ['lift', 'pulse'], arp: ['roll', 'sparse'], spark: 0.07, wind: { f: 1200, q: 3, g: 0.5, lfo: 0.07 }, arpWave: 'p25', lead: 'p12' },
 };
+const LOOP_BARS = 28; // intro 4, verse 8, bridge 8, verse 8 with a harmony voice
 
 function loadSettings() {
   try { const s = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); return { vol: clamp(+s.vol >= 0 ? +s.vol : 0.5, 0, 1), muted: !!s.muted }; }
@@ -186,41 +212,105 @@ export class Music {
   }
 
   // ---------------------------------------------------------------- composition
+  // The song is a fixed 32-bar loop of note events, written once from the seed.
+  // Melodies come from a motif in chord-relative degrees, so a repeat over a new chord stays in tune.
   _compose(world) {
     const rng = mulberry32(cyrb32('music:' + world.seed));
+    const pick = (a) => a[Math.floor(rng() * a.length)];
     const type = MOOD[world.type] ? world.type : 'terran';
     const mood = MOOD[type];
-    const scales = SCALES[type];
-    const scale = scales[Math.floor(rng() * scales.length)];
+    const modeName = pick(mood.modes), scale = MODES[modeName];
+    const prog = pick(PROGS[modeName]);
     const s = world.stats || {};
     const temp = parseFloat(s.temp) || 10;
     const day = parseFloat(s.day) || 24;
     const grav = world.gravity || 1;
     // slow days and heavy worlds turn slowly; short days hurry
-    const bpm = clamp(46 + (60 - clamp(day, 8, 60)) * 0.8 - (grav - 1) * 10, 42, 92);
+    const bpm = clamp(54 + (60 - clamp(day, 8, 60)) * 0.9 - (grav - 1) * 10, 50, 104);
     const stepDur = 60 / bpm / 2; // one eighth note
     const root = 48 + Math.floor(rng() * 7) - 3 - clamp(Math.round((grav - 1) * 4), -6, 3);
-    // chord progression: 4 chords, each a scale degree, the first is the root
-    const n = scale.length;
-    const prog = [0];
-    for (let i = 1; i < 4; i++) { let d; do { d = Math.floor(rng() * n); } while (d === prog[i - 1]); prog.push(d); }
-    const chordBars = 2;
-    // two arpeggio patterns, 8 steps each
-    const pattern = () => Array.from({ length: 8 }, (_, i) => (rng() < mood.density || i === 0) ? { k: Math.floor(rng() * 4), oct: rng() < 0.3 ? 1 : 0 } : null);
-    const arps = [pattern(), pattern()];
     const windK = world.hasAtmosphere === false ? 0 : (world.atmoStrength ?? 1);
-    return {
-      seed: world.seed, mood, scale, prog, chordBars, arps, stepDur, root, rng,
+    const song = {
+      seed: world.seed, mood, scale, modeName, prog, stepDur, root,
+      raise7: modeName === 'minor', // a leading tone under the V chord, as in the harmonic minor
       cutoff: clamp(4800 - temp * 6, 1400, 6500),
-      echo: windK > 0 ? 0.18 + 0.2 * windK : 0.06,
+      echo: windK > 0 ? 0.16 + 0.18 * windK : 0.05,
       windK, windPitch: clamp(1 + (temp + 30) / 400, 0.8, 1.6),
-      lead: { note: 0, at: -1, len: 0 },
-      nodes: [],
-      degree: (chord, k, oct = 0) => { // k-th note of the chord (thirds), as midi
-        const idx = prog[chord] + k * 2, o = Math.floor(idx / n);
-        return root + scale[idx % n] + 12 * (o + oct);
-      },
+      nodes: [], byStep: Array.from({ length: LOOP_BARS * 8 }, () => []),
     };
+    // pitch of a chord-relative degree: chord root + rel scale steps, in midi
+    song.pitch = (chordDeg, rel, oct = 0) => {
+      const idx = chordDeg + rel, o = Math.floor(idx / 7), k = ((idx % 7) + 7) % 7;
+      let semi = scale[k];
+      if (song.raise7 && chordDeg === 4 && k === 6) semi += 1;
+      return root + semi + 12 * (o + oct);
+    };
+    const put = (bar, step, voice, chordDeg, rel, oct, len, level, env) => {
+      if (bar >= LOOP_BARS) return;
+      song.byStep[bar * 8 + step].push({ voice, midi: song.pitch(chordDeg, rel, oct), len, level, env });
+    };
+    const chordAt = (bar) => prog[bar % 4];
+    const isChordTone = (rel) => [0, 2, 4].includes(((rel % 7) + 7) % 7);
+    const snap = (rel, dir) => { let r = rel; while (!isChordTone(r)) r += dir; return r; };
+
+    // ---- a motif: one bar of rhythm plus chord-relative degrees, mostly stepwise, chord tones on strong beats
+    const motif = (startRel, rhythm = pick(RHYTHMS)) => {
+      const notes = []; let step = 0, rel = snap(startRel, rng() < 0.5 ? 1 : -1);
+      for (let i = 0; i < rhythm.length; i++) {
+        const len = rhythm[i];
+        if (len < 0) { step -= len; continue; }
+        if (notes.length) {
+          const r = rng();
+          rel += r < 0.16 ? -2 : r < 0.44 ? -1 : r < 0.72 ? 1 : r < 0.88 ? 2 : r < 0.94 ? 0 : (rng() < 0.5 ? 3 : -3);
+          if (step % 4 === 0 || len >= 3) rel = snap(rel, rel >= notes[notes.length - 1].rel ? 1 : -1);
+        }
+        if (rel > 8) rel -= 7; if (rel < -2) rel += 7;
+        notes.push({ step, rel, len });
+        step += len;
+      }
+      return notes;
+    };
+    // ---- a phrase: motif, its sequence over the next chord, a contrast bar, a cadence bar
+    // The question ends away from the tonic, the answer ends on it.
+    const phrase = (bar0, m1, m2, answer, oct, level, harm) => {
+      const bars = [m1, m1, m2];
+      let last = m1[0].rel;
+      for (let b = 0; b < 3; b++) for (const n of bars[b]) {
+        put(bar0 + b, n.step, 'lead', chordAt(bar0 + b), n.rel, oct, n.len, level, n.len >= 3 ? 'held' : 'short');
+        if (harm) put(bar0 + b, n.step, 'harm', chordAt(bar0 + b), n.rel - 2, oct, n.len, level * 0.5, 'short');
+        last = n.rel;
+      }
+      // cadence: an approach note then a long target note (absolute degree 0 for the answer, 4 or 1 for the question)
+      const cBar = bar0 + 3, cd = answer ? 0 : chordAt(cBar), target = answer ? 0 : (rng() < 0.6 ? 4 : 1);
+      const targetRel = (() => { const base = ((target - cd) % 7 + 7) % 7; let best = base, bd = 99; for (const c of [base - 7, base, base + 7]) { if (c < -2 || c > 8) continue; const dd = Math.abs(c - last); if (dd < bd) { bd = dd; best = c; } } return best; })();
+      const cad = pick(CADENCES); let step = 0;
+      for (let i = 0; i < cad.length; i++) {
+        const lastNote = i === cad.length - 1;
+        const rel = lastNote ? targetRel : snap(targetRel + (targetRel > last ? -1 : 1) * (cad.length - i), targetRel > last ? -1 : 1);
+        put(cBar, step, 'lead', cd, rel, oct, cad[i], level, lastNote ? 'held' : 'short');
+        if (harm) put(cBar, step, 'harm', cd, rel - 2, oct, cad[i], level * 0.5, lastNote ? 'held' : 'short');
+        step += cad[i];
+      }
+      return cd;
+    };
+    // ---- bass and arpeggio for every bar; the answer phrases land on the tonic chord
+    const bassPat = BASS[pick(mood.bass)], arpPat = ARPS[pick(mood.arp)];
+    const tonicBars = new Set();
+    // ---- form: intro (no lead), verse Q+A, bridge Q+A a fifth up and softer, verse again
+    const m1 = motif(0), m2 = motif(2), m3 = motif(4, pick(RHYTHMS)), m4 = motif(2);
+    const verse = (bar0, level, first, second, harm) => { phrase(bar0, first, second, false, 1, level, harm); tonicBars.add(bar0 + 7); phrase(bar0 + 4, first, second, true, 1, level, harm); };
+    verse(4, 0.09, m1, m2, false);
+    verse(12, 0.065, m3, m4, false);
+    verse(20, 0.085, m1, m2, true);
+    for (let bar = 0; bar < LOOP_BARS; bar++) {
+      const cd = tonicBars.has(bar) ? 0 : chordAt(bar);
+      const quiet = bar < 4 || bar >= 12 && bar < 20;
+      for (const [st, rel, len] of bassPat) put(bar, st, 'bass', cd, rel, -1, len, bassPat === BASS.drone ? 0.18 : 0.16, len >= 4 ? 'drone' : 'pluck');
+      if (bar === LOOP_BARS - 1) continue; // one bar of rest before the loop repeats
+      arpPat.forEach((rel, st) => { if (rel !== null && (!quiet || st % 2 === 0)) put(bar, st, 'arp', cd, rel, 0, 1, quiet ? 0.045 : 0.06, 'pluck'); });
+      if (mood.spark > 0) for (let st = 0; st < 8; st++) if (rng() < mood.spark) put(bar, st, 'spark', cd, [0, 2, 4][Math.floor(rng() * 3)], 2, 1, 0.03, 'spark');
+    }
+    return song;
   }
 
   // ---------------------------------------------------------------- scheduler
@@ -238,33 +328,13 @@ export class Music {
     while (song.next < horizon) { this._stepAt(song, song.step, song.next); song.step++; song.next += song.stepDur; }
   }
   _stepAt(song, step, t) {
-    const { mood, stepDur, rng } = song;
-    const bar = Math.floor(step / 8), inBar = step % 8;
-    const chord = Math.floor(bar / song.chordBars) % 4;
-    const chordStart = inBar === 0 && bar % song.chordBars === 0;
-    // bass
-    if (mood.bass === 'drone') {
-      if (chordStart) this._note(song, 'triangle', song.degree(chord, 0, -1), t, stepDur * 8 * song.chordBars, 0.20, { a: 0.8, r: 1.2 });
-      if (inBar === 4 && bar % song.chordBars === 1 && rng() < 0.5) this._note(song, 'triangle', song.degree(chord, 2, -1), t, stepDur * 4, 0.12, { a: 0.6, r: 0.8 });
-    } else if (inBar % 2 === 0) {
-      this._note(song, 'triangle', song.degree(chord, inBar === 4 ? 2 : 0, -1), t, stepDur * 1.6, 0.20, { a: 0.005, r: 0.4 });
+    const { mood, stepDur } = song;
+    for (const ev of song.byStep[step % (LOOP_BARS * 8)]) {
+      const wave = ev.voice === 'lead' ? mood.lead : ev.voice === 'arp' || ev.voice === 'harm' ? mood.arpWave : ev.voice === 'bass' ? 'triangle' : 'p12';
+      const env = { drone: { a: 0.4, r: 0.8 }, pluck: { a: 0.004, r: 0.3 }, short: { a: 0.01, r: 0.25 }, held: { a: 0.02, r: 0.5, vib: true }, spark: { a: 0.002, r: 0.25 } }[ev.env];
+      this._note(song, wave, ev.midi, t, stepDur * ev.len * (ev.voice === 'arp' ? 0.9 : 0.95), ev.level, env);
     }
-    // arpeggio: two patterns alternate every four bars, the second half of a phrase is quieter
-    const pat = song.arps[Math.floor(bar / 4) % 2][inBar];
-    if (pat && (bar % 8 < 6 || rng() < 0.5)) this._note(song, mood.arp, song.degree(chord, pat.k, pat.oct), t, stepDur * 0.9, 0.075, { a: 0.003, r: 0.35 });
-    // lead: a slow random walk, one phrase every few bars
-    const L = song.lead;
-    if (inBar === 0 && bar % 2 === 1 && rng() < 0.55) { L.at = bar; L.count = 1 + Math.floor(rng() * 3); L.pos = Math.floor(rng() * 4); }
-    if (L.at === bar && L.count > 0 && inBar === L.pos) {
-      L.note = clamp(L.note + Math.floor(rng() * 5) - 2, -2, song.scale.length * 2 - 1);
-      const len = 2 + Math.floor(rng() * 4);
-      this._note(song, mood.lead, this._scaleMidi(song, L.note) + 12, t, stepDur * len, 0.085, { a: 0.02, r: 0.5, vib: true });
-      L.count--; L.pos += len + Math.floor(rng() * 2);
-    }
-    // sparkle: rare very short high notes on cold or strange worlds
-    if (mood.spark > 0 && rng() < mood.spark) this._note(song, 'p12', song.degree(chord, Math.floor(rng() * 3), 2), t, stepDur * 0.5, 0.035, { a: 0.002, r: 0.25 });
   }
-  _scaleMidi(song, i) { const n = song.scale.length, o = Math.floor(i / n); return song.root + song.scale[((i % n) + n) % n] + 12 * o; }
   _note(song, wave, midi, t, dur, level, env) {
     const ctx = this.ctx;
     const osc = ctx.createOscillator();
