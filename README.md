@@ -1,4 +1,4 @@
-# myworlds
+# My Worlds
 
 Type a name or a word. Get a small low-poly planet. The same word always gives the same world.
 
@@ -30,7 +30,9 @@ Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jeky
 
 ## Controls
 
-Drag to spin and tilt. Scroll or pinch to zoom. Zoom in close and the view tilts toward the horizon. Get close to the ground to find the wildlife. The speaker button mutes the music. The slider under the world list sets the volume.
+Drag to spin and tilt. Scroll or pinch to zoom. Zoom in close and the view tilts toward the horizon. Get close to the ground to find the wildlife.
+
+All controls live in one sidebar: the seed input, the current world with its stats and fauna, the share button, the saved worlds, and the music volume. The speaker button in the sidebar header mutes the music. The header button folds the sidebar to one line that shows the current world. On a phone the sidebar docks at the bottom as a sheet, and a tap on the planet folds it away. Press `/` to focus the seed input and `Escape` to close the creature inspector.
 
 ## Fauna
 

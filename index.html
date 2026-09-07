@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <title>myworlds — your name, your planet</title>
+  <title>My Worlds — your name, your planet</title>
   <meta name="description" content="Type a name, get a tiny low-poly planet. Same name, same world.">
   <meta name="theme-color" content="#070a16">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,30 +18,45 @@
 <body>
   <canvas id="c"></canvas>
 
-  <aside id="panel">
+  <aside id="panel" aria-label="Sidebar">
     <header>
-      <h1><span class="logo">✦</span> myworlds</h1>
+      <h1><span class="logo">✦</span> My Worlds</h1>
+      <span id="hworld" class="hworld"></span>
       <div class="hbtns">
         <button id="mute" type="button" aria-label="Mute music" aria-pressed="false" title="Music on/off">🔊</button>
-        <button id="toggle" type="button" aria-label="Toggle panel">☰</button>
+        <button id="toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Show/hide sidebar">☰</button>
       </div>
     </header>
-    <div class="body">
-      <form id="seed-form" autocomplete="off">
-        <input id="seed" type="text" maxlength="40" placeholder="Your name or a word…" enterkeyhint="go" spellcheck="false">
-        <button type="submit" class="go">Generate</button>
-        <button type="button" id="dice" title="Random world" aria-label="Random world">🎲</button>
-      </form>
-      <p class="sub">Same name, same world. Every time.</p>
-      <h2>Your worlds</h2>
-      <div id="worlds"></div>
-      <div class="actions"><button type="button" id="share" class="ghost">Share link</button></div>
-      <label class="music" for="vol"><span>Music</span><input id="vol" type="range" min="0" max="100" step="1" aria-label="Music volume"></label>
-    </div>
-  </aside>
 
-  <section id="info" aria-live="polite"></section>
-  <button type="button" id="info-pill" class="ghost" hidden aria-label="Show world card"></button>
+    <div class="body">
+      <section class="sec">
+        <form id="seed-form" autocomplete="off">
+          <input id="seed" type="text" maxlength="40" placeholder="Your name or a word…" enterkeyhint="go" spellcheck="false" aria-label="Seed">
+          <button type="submit" class="go">Generate</button>
+          <button type="button" id="dice" title="Random world" aria-label="Random world">🎲</button>
+        </form>
+        <p class="sub">Same name, same world. Every time.</p>
+      </section>
+
+      <section class="sec" id="info" aria-live="polite" hidden>
+        <div class="sechead">
+          <h2>This world</h2>
+          <button type="button" id="share" class="ghost">Share link</button>
+        </div>
+        <div id="info-body"></div>
+      </section>
+
+      <section class="sec">
+        <div class="sechead"><h2>Your worlds</h2></div>
+        <div id="worlds"></div>
+      </section>
+    </div>
+
+    <footer>
+      <label class="music" for="vol"><span>Music</span><input id="vol" type="range" min="0" max="100" step="1" aria-label="Music volume"></label>
+      <p class="help">Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife</p>
+    </footer>
+  </aside>
 
   <section id="creature" hidden aria-live="polite">
     <div class="ccard">
@@ -56,8 +71,6 @@
       </div>
     </div>
   </section>
-
-  <div id="hint">drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife</div>
 
   <div id="overlay">
     <div class="box">

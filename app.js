@@ -8,6 +8,7 @@ import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, ste
 const isCoarse = matchMedia('(pointer: coarse)').matches;
 const isSmall = Math.min(innerWidth, innerHeight) < 600;
 const LOW = isCoarse || isSmall || (navigator.hardwareConcurrency || 4) <= 4;
+const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet stays visible
 const Q = {
   detail: LOW ? 64 : 100,
   maxFlora: LOW ? 2500 : 7000,
@@ -27,14 +28,13 @@ const input = $('#seed');
 const diceBtn = $('#dice');
 const worldsEl = $('#worlds');
 const infoEl = $('#info');
-const infoPill = $('#info-pill');
-let infoHidden = false; // the user closed the world card; new worlds keep it closed
+const infoBody = $('#info-body');
+const hworld = $('#hworld');
 const overlay = $('#overlay');
 const overlayLabel = $('#overlay-label');
 const overlayBar = $('#overlay-bar');
 const toggleBtn = $('#toggle');
 const panel = $('#panel');
-const hint = $('#hint');
 const shareBtn = $('#share');
 const muteBtn = $('#mute');
 const volInput = $('#vol');
@@ -62,7 +62,7 @@ controls.maxDistance = CAM_MAX;
 controls.rotateSpeed = 0.7;
 controls.zoomSpeed = 0.9;
 let userActive = false, lastInteract = 0;
-controls.addEventListener('start', () => { userActive = true; lastInteract = performance.now(); hideHint(); });
+controls.addEventListener('start', () => { userActive = true; lastInteract = performance.now(); });
 controls.addEventListener('end', () => { userActive = false; lastInteract = performance.now(); });
 
 const sunDir = new THREE.Vector3(1, 0.55, 0.8).normalize();
@@ -551,7 +551,7 @@ function generate(seed, { save = true } = {}) {
       if (save) saveWorld(msg.result.world);
       history.replaceState(null, '', '#' + encodeURIComponent(seed));
       input.value = seed;
-      if (LOW) panel.classList.add("collapsed");
+      if (COMPACT) setCollapsed(true);
       setTimeout(() => { overlay.classList.remove("show"); busy = false; }, 250);
     } else if (msg.type === 'error') {
       overlayLabel.textContent = 'Generation failed. See console.';
@@ -637,8 +637,7 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&a
 
 function renderInfo(w) {
   const s = w.stats;
-  infoEl.innerHTML = `
-    <button type="button" class="iclose" aria-label="Hide world card">×</button>
+  infoBody.innerHTML = `
     <div class="iname">${escapeHtml(w.seed)}</div>
     <div class="itype">${escapeHtml(w.designation)} · ${escapeHtml(w.typeLabel)}</div>
     <dl>
@@ -650,17 +649,10 @@ function renderInfo(w) {
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
     </dl>`;
-  infoEl.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
-  infoEl.querySelector('.iclose').addEventListener('click', () => setInfoHidden(true));
-  infoPill.textContent = `${w.seed} · ${w.typeLabel}`;
-  setInfoHidden(infoHidden);
+  infoBody.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
+  infoEl.hidden = false;
+  hworld.textContent = `${w.seed} · ${w.typeLabel}`;
 }
-function setInfoHidden(hidden) {
-  infoHidden = hidden;
-  infoEl.classList.toggle('show', !hidden);
-  infoPill.hidden = !hidden;
-}
-infoPill.addEventListener('click', () => setInfoHidden(false));
 
 // ---------------------------------------------------------------- creature inspector
 const creatureCard = $('#creature');
@@ -735,7 +727,18 @@ diceBtn.addEventListener('click', () => {
   const w = WORDS[Math.floor(Math.random() * WORDS.length)] + '-' + Math.floor(Math.random() * 900 + 100);
   input.value = w; generate(w);
 });
-toggleBtn.addEventListener('click', () => panel.classList.toggle('collapsed'));
+function setCollapsed(on) {
+  panel.classList.toggle('collapsed', on);
+  toggleBtn.setAttribute('aria-expanded', String(!on));
+  toggleBtn.setAttribute('aria-label', on ? 'Expand sidebar' : 'Collapse sidebar');
+}
+toggleBtn.addEventListener('click', () => setCollapsed(!panel.classList.contains('collapsed')));
+panel.querySelector('header').addEventListener('click', (e) => {
+  if (e.target.closest('button')) return;
+  setCollapsed(!panel.classList.contains('collapsed'));
+});
+// On a phone the sheet covers the planet: a touch on the canvas folds it away.
+if (COMPACT) canvas.addEventListener('pointerdown', () => setCollapsed(true));
 shareBtn.addEventListener('click', async () => {
   if (!current) return;
   const url = location.origin + location.pathname + '#' + encodeURIComponent(current.world.seed);
@@ -758,16 +761,15 @@ renderMusic();
 muteBtn.addEventListener('click', () => music.setMuted(!music.settings.muted));
 volInput.addEventListener('input', () => music.setVolume(volInput.value / 100));
 
-function hideHint() { hint.classList.add('hide'); }
-setTimeout(hideHint, 9000);
 addEventListener('hashchange', () => {
   const seed = decodeURIComponent(location.hash.slice(1));
   if (seed && (!current || current.world.seed !== seed)) generate(seed);
 });
 addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
+  if (e.key === 'Escape' && !creatureCard.hidden) inspector.hide();
 });
-if (LOW) panel.classList.add('collapsed');
+if (COMPACT) setCollapsed(true);
 
 // ---------------------------------------------------------------- boot
 renderWorlds();
