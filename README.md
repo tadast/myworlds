@@ -24,6 +24,7 @@ Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jeky
 - `app.js` renders the result with three.js (flat-shaded vertex colours, instanced flora, fauna and clouds, atmosphere shaders, rings, moons). It saves each world's seed, type, and a thumbnail to `localStorage`.
 - `species.js` rolls a set of species per world: class, niche, body plan, limbs, head, extras, gait, movement, colours, and modular lore. It runs inside the worker.
 - `fauna.js` builds a creature from a genome, rigs it for the vertex shader, steers it, and runs the inspector card.
+- `phenomena.js` draws the one natural activity a world can have: the glow, smoke, and embers of a volcano, the jet of a geyser, the light of a fissure, the curtains of an aurora, or the bolts of a thunderstorm. The worker picks the kind and the site, shapes and paints the ground, and keeps flora and fauna away from it.
 - `music.js` plays a chip-tune for each world with the Web Audio API. The world type picks a mode, a chord progression, and the wind. A motif in chord-relative degrees repeats over each chord, and every phrase ends in a cadence. The day length and the gravity set the tempo and the root note. The temperature sets the tone. The song fades in, and a new world crossfades. The volume and the mute state persist in `localStorage`. Browsers start the sound after the first tap or key press. On iOS a looping silent audio element starts with the same tap, so the music also plays with the ring switch on silent.
 - Continents come from three low-frequency noise octaves, so each world gets a few large landmasses with bays and peninsulas, not a spray of islands. Each type has a target land fraction, Earth has 29%, and the sea level is the quantile of the terrain field that leaves that fraction dry. Fine relief fades out at the coast so it cannot cut the shore into specks. A masked ridge term adds a few volcanic island chains. Ocean worlds keep their archipelagos.
 - Worlds are stored as seeds, not meshes. A saved world regenerates in about a second and the store stays small.
@@ -34,6 +35,10 @@ Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jeky
 Drag to spin and tilt. Scroll or pinch to zoom. Zoom in close and the view tilts toward the horizon. Get close to the ground to find the wildlife.
 
 All controls live in one sidebar: the seed input, the current world with its stats and fauna, the share button, the saved worlds, and the music volume. The speaker button in the sidebar header mutes the music. The header button folds the sidebar to one line that shows the current world. On a phone the sidebar docks at the bottom as a sheet, and a tap on the planet folds it away. Press `/` to focus the seed input and `Escape` to close the creature inspector.
+
+## Natural activity
+
+About one world in three has one phenomenon, never more. The world type sets the odds of each kind: a volcano with a cone, a crater, smoke and embers; a geyser that erupts every ten seconds or so; a long ragged fissure with side branches that walks across the land and stops at the shore; an aurora that folds around one pole; or a thunderstorm cell where bolts strike down from the atmosphere in two or three strokes, each with a new shape. Ice worlds get cryovolcanoes, cryogeysers, and crevasses. Gas giants get lightning in the great storm or an aurora. The info panel shows the activity of the world.
 
 ## Fauna
 

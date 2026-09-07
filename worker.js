@@ -481,6 +481,11 @@ function generate(seed, opts) {
     if ((v & 16383) === 0) post(35 + (v / vCount) * 25, 'Raising continents');
   }
 
+  post(60, 'Stirring the crust');
+  const act = makeActivity(makeRng(seed + '|activity'), type, world, P, pos, vCount, H, T, R, amp, beachW);
+  const paintAct = act ? act.paint : null;
+  const blockV = act ? act.block : null;
+
   post(62, 'Painting biomes');
   // per-face colouring, expanded to non-indexed triangles
   const outPos = new Float32Array(triCount * 9);
@@ -507,6 +512,7 @@ function generate(seed, opts) {
     const a = idx[f * 3], b = idx[f * 3 + 1], c = idx[f * 3 + 2];
     const h = (H[a] + H[b] + H[c]) / 3, t = (T[a] + T[b] + T[c]) / 3, m = (M[a] + M[b] + M[c]) / 3;
     biomeColor(h, t, m, f, tmp);
+    if (paintAct) paintAct((pos[a * 3] + pos[b * 3] + pos[c * 3]) / 3, (pos[a * 3 + 1] + pos[b * 3 + 1] + pos[c * 3 + 1]) / 3, (pos[a * 3 + 2] + pos[b * 3 + 2] + pos[c * 3 + 2]) / 3, tmp);
     const o = f * 9;
     outPos[o] = pos[a * 3] * R[a]; outPos[o + 1] = pos[a * 3 + 1] * R[a]; outPos[o + 2] = pos[a * 3 + 2] * R[a];
     outPos[o + 3] = pos[b * 3] * R[b]; outPos[o + 4] = pos[b * 3 + 1] * R[b]; outPos[o + 5] = pos[b * 3 + 2] * R[b];
@@ -523,6 +529,7 @@ function generate(seed, opts) {
   for (let v = 0; v < vCount; v++) {
     const h = H[v], t = T[v], m = M[v];
     if (h <= beachW || h > snowLine - 0.3) continue;
+    if (blockV && blockV[v]) continue;
     let kind = -1, p = 0;
     switch (type) {
       case 'terran': case 'ocean':
@@ -570,37 +577,15 @@ function generate(seed, opts) {
 
   post(86, 'Surveying the ground');
   // coarse lat/lon height map (radius factors) so creatures can follow the terrain on the main thread
-  const HM_W = 384, HM_H = 192;
-  const heightMap = new Float32Array(HM_W * HM_H), hmCount = new Uint16Array(HM_W * HM_H);
-  for (let v = 0; v < vCount; v++) {
-    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
-    const u = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * HM_W, w = (Math.asin(clamp(y, -1, 1)) / Math.PI + 0.5) * HM_H;
-    const i = Math.min(HM_W - 1, Math.floor(u)) + Math.min(HM_H - 1, Math.floor(w)) * HM_W;
-    heightMap[i] += R[v]; hmCount[i]++;
-  }
-  for (let i = 0; i < heightMap.length; i++) if (hmCount[i]) heightMap[i] /= hmCount[i];
-  for (let pass = 0; pass < 3; pass++) {
-    for (let i = 0; i < heightMap.length; i++) {
-      if (hmCount[i]) continue;
-      const xI = i % HM_W, yI = (i / HM_W) | 0;
-      let s = 0, n = 0;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const xx = (xI + dx + HM_W) % HM_W, yy = yI + dy;
-        if (yy < 0 || yy >= HM_H) continue;
-        const j = xx + yy * HM_W;
-        if (hmCount[j]) { s += heightMap[j]; n++; }
-      }
-      if (n) { heightMap[i] = s / n; hmCount[i] = 255; }
-    }
-  }
+  const { heightMap, HM_W, HM_H } = buildHeightMap(pos, R, vCount);
   world.heightMapSize = [HM_W, HM_H];
   world.seaRadius = world.hasOcean ? 1 + amp * 0.004 : 0;
 
   post(88, 'Waking the wildlife');
-  const fauna = makeFauna(makeRng(seed + '|fauna'), type, pos, vCount, H, T, M, FM, R, beachW, snowLine, maxFauna, world);
+  const fauna = makeFauna(makeRng(seed + '|fauna'), type, pos, vCount, H, T, M, FM, R, beachW, snowLine, maxFauna, world, blockV);
 
   post(90, 'Condensing clouds');
-  const clouds = makeClouds(makeRng(seed + '|clouds'), noise, cloudCount, type);
+  const clouds = makeClouds(makeRng(seed + '|clouds'), noise, cloudCount, type, world.activity && world.activity.kind === 'lightning' ? world.activity : null);
 
   post(94, 'Catching moons');
   world.rings = rng() < (type === 'ice' ? 0.2 : 0.08) ? makeRings(rng, P.rock ? mix(P.rock, [1, 1, 1], 0.4) : [0.8, 0.8, 0.8], 1.5) : null;
@@ -612,14 +597,18 @@ function generate(seed, opts) {
   self.postMessage({ type: 'done', result }, [outPos.buffer, outCol.buffer, flora.buffer, clouds.buffer, fauna.buffer, heightMap.buffer]);
 }
 
-function makeClouds(rng, noise, count, type) {
+function makeClouds(rng, noise, count, type, storm) {
   // clusters of puffs: x y z altitude-scaled, sx sy sz
   const puffs = [];
-  for (let c = 0; c < count; c++) {
-    const dir = randDir(rng);
-    const n = 3 + Math.floor(rng() * 5);
-    const alt = rrange(rng, 1.085, 1.105);
-    const spread = rrange(rng, 0.018, 0.04);
+  // the last cluster is the storm cell of a lightning activity: bigger, denser, lower
+  const total = storm ? count + 1 : count;
+  for (let c = 0; c < total; c++) {
+    const isStorm = storm && c === count;
+    if (isStorm) { storm.puffStart = puffs.length / 6; storm.puffCount = 16; }
+    const dir = isStorm ? storm.dir : randDir(rng);
+    const n = isStorm ? 16 : 3 + Math.floor(rng() * 5);
+    const alt = isStorm ? 1.08 : rrange(rng, 1.085, 1.105);
+    const spread = isStorm ? 0.05 : rrange(rng, 0.018, 0.04);
     // tangent frame
     const up = Math.abs(dir[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
     const tx = [up[1] * dir[2] - up[2] * dir[1], up[2] * dir[0] - up[0] * dir[2], up[0] * dir[1] - up[1] * dir[0]];
@@ -630,7 +619,7 @@ function makeClouds(rng, noise, count, type) {
       const u = (rng() - 0.5) * 2 * spread * elong, v = (rng() - 0.5) * 2 * spread;
       const px = dir[0] + tx[0] * u + ty[0] * v, py = dir[1] + tx[1] * u + ty[1] * v, pz = dir[2] + tx[2] * u + ty[2] * v;
       const l = Math.hypot(px, py, pz);
-      const s = rrange(rng, 0.011, 0.022) * (i === 0 ? 1.3 : 1);
+      const s = rrange(rng, 0.011, 0.022) * (i === 0 ? 1.3 : 1) * (isStorm ? 1.5 : 1);
       puffs.push(px / l * alt, py / l * alt, pz / l * alt, s * rrange(rng, 1, 1.6), s * 0.45, s * rrange(rng, 1, 1.6));
     }
   }
@@ -692,10 +681,11 @@ function packFauna(list, maxFauna) {
   return { fauna: out, count: keep, kinds: [...kinds].sort((a, b) => a - b) };
 }
 
-function makeFauna(rng, type, pos, vCount, H, T, M, FM, R, beachW, snowLine, maxFauna, world) {
+function makeFauna(rng, type, pos, vCount, H, T, M, FM, R, beachW, snowLine, maxFauna, world, blockV) {
   const list = [];
   const seaR = 1 + world.amp * 0.004;
   for (let v = 0; v < vCount; v++) {
+    if (blockV && blockV[v]) continue;
     const h = H[v], t = T[v], m = M[v], f = FM[v];
     const beach = h > 0 && h < beachW;
     const lowland = h > beachW && h < 0.3;
@@ -761,8 +751,241 @@ function makeStats(rng, type, world, floraCount) {
   return {
     radius: `${km.toLocaleString()} km`, gravity: `${g.toFixed(2)} g`, day: `${day.toFixed(1)} h`,
     land: type === 'gas' ? null : `${Math.round(world.land * 100)}%`,
+    activity: world.activity ? world.activity.label : null,
     temp: `${temp} °C`, moons: world.moons.length, life, fauna: faunaText[0].toUpperCase() + faunaText.slice(1), floraCount,
   };
+}
+
+// ---------------------------------------------------------------- natural activity
+// At most one phenomenon per world, and most worlds have none.
+// The worker picks the kind and the site, deforms and paints the ground, and blocks flora and fauna there.
+// The main thread (phenomena.js) draws the moving parts: glow, smoke, jets, curtains, bolts.
+const ACTIVITY = {
+  terran: [['volcano', 3], ['geyser', 3], ['fissure', 1], ['aurora', 3], ['lightning', 3]],
+  ocean: [['volcano', 2], ['geyser', 1], ['aurora', 3], ['lightning', 3]],
+  desert: [['volcano', 3], ['fissure', 3], ['aurora', 1], ['lightning', 1]],
+  ice: [['volcano', 1], ['geyser', 4], ['fissure', 3], ['aurora', 4]],
+  lava: [['volcano', 5], ['fissure', 4], ['lightning', 1]],
+  exotic: [['volcano', 2], ['geyser', 2], ['fissure', 2], ['aurora', 2], ['lightning', 2]],
+  gas: [['lightning', 4], ['aurora', 3]],
+};
+const ACTIVITY_LABEL = {
+  volcano: { default: 'Active volcano', ice: 'Cryovolcano' },
+  geyser: { default: 'Geyser field', ice: 'Cryogeyser', exotic: 'Glowing geyser' },
+  fissure: { default: 'Glowing fissure', ice: 'Deep crevasse', exotic: 'Luminous rift' },
+  aurora: { default: 'Aurora' },
+  lightning: { default: 'Thunderstorm', gas: 'Storm lightning', lava: 'Ash lightning' },
+};
+
+function buildHeightMap(pos, R, vCount) {
+  const HM_W = 384, HM_H = 192;
+  const heightMap = new Float32Array(HM_W * HM_H), hmCount = new Uint16Array(HM_W * HM_H);
+  for (let v = 0; v < vCount; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    const u = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * HM_W, w = (Math.asin(clamp(y, -1, 1)) / Math.PI + 0.5) * HM_H;
+    const i = Math.min(HM_W - 1, Math.floor(u)) + Math.min(HM_H - 1, Math.floor(w)) * HM_W;
+    heightMap[i] += R[v]; hmCount[i]++;
+  }
+  for (let i = 0; i < heightMap.length; i++) if (hmCount[i]) heightMap[i] /= hmCount[i];
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < heightMap.length; i++) {
+      if (hmCount[i]) continue;
+      const xI = i % HM_W, yI = (i / HM_W) | 0;
+      let s = 0, n = 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const xx = (xI + dx + HM_W) % HM_W, yy = yI + dy;
+        if (yy < 0 || yy >= HM_H) continue;
+        const j = xx + yy * HM_W;
+        if (hmCount[j]) { s += heightMap[j]; n++; }
+      }
+      if (n) { heightMap[i] = s / n; hmCount[i] = 255; }
+    }
+  }
+  return { heightMap, HM_W, HM_H };
+}
+function sampleHeightMap(hm, W, Hh, x, y, z) {
+  const u = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * W, w = (Math.asin(clamp(y, -1, 1)) / Math.PI + 0.5) * Hh;
+  return hm[Math.min(W - 1, Math.floor(u)) + Math.min(Hh - 1, Math.floor(w)) * W];
+}
+
+function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW) {
+  world.activity = null;
+  if (rng() >= (type === 'lava' ? 0.45 : 0.3)) return null;
+  const table = ACTIVITY[type];
+  const total = table.reduce((s, t) => s + t[1], 0);
+  let roll = rng() * total, kind = table[0][0];
+  for (const [k, w] of table) { roll -= w; if (roll <= 0) { kind = k; break; } }
+  const label = ACTIVITY_LABEL[kind][type] || ACTIVITY_LABEL[kind].default;
+  const act = { kind, label, dir: null, r: 1, glow: '#ff6a1e' };
+  if (type === 'ice') act.glow = '#8fe0ff';
+  if (type === 'exotic') act.glow = toHex(P.faunaColor.glow);
+
+  if (type === 'gas') {
+    act.dir = kind === 'lightning' ? world.storm.dir : null;
+    if (kind === 'aurora') act.pole = rng() < 0.5 ? 1 : -1;
+    world.activity = act;
+    return act;
+  }
+
+  // a site: a vertex that fits the kind, or null if the world has none
+  const pickSite = (ok) => {
+    const list = [];
+    for (let v = 0; v < vCount; v += 3) if (ok(v)) list.push(v);
+    return list.length ? list[Math.floor(rng() * list.length)] : -1;
+  };
+  const dirOf = (v) => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]];
+  const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const block = new Uint8Array(vCount);
+  const blockAround = (dir, rho) => {
+    const c = Math.cos(rho);
+    for (let v = 0; v < vCount; v++) if (pos[v * 3] * dir[0] + pos[v * 3 + 1] * dir[1] + pos[v * 3 + 2] * dir[2] > c) block[v] = 1;
+  };
+  const dark = scale(P.rock2, 0.45);
+
+  if (kind === 'aurora') {
+    act.pole = rng() < 0.5 ? 1 : -1;
+  } else if (kind === 'lightning') {
+    act.dir = randDir(rng);
+  } else if (kind === 'volcano') {
+    // a cone with a crater on a hill; the cone replaces the ground near the vent and blends at the rim
+    const v = pickSite((i) => H[i] > 0.12 && H[i] < 0.35);
+    if (v < 0) return null;
+    const dir = dirOf(v), rho = rrange(rng, 0.07, 0.11), peak = rrange(rng, 0.45, 0.65), hs = H[v];
+    const cr = Math.cos(rho);
+    for (let i = 0; i < vCount; i++) {
+      const d0 = dot3(dirOf(i), dir);
+      if (d0 < cr) continue;
+      const d = Math.acos(Math.min(1, d0)) / rho;
+      const cone = peak * Math.pow(1 - d, 1.3);
+      const crater = smoothstep(0.22, 0.06, d) * peak * 0.3;
+      const w = smoothstep(1.0, 0.5, d);
+      const h = H[i] + cone * (1 - w) + (hs + cone - crater - H[i]) * w;
+      H[i] = h;
+      R[i] = 1 + amp * Math.min(h, 1.0);
+    }
+    blockAround(dir, rho * 1.05);
+    act.dir = dir; act.rho = rho;
+    act.r = 1 + amp * Math.min(hs + peak * 0.7, 1.0); // the crater floor
+    act.peakR = 1 + amp * Math.min(hs + peak, 1.0);
+    const vent = type === 'ice' ? mix(P.shallow, [1, 1, 1], 0.3) : [1.0, 0.42, 0.08];
+    act.paint = (x, y, z, out) => {
+      const d0 = x * dir[0] + y * dir[1] + z * dir[2];
+      if (d0 < cr) return;
+      const d = Math.acos(Math.min(1, d0)) / rho;
+      const k = smoothstep(0.25, 1.0, d);
+      let c = mix(dark, [out[0], out[1], out[2]], k);
+      if (d < 0.16) c = mix(vent, c, smoothstep(0.09, 0.16, d));
+      out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
+    };
+  } else if (kind === 'geyser') {
+    const v = pickSite((i) => H[i] > beachW + 0.01 && H[i] < 0.22 && (type === 'ice' || T[i] > 0.3));
+    if (v < 0) return null;
+    const dir = dirOf(v), rho = 0.02, cr = Math.cos(rho);
+    blockAround(dir, rho);
+    act.dir = dir; act.rho = rho; act.r = R[v];
+    const mineral = type === 'ice' ? mix(P.shallow, [1, 1, 1], 0.4) : type === 'exotic' ? mix(P.beach, P.faunaColor.glow, 0.5) : mix(P.beach, [0.95, 0.9, 0.8], 0.5);
+    const pool = type === 'exotic' ? P.faunaColor.glow : P.shallow;
+    act.paint = (x, y, z, out) => {
+      const d0 = x * dir[0] + y * dir[1] + z * dir[2];
+      if (d0 < cr) return;
+      const d = Math.acos(Math.min(1, d0)) / rho;
+      let c = mix(mineral, [out[0], out[1], out[2]], smoothstep(0.5, 1.0, d));
+      if (d < 0.35) c = mix(pool, c, smoothstep(0.2, 0.35, d));
+      out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
+    };
+  } else if (kind === 'fissure') {
+    // a long ragged crack walks across the land with a wandering heading, sideways jitter,
+    // and a few short branches; every line stops at the shore. The longest of six tries wins.
+    const { heightMap, HM_W, HM_H } = buildHeightMap(pos, R, vCount);
+    const seaR = world.hasOcean ? 1 + amp * 0.004 : 0;
+    const rot = (vec, axis, ang) => {
+      const c = Math.cos(ang), s = Math.sin(ang), k = axis, d = dot3(k, vec);
+      return [vec[0] * c + (k[1] * vec[2] - k[2] * vec[1]) * s + k[0] * d * (1 - c),
+        vec[1] * c + (k[2] * vec[0] - k[0] * vec[2]) * s + k[1] * d * (1 - c),
+        vec[2] * c + (k[0] * vec[1] - k[1] * vec[0]) * s + k[2] * d * (1 - c)];
+    };
+    const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+    const tangentAt = (p) => {
+      const up = Math.abs(p[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+      return norm([up[1] * p[2] - up[2] * p[1], up[2] * p[0] - up[0] * p[2], up[0] * p[1] - up[1] * p[0]]);
+    };
+    // walk from p along t; returns the flat point list and the heading at each step for branches
+    const walk = (p, t, steps, step, bend, onStep) => {
+      const out = [];
+      for (let i = 0; i <= steps; i++) {
+        const side = norm([p[1] * t[2] - p[2] * t[1], p[2] * t[0] - p[0] * t[2], p[0] * t[1] - p[1] * t[0]]);
+        const jit = (rng() - 0.5) * 0.007;
+        const q = norm([p[0] + side[0] * jit, p[1] + side[1] * jit, p[2] + side[2] * jit]);
+        const r = sampleHeightMap(heightMap, HM_W, HM_H, q[0], q[1], q[2]);
+        if (r < seaR + 0.0008) break;
+        out.push(q[0], q[1], q[2], r);
+        if (onStep) onStep(i, p, t);
+        const c = Math.cos(step), sn = Math.sin(step);
+        p = norm([p[0] * c + t[0] * sn, p[1] * c + t[1] * sn, p[2] * c + t[2] * sn]);
+        const dt = dot3(t, p); t = norm(t.map((v, k) => v - p[k] * dt));
+        t = rot(t, p, bend + (rng() - 0.5) * 0.5 + (rng() < 0.08 ? (rng() - 0.5) * 1.4 : 0)); // a jitter and a rare kink
+      }
+      return out;
+    };
+    let best = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const v = pickSite((i) => H[i] > 0.08 && H[i] < 0.6);
+      if (v < 0) break;
+      const p0 = dirOf(v);
+      const t0 = rot(tangentAt(p0), p0, rng() * Math.PI * 2);
+      const steps = 40 + Math.floor(rng() * 30), step = 0.012, bend = rrange(rng, -0.04, 0.04);
+      const branches = [];
+      const main = walk(p0, t0, steps, step, bend, (i, p, t) => {
+        if (i > 3 && branches.length < 3 && rng() < 0.07) {
+          const bt = rot(t, p, (rng() < 0.5 ? 1 : -1) * rrange(rng, 0.5, 1.1));
+          const b = walk(p, bt, 5 + Math.floor(rng() * 6), step * 0.9, rrange(rng, -0.1, 0.1), null);
+          if (b.length >= 3 * 4) branches.push(b);
+        }
+      });
+      if (!best || main.length > best.main.length) best = { main, branches };
+    }
+    if (!best || best.main.length < 12 * 4) return null;
+    const lines = [best.main, ...best.branches];
+    const n = best.main.length / 4;
+    let mid = [0, 0, 0];
+    for (const line of lines) for (let i = 0; i < line.length; i += 4) { mid[0] += line[i]; mid[1] += line[i + 1]; mid[2] += line[i + 2]; }
+    mid = norm(mid);
+    let minDot = 1;
+    for (const line of lines) for (let i = 0; i < line.length; i += 4) minDot = Math.min(minDot, line[i] * mid[0] + line[i + 1] * mid[1] + line[i + 2] * mid[2]);
+    const reach = Math.cos(Math.acos(Math.min(1, minDot)) + 0.03);
+    act.dir = mid; act.points = best.main; act.branches = best.branches; act.r = best.main[3];
+    const glow = type === 'ice' ? mix(P.shallow, [1, 1, 1], 0.2) : type === 'exotic' ? P.faunaColor.glow : [1.0, 0.45, 0.1];
+    // distance from a point to the nearest crack, in chord units
+    const distTo = (x, y, z) => {
+      let best = 1;
+      for (const pts of lines) {
+        const m = pts.length / 4;
+        for (let i = 0; i < m - 1; i++) {
+          const ax = pts[i * 4], ay = pts[i * 4 + 1], az = pts[i * 4 + 2];
+          const bx = pts[i * 4 + 4] - ax, by = pts[i * 4 + 5] - ay, bz = pts[i * 4 + 6] - az;
+          const px = x - ax, py = y - ay, pz = z - az;
+          const u = clamp((px * bx + py * by + pz * bz) / (bx * bx + by * by + bz * bz), 0, 1);
+          const dx = px - bx * u, dy = py - by * u, dz = pz - bz * u;
+          const d = dx * dx + dy * dy + dz * dz;
+          if (d < best) best = d;
+        }
+      }
+      return Math.sqrt(best);
+    };
+    act.paint = (x, y, z, out) => {
+      if (x * mid[0] + y * mid[1] + z * mid[2] < reach) return;
+      const d = distTo(x, y, z);
+      if (d > 0.014) return;
+      let c = mix(dark, [out[0], out[1], out[2]], smoothstep(0.005, 0.014, d));
+      if (d < 0.004) c = mix(glow, c, smoothstep(0.002, 0.004, d));
+      out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
+    };
+  }
+  // the world object crosses to the main thread: functions and the block mask stay here
+  act.block = block;
+  const data = { ...act }; delete data.paint; delete data.block;
+  world.activity = data;
+  return act;
 }
 
 // ---------------------------------------------------------------- gas giant
@@ -806,6 +1029,9 @@ function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   }
   world.hasOcean = false; world.hasClouds = false; world.floraCount = 0; world.floraKinds = [];
   world.atmoStrength = 0.9;
+  const sr = Math.sqrt(1 - stormLat * stormLat);
+  world.storm = { dir: [sr * Math.cos(stormLon), stormLat, sr * Math.sin(stormLon)], size: stormSize };
+  makeActivity(makeRng(world.seed + '|activity'), 'gas', world, P);
   world.rings = rng() < 0.65 ? makeRings(rng, mix(bands[0], [1, 1, 1], 0.2), 1) : null;
   world.moons = makeMoons(rng, "gas", !!world.rings);
   const fauna = makeGasFauna(makeRng(world.seed + '|fauna'), maxFauna, world);
