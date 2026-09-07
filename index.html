@@ -3,14 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <title>My Worlds — your name, your planet</title>
-  <meta name="description" content="Type a name, get a tiny low-poly planet. Same name, same world.">
+  <title>My Worlds — every name hides a planet</title>
+  <meta name="description" content="Every name hides a planet. Type yours and meet its creatures, its weather, and its song.">
   <meta name="theme-color" content="#070a16">
+  <link rel="icon" href="./favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="My Worlds">
+  <meta property="og:title" content="My Worlds — every name hides a planet">
+  <meta property="og:description" content="Every name hides a planet. Type yours and meet its creatures, its weather, and its song.">
+  <meta property="og:url" content="https://codeme.lt/myworlds/">
+  <meta property="og:image" content="https://codeme.lt/myworlds/assets/share.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="A low-poly ocean planet in space beside the words My Worlds and Every name hides a planet.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="My Worlds — every name hides a planet">
+  <meta name="twitter:description" content="Every name hides a planet. Type yours and meet its creatures, its weather, and its song.">
+  <meta name="twitter:image" content="https://codeme.lt/myworlds/assets/share.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./style.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='44' fill='%233a8fd9'/><path d='M30 40 L55 28 L70 45 L58 66 L34 62 Z' fill='%236fbf5a'/></svg>">
   <script type="importmap">
     { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
   </script>
@@ -23,7 +38,7 @@
       <h1><span class="logo">✦</span> My Worlds</h1>
       <span id="hworld" class="hworld"></span>
       <div class="hbtns">
-        <button id="mute" type="button" aria-label="Mute music" aria-pressed="false" title="Music on/off">🔊</button>
+        <button id="mute" type="button" aria-label="Unmute music" aria-pressed="true" title="Music on/off">🔇</button>
         <button id="toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Show/hide sidebar">☰</button>
       </div>
     </header>
@@ -35,7 +50,7 @@
           <button type="submit" class="go">Generate</button>
           <button type="button" id="dice" title="Random world" aria-label="Random world">🎲</button>
         </form>
-        <p class="sub">Same name, same world. Every time.</p>
+        <p class="sub">Every name hides a planet. The same name always finds the same one.</p>
       </section>
 
       <section class="sec" id="info" aria-live="polite" hidden>

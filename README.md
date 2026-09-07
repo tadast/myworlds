@@ -18,6 +18,20 @@ Open <http://localhost:5555/>. Add `#YourName` to the URL to open a specific wor
 
 Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jekyll away from `vendor/`.
 
+## Icons and the share image
+
+`icon.svg` draws the planet mark. `favicon.ico` (16, 32, 48) and `assets/apple-touch-icon.png` (180) come from it:
+
+```sh
+rsvg-convert -w 16 -h 16 icon.svg -o /tmp/i16.png
+rsvg-convert -w 32 -h 32 icon.svg -o /tmp/i32.png
+rsvg-convert -w 48 -h 48 icon.svg -o /tmp/i48.png
+magick /tmp/i16.png /tmp/i32.png /tmp/i48.png favicon.ico
+rsvg-convert -w 180 -h 180 icon.svg | magick png:- -background '#070a16' -alpha remove assets/apple-touch-icon.png
+```
+
+`assets/share.png` (1200x630) is the Open Graph card. `tools/share-image.html` composes it: the real app in an iframe for the planet, the title over it. Serve the directory, open the page at 1200x630, wait for the world, and save the frame. The seed is `Auralis`, so the planet is always the same one.
+
 ## How it works
 
 - `worker.js` turns the seed into a hash, a PRNG, and seeded simplex noise. It builds an icosphere, raises terrain, paints biomes per face, places flora and fauna, and condenses clouds. It runs off the main thread and reports progress.
@@ -25,7 +39,7 @@ Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jeky
 - `species.js` rolls a set of species per world: class, niche, body plan, limbs, head, extras, gait, movement, colours, and modular lore. It runs inside the worker.
 - `fauna.js` builds a creature from a genome, rigs it for the vertex shader, steers it, and runs the inspector card.
 - `phenomena.js` draws the one natural activity a world can have: the glow, smoke, and embers of a volcano, the jet of a geyser, the light of a fissure, the curtains of an aurora, or the bolts of a thunderstorm. The worker picks the kind and the site, shapes and paints the ground, and keeps flora and fauna away from it.
-- `music.js` plays a chip-tune for each world with the Web Audio API. The world type picks a mode, a chord progression, and the wind. A motif in chord-relative degrees repeats over each chord, and every phrase ends in a cadence. The day length and the gravity set the tempo and the root note. The temperature sets the tone. The song fades in, and a new world crossfades. The volume and the mute state persist in `localStorage`. Browsers start the sound after the first tap or key press. On iOS a looping silent audio element starts with the same tap, so the music also plays with the ring switch on silent.
+- `music.js` plays a chip-tune for each world with the Web Audio API. The world type picks a mode, a chord progression, and the wind. A motif in chord-relative degrees repeats over each chord, and every phrase ends in a cadence. The day length and the gravity set the tempo and the root note. The temperature sets the tone. The song fades in, and a new world crossfades. The music starts muted, so a new visitor gets silence until they press the speaker button. The volume and the mute state persist in `localStorage`. Browsers start the sound after the first tap or key press. On iOS a looping silent audio element starts with the same tap, so the music also plays with the ring switch on silent.
 - Continents come from three low-frequency noise octaves, so each world gets a few large landmasses with bays and peninsulas, not a spray of islands. Each type has a target land fraction, Earth has 29%, and the sea level is the quantile of the terrain field that leaves that fraction dry. Fine relief fades out at the coast so it cannot cut the shore into specks. A masked ridge term adds a few volcanic island chains. Ocean worlds keep their archipelagos.
 - Worlds are stored as seeds, not meshes. A saved world regenerates in about a second and the store stays small.
 - Small or coarse-pointer devices get a lower mesh detail, fewer plants, and no shadows.

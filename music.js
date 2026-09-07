@@ -68,9 +68,11 @@ const MOOD = {
 };
 const LOOP_BARS = 28; // intro 4, verse 8, bridge 8, verse 8 with a harmony voice
 
+// Start muted until the user turns the music on. Browsers block audio before a
+// gesture, and silence on arrival is the polite default.
 function loadSettings() {
-  try { const s = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); return { vol: clamp(+s.vol >= 0 ? +s.vol : 0.5, 0, 1), muted: !!s.muted }; }
-  catch { return { vol: 0.5, muted: false }; }
+  try { const s = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); return { vol: clamp(+s.vol >= 0 ? +s.vol : 0.5, 0, 1), muted: s.muted === undefined ? true : !!s.muted }; }
+  catch { return { vol: 0.5, muted: true }; }
 }
 
 const UNLOCK_EVENTS = ['pointerdown', 'touchend', 'click', 'keydown'];
