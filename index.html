@@ -21,7 +21,10 @@
   <aside id="panel">
     <header>
       <h1><span class="logo">✦</span> myworlds</h1>
-      <button id="toggle" type="button" aria-label="Toggle panel">☰</button>
+      <div class="hbtns">
+        <button id="mute" type="button" aria-label="Mute music" aria-pressed="false" title="Music on/off">🔊</button>
+        <button id="toggle" type="button" aria-label="Toggle panel">☰</button>
+      </div>
     </header>
     <div class="body">
       <form id="seed-form" autocomplete="off">
@@ -33,6 +36,7 @@
       <h2>Your worlds</h2>
       <div id="worlds"></div>
       <div class="actions"><button type="button" id="share" class="ghost">Share link</button></div>
+      <label class="music" for="vol"><span>Music</span><input id="vol" type="range" min="0" max="100" step="1" aria-label="Music volume"></label>
     </div>
   </aside>
 

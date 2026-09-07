@@ -47,10 +47,14 @@ body {
 }
 #panel h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.3px; }
 #panel h1 .logo { color: var(--accent-2); margin-right: 2px; }
-#toggle {
+.hbtns { display: flex; gap: 6px; }
+#toggle, #mute {
   background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
   width: 34px; height: 34px; border-radius: 10px; cursor: pointer; font-size: 16px;
 }
+#mute[aria-pressed="true"] { color: var(--muted); }
+.music { margin-top: 10px; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.music input { flex: 1; min-width: 0; accent-color: var(--accent); cursor: pointer; }
 #panel .body { padding: 0 14px 14px; overflow: auto; }
 #panel.collapsed .body { display: none; }
 

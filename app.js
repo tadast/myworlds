@@ -1,6 +1,7 @@
 // myworlds — main thread: rendering, controls, UI, storage.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Music } from './music.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
 
 // ---------------------------------------------------------------- config
@@ -35,6 +36,8 @@ const toggleBtn = $('#toggle');
 const panel = $('#panel');
 const hint = $('#hint');
 const shareBtn = $('#share');
+const muteBtn = $('#mute');
+const volInput = $('#vol');
 
 // ---------------------------------------------------------------- renderer / scene
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -544,6 +547,7 @@ function generate(seed, { save = true } = {}) {
       resetCamera();
       console.info(`[myworlds] "${seed}" ${msg.result.world.type} built in ${Math.round(performance.now() - t0)} ms, worker ${Math.round(t0 - genStart)} ms`);
       renderInfo(msg.result.world);
+      music.play(msg.result.world);
       if (save) saveWorld(msg.result.world);
       history.replaceState(null, '', '#' + encodeURIComponent(seed));
       input.value = seed;
@@ -739,6 +743,21 @@ shareBtn.addEventListener('click', async () => {
   catch { shareBtn.textContent = url; }
   setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
 });
+// ---------------------------------------------------------------- music
+const music = new Music();
+function renderMusic() {
+  const { vol, muted } = music.settings;
+  muteBtn.textContent = muted ? '🔇' : vol < 0.01 ? '🔈' : '🔊';
+  muteBtn.setAttribute('aria-pressed', String(muted));
+  muteBtn.setAttribute('aria-label', muted ? 'Unmute music' : 'Mute music');
+  volInput.value = Math.round(vol * 100);
+  volInput.disabled = muted;
+}
+music.onchange = renderMusic;
+renderMusic();
+muteBtn.addEventListener('click', () => music.setMuted(!music.settings.muted));
+volInput.addEventListener('input', () => music.setVolume(volInput.value / 100));
+
 function hideHint() { hint.classList.add('hide'); }
 setTimeout(hideHint, 9000);
 addEventListener('hashchange', () => {
@@ -760,4 +779,4 @@ renderWorlds();
 }
 
 // debug handle (harmless in production)
-window.__mw = { scene, camera, controls, renderer, get current() { return current; }, generate, inspect, inspector };
+window.__mw = { scene, camera, controls, renderer, get current() { return current; }, generate, inspect, inspector, music };
