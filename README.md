@@ -52,7 +52,7 @@ All controls live in one sidebar: the seed input, the current world with its sta
 
 ## Natural activity
 
-About one world in three has one phenomenon, never more. The world type sets the odds of each kind: a volcano with a cone, a crater, smoke and embers; a geyser that erupts every ten seconds or so; a long ragged fissure with side branches that walks across the land and stops at the shore; an aurora that folds around one pole; or a thunderstorm cell where bolts strike down from the atmosphere in two or three strokes, each with a new shape. Ice worlds get cryovolcanoes, cryogeysers, and crevasses. Gas giants get lightning in the great storm or an aurora. The info panel shows the activity of the world.
+About two worlds in three have one phenomenon, never more. The world type sets the odds of each kind: a volcano with a cone, a crater, smoke and embers; a geyser that erupts every ten seconds or so; a long ragged fissure with side branches that walks across the land and stops at the shore; an aurora that folds around one pole; or a thunderstorm cell where bolts strike down from the atmosphere in two or three strokes, each with a new shape. Ice worlds get cryovolcanoes, cryogeysers, and crevasses. Gas giants get lightning in the great storm or an aurora. The info panel shows the activity of the world.
 
 ## Fauna
 

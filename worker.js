@@ -757,7 +757,7 @@ function makeStats(rng, type, world, floraCount) {
 }
 
 // ---------------------------------------------------------------- natural activity
-// At most one phenomenon per world, and most worlds have none.
+// At most one phenomenon per world, and about two worlds in three have one.
 // The worker picks the kind and the site, deforms and paints the ground, and blocks flora and fauna there.
 // The main thread (phenomena.js) draws the moving parts: glow, smoke, jets, curtains, bolts.
 const ACTIVITY = {
@@ -810,7 +810,7 @@ function sampleHeightMap(hm, W, Hh, x, y, z) {
 
 function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW) {
   world.activity = null;
-  if (rng() >= (type === 'lava' ? 0.45 : 0.3)) return null;
+  if (rng() >= (type === 'lava' ? 0.8 : 0.667)) return null;
   const table = ACTIVITY[type];
   const total = table.reduce((s, t) => s + t[1], 0);
   let roll = rng() * total, kind = table[0][0];
