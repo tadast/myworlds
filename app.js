@@ -645,6 +645,7 @@ function renderInfo(w) {
       <dt>Gravity</dt><dd>${s.gravity}</dd>
       <dt>Day</dt><dd>${s.day}</dd>
       <dt>Temp</dt><dd>${s.temp}</dd>
+      ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>

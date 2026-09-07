@@ -392,22 +392,25 @@ function generate(seed, opts) {
   if (type === 'gas') return generateGas(world, rng, noise, P, detail, post, frng, maxFauna);
 
   // ---- terrain parameters per type
-  let seaLevel, amp, mountain, contFreq, tempBias, snowLine, beachW, floraDensity, cloudCount;
+  // land: the fraction of the surface above the sea. Earth is 0.29.
+  // contFreq: the size of the continents. A lower value gives fewer and larger continents.
+  // islands: the weight of the volcanic arcs that make small islands in the open sea.
+  let land, amp, mountain, contFreq, islands, tempBias, snowLine, beachW, floraDensity, cloudCount;
   switch (type) {
-    case 'terran': seaLevel = rrange(rng, -0.05, 0.25); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.9, 1.5); tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = 0.6; cloudCount = Math.round(rrange(rng, 40, 70)); break;
-    case 'ocean': seaLevel = rrange(rng, 0.42, 0.6); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 1.2, 2.0); tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = 0.7; cloudCount = Math.round(rrange(rng, 55, 85)); break;
-    case 'desert': seaLevel = rng() < 0.6 ? -0.62 : -2; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.8, 1.4); tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = 0.15; cloudCount = Math.round(rrange(rng, 6, 18)); break;
-    case 'ice': seaLevel = rrange(rng, 0.0, 0.3); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.9, 1.5); tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = 0.12; cloudCount = Math.round(rrange(rng, 15, 30)); break;
-    case 'lava': seaLevel = rrange(rng, -0.1, 0.15); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 1.2, 1.8); tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = 0.1; cloudCount = Math.round(rrange(rng, 12, 28)); break;
-    case 'exotic': seaLevel = rrange(rng, -0.1, 0.35); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.9, 1.8); tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = 0.55; cloudCount = Math.round(rrange(rng, 25, 60)); break;
+    case 'terran': land = rrange(rng, 0.22, 0.42); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.55, 0.85); islands = 0.2; tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = 0.6; cloudCount = Math.round(rrange(rng, 40, 70)); break;
+    case 'ocean': land = rrange(rng, 0.03, 0.12); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 0.8, 1.3); islands = 0.6; tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = 0.7; cloudCount = Math.round(rrange(rng, 55, 85)); break;
+    case 'desert': land = rng() < 0.6 ? rrange(rng, 0.75, 0.92) : 1; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.5, 0.8); islands = 0.1; tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = 0.15; cloudCount = Math.round(rrange(rng, 6, 18)); break;
+    case 'ice': land = rrange(rng, 0.3, 0.55); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.55, 0.9); islands = 0.15; tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = 0.12; cloudCount = Math.round(rrange(rng, 15, 30)); break;
+    case 'lava': land = rrange(rng, 0.35, 0.6); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 0.6, 1.0); islands = 0.3; tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = 0.1; cloudCount = Math.round(rrange(rng, 12, 28)); break;
+    case 'exotic': land = rrange(rng, 0.2, 0.6); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.5, 1.0); islands = 0.25; tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = 0.55; cloudCount = Math.round(rrange(rng, 25, 60)); break;
   }
-  world.seaLevel = seaLevel; world.amp = amp;
-  world.hasOcean = seaLevel > -1.5;
+  world.amp = amp; world.land = land;
+  world.hasOcean = land < 1;
   world.hasClouds = cloudCount > 0;
   world.atmoStrength = type === 'lava' ? 0.6 : type === 'desert' ? 0.7 : 1;
 
   const o1 = randDir(rng).map((v) => v * 10), o2 = randDir(rng).map((v) => v * 10), o3 = randDir(rng).map((v) => v * 10);
-  const o4 = randDir(rng).map((v) => v * 10), o5 = randDir(rng).map((v) => v * 10);
+  const o4 = randDir(rng).map((v) => v * 10), o5 = randDir(rng).map((v) => v * 10), o6 = randDir(rng).map((v) => v * 10);
   const mFreq = rrange(rng, 2.6, 4.2);
   const warp = rrange(rng, 0.15, 0.45);
 
@@ -421,21 +424,51 @@ function generate(seed, opts) {
   const M = new Float32Array(vCount);   // moisture -1..1
   const R = new Float32Array(vCount);   // radius factor
   const FM = new Float32Array(vCount);  // forest cluster mask
+  const C = new Float32Array(vCount);   // continent field
+  const PX = new Float32Array(vCount * 3); // warped positions
+  // Pass 1: the continent field. Few low-frequency octaves give a few large continents,
+  // as buoyant continental crust does on Earth. A fine octave shapes bays and peninsulas.
+  // Volcanic arcs add small islands in the open sea.
   for (let v = 0; v < vCount; v++) {
     const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
     // domain warp for organic coastlines
-    const wx = noise.fbm(x * 1.3 + o4[0], y * 1.3 + o4[1], z * 1.3 + o4[2], 2) * warp;
-    const wy = noise.fbm(x * 1.3 + o5[0], y * 1.3 + o5[1], z * 1.3 + o5[2], 2) * warp;
+    const wx = noise.fbm(x * 0.9 + o4[0], y * 0.9 + o4[1], z * 0.9 + o4[2], 2) * warp;
+    const wy = noise.fbm(x * 0.9 + o5[0], y * 0.9 + o5[1], z * 0.9 + o5[2], 2) * warp;
     const px = x + wx, py = y + wy, pz = z + (wx - wy) * 0.5;
-    const c = noise.fbm(px * contFreq + o1[0], py * contFreq + o1[1], pz * contFreq + o1[2], 5, 2.0, 0.5) * 1.35;
-    const land = smoothstep(seaLevel - 0.15, seaLevel + 0.25, c);
+    PX[v * 3] = px; PX[v * 3 + 1] = py; PX[v * 3 + 2] = pz;
+    const cont = noise.fbm(px * contFreq + o1[0], py * contFreq + o1[1], pz * contFreq + o1[2], 3, 2.0, 0.5);
+    const coast = noise.fbm(px * 3.5 + o6[0], py * 3.5 + o6[1], pz * 3.5 + o6[2], 3, 2.0, 0.5) * 0.1;
+    // a low-frequency mask limits the arcs to a few chains, as on Earth
+    const arc = noise.ridged(px * 6 + o2[0], py * 6 + o2[1], pz * 6 + o2[2], 2);
+    const arcMask = smoothstep(0.25, 0.55, noise.fbm(px * 1.2 + o3[0], py * 1.2 + o3[1], pz * 1.2 + o3[2], 2));
+    C[v] = (cont + coast + arc * arc * arc * arc * arcMask * islands) * 1.35;
+    if ((v & 16383) === 0) post(15 + (v / vCount) * 20, 'Raising continents');
+  }
+  // The sea level is the quantile of the field that leaves the wanted land fraction dry.
+  // Without an ocean the whole field sits high above a sea level that no vertex reaches.
+  let seaLevel = -2;
+  if (land < 1) {
+    const sorted = C.slice().sort();
+    seaLevel = sorted[Math.min(vCount - 1, Math.floor((1 - land) * vCount))];
+  }
+  world.seaLevel = seaLevel;
+
+  // Pass 2: elevation, temperature, moisture
+  for (let v = 0; v < vCount; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    const px = PX[v * 3], py = PX[v * 3 + 1], pz = PX[v * 3 + 2];
+    const c = C[v];
+    const onLand = smoothstep(seaLevel - 0.15, seaLevel + 0.25, c);
     const m = noise.ridged(px * mFreq + o2[0], py * mFreq + o2[1], pz * mFreq + o2[2], 5);
     const d = noise.fbm(x * 9 + o3[0], y * 9 + o3[1], z * 9 + o3[2], 3) * 0.12;
     const hl = c - seaLevel;
-    // compress continent interiors into gentle lowlands; ridges carry the mountains
-    const base = hl > 0 ? Math.pow(hl, 0.75) * 0.3 : hl;
-    const ridge = m * m * mountain * land * 0.75;
-    let h = base + ridge + d * (0.5 + land * 0.5);
+    // compress continent interiors into gentle lowlands; ridges carry the mountains.
+    // The fine relief fades out at the coast, so it does not cut the shore into specks
+    // and does not lift the sea floor into islands. Islands come from the arc term only.
+    const ridge = m * m * mountain * onLand * 0.75;
+    let h;
+    if (hl >= 0) h = Math.pow(hl, 0.75) * 0.3 + ridge + d * smoothstep(0, 0.08, hl);
+    else h = hl + (ridge + d * 0.5) * smoothstep(0, -0.2, hl);
     H[v] = h;
     const lat = Math.abs(y);
     const tnoise = noise.fbm(x * 2.2 + o5[0], y * 2.2 + o5[1], z * 2.2 + o5[2], 2) * 0.12;
@@ -445,7 +478,7 @@ function generate(seed, opts) {
     // displacement: land pushed up, sea floor gently down and clamped
     const disp = h >= 0 ? Math.min(h, 1.0) : Math.max(h, -0.5) * 0.55;
     R[v] = 1 + amp * disp;
-    if ((v & 16383) === 0) post(15 + (v / vCount) * 45, 'Raising continents');
+    if ((v & 16383) === 0) post(35 + (v / vCount) * 25, 'Raising continents');
   }
 
   post(62, 'Painting biomes');
@@ -727,6 +760,7 @@ function makeStats(rng, type, world, floraCount) {
   const faunaText = fauna.length ? fauna.slice(0, 3).join(", ") : "none seen";
   return {
     radius: `${km.toLocaleString()} km`, gravity: `${g.toFixed(2)} g`, day: `${day.toFixed(1)} h`,
+    land: type === 'gas' ? null : `${Math.round(world.land * 100)}%`,
     temp: `${temp} °C`, moons: world.moons.length, life, fauna: faunaText[0].toUpperCase() + faunaText.slice(1), floraCount,
   };
 }
