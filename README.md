@@ -18,6 +18,20 @@ Open <http://localhost:5555/>. Add `#YourName` to the URL to open a specific wor
 
 Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jekyll away from `vendor/`.
 
+## Icons and the share image
+
+`icon.svg` draws the planet mark. `favicon.ico` (16, 32, 48) and `assets/apple-touch-icon.png` (180) come from it:
+
+```sh
+rsvg-convert -w 16 -h 16 icon.svg -o /tmp/i16.png
+rsvg-convert -w 32 -h 32 icon.svg -o /tmp/i32.png
+rsvg-convert -w 48 -h 48 icon.svg -o /tmp/i48.png
+magick /tmp/i16.png /tmp/i32.png /tmp/i48.png favicon.ico
+rsvg-convert -w 180 -h 180 icon.svg | magick png:- -background '#070a16' -alpha remove assets/apple-touch-icon.png
+```
+
+`assets/share.png` (1200x630) is the Open Graph card. `tools/share-image.html` composes it: the real app in an iframe for the planet, the title over it. Serve the directory, open the page at 1200x630, wait for the world, and save the frame. The seed is `Auralis`, so the planet is always the same one.
+
 ## How it works
 
 - `worker.js` turns the seed into a hash, a PRNG, and seeded simplex noise. It builds an icosphere, raises terrain, paints biomes per face, places flora and fauna, and condenses clouds. It runs off the main thread and reports progress.
