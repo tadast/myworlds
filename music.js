@@ -73,6 +73,23 @@ function loadSettings() {
   catch { return { vol: 0.5, muted: false }; }
 }
 
+const UNLOCK_EVENTS = ['pointerdown', 'touchend', 'click', 'keydown'];
+
+// A blob URL for a quarter second of 8-bit mono silence in WAV form.
+let silentUrl = null;
+function silentWav() {
+  if (silentUrl) return silentUrl;
+  const rate = 8000, n = rate / 4, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE');
+  str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, n, true);
+  new Uint8Array(buf, 44).fill(128);
+  silentUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  return silentUrl;
+}
+
 export class Music {
   constructor() {
     this.settings = loadSettings();
@@ -111,20 +128,35 @@ export class Music {
     return true;
   }
   _armUnlock() {
-    for (const ev of ['pointerdown', 'touchend', 'keydown']) addEventListener(ev, this._unlock, { passive: true });
+    for (const ev of UNLOCK_EVENTS) addEventListener(ev, this._unlock, { passive: true });
   }
+  // Call from a user gesture. iOS only starts audio inside a tap, a click, or a key press.
   unlock() {
     if (!this.ctx || this.settings.muted) return;
+    this._media(true);
     this.ctx.resume().then(() => {
       if (this.ctx.state !== 'running') return;
-      for (const ev of ['pointerdown', 'touchend', 'keydown']) removeEventListener(ev, this._unlock);
+      for (const ev of UNLOCK_EVENTS) removeEventListener(ev, this._unlock);
       this._startTimer();
     }).catch(() => {});
   }
+  // iOS mutes Web Audio while the ring switch is on silent, unless an HTML media element plays.
+  // A looping silent clip, started in a gesture, moves the audio session to playback mode.
+  // Playback mode ignores the switch.
+  _media(on) {
+    if (!on) { this._el?.pause(); return; }
+    if (!this._el) {
+      const el = this._el = document.createElement('audio');
+      el.src = silentWav(); el.loop = true; el.preload = 'auto';
+      el.setAttribute('playsinline', ''); el.setAttribute('aria-hidden', 'true');
+    }
+    const p = this._el.play();
+    if (p) p.catch(() => {}); // no gesture yet, or paused at once: the next gesture calls play again
+  }
   _visibility() {
     if (!this.ctx || this.settings.muted) return;
-    if (document.hidden) { this._stopTimer(); this.ctx.suspend().catch(() => {}); }
-    else this.ctx.resume().then(() => this._startTimer()).catch(() => {});
+    if (document.hidden) { this._stopTimer(); this._media(false); this.ctx.suspend().catch(() => {}); }
+    else { this._media(true); this.ctx.resume().then(() => this._startTimer()).catch(() => {}); }
   }
   _gain() { const v = this.settings.vol; return v * v * 0.9; }
   _save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(this.settings)); } catch { /* ignore */ } this.onchange?.(this.settings); }
@@ -142,12 +174,14 @@ export class Music {
     if (m) {
       if (this.master) this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08);
       this._stopTimer();
+      this._media(false);
       clearTimeout(this._suspendT);
       this._suspendT = setTimeout(() => { if (this.settings.muted && this.ctx) this.ctx.suspend().catch(() => {}); }, 500);
       return;
     }
     clearTimeout(this._suspendT);
     if (!this._ensure()) return;
+    this._media(true);
     if (this.pending) { const w = this.pending; this.pending = null; this._start(w, FADE_IN); }
     this.master.gain.setTargetAtTime(this._gain(), this.ctx.currentTime, 0.3);
     if (this.song && !this.song.stopping) this._startTimer();
