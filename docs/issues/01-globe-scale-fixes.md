@@ -1,5 +1,7 @@
 # 01 Globe scale fixes
 
+Status: CLOSED, 2026-09-08, merged as 6d232a6.
+
 Type: AFK. Phase 0. Blocked by: none. Read `docs/issues/README.md` first.
 
 ## What to build
@@ -15,12 +17,12 @@ Do not change the lore numbers. They become true on the ground in later issues.
 
 ## Acceptance criteria
 
-- [ ] The ocean from the home camera distance reads as a slow shimmer, with no visible travelling swell.
-- [ ] Trees on a terran world are 40% smaller and visibly denser in forests. The console line `built in ... ms` shows the flora count near 10,500 on HIGH for a lush terran seed.
-- [ ] Creatures are 30% smaller and flyers hover proportionally. A creature is still clickable at `CAM_MIN` with a mouse and with a coarse pointer emulation in devtools.
-- [ ] The average frame time on the globe at `CAM_MIN` is not worse than before the change by more than 1 ms. State both numbers in the summary.
-- [ ] Same seed gives the same world before and after, apart from the scale and count changes. Check `Auralis`.
-- [ ] `README.md` "How it works" mentions the flora count change if the number appears there.
+- [x] The ocean from the home camera distance reads as a slow shimmer, with no visible travelling swell.
+- [x] Trees on a terran world are 40% smaller and visibly denser in forests. The console line `built in ... ms` shows the flora count near 10,500 on HIGH for a lush terran seed.
+- [x] Creatures are 30% smaller and flyers hover proportionally. A creature is still clickable at `CAM_MIN` with a mouse and with a coarse pointer emulation in devtools.
+- [x] The average frame time on the globe at `CAM_MIN` is not worse than before the change by more than 1 ms. State both numbers in the summary.
+- [x] Same seed gives the same world before and after, apart from the scale and count changes. Check `Auralis`.
+- [x] `README.md` "How it works" mentions the flora count change if the number appears there.
 
 ## Blocked by
 

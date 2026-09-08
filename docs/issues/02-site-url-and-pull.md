@@ -1,5 +1,7 @@
 # 02 Site in the URL and the pull to life
 
+Status: CLOSED, 2026-09-08, merged as 2e6ee86.
+
 Type: AFK. Phase 1. Blocked by: none. Read `docs/issues/README.md` first, in particular "The site and the URL".
 
 ## What to build
@@ -16,13 +18,13 @@ Keep the marker and the site logic in a small module, `site.js`, so issue 03 can
 
 ## Acceptance criteria
 
-- [ ] Zoom to `CAM_MIN` on a terran world. A ring marker appears on the surface at the screen centre. It follows the crosshair as you drag.
-- [ ] When a creature home is within 3 km at world scale, the marker snaps to it and stays while the crosshair is within range.
-- [ ] Reloading `#Auralis@12.50,-73.25` opens the world at `CAM_MIN` with the marker under the crosshair at that site, and `__mw.site` reports the same lat and lon to two decimals.
-- [ ] The share button copies `#Seed@lat,lon` in the pick range and `#Seed` otherwise.
-- [ ] A gas giant shows no marker and the hash never gets a site.
-- [ ] Old URLs with no `@` behave exactly as before.
-- [ ] `README.md` "Controls" mentions the site URL.
+- [x] Zoom to `CAM_MIN` on a terran world. A ring marker appears on the surface at the screen centre. It follows the crosshair as you drag.
+- [x] When a creature home is within 3 km at world scale, the marker snaps to it and stays while the crosshair is within range.
+- [x] Reloading `#Auralis@12.50,-73.25` opens the world at `CAM_MIN` with the marker under the crosshair at that site, and `__mw.site` reports the same lat and lon to two decimals.
+- [x] The share button copies `#Seed@lat,lon` in the pick range and `#Seed` otherwise.
+- [x] A gas giant shows no marker and the hash never gets a site.
+- [x] Old URLs with no `@` behave exactly as before.
+- [x] `README.md` "Controls" mentions the site URL.
 
 ## Blocked by
 

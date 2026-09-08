@@ -109,6 +109,8 @@ Terrain colours use the globe rules for beach, snow line, and forest mask, evalu
 
 The lore size text in `species.js` is the source of truth. Add `Species.bodyMetres(G)` that returns the leading number of `sizeText` and the axis it measures, `'height'` or `'length'`. On the ground a creature is scaled so its geometry extent along that axis equals that number.
 
+Open question, raised when issue 08 landed: issue 08 lists `hexapod` under `axis: 'height'`, but `sizeText` for a hexapod reads "2.2 m long". The code follows issue 08 today, so a ground hexapod scales to its number in height. Decide this before issue 09 scales fauna on the ground, and record the decision here.
+
 ### The sociality gene
 
 `G.social = { kind: 'solitary' | 'pair' | 'herd', n: 1 | 2 | 4..14, spread: metres }`. `spread` is the formation radius. Rolled in `species.js`, deterministic per seed.
@@ -129,6 +131,19 @@ There is no test runner. Each issue verifies by hand in the served site and stat
 - Determinism: reload the same URL twice and confirm the same terrain, flora, and creatures.
 - Two seeds at least: one terran and one desert or ice. Check `__mw.current.world.type`.
 
+Three traps that make a good build look broken, or a bad one look good:
+
+- **The worker caches `species.js`.** After a merge or an edit, a plain reload can still run the old code, because the worker keeps its `importScripts` copy. Force fresh sources first, then reload:
+  ```js
+  for (const f of ["species.js","app.js","worker.js","fauna.js"]) await fetch("/"+f,{cache:"reload"}); location.reload();
+  ```
+- **A hidden tab stops `requestAnimationFrame`.** The frame-time snippet returns nothing, or a wrong number, when the tab is not in front. Confirm `document.visibilityState === "visible"` in the same run. On macOS, bring the tab to the front with:
+  ```sh
+  osascript -e 'tell application "Google Chrome" to activate' -e 'tell application "Google Chrome" to set active tab index of window 1 to N'
+  ```
+  A shell command steals the focus back, so start the measurement immediately after, and keep one run under 45 s.
+- **Frame time is capped at the refresh rate.** A pass at 16.6 ms only proves the build holds 60 fps. It cannot show the headroom that is left. To compare two builds, serve the baseline on a second port and interleave the runs.
+
 ## Sequence and dependencies
 
 ```
@@ -143,21 +158,21 @@ There is no test runner. Each issue verifies by hand in the served site and stat
 
 Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 and 09 both add to `ground.js`; keep flora and fauna in separate files, `ground-flora.js` and `ground-fauna.js`, to avoid merge pain.
 
-| # | Issue | Type | Blocked by |
-|---|---|---|---|
-| 01 | Globe scale fixes | AFK | none |
-| 02 | Site in the URL and the pull to life | AFK | none |
-| 03 | Descent and ascent shell | AFK | 02 |
-| 04 | Patch terrain from the worker | AFK | 03 |
-| 05 | Ground sea and shoreline | AFK | 04 |
-| 06 | Ground camera: pan, clamps, glide | AFK | 04 |
-| 07 | Ground flora with card impostors | AFK | 04 |
-| 08 | Sociality gene | AFK | none |
-| 09 | Ground fauna in groups | AFK | 04, 08 |
-| 10 | Far fauna coarse mesh | AFK | 09 |
-| 11 | Adaptive LOD and the perf overlay | AFK | 07, 10 |
-| 12 | Sky continuity: sun, moons, rings, clouds | AFK | 03 |
-| 13 | LOW tier pass | AFK | 05, 06, 11, 12 |
-| 14 | Ground-scale phenomena | HITL | 04, design |
-| 15 | Sea species | HITL | 05, 09, design |
-| 16 | Herd behaviour on the anchor | HITL | 09, design |
+| # | Issue | Type | Blocked by | Status |
+|---|---|---|---|---|
+| 01 | Globe scale fixes | AFK | none | CLOSED 6d232a6 |
+| 02 | Site in the URL and the pull to life | AFK | none | CLOSED 2e6ee86 |
+| 03 | Descent and ascent shell | AFK | 02 | open |
+| 04 | Patch terrain from the worker | AFK | 03 | open |
+| 05 | Ground sea and shoreline | AFK | 04 | open |
+| 06 | Ground camera: pan, clamps, glide | AFK | 04 | open |
+| 07 | Ground flora with card impostors | AFK | 04 | open |
+| 08 | Sociality gene | AFK | none | CLOSED d223dee |
+| 09 | Ground fauna in groups | AFK | 04, 08 | open |
+| 10 | Far fauna coarse mesh | AFK | 09 | open |
+| 11 | Adaptive LOD and the perf overlay | AFK | 07, 10 | open |
+| 12 | Sky continuity: sun, moons, rings, clouds | AFK | 03 | open |
+| 13 | LOW tier pass | AFK | 05, 06, 11, 12 | open |
+| 14 | Ground-scale phenomena | HITL | 04, design | open |
+| 15 | Sea species | HITL | 05, 09, design | open |
+| 16 | Herd behaviour on the anchor | HITL | 09, design | open |

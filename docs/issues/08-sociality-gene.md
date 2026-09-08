@@ -1,5 +1,7 @@
 # 08 Sociality gene
 
+Status: CLOSED, 2026-09-08, merged as d223dee.
+
 Type: AFK. Phase 1. Blocked by: none. Read `docs/issues/README.md` first, in particular "The sociality gene" and "Metres for a creature". Read `docs/fauna.md`.
 
 ## What to build
@@ -13,12 +15,12 @@ Two additions to `species.js`, both deterministic per seed, and no change to the
 
 ## Acceptance criteria
 
-- [ ] `__mw.current.world.species[i].social` exists for every species and is the same on reload.
-- [ ] The inspector card for a herd species mentions the herd in the manner or the story. A solitary species never says "herd".
-- [ ] `Species.bodyMetres(G).metres` equals the leading number in `lore.size` for every locomotion. Verify with a console loop over the species of five seeds.
-- [ ] Names, sizes, and stories of `Auralis` species are unchanged except for the new sociality sentence. Rolling `social` must come after the existing rolls in the RNG stream, so nothing earlier shifts.
+- [x] `__mw.current.world.species[i].social` exists for every species and is the same on reload.
+- [x] The inspector card for a herd species mentions the herd in the manner or the story. A solitary species never says "herd".
+- [x] `Species.bodyMetres(G).metres` equals the leading number in `lore.size` for every locomotion. Verify with a console loop over the species of five seeds.
+- [x] Names, sizes, and stories of `Auralis` species are unchanged except for the new sociality sentence. Rolling `social` must come after the existing rolls in the RNG stream, so nothing earlier shifts.
   - Decision, 2026-09-08: this criterion and item 3 disagree. The old code gives the `herd` manner from a high pause factor. The new gene can make the same species solitary. The card then states two facts that cannot both be true. Item 3 wins. A solitary species loses the herd sentence, and gets the `wary` sentence in its place. Two `Auralis` stories change. Names, latin names, and sizes do not change.
-- [ ] `docs/fauna.md` updated.
+- [x] `docs/fauna.md` updated.
 
 ## Blocked by
 
