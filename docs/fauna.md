@@ -73,10 +73,25 @@ A genome `G` is plain data. `fauna.js` reads these fields:
 | `size` | Scale factor used at placement |
 | `hover` | Height above the ground in world units (air only) |
 | `move` | `{ leash, speed, turn, pause, flies, shadow }` for the steering model |
+| `social` | `{ kind, n, spread }`. `kind` is `solitary`, `pair`, or `herd`. `n` is 1, 2, or 4 to 14. `spread` is the formation radius in metres |
 | `density`, `fsign`, `fcut` | Placement rules (see stage 2) |
 | `gravity` | The world gravity in g. `makeStats()` in the worker writes it on every species after the roll |
 | `colors` | `{ body, body2, accent, glow }` as hex strings |
 | `lore` | `{ name, latin, habitat, size, diet, temperament, story, plural }` |
+
+### Size in metres
+
+`Species.bodyMetres(G)` returns `{ metres, axis }`. `metres` is how large the animal is in the real world. `axis` is `height` or `length`, and it tells the ground code which extent of the geometry to match to `metres`. The `BODY` table holds a factor on `G.size` and the axis for each locomotion. A swarm is measured across the whole wheel.
+
+`sizeText()` formats the same number, so the lore text and the ground scale cannot drift apart. The leading number of `lore.size` is always `bodyMetres(G).metres`.
+
+### The sociality gene
+
+`G.social` says how the species groups: `{ kind, n, spread }`. The weights come from the locomotion. A quad or a hexapod is usually a herd animal. A serpent, a sac, and a sky whale are usually alone. A swarm is always a herd. Herd `n` is 4 to 14, a pair is 2, and a solitary animal is 1. `spread` is `n` times the body metres times 0.8, so a herd of large animals has room.
+
+`makeSpeciesSet()` rolls `social` in a second pass, after every species has its lore. Nothing before it moves in the random stream, so a seed keeps its names and its sizes.
+
+`applySocial()` then writes the sociality into the lore. It adds one story sentence, and it sets the manner text from the habit and the sociality together, for example `Placid, herds of nine` or `Wary, solitary`. A species that is not a herd loses the `herd` habit sentence, because that sentence would contradict the gene.
 
 ### Lore
 

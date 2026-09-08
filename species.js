@@ -100,6 +100,55 @@
   const HOVER = { sac: 0.014, wings: 0.02, fins: 0.03 };
   const DENSITY = { land: 0.016, air: 0.007, sub: 0.045 };
 
+  // ---------------------------------------------------------------- body size in metres
+  // The lore size text is the source of truth for how large an animal is.
+  // BODY gives the factor on G.size, the axis the number measures, and how the number is rounded.
+  // bodyMetres() returns that number, and sizeText() formats the same number, so the lore and the
+  // ground scale cannot drift apart.
+  const BODY = {
+    monopod: { k: 3.6, axis: 'height' }, biped: { k: 3.6, axis: 'height' }, tripod: { k: 3.6, axis: 'height' },
+    quad: { k: 2.6, axis: 'height' }, hexapod: { k: 2.2, axis: 'height' }, serpent: { k: 6, axis: 'length' },
+    sac: { k: 1.6, axis: 'height' }, wings: { k: 2.4, axis: 'length' }, fins: { k: 17, axis: 'length', whole: true },
+    arch: { k: 2.8, axis: 'length' }, periscope: { k: 2.4, axis: 'height' }, plough: { k: 3, axis: 'length' },
+  };
+  const SWARM_BODY = { k: 7, axis: 'length', whole: true }; // a swarm is measured across the whole wheel
+
+  function bodyMetres(G) {
+    const B = G.loco === 'wings' && G.plan === 'swarm' ? SWARM_BODY : BODY[G.loco];
+    return { metres: B.whole ? Math.round(G.size * B.k) : round1(G.size * B.k), axis: B.axis };
+  }
+
+  // ---------------------------------------------------------------- the sociality gene
+  // kind: how the species groups. n: how many animals in one group. spread: the formation radius in metres.
+  // The weights come from the locomotion, so a grazer walks in a herd and a serpent walks alone.
+  const SOCIAL = {
+    quad: [['herd', 0.6], ['pair', 0.15], ['solitary', 0.25]],
+    hexapod: [['herd', 0.6], ['pair', 0.15], ['solitary', 0.25]],
+    biped: [['herd', 0.3], ['pair', 0.3], ['solitary', 0.4]],
+    tripod: [['herd', 0.3], ['pair', 0.3], ['solitary', 0.4]],
+    monopod: [['herd', 0.3], ['pair', 0.3], ['solitary', 0.4]],
+    serpent: [['solitary', 0.8], ['pair', 0.2]],
+    wings: [['herd', 0.5], ['pair', 0.2], ['solitary', 0.3]],
+    sac: [['solitary', 0.7], ['pair', 0.3]],
+    fins: [['solitary', 0.7], ['pair', 0.3]],
+    arch: [['solitary', 0.6], ['pair', 0.2], ['herd', 0.2]],
+    periscope: [['solitary', 0.6], ['pair', 0.2], ['herd', 0.2]],
+    plough: [['solitary', 0.6], ['pair', 0.2], ['herd', 0.2]],
+  };
+
+  function rollSocial(rng, G) {
+    let kind;
+    if (G.plan === 'swarm') kind = 'herd'; // a swarm is a group by definition
+    else {
+      let r = rng();
+      const table = SOCIAL[G.loco];
+      kind = table[table.length - 1][0];
+      for (const [k, w] of table) { if (r < w) { kind = k; break; } r -= w; }
+    }
+    const n = kind === 'herd' ? 4 + Math.floor(rng() * 11) : kind === 'pair' ? 2 : 1;
+    return { kind, n, spread: n * bodyMetres(G).metres * 0.8 };
+  }
+
   function rollGenome(rng, type, niche, cls, usedLoco, hasFlora, forceLoco) {
     const options = cls === 'air' && niche !== 'sea' && niche !== 'cloud' ? LOCO.air.filter((l) => l !== 'fins') : LOCO[cls]; // whales need open air
     let loco = forceLoco || pick(rng, options);
@@ -223,7 +272,34 @@
     exotic: ['Nothing on {world} is quite what it looks like, and this is no exception.', 'It may not be an animal at all.'],
     gas: ['The ones in the clouds of {world} have never seen ground and have no word for down.', 'It has crossed the storm belts of {world} more times than there are stars in its sky.'],
   };
-  const TEMPER = { herd: 'Placid, herd-bound', ambush: 'Still, then sudden', strike: 'Still, then sudden', restless: 'Restless', patient: 'Patient', serene: 'Serene', tide: 'Unaware', buried: 'Unaware', armoured: 'Indifferent', wary: 'Wary' };
+  const TEMPER = { herd: 'Placid', ambush: 'Still, then sudden', strike: 'Still, then sudden', restless: 'Restless', patient: 'Patient', serene: 'Serene', tide: 'Unaware', buried: 'Unaware', armoured: 'Indifferent', wary: 'Wary' };
+  // the sociality half of the manner text, appended to TEMPER
+  const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
+  const socialTemper = (s) => (s.kind === 'herd' ? `herds of ${NUM[s.n]}` : s.kind === 'pair' ? 'in pairs' : 'solitary');
+  // one story sentence about the sociality. An arch and a periscope never travel, so their herd stays in one place.
+  function socialStory(rng, G, N) {
+    const s = G.social, still = G.cls === 'sub' && G.loco !== 'plough';
+    if (s.kind === 'herd') {
+      const spread = Math.round(s.spread);
+      if (still) return `A herd of ${NUM[s.n]} shares one stretch of ${N.ground} about ${spread} metres across. None of them ever moves.`;
+      return pick(rng, [
+        `It moves in herds of ${NUM[s.n]}. The herd holds a ring about ${spread} metres across, and the young keep to the middle of it.`,
+        `A herd of ${NUM[s.n]} feeds together and moves together over about ${spread} metres of ${N.ground}. One animal alone is a lost animal.`,
+      ]);
+    }
+    if (s.kind === 'pair') {
+      if (G.head === 'mandibles' || G.head === 'lure') return 'It hunts in pairs, and a pair holds together until one of the two dies.';
+      return pick(rng, [
+        'It lives in pairs. The two feed apart and rest together, and a pair keeps the same ground for years.',
+        'It comes in twos. Neither one strays further than a call.',
+      ]);
+    }
+    if (still) return `It keeps to itself. No two of them have been found in one stretch of ${N.ground}.`;
+    return pick(rng, [
+      'It keeps to itself. Two in one place is a fight, or a season of young.',
+      'It lives alone, and meets its own kind twice: once at birth, once to breed.',
+    ]);
+  }
 
   function habitKey(G) {
     const m = G.move;
@@ -253,19 +329,20 @@
     if (G.cls === 'air') return G.extras.includes('tendrils') ? 'Airborne spores and whatever the tendrils catch' : 'Cloud plankton and rain';
     return mineral ? 'Minerals licked from the rock' : 'Leaf litter and fallen fruit';
   }
+  // The leading number of every one of these texts comes from bodyMetres(), so the ground scale matches the lore.
   function sizeText(G, N) {
-    const s = G.size;
+    const m = bodyMetres(G).metres;
     switch (G.loco) {
-      case 'quad': return `${round1(s * 2.6)} m at the shoulder`;
-      case 'serpent': return `${round1(s * 6)} m long`;
-      case 'hexapod': return `${round1(s * 2.2)} m long`;
-      case 'sac': return `${round1(s * 1.6)} m sac, ${round1(s * 3)} m of tendril`;
-      case 'wings': return G.plan === 'swarm' ? `Each shard a hand wide, the swarm ${Math.round(s * 7)} m` : `${round1(s * 2.4)} m across`;
-      case 'fins': return `${Math.round(s * 17)} m`;
-      case 'arch': return `${round1(s * 2.8)} m exposed, far more below`;
-      case 'periscope': return `${round1(s * 2.4)} m of neck above the ${N.ground}`;
-      case 'plough': return `${round1(s * 3)} m, mostly under the ${N.ground}`;
-      default: return `${round1(s * 3.6)} m tall`;
+      case 'quad': return `${m} m at the shoulder`;
+      case 'serpent': return `${m} m long`;
+      case 'hexapod': return `${m} m long`;
+      case 'sac': return `${m} m sac, ${round1(G.size * 3)} m of tendril`;
+      case 'wings': return G.plan === 'swarm' ? `Each shard a hand wide, the swarm ${m} m` : `${m} m across`;
+      case 'fins': return `${m} m`;
+      case 'arch': return `${m} m exposed, far more below`;
+      case 'periscope': return `${m} m of neck above the ${N.ground}`;
+      case 'plough': return `${m} m, mostly under the ${N.ground}`;
+      default: return `${m} m tall`;
     }
   }
   function makeLore(rng, G, type, world, usedNames, usedLatin) {
@@ -294,6 +371,19 @@
     return { name, latin, habitat: N.habitat[G.cls], size: sizeText(G, N), diet: dietText(G, N), temperament: TEMPER[habit], story, plural: name.toLowerCase() + 's' };
   }
 
+  // Write the sociality into the lore. This runs after every species has its lore, so it must not
+  // roll anything that the earlier text depends on.
+  // A solitary or paired species loses the herd manner, because the herd sentence would contradict the gene.
+  function applySocial(rng, G, world) {
+    const N = NICHE[G.niche];
+    const fill = (s) => s.replace(/\{ground\}/g, N.ground).replace(/\{world\}/g, world.designation);
+    const habit = habitKey(G);
+    const key = habit === 'herd' && G.social.kind !== 'herd' ? 'wary' : habit;
+    if (key !== habit) G.lore.story = G.lore.story.replace(fill(HABIT[habit]), fill(HABIT[key]));
+    G.lore.temperament = `${TEMPER[key]}, ${socialTemper(G.social)}`;
+    G.lore.story += ' ' + socialStory(rng, G, N);
+  }
+
   // ---------------------------------------------------------------- the species set of one world
   function makeSpeciesSet(rng, type, world, P) {
     const W = WORLD_NICHES[type];
@@ -314,8 +404,11 @@
       G.lore = makeLore(rng, G, type, world, usedNames, usedLatin);
       list.push(G);
     }
+    // The sociality rolls last, in a second pass. Nothing before it moves in the random stream,
+    // so the names, the sizes, and the stories of a seed stay what they were.
+    for (const G of list) { G.social = rollSocial(rng, G); applySocial(rng, G, world); }
     return list;
   }
 
-  self.Species = { makeSpeciesSet, NICHE };
+  self.Species = { makeSpeciesSet, bodyMetres, NICHE };
 })();
