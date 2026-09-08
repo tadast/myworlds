@@ -13,11 +13,58 @@ export const PATCH_SIZE = 1500;      // metres, the side of the patch
 export const FOG_NEAR = 450;         // metres, where the fog starts
 export const FOG_FAR = 750;          // metres, where the fog is solid
 export const SKY_RADIUS = 5000;      // metres, the sky dome
-export const CEILING = 1200;         // metres, the camera ceiling
+export const CEILING = 1200;         // metres, the camera ceiling above the site
 export const FLOOR = 2;              // metres, the camera floor above the terrain
 export const CAM_START = 300;        // metres, the camera starts this far up and this far south
+export const RIM = 1500;             // metres, how far the coarse rim reaches from the site
+
+const CHUNKS = 10;           // the fine terrain splits into 10 by 10 meshes, so the frustum culls it
+const RIM_STEP = 4;          // the rim uses this many grid steps per cell
+const RIM_DEPTH = 2;         // cells outward. The rim is flat, so it needs no more.
+const FACE_JITTER = 0.055;   // the lightness noise per face, so the ground is not one flat swatch
 
 const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
+
+// small integer hash, the one the worker jitters its faces with
+function hash1(i) {
+  i = Math.imul(i ^ (i >>> 16), 2246822507);
+  i = Math.imul(i ^ (i >>> 13), 3266489909);
+  return ((i ^ (i >>> 16)) >>> 0) / 4294967296;
+}
+
+// One triangle into a non-indexed position buffer. Returns the next write offset.
+function writeTri(pos, o, ax, ay, az, bx, by, bz, cx, cy, cz) {
+  pos[o] = ax; pos[o + 1] = ay; pos[o + 2] = az;
+  pos[o + 3] = bx; pos[o + 4] = by; pos[o + 5] = bz;
+  pos[o + 6] = cx; pos[o + 7] = cy; pos[o + 8] = cz;
+  return o + 9;
+}
+
+// The colour of one face: the mean of its three vertex colours, times a lightness jitter.
+// The worker paints per vertex, so the jitter has to live here to stay per face. The face id
+// comes from the grid, so the same patch always draws the same jitter.
+function writeFace(col, o, C, a, b, c, id) {
+  const j = 1 + (hash1(id) - 0.5) * 2 * FACE_JITTER;
+  for (let k = 0; k < 3; k++) {
+    const v = (C[a * 3 + k] + C[b * 3 + k] + C[c * 3 + k]) / 3 * j;
+    col[o + k] = v; col[o + 3 + k] = v; col[o + 6 + k] = v;
+  }
+  return o + 9;
+}
+
+function writeFlat(col, o, tint) {
+  for (let k = 0; k < 3; k++) { col[o + k] = tint[k]; col[o + 3 + k] = tint[k]; col[o + 6 + k] = tint[k]; }
+  return o + 9;
+}
+
+// flatShading takes the normal from the derivatives, so the mesh carries no normal attribute
+function makeGeometry(pos, col) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.computeBoundingSphere();
+  return geo;
+}
 
 export class Ground {
   // tier: { grid, maxFlora, maxFauna, shadows }
@@ -30,6 +77,10 @@ export class Ground {
     this.result = null;
     this.atCeiling = false;
     this.lod = { distance: 150, min: 40, max: 400 };   // metres, one knob for issue 11
+    // the height grid of the patch, and the ground height at the site
+    this.heights = null;
+    this.n = 0; this.grid = 0; this.half = PATCH_SIZE / 2;
+    this.base = 0;
 
     const pal = world.palette || {};
     this.skyColor = new THREE.Color(pal.atmo || '#8fb7ff');
@@ -65,53 +116,174 @@ export class Ground {
     if (sunDir) this.sunDir.copy(sunDir).normalize();
     this._clear();
 
+    const p = result && result.patch;
+    this.heights = p ? result.heights : null;
+    this.n = p ? p.n : 0;
+    this.grid = p ? p.grid : 0;
+    this.half = p ? p.size / 2 : PATCH_SIZE / 2;
+    this.base = this.heightAt(0, 0);
+
     // The sky dome takes the atmosphere colour. The dome is far past the fog, so the fog paints it
     // in the fog colour, exactly like the far ground. That hides the edge of the patch: a dome
     // outside the fog reads as a paler sky, because the renderer applies the fog after the tone
     // mapping, and the edge of the plane then shows as a hard line.
+    // The dome sits at the height of the site, because a site can stand kilometres above sea level.
     const sky = new THREE.Mesh(
       new THREE.SphereGeometry(SKY_RADIUS, 24, 16),
       new THREE.MeshBasicMaterial({ color: this.skyColor, side: THREE.BackSide, depthWrite: false }),
     );
+    sky.position.y = this.base;
     sky.renderOrder = -1;
     this.content.add(sky);
 
-    // the placeholder ground: one flat plane in the ground colour of the palette
-    const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(PATCH_SIZE, PATCH_SIZE, 1, 1),
-      new THREE.MeshStandardMaterial({ color: this.groundColor, flatShading: true, roughness: 0.95, metalness: 0 }),
-    );
-    plane.rotation.x = -Math.PI / 2;
-    plane.receiveShadow = !!this.tier.shadows;
-    this.content.add(plane);
+    if (p) this._buildTerrain();
+    else {
+      // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(PATCH_SIZE, PATCH_SIZE, 1, 1),
+        new THREE.MeshStandardMaterial({ color: this.groundColor, flatShading: true, roughness: 0.95, metalness: 0 }),
+      );
+      plane.rotation.x = -Math.PI / 2;
+      plane.receiveShadow = !!this.tier.shadows;
+      this.content.add(plane);
+    }
 
+    // A directional light takes its direction from the position and the target, not the distance,
+    // so the height of the site must not move it. Issue 12 turns the sun to the site.
     const sun = new THREE.DirectionalLight('#fff4e0', 2.6);
     sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6);
     this.content.add(sun);
     this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7));
 
     // the camera starts 300 m up and 300 m south of the site, and it looks at the site
-    this.controls.target.set(0, 0, 0);
+    this.controls.target.set(0, this.base, 0);
     this.camera.up.set(0, 1, 0);
-    this.camera.position.set(0, CAM_START, CAM_START);
+    this.camera.position.set(0, this.base + CAM_START, CAM_START);
     this.controls.update();
     return this;
+  }
+
+  // ---------------------------------------------------------------- the terrain mesh
+  // The patch is a square height grid. The mesh is non-indexed with one colour per face, so the
+  // flat shading reads like the globe. The fine grid splits into chunks, because one mesh of a
+  // million triangles cannot be culled and the camera sees only a part of it.
+  _buildTerrain() {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
+    this.terrainMat = mat;
+    const cells = this.n - 1;
+    for (let cj = 0; cj < CHUNKS; cj++) {
+      const j0 = Math.floor(cj * cells / CHUNKS), j1 = Math.floor((cj + 1) * cells / CHUNKS);
+      for (let ci = 0; ci < CHUNKS; ci++) {
+        const i0 = Math.floor(ci * cells / CHUNKS), i1 = Math.floor((ci + 1) * cells / CHUNKS);
+        if (i1 <= i0 || j1 <= j0) continue;
+        this.content.add(this._mesh(this._chunkGeometry(i0, i1, j0, j1), mat));
+      }
+    }
+    // The rim fills the fog out to RIM metres. It holds the height of the patch edge, so it needs
+    // cells only along the edge and two cells outward.
+    const h = this.half, r = RIM;
+    this.content.add(this._mesh(this._bandGeometry(-r, r, -r, -h), mat));
+    this.content.add(this._mesh(this._bandGeometry(-r, r, h, r), mat));
+    this.content.add(this._mesh(this._bandGeometry(-r, -h, -h, h), mat));
+    this.content.add(this._mesh(this._bandGeometry(h, r, -h, h), mat));
+  }
+
+  _mesh(geo, mat) {
+    const m = new THREE.Mesh(geo, mat);
+    m.receiveShadow = !!this.tier.shadows;
+    return m;
+  }
+
+  // One block of the fine grid, from cell i0 to i1 and j0 to j1.
+  _chunkGeometry(i0, i1, j0, j1) {
+    const n = this.n, g = this.grid, half = this.half, H = this.heights, C = this.result.colors;
+    const tris = (i1 - i0) * (j1 - j0) * 2;
+    const pos = new Float32Array(tris * 9), col = new Float32Array(tris * 9);
+    let o = 0, f = 0;
+    for (let j = j0; j < j1; j++) {
+      for (let i = i0; i < i1; i++) {
+        const x0 = -half + i * g, x1 = x0 + g;
+        const z0 = -half + j * g, z1 = z0 + g;
+        const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
+        // two triangles per cell, wound so the normal points up
+        o = writeTri(pos, o, x0, H[a], z0, x0, H[c], z1, x1, H[d], z1);
+        f = writeFace(col, f, C, a, c, d, a * 2);
+        o = writeTri(pos, o, x0, H[a], z0, x1, H[d], z1, x1, H[b], z0);
+        f = writeFace(col, f, C, a, d, b, a * 2 + 1);
+      }
+    }
+    return makeGeometry(pos, col);
+  }
+
+  // One band of the rim. The heights and the colours come from the nearest point of the patch,
+  // so the band joins the edge and stays flat outward. The band keeps the step along the edge of
+  // the patch and takes only RIM_DEPTH cells outward, because it is flat that way.
+  _bandGeometry(x0, x1, z0, z1) {
+    const step = this.grid * RIM_STEP;
+    let nx = Math.max(1, Math.round((x1 - x0) / step)), nz = Math.max(1, Math.round((z1 - z0) / step));
+    if (x1 - x0 < z1 - z0) nx = Math.min(nx, RIM_DEPTH); else nz = Math.min(nz, RIM_DEPTH);
+    const pos = new Float32Array(nx * nz * 2 * 9), col = new Float32Array(nx * nz * 2 * 9);
+    const xs = new Float32Array(nx + 1), zs = new Float32Array(nz + 1);
+    for (let i = 0; i <= nx; i++) xs[i] = x0 + (x1 - x0) * i / nx;
+    for (let j = 0; j <= nz; j++) zs[j] = z0 + (z1 - z0) * j / nz;
+    const tint = [0, 0, 0];
+    let o = 0, f = 0;
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        const xa = xs[i], xb = xs[i + 1], za = zs[j], zb = zs[j + 1];
+        const ya = this._edgeHeight(xa, za), yb = this._edgeHeight(xb, za);
+        const yc = this._edgeHeight(xa, zb), yd = this._edgeHeight(xb, zb);
+        o = writeTri(pos, o, xa, ya, za, xa, yc, zb, xb, yd, zb);
+        this._edgeColor((xa + xb) / 2, (za + zb) / 2, tint);
+        f = writeFlat(col, f, tint);
+        o = writeTri(pos, o, xa, ya, za, xb, yd, zb, xb, yb, za);
+        f = writeFlat(col, f, tint);
+      }
+    }
+    return makeGeometry(pos, col);
+  }
+
+  // The nearest grid index of the patch to a point, clamped into the grid.
+  _edgeIndex(x, z) {
+    const n = this.n, g = this.grid, half = this.half;
+    const i = Math.min(n - 1, Math.max(0, Math.round((x + half) / g)));
+    const j = Math.min(n - 1, Math.max(0, Math.round((z + half) / g)));
+    return j * n + i;
+  }
+
+  _edgeHeight(x, z) {
+    return this.heights ? this.heights[this._edgeIndex(x, z)] : 0;
+  }
+
+  _edgeColor(x, z, out) {
+    const k = this._edgeIndex(x, z) * 3, C = this.result.colors;
+    out[0] = C[k]; out[1] = C[k + 1]; out[2] = C[k + 2];
+    return out;
   }
 
   update(t, dt) {
     this.controls.update();
     const p = this.camera.position, tg = this.controls.target;
 
-    // the ceiling: shorten the offset from the target, so the view direction holds
-    const dy = p.y - tg.y, top = CEILING - tg.y;
-    if (dy > top && top > 0) {
-      p.sub(tg).multiplyScalar(top / dy).add(tg);
+    // the target stays inside the fog, so the view always holds ground the reader can see
+    const tr = Math.hypot(tg.x, tg.z);
+    if (tr > FOG_NEAR) {
+      const k = FOG_NEAR / tr;
+      tg.x *= k; tg.z *= k;
       this.controls.update();
     }
-    this.atCeiling = this.camera.position.y >= CEILING - 1;
+
+    // the ceiling: shorten the offset from the target, so the view direction holds
+    const ceiling = this.base + CEILING;
+    const dy = p.y - tg.y, room = ceiling - tg.y;
+    if (dy > room && room > 0) {
+      p.sub(tg).multiplyScalar(room / dy).add(tg);
+      this.controls.update();
+    }
+    this.atCeiling = this.camera.position.y >= ceiling - 1;
 
     // the floor: the camera stays FLOOR metres above the terrain
-    const floor = this.heightAt(p.x, p.z) + FLOOR;
+    const floor = this._groundAt(p.x, p.z) + FLOOR;
     if (p.y < floor) { p.y = floor; this.controls.update(); }
   }
 
@@ -124,9 +296,27 @@ export class Ground {
     this.camera.updateProjectionMatrix();
   }
 
-  // The elevation above sea level in metres. The placeholder ground is flat, so it reads 0.
+  // The elevation above sea level in metres, bilinear on the grid. Outside the patch it reads 0,
+  // as the contract asks. Use _groundAt() for a camera clamp, because that one follows the rim.
   heightAt(x, z) {
-    return 0;
+    const H = this.heights;
+    if (!H) return 0;
+    const n = this.n, half = this.half;
+    const u = (x + half) / this.grid, v = (z + half) / this.grid;
+    if (!(u >= 0 && v >= 0 && u <= n - 1 && v <= n - 1)) return 0;
+    const i0 = Math.min(n - 2, Math.floor(u)), j0 = Math.min(n - 2, Math.floor(v));
+    const fx = u - i0, fz = v - j0;
+    const a = H[j0 * n + i0], b = H[j0 * n + i0 + 1];
+    const c = H[(j0 + 1) * n + i0], d = H[(j0 + 1) * n + i0 + 1];
+    return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
+  }
+
+  // The drawn ground height, the rim included. The rim holds the height of the patch edge, so a
+  // point outside the patch reads the height of the nearest edge point.
+  _groundAt(x, z) {
+    if (!this.heights) return 0;
+    const h = this.half - this.grid * 0.5;
+    return this.heightAt(Math.min(h, Math.max(-h, x)), Math.min(h, Math.max(-h, z)));
   }
 
   dispose() {
@@ -134,6 +324,7 @@ export class Ground {
     this._clear();
     this.scene.clear();
     this.result = null;
+    this.heights = null;
   }
 
   _clear() {

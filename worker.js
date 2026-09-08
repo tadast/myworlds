@@ -358,13 +358,24 @@ function moonName(rng) {
   return s[0].toUpperCase() + s.slice(1);
 }
 
-// ---------------------------------------------------------------- generation
-function generate(seed, opts) {
-  const detail = opts.detail || 96;
-  const maxFlora = opts.maxFlora || 6000;
-  const maxFauna = opts.maxFauna || 140;
-  const post = (pct, label) => self.postMessage({ type: 'progress', pct, label });
+// The planet radius in kilometres. The ground needs it to turn globe units into metres, and it
+// needs it before the globe is built. makeStats() draws the radius as the first value of the
+// flavour stream after the designation, so a replay of that stream gives the same number.
+function radiusKmOf(seed, type) {
+  const f = makeRng(seed + '|flavour');
+  designation(f, seed);
+  return type === 'gas' ? Math.round(rrange(f, 24000, 75000)) : Math.round(rrange(f, 3200, 9800));
+}
 
+// ---------------------------------------------------------------- the world context
+// The last context the worker built. A patch reuses it, so the ground sits at the sea level of
+// the globe the reader looked at, and no globe work runs twice.
+let cachedCtx = null;
+
+// Everything a world needs before its mesh: the type, the palette, the noise, and the terrain
+// parameters. generate() builds the globe from it. patch() builds a ground patch from it without
+// a mesh. The draw order of the seed stream must stay as it is, or every world changes.
+function worldContext(seed) {
   const rng = makeRng(seed);
   const type = chooseType(rng);
   const noise = new Noise(makeRng(seed + '|noise'));
@@ -389,7 +400,10 @@ function generate(seed, opts) {
   };
   world.species = Species.makeSpeciesSet(makeRng(seed + '|species'), type, world, P);
 
-  if (type === 'gas') return generateGas(world, rng, noise, P, detail, post, frng, maxFauna);
+  // seaLevel stays at -2 until the globe build, or until patch() samples it. A world with no
+  // ocean keeps -2, because no vertex ever reaches it.
+  const ctx = { seed, type, rng, noise, P, frng, world, radiusKm: radiusKmOf(seed, type), seaLevel: -2 };
+  if (type === 'gas') return ctx;
 
   // ---- terrain parameters per type
   // land: the fraction of the surface above the sea. Earth is 0.29.
@@ -414,6 +428,81 @@ function generate(seed, opts) {
   const mFreq = rrange(rng, 2.6, 4.2);
   const warp = rrange(rng, 0.15, 0.45);
 
+  Object.assign(ctx, {
+    land, amp, mountain, contFreq, islands, tempBias, snowLine, beachW, floraDensity, cloudCount,
+    o1, o2, o3, o4, o5, o6, mFreq, warp,
+  });
+  return ctx;
+}
+
+// ---------------------------------------------------------------- the terrain field
+// The globe paints itself from two passes over the icosphere. contAt() is pass 1 for one
+// direction and fieldFrom() is pass 2 for one direction. The patch calls fieldAt(), which runs
+// both. The globe keeps its two passes, because pass 2 needs the sea level of pass 1.
+const _warped = new Float32Array(3);   // float32, exactly as the globe stores its warped positions
+
+// The continent field at one unit direction. Writes the warped position into out.
+function contAt(ctx, x, y, z, out) {
+  const noise = ctx.noise, o1 = ctx.o1, o2 = ctx.o2, o3 = ctx.o3, o4 = ctx.o4, o5 = ctx.o5, o6 = ctx.o6;
+  // domain warp for organic coastlines
+  const wx = noise.fbm(x * 0.9 + o4[0], y * 0.9 + o4[1], z * 0.9 + o4[2], 2) * ctx.warp;
+  const wy = noise.fbm(x * 0.9 + o5[0], y * 0.9 + o5[1], z * 0.9 + o5[2], 2) * ctx.warp;
+  const px = x + wx, py = y + wy, pz = z + (wx - wy) * 0.5;
+  out[0] = px; out[1] = py; out[2] = pz;
+  const cont = noise.fbm(px * ctx.contFreq + o1[0], py * ctx.contFreq + o1[1], pz * ctx.contFreq + o1[2], 3, 2.0, 0.5);
+  const coast = noise.fbm(px * 3.5 + o6[0], py * 3.5 + o6[1], pz * 3.5 + o6[2], 3, 2.0, 0.5) * 0.1;
+  // a low-frequency mask limits the arcs to a few chains, as on Earth
+  const arc = noise.ridged(px * 6 + o2[0], py * 6 + o2[1], pz * 6 + o2[2], 2);
+  const arcMask = smoothstep(0.25, 0.55, noise.fbm(px * 1.2 + o3[0], py * 1.2 + o3[1], pz * 1.2 + o3[2], 2));
+  return (cont + coast + arc * arc * arc * arc * arcMask * ctx.islands) * 1.35;
+}
+
+// Elevation, temperature, moisture, forest mask, and radius factor for one direction, from the
+// continent value c and the warped position of pass 1. Writes h, t, m, fm, and r into out.
+function fieldFrom(ctx, x, y, z, c, px, py, pz, out) {
+  const noise = ctx.noise, o2 = ctx.o2, o3 = ctx.o3, o4 = ctx.o4, o5 = ctx.o5;
+  const onLand = smoothstep(ctx.seaLevel - 0.15, ctx.seaLevel + 0.25, c);
+  const m = noise.ridged(px * ctx.mFreq + o2[0], py * ctx.mFreq + o2[1], pz * ctx.mFreq + o2[2], 5);
+  const d = noise.fbm(x * 9 + o3[0], y * 9 + o3[1], z * 9 + o3[2], 3) * 0.12;
+  const hl = c - ctx.seaLevel;
+  // compress continent interiors into gentle lowlands; ridges carry the mountains.
+  // The fine relief fades out at the coast, so it does not cut the shore into specks
+  // and does not lift the sea floor into islands. Islands come from the arc term only.
+  const ridge = m * m * ctx.mountain * onLand * 0.75;
+  let h;
+  if (hl >= 0) h = Math.pow(hl, 0.75) * 0.3 + ridge + d * smoothstep(0, 0.08, hl);
+  else h = hl + (ridge + d * 0.5) * smoothstep(0, -0.2, hl);
+  const lat = Math.abs(y);
+  const tnoise = noise.fbm(x * 2.2 + o5[0], y * 2.2 + o5[1], z * 2.2 + o5[2], 2) * 0.12;
+  out.h = h;
+  out.t = clamp(1 - Math.pow(lat, 1.6) * 1.1 + ctx.tempBias + tnoise - Math.max(h, 0) * 0.55, -0.3, 1.3);
+  out.m = noise.fbm(x * 1.7 + o4[0] * 0.7, y * 1.7 + o4[1] * 0.7, z * 1.7 + o4[2] * 0.7, 3);
+  out.fm = noise.fbm(x * 6 + o2[0], y * 6 + o2[1], z * 6 + o2[2], 2);
+  // displacement: land pushed up, sea floor gently down and clamped
+  const disp = h >= 0 ? Math.min(h, 1.0) : Math.max(h, -0.5) * 0.55;
+  out.r = 1 + ctx.amp * disp;
+  return out;
+}
+
+// The whole terrain field for one direction. The patch uses it; the globe does not, because the
+// globe already holds the pass-1 values in arrays.
+function fieldAt(ctx, x, y, z, out) {
+  const c = contAt(ctx, x, y, z, _warped);
+  return fieldFrom(ctx, x, y, z, c, _warped[0], _warped[1], _warped[2], out);
+}
+
+// ---------------------------------------------------------------- generation
+function generate(seed, opts) {
+  const detail = opts.detail || 96;
+  const maxFlora = opts.maxFlora || 6000;
+  const maxFauna = opts.maxFauna || 140;
+  const post = (pct, label) => self.postMessage({ type: 'progress', pct, label });
+
+  const ctx = worldContext(seed);
+  const { type, rng, noise, P, frng, world } = ctx;
+  if (type === 'gas') { cachedCtx = ctx; return generateGas(world, rng, noise, P, detail, post, frng, maxFauna); }
+  const { amp, mountain, snowLine, beachW, floraDensity, cloudCount } = ctx;
+
   post(5, 'Shaping the sphere');
   const geo = icosphere(detail);
   const { pos, idx, vCount, triCount } = geo;
@@ -430,54 +519,26 @@ function generate(seed, opts) {
   // as buoyant continental crust does on Earth. A fine octave shapes bays and peninsulas.
   // Volcanic arcs add small islands in the open sea.
   for (let v = 0; v < vCount; v++) {
-    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
-    // domain warp for organic coastlines
-    const wx = noise.fbm(x * 0.9 + o4[0], y * 0.9 + o4[1], z * 0.9 + o4[2], 2) * warp;
-    const wy = noise.fbm(x * 0.9 + o5[0], y * 0.9 + o5[1], z * 0.9 + o5[2], 2) * warp;
-    const px = x + wx, py = y + wy, pz = z + (wx - wy) * 0.5;
-    PX[v * 3] = px; PX[v * 3 + 1] = py; PX[v * 3 + 2] = pz;
-    const cont = noise.fbm(px * contFreq + o1[0], py * contFreq + o1[1], pz * contFreq + o1[2], 3, 2.0, 0.5);
-    const coast = noise.fbm(px * 3.5 + o6[0], py * 3.5 + o6[1], pz * 3.5 + o6[2], 3, 2.0, 0.5) * 0.1;
-    // a low-frequency mask limits the arcs to a few chains, as on Earth
-    const arc = noise.ridged(px * 6 + o2[0], py * 6 + o2[1], pz * 6 + o2[2], 2);
-    const arcMask = smoothstep(0.25, 0.55, noise.fbm(px * 1.2 + o3[0], py * 1.2 + o3[1], pz * 1.2 + o3[2], 2));
-    C[v] = (cont + coast + arc * arc * arc * arc * arcMask * islands) * 1.35;
+    C[v] = contAt(ctx, pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], _warped);
+    PX[v * 3] = _warped[0]; PX[v * 3 + 1] = _warped[1]; PX[v * 3 + 2] = _warped[2];
     if ((v & 16383) === 0) post(15 + (v / vCount) * 20, 'Raising continents');
   }
   // The sea level is the quantile of the field that leaves the wanted land fraction dry.
   // Without an ocean the whole field sits high above a sea level that no vertex reaches.
   let seaLevel = -2;
-  if (land < 1) {
+  if (ctx.land < 1) {
     const sorted = C.slice().sort();
-    seaLevel = sorted[Math.min(vCount - 1, Math.floor((1 - land) * vCount))];
+    seaLevel = sorted[Math.min(vCount - 1, Math.floor((1 - ctx.land) * vCount))];
   }
+  ctx.seaLevel = seaLevel;
   world.seaLevel = seaLevel;
+  cachedCtx = ctx;    // a patch for this seed reuses the context and this exact sea level
 
   // Pass 2: elevation, temperature, moisture
+  const fld = { h: 0, t: 0, m: 0, fm: 0, r: 0 };
   for (let v = 0; v < vCount; v++) {
-    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
-    const px = PX[v * 3], py = PX[v * 3 + 1], pz = PX[v * 3 + 2];
-    const c = C[v];
-    const onLand = smoothstep(seaLevel - 0.15, seaLevel + 0.25, c);
-    const m = noise.ridged(px * mFreq + o2[0], py * mFreq + o2[1], pz * mFreq + o2[2], 5);
-    const d = noise.fbm(x * 9 + o3[0], y * 9 + o3[1], z * 9 + o3[2], 3) * 0.12;
-    const hl = c - seaLevel;
-    // compress continent interiors into gentle lowlands; ridges carry the mountains.
-    // The fine relief fades out at the coast, so it does not cut the shore into specks
-    // and does not lift the sea floor into islands. Islands come from the arc term only.
-    const ridge = m * m * mountain * onLand * 0.75;
-    let h;
-    if (hl >= 0) h = Math.pow(hl, 0.75) * 0.3 + ridge + d * smoothstep(0, 0.08, hl);
-    else h = hl + (ridge + d * 0.5) * smoothstep(0, -0.2, hl);
-    H[v] = h;
-    const lat = Math.abs(y);
-    const tnoise = noise.fbm(x * 2.2 + o5[0], y * 2.2 + o5[1], z * 2.2 + o5[2], 2) * 0.12;
-    T[v] = clamp(1 - Math.pow(lat, 1.6) * 1.1 + tempBias + tnoise - Math.max(h, 0) * 0.55, -0.3, 1.3);
-    M[v] = noise.fbm(x * 1.7 + o4[0] * 0.7, y * 1.7 + o4[1] * 0.7, z * 1.7 + o4[2] * 0.7, 3);
-    FM[v] = noise.fbm(x * 6 + o2[0], y * 6 + o2[1], z * 6 + o2[2], 2);
-    // displacement: land pushed up, sea floor gently down and clamped
-    const disp = h >= 0 ? Math.min(h, 1.0) : Math.max(h, -0.5) * 0.55;
-    R[v] = 1 + amp * disp;
+    fieldFrom(ctx, pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], C[v], PX[v * 3], PX[v * 3 + 1], PX[v * 3 + 2], fld);
+    H[v] = fld.h; T[v] = fld.t; M[v] = fld.m; FM[v] = fld.fm; R[v] = fld.r;
     if ((v & 16383) === 0) post(35 + (v / vCount) * 25, 'Raising continents');
   }
 
@@ -1042,11 +1103,211 @@ function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   self.postMessage({ type: 'done', result: { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna } }, [outPos.buffer, outCol.buffer, fauna.buffer]);
 }
 
+// ---------------------------------------------------------------- the ground patch
+// The globe draws its relief 40 times too tall, so a peak of 0.06 units reads as 10 km and not
+// as 390 km. The ground divides by the same number, and it works in metres.
+const EXAGGERATION = 40;
+const HILL_M = 25, HILL_WAVE = 400;    // metres: the hills that carry the shape of the site
+const KNOLL_M = 6, KNOLL_WAVE = 90;    // metres: the knolls a walker sees
+const ROCK_M = 1.2, ROCK_WAVE = 14;    // metres: the rock the ground shows at the feet
+const SHORE_DAMP = 45;                 // metres: the band where the patch noise fades at the shore
+const SLOPE_ROCK = [0.55, 1.15];       // the slope band where the ground turns to bare rock
+const BIOME_NAME = ['ocean', 'shallows', 'beach', 'tundra', 'snow', 'rock', 'forest', 'grass', 'dry', 'desert'];
+
+// The biome of one point, by the rules the globe paints with.
+function biomeIndex(ctx, h, t, m) {
+  if (h < -0.12) return 0;
+  if (h < 0) return 1;
+  if (h < ctx.beachW) return t < 0.25 ? 3 : 2;
+  if (t < 0.12 || h > ctx.snowLine + (t - 0.5) * 0.4) return 4;
+  if (h > ctx.snowLine - 0.2 + (t - 0.5) * 0.25) return 5;
+  if (t < 0.28) return 3;
+  if (m > 0.22) return 6;
+  if (m > -0.15) return 7;
+  if (m > -0.45 || t < 0.6) return 8;
+  return 9;
+}
+
+// The colour of one biome, written into out. The two mixed biomes take the same hash the globe
+// takes, so a patch and the face above it draw from one rule.
+function biomeTint(ctx, bi, h, i, out) {
+  const P = ctx.P;
+  let a, b = null, k = 0;
+  switch (bi) {
+    case 0: a = P.deep; break;
+    case 1: a = P.deep; b = P.shallow; k = smoothstep(-0.12, 0, h); break;
+    case 2: a = P.beach || P.dry; break;
+    case 3: a = P.tundra; break;
+    case 4: a = P.snow; break;
+    case 5: a = P.rock; b = P.rock2; k = hash1(i * 7 + 3); break;
+    case 6: a = P.forest; break;
+    case 7: a = P.grass; b = P.grass2; k = hash1(i * 3 + 1); break;
+    case 8: a = P.dry; break;
+    default: a = P.desert;
+  }
+  if (b) { out[0] = lerp(a[0], b[0], k); out[1] = lerp(a[1], b[1], k); out[2] = lerp(a[2], b[2], k); }
+  else { out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; }
+  return out;
+}
+
+// The sea level without a globe build: the land quantile of the continent field over a Fibonacci
+// sphere. generate() fills the exact value, so this runs only on a worker that never built the
+// globe of this seed.
+function sampledSeaLevel(ctx) {
+  const N = 60000, c = new Float32Array(N), w = new Float32Array(3);
+  const ga = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (i + 0.5) * (2 / N), r = Math.sqrt(Math.max(0, 1 - y * y)), a = ga * i;
+    c[i] = contAt(ctx, Math.cos(a) * r, y, Math.sin(a) * r, w);
+  }
+  c.sort();
+  return c[Math.min(N - 1, Math.floor((1 - ctx.land) * N))];
+}
+
+function contextFor(seed) {
+  if (cachedCtx && cachedCtx.seed === seed) return cachedCtx;
+  const ctx = worldContext(seed);
+  if (ctx.type !== 'gas' && ctx.land < 1) ctx.seaLevel = sampledSeaLevel(ctx);
+  ctx.world.seaLevel = ctx.seaLevel;
+  cachedCtx = ctx;
+  return ctx;
+}
+
+// A ground patch at one site: a square height grid and a colour per vertex, both in the frame
+// x east, y up, z south, with the origin at the site at sea level.
+function patch(seed, lat, lon, opts) {
+  const post = (pct, label) => self.postMessage({ type: 'progress', pct, label });
+  post(4, 'Reading the site');
+  const ctx = contextFor(seed);
+  if (ctx.type === 'gas') throw new Error('a gas giant has no ground');
+  const P = ctx.P;
+
+  const size = opts.size || 1500;
+  const grid = opts.grid || 2;
+  const n = Math.round(size / grid) + 1;
+  const half = size / 2;
+  const radiusM = ctx.radiusKm * 1000;
+  const M_PER_H = ctx.amp * radiusM / EXAGGERATION;   // globe elevation units to metres
+  const H_PER_M = 1 / M_PER_H;
+
+  // the frame of the site on the globe: up, east, and south
+  const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
+  const ux = cla * clo, uy = sla, uz = cla * slo;
+  const ex = -slo, ez = clo;                       // east has no y part
+  const sx = sla * clo, sy = -cla, sz = sla * slo; // south is the opposite of north
+
+  const fld = { h: 0, t: 0, m: 0, fm: 0, r: 0 };
+  // The globe field at a point of the patch, in metres from the site.
+  const fieldOn = (xm, zm) => {
+    const ax = xm / radiusM, az = zm / radiusM;
+    const dx = ux + ex * ax + sx * az, dy = uy + sy * az, dz = uz + ez * ax + sz * az;
+    const l = Math.hypot(dx, dy, dz) || 1;
+    return fieldAt(ctx, dx / l, dy / l, dz / l, fld);
+  };
+
+  fieldOn(0, 0);
+  const siteH = fld.h, siteT = fld.t, siteM = fld.m, siteFM = fld.fm;
+  const elevation = siteH * M_PER_H;
+
+  // The tilt: the gradient of the globe elevation across the patch. The globe holds nothing
+  // below about 50 km, so this tilt is gentle. The hills below carry the relief a walker sees.
+  const hE = fieldOn(half, 0).h, hW = fieldOn(-half, 0).h;
+  const hS = fieldOn(0, half).h, hN = fieldOn(0, -half).h;
+  const gx = (hE - hW) * M_PER_H / size, gz = (hS - hN) * M_PER_H / size;
+
+  // A site high on the globe stands in a mountain range, so its hills are tall. A lowland site
+  // gets gentle hills. Without this the patch would look the same on a peak and on a plain.
+  const relief = clamp(siteH / Math.max(ctx.snowLine, 0.2), 0, 1.4);
+  const hillAmp = HILL_M * ctx.mountain * clamp(0.35 + 1.25 * relief, 0.2, 1.8);
+
+  const pseed = `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}`;
+  const prng = makeRng(pseed);
+  const pnoise = new Noise(makeRng(pseed));
+  const oh0 = prng() * 90, oh1 = prng() * 90, ok0 = prng() * 90, ok1 = prng() * 90;
+  const or0 = prng() * 90, or1 = prng() * 90;
+
+  post(20, 'Raising the ground');
+  const heights = new Float32Array(n * n);
+  const vary = new Float32Array(n * n);
+  const fh = 1 / HILL_WAVE, fk = 1 / KNOLL_WAVE, fr = 1 / ROCK_WAVE;
+  let hasSea = false, hasLand = false;
+  // Far from the sea the damping is 1 everywhere, so the whole patch skips the test.
+  const inland = Math.abs(elevation) - (Math.abs(gx) + Math.abs(gz)) * half > SHORE_DAMP;
+  for (let j = 0; j < n; j++) {
+    const zm = -half + j * grid;
+    for (let i = 0; i < n; i++) {
+      const xm = -half + i * grid;
+      const base = elevation + gx * xm + gz * zm;
+      const hn = pnoise.n3(xm * fh + oh0, zm * fh + oh1, 0.5);
+      const knolls = pnoise.n3(xm * fk + ok0, zm * fk + ok1, 11.5) * KNOLL_M;
+      const rock = pnoise.n3(xm * fr + or0, zm * fr + or1, 23.5) * ROCK_M;
+      // The globe flattens its fine relief at the coast. The patch does the same, so the shore
+      // of issue 05 meets the water on a gentle slope and not on a field of specks.
+      const damp = inland ? 1 : smoothstep(0, SHORE_DAMP, Math.abs(base));
+      const h = base + (hn * hillAmp + knolls) * (0.25 + 0.75 * damp) + rock * (0.4 + 0.6 * damp);
+      const k = j * n + i;
+      heights[k] = h;
+      vary[k] = hn;   // the hill field also varies the moisture: a hollow is wetter than a crest
+      if (h < 0) hasSea = true; else hasLand = true;
+    }
+    if ((j & 31) === 0) post(20 + (j / n) * 45, 'Raising the ground');
+  }
+
+  post(66, 'Painting the ground');
+  const colors = new Float32Array(n * n * 3);
+  const tint = [0, 0, 0];
+  const invZ = 1 / (2 * grid);
+  for (let j = 0; j < n; j++) {
+    const jn = j * n;
+    const j1 = j > 0 ? jn - n : jn, j2 = j < n - 1 ? jn + n : jn;
+    const iz = j > 0 && j < n - 1 ? invZ : 1 / grid;
+    for (let i = 0; i < n; i++) {
+      const k = jn + i;
+      const h = heights[k], hg = h * H_PER_M;
+      const i1 = i > 0 ? i - 1 : i, i2 = i < n - 1 ? i + 1 : i;
+      const ix = i > 0 && i < n - 1 ? invZ : 1 / grid;
+      const dhx = (heights[jn + i2] - heights[jn + i1]) * ix;
+      const dhz = (heights[j2 + i] - heights[j1 + i]) * iz;
+      // the globe lapse rate, so a hilltop inside the patch can hold snow the valley cannot
+      const t = siteT + (Math.max(elevation, 0) - Math.max(h, 0)) * H_PER_M * 0.55;
+      // the forest mask lifts the moisture a little, so a site inside a forest cluster reads green
+      const m = siteM - vary[k] * 0.1 + Math.max(siteFM, 0) * 0.06;
+      biomeTint(ctx, biomeIndex(ctx, hg, t, m), hg, k, tint);
+      const rk = P.rock ? smoothstep(SLOPE_ROCK[0], SLOPE_ROCK[1], Math.sqrt(dhx * dhx + dhz * dhz)) : 0;
+      const o = k * 3;
+      if (rk > 0) {
+        colors[o] = lerp(tint[0], P.rock[0], rk);
+        colors[o + 1] = lerp(tint[1], P.rock[1], rk);
+        colors[o + 2] = lerp(tint[2], P.rock[2], rk);
+      } else {
+        colors[o] = tint[0]; colors[o + 1] = tint[1]; colors[o + 2] = tint[2];
+      }
+    }
+    if ((j & 31) === 0) post(66 + (j / n) * 30, 'Painting the ground');
+  }
+
+  post(97, 'Almost there');
+  const flora = new Float32Array(0), groups = new Float32Array(0), members = new Float32Array(0);
+  const result = {
+    patch: {
+      seed, patchSeed: pseed, lat, lon, size, grid, n,
+      biome: BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM)],
+      palette: ctx.world.palette,
+      elevation, radiusKm: ctx.radiusKm,
+      seaLevel: 0, hasSea, shore: hasSea && hasLand,
+    },
+    heights, colors, flora, groups, members,
+  };
+  self.postMessage({ type: 'patch-done', result },
+    [heights.buffer, colors.buffer, flora.buffer, groups.buffer, members.buffer]);
+}
+
 self.onmessage = (e) => {
   const msg = e.data;
-  if (msg.type !== 'generate') return;
   try {
-    generate(msg.seed, msg.opts || {});
+    if (msg.type === 'generate') generate(msg.seed, msg.opts || {});
+    else if (msg.type === 'patch') patch(msg.seed, msg.lat, msg.lon, msg.opts || {});
   } catch (err) {
     self.postMessage({ type: 'error', message: String(err && err.stack || err) });
   }
