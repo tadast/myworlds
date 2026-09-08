@@ -7,7 +7,7 @@
 // a whole-body "carriage" (walk bob, hop, wave, float, arch, rise). Nothing here is hand-placed per species.
 import * as THREE from 'three';
 
-export const BASE_SCALE = 0.011;
+export const BASE_SCALE = 0.0077; // 30% smaller than the first pass, so the globe reads as a miniature
 
 // part modes
 const RIG = { NONE: 0, LEG: 1, WING: 2, SWAY: 3, PULSE: 4, NOD: 5, SPIN: 6, STATIC: 7, FLUKE: 8 };
