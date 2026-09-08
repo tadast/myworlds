@@ -1,5 +1,7 @@
 # 03 Descent and ascent shell
 
+Status: CLOSED, 2026-09-09, merged as 2ca24b1.
+
 Type: AFK. Phase 1. Blocked by: 02. Read `docs/issues/README.md` first, in particular "App mode" and "The ground module".
 
 ## What to build
