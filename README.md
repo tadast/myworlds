@@ -36,6 +36,7 @@ rsvg-convert -w 180 -h 180 icon.svg | magick png:- -background '#070a16' -alpha 
 
 - `worker.js` turns the seed into a hash, a PRNG, and seeded simplex noise. It builds an icosphere, raises terrain, paints biomes per face, places flora and fauna, and condenses clouds. It runs off the main thread and reports progress.
 - `app.js` renders the result with three.js (flat-shaded vertex colours, instanced flora, fauna and clouds, atmosphere shaders, rings, moons). It saves each world's seed, type, and a thumbnail to `localStorage`.
+- `site.js` picks the landing site for the probe: a ray from the screen centre onto the surface, a pull to a creature home within two patch widths, a ring marker on the ground, and the site in the URL.
 - `species.js` rolls a set of species per world: class, niche, body plan, limbs, head, extras, gait, movement, colours, and modular lore. It runs inside the worker.
 - `fauna.js` builds a creature from a genome, rigs it for the vertex shader, steers it, and runs the inspector card.
 - `phenomena.js` draws the one natural activity a world can have: the glow, smoke, and embers of a volcano, the jet of a geyser, the light of a fissure, the curtains of an aurora, or the bolts of a thunderstorm. The worker picks the kind and the site, shapes and paints the ground, and keeps flora and fauna away from it.
@@ -48,6 +49,8 @@ rsvg-convert -w 180 -h 180 icon.svg | magick png:- -background '#070a16' -alpha 
 ## Controls
 
 Drag to spin and tilt. Scroll or pinch to zoom. Zoom in close and the view tilts toward the horizon. Get close to the ground to find the wildlife.
+
+At the closest zoom a ring marks the landing site under the screen centre. The ring snaps to a creature home within 3 km, and the planet holds still so the site stays put. The URL then reads `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Open that link and the world comes back with the camera over the same site. The share button copies the URL with the site. A gas giant has no ground, so it gets no marker and no site.
 
 All controls live in one sidebar: the seed input, the current world with its stats and fauna, the share button, the saved worlds, and the music volume. The speaker button in the sidebar header mutes the music. The header button folds the sidebar to one line that shows the current world. On a phone the sidebar docks at the bottom as a sheet, and a tap on the planet folds it away. Press `/` to focus the seed input and `Escape` to close the creature inspector.
 

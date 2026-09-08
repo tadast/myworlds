@@ -118,6 +118,8 @@ Output layout, 9 floats per creature: `x y z` home point, `nx ny nz` surface nor
 
 A coarse height map (384 by 192, lat/lon) is also sent, so the main thread can follow the terrain.
 
+`site.js` reads the same home points on the main thread. It keeps one unit direction and one species id per creature, and the landing site snaps to the nearest home within two patch widths. See `docs/probe.md`.
+
 ## Stage 3: geometry and rig (`fauna.js`)
 
 ### Coordinate frame
