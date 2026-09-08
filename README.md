@@ -62,11 +62,12 @@ Every world rolls its own species, two to four of them, from the seed. Each spec
 - a locomotion: monopod, biped, tripod, quadruped, hexapod, serpent; gas sac, wings, fins; or a breathing arch, a periscope neck, or a plough that swims under the ground;
 - a body plan: blob, spindle, chain, dome, disc, or a swarm of shards around a core;
 - a head: beak, mandibles, eye stalks, lure, crest, tusks, or none;
-- extras: sail, spikes, lamp beads, tendrils, garden, plates, tail, flukes, antennae, mounds.
+- extras: sail, spikes, lamp beads, tendrils, garden, plates, tail, flukes, antennae, mounds;
+- a sociality: solitary, a pair, or a herd of four to fourteen, with the size of the formation in metres.
 
 The geometry is built from those parts. Every vertex carries a rig record (mode, phase, amplitude, weight) and a pivot, and one shader animates all species: legs swing about the hip and fold at the knee on the forward stroke, wing sheets roll at the root and bend toward the tip, tendrils and tails sway, lures and beads pulse, heads nod, flukes lag the body. A per-species carriage moves the whole body: a walk bob, a hop, a wave, a float, an arch pulse, or a rise and sink. Legs only swing while the animal actually moves.
 
-The lore is modular too. The name, the binomial, the habitat, the size, the diet, the manner, and the story are all assembled from the parts the animal really has, so a lantern-headed tripod waits in ambush and a plated hexapod licks minerals from the rock.
+The lore is modular too. The name, the binomial, the habitat, the size, the diet, the manner, and the story are all assembled from the parts the animal really has, so a lantern-headed tripod waits in ambush and a plated hexapod licks minerals from the rock. The manner and the story also say how the animal groups: a grazer moves in herds of twelve, a jawed strider hunts in pairs, and a serpent keeps to itself. The size text gives the real size of the animal in metres, and the ground scale uses the same number.
 
 See `docs/fauna.md` for the architecture: the genome fields, the rig modes, the carriages, and the placement rules.
 
