@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker } from './site.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -20,6 +21,7 @@ const Q = {
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
 const CAM_MIN = 1.11, CAM_MAX = 8, CAM_HOME = 3.3;
+const PICK_RANGE = CAM_MIN + 0.1;   // the probe can pick a site inside this camera distance
 
 // ---------------------------------------------------------------- dom
 const $ = (s) => document.querySelector(s);
@@ -188,6 +190,8 @@ let current = null; // { group, spin, oceanMat, cloudGroup, moons, ringMesh, dat
 
 function disposeWorld() {
   if (!current) return;
+  showMarker(null);                 // the ring is shared between worlds, so it must not be disposed
+  site = null;
   current.group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
@@ -325,7 +329,7 @@ function buildWorld(res) {
           const st = makeMover(rng, G.move);
           st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
           if (G.loco === 'monopod') { st.hop = hopGait(G); st.phase = phases[j]; } // a hopper moves in bursts, in step with its shader hop
-          const g0 = sampleGround(world, heightMap, nrm);
+          const g0 = groundRadius(world, heightMap, nrm);
           st.hover = pos.length() - g0;
           st.dry = !world.seaRadius || g0 > world.seaRadius + 0.0005;
           movers.push(st);
@@ -364,7 +368,7 @@ function buildWorld(res) {
   group.add(cloudGroup);
 
   // natural activity: at most one per world
-  const activity = buildActivity(world, planet, cloudGroup, cloudInst, (dir) => sampleGround(world, heightMap, dir));
+  const activity = buildActivity(world, planet, cloudGroup, cloudInst, (dir) => groundRadius(world, heightMap, dir));
 
   // atmosphere
   if (world.hasAtmosphere) {
@@ -428,7 +432,8 @@ function buildWorld(res) {
   }
 
   scene.add(group);
-  current = { group, planet, cloudGroup, oceanMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity };
+  const homes = faunaHomes(fauna, world.faunaCount || 0);   // the pull to life reads these every frame
+  current = { group, planet, cloudGroup, oceanMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity, homes };
 }
 
 // ---------------------------------------------------------------- render loop
@@ -440,7 +445,8 @@ function frame() {
   if (current) {
     const dist = camera.position.length();
     const zoomFactor = THREE.MathUtils.clamp((dist - CAM_MIN) / 1.6, 0.015, 1); // near the ground the world must hold still
-    const spin = current.spin * zoomFactor * (userActive ? 0.15 : 1);
+    const hold = THREE.MathUtils.smoothstep(dist, PICK_RANGE, PICK_RANGE + 0.4);   // in the pick range it stops, so the site stays put
+    const spin = current.spin * zoomFactor * hold * (userActive ? 0.15 : 1);
     current.planet.rotation.y += spin * dt;
     current.cloudGroup.rotation.y += spin * 1.25 * dt;
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
@@ -467,23 +473,58 @@ function frame() {
   controls.update();
   // near the surface, tilt the view toward the horizon so relief reads in profile
   const d = camera.position.length();
-  const pitch = (1 - THREE.MathUtils.smoothstep(d, CAM_MIN, 2.3)) * 0.95;
+  const pitch = pitchFor(d);
   if (pitch > 0) camera.rotateX(pitch);
+  updateSite(d, t);                 // the screen centre points where the pitched camera looks
   renderer.render(scene, camera);
 }
+function pitchFor(d) { return (1 - THREE.MathUtils.smoothstep(d, CAM_MIN, 2.3)) * 0.95; }
 requestAnimationFrame(frame);
 
-// ground radius under a unit direction (planet space), from the worker's lat/lon height map
-function sampleGround(world, hm, dir) {
-  if (!hm || !world.heightMapSize) return 1;
-  const [W, H] = world.heightMapSize;
-  const u = (Math.atan2(dir.z, dir.x) / (Math.PI * 2) + 0.5) * W - 0.5;
-  const v = (Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) / Math.PI + 0.5) * H - 0.5;
-  const x0 = Math.floor(u), y0 = THREE.MathUtils.clamp(Math.floor(v), 0, H - 2);
-  const fx = u - x0, fy = THREE.MathUtils.clamp(v - y0, 0, 1);
-  const xa = ((x0 % W) + W) % W, xb = (xa + 1) % W;
-  const a = hm[xa + y0 * W], b = hm[xb + y0 * W], c = hm[xa + (y0 + 1) * W], d = hm[xb + (y0 + 1) * W];
-  return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+// ---------------------------------------------------------------- the landing site
+// The probe would land where the screen centre points. The site follows the crosshair, it snaps
+// to a creature home within two patch widths, and it goes in the URL as #Seed@lat,lon.
+let site = null;          // { lat, lon, kind } or null outside the pick range
+let pendingSite = null;   // a site read from the URL, used once the world is built
+let hashAt = 0;
+
+function updateSite(dist, t) {
+  const canPick = !!current && current.world.type !== 'gas' && dist <= PICK_RANGE;
+  site = canPick ? pullSite(pickSite(camera, current), current) : null;
+  showMarker(site, current);
+  if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows, but not every frame
+}
+
+function writeHash() {
+  if (!current) return;
+  const url = siteToUrl(current.world.seed, site);
+  if (url !== location.hash) history.replaceState(null, '', url);
+}
+
+// Put the camera at the minimum distance and turn it until the screen centre lands on the site.
+// The view pitches toward the horizon near the surface, so the answer needs a few steps.
+const _want = new THREE.Vector3(), _rotM = new THREE.Matrix4(), _turn = new THREE.Quaternion();
+function placeCameraOverSite(target) {
+  if (!current || current.world.type === 'gas') return false;
+  current.planet.updateWorldMatrix(true, false);
+  _rotM.extractRotation(current.planet.matrixWorld);
+  siteDir(target.lat, target.lon, _want).applyMatrix4(_rotM).normalize();
+  controls.target.set(0, 0, 0);
+  camera.up.set(0, 1, 0);
+  camera.position.copy(_want).multiplyScalar(CAM_MIN);
+  controls.update();
+  for (let i = 0; i < 24; i++) {
+    controls.update();
+    const p = pitchFor(camera.position.length());
+    if (p > 0) camera.rotateX(p);
+    const hit = pickDirs(camera, current);
+    if (!hit) break;
+    if (hit.world.angleTo(_want) < 1e-6) break;
+    _turn.setFromUnitVectors(hit.world, _want);
+    camera.position.applyQuaternion(_turn);
+  }
+  controls.update();
+  return true;
 }
 
 // creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
@@ -502,12 +543,12 @@ function updateMovers(t, dt) {
     const pu = mv.u, pv = mv.v;
     stepMover(mv, t, dt, mv.hop ? hopBurst(mv.hop, t, mv.phase) : 1);
     _u.copy(mv.n).addScaledVector(mv.t1, mv.u).addScaledVector(mv.t2, mv.v).normalize();
-    let ground = sampleGround(world, heightMap, _u);
+    let ground = groundRadius(world, heightMap, _u);
     if (!mv.flies && mv.dry && ground < seaR + 0.0005) {
       // water ahead: step back and turn around
       mv.u = pu; mv.v = pv; mv.heading += Math.PI * 0.75; mv.spd = 0;
       _u.copy(mv.n).addScaledVector(mv.t1, mv.u).addScaledVector(mv.t2, mv.v).normalize();
-      ground = sampleGround(world, heightMap, _u);
+      ground = groundRadius(world, heightMap, _u);
     }
     if (mv.flies) ground = Math.max(ground, seaR);
     _p.copy(_u).multiplyScalar(ground + mv.hover);
@@ -549,12 +590,15 @@ function generate(seed, { save = true } = {}) {
       overlayBar.style.width = "100%";
       const t0 = performance.now();
       buildWorld(msg.result);
-      resetCamera();
+      const wanted = pendingSite;
+      pendingSite = null;
+      if (!(wanted && placeCameraOverSite(wanted))) resetCamera();
       console.info(`[myworlds] "${seed}" ${msg.result.world.type} built in ${Math.round(performance.now() - t0)} ms, worker ${Math.round(t0 - genStart)} ms`);
       renderInfo(msg.result.world);
       music.play(msg.result.world);
       if (save) saveWorld(msg.result.world);
-      history.replaceState(null, '', '#' + encodeURIComponent(seed));
+      site = wanted && current.world.type !== 'gas' ? wanted : null;
+      writeHash();
       input.value = seed;
       if (COMPACT) setCollapsed(true);
       setTimeout(() => { overlay.classList.remove("show"); busy = false; }, 250);
@@ -748,7 +792,7 @@ panel.querySelector('header').addEventListener('click', (e) => {
 if (COMPACT) canvas.addEventListener('pointerdown', () => setCollapsed(true));
 shareBtn.addEventListener('click', async () => {
   if (!current) return;
-  const url = location.origin + location.pathname + '#' + encodeURIComponent(current.world.seed);
+  const url = location.origin + location.pathname + siteToUrl(current.world.seed, site);
   try { await navigator.clipboard.writeText(url); shareBtn.textContent = 'Copied!'; }
   catch { shareBtn.textContent = url; }
   setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
@@ -769,8 +813,10 @@ muteBtn.addEventListener('click', () => music.setMuted(!music.settings.muted));
 volInput.addEventListener('input', () => music.setVolume(volInput.value / 100));
 
 addEventListener('hashchange', () => {
-  const seed = decodeURIComponent(location.hash.slice(1));
-  if (seed && (!current || current.world.seed !== seed)) generate(seed);
+  const { seed, site: fromHash } = parseUrl(location.hash);
+  if (!seed) return;
+  if (!current || current.world.seed !== seed) { pendingSite = fromHash; generate(seed); }
+  else if (fromHash) { pendingSite = null; placeCameraOverSite(fromHash); }
 });
 addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
@@ -781,11 +827,12 @@ if (COMPACT) setCollapsed(true);
 // ---------------------------------------------------------------- boot
 renderWorlds();
 {
-  const fromHash = decodeURIComponent(location.hash.slice(1));
+  const fromHash = parseUrl(location.hash);
   const saved = loadWorlds();
-  const seed = fromHash || (saved.length ? saved[saved.length - 1].seed : WORDS[Math.floor(Math.random() * WORDS.length)]);
+  const seed = fromHash.seed || (saved.length ? saved[saved.length - 1].seed : WORDS[Math.floor(Math.random() * WORDS.length)]);
+  pendingSite = fromHash.site;
   generate(seed);
 }
 
 // debug handle (harmless in production)
-window.__mw = { scene, camera, controls, renderer, get current() { return current; }, generate, inspect, inspector, music };
+window.__mw = { scene, camera, controls, renderer, get current() { return current; }, get site() { return site; }, generate, inspect, inspector, music };
