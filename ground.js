@@ -8,6 +8,7 @@
 // the elevation above sea level in metres.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Sky } from './ground-sky.js';
 
 export const PATCH_SIZE = 1500;      // metres, the side of the patch
 export const FOG_NEAR = 450;         // metres, where the fog starts
@@ -75,6 +76,7 @@ export class Ground {
     this.site = site;
     this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
     this.result = null;
+    this.sky = null;
     this.atCeiling = false;
     this.lod = { distance: 150, min: 40, max: 400 };   // metres, one knob for issue 11
     // the height grid of the patch, and the ground height at the site
@@ -110,8 +112,10 @@ export class Ground {
   }
 
   // The worker's patch result, or null for the placeholder ground of issue 03.
-  // The sun direction comes from the app, because only the app knows planet.rotation.y.
-  load(result, { sunDir } = {}) {
+  // The sun direction comes from the app, because only the app knows planet.rotation.y. The view
+  // comes from the app for the same reason: it holds the sun, the moons, and the ring of the globe
+  // in the frame of the site. See ground-sky.js.
+  load(result, { sunDir, view } = {}) {
     this.result = result;
     if (sunDir) this.sunDir.copy(sunDir).normalize();
     this._clear();
@@ -123,18 +127,18 @@ export class Ground {
     this.half = p ? p.size / 2 : PATCH_SIZE / 2;
     this.base = this.heightAt(0, 0);
 
-    // The sky dome takes the atmosphere colour. The dome is far past the fog, so the fog paints it
-    // in the fog colour, exactly like the far ground. That hides the edge of the patch: a dome
-    // outside the fog reads as a paler sky, because the renderer applies the fog after the tone
-    // mapping, and the edge of the plane then shows as a hard line.
-    // The dome sits at the height of the site, because a site can stand kilometres above sea level.
-    const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(SKY_RADIUS, 24, 16),
-      new THREE.MeshBasicMaterial({ color: this.skyColor, side: THREE.BackSide, depthWrite: false }),
-    );
-    sky.position.y = this.base;
-    sky.renderOrder = -1;
-    this.content.add(sky);
+    // The sky: a gradient dome, the moons, the ring, and the clouds of this world. The fog takes
+    // the horizon colour of the dome, so the far terrain and the dome end at one colour and the
+    // horizon holds no seam.
+    this.sky = new Sky({
+      world: this.world, site: this.site, tier: this.tier, renderer: this.renderer,
+      view, sunDir: this.sunDir, skyRadius: SKY_RADIUS,
+    });
+    this.sunDir.copy(this.sky.sunDir);
+    this.skyColor.copy(this.sky.horizon);
+    this.scene.fog.color.copy(this.sky.horizon);
+    this.scene.background = this.sky.horizon.clone();
+    this.content.add(this.sky.group);
 
     if (p) this._buildTerrain();
     else {
@@ -149,11 +153,11 @@ export class Ground {
     }
 
     // A directional light takes its direction from the position and the target, not the distance,
-    // so the height of the site must not move it. Issue 12 turns the sun to the site.
-    const sun = new THREE.DirectionalLight('#fff4e0', 2.6);
+    // so the height of the site must not move it. The colour and the strength come from the sky.
+    const sun = new THREE.DirectionalLight(this.sky.sunColor, this.sky.sunIntensity);
     sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6);
     this.content.add(sun);
-    this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7));
+    this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night));
 
     // the camera starts 300 m up and 300 m south of the site, and it looks at the site
     this.controls.target.set(0, this.base, 0);
@@ -285,6 +289,9 @@ export class Ground {
     // the floor: the camera stays FLOOR metres above the terrain
     const floor = this._groundAt(p.x, p.z) + FLOOR;
     if (p.y < floor) { p.y = floor; this.controls.update(); }
+
+    // the sky follows the camera, so it must move after every clamp
+    if (this.sky) this.sky.update(t, dt, this.camera);
   }
 
   render() {
@@ -325,6 +332,7 @@ export class Ground {
     this.scene.clear();
     this.result = null;
     this.heights = null;
+    this.sky = null;
   }
 
   _clear() {
