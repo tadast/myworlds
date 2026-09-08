@@ -43,6 +43,7 @@ rsvg-convert -w 180 -h 180 icon.svg | magick png:- -background '#070a16' -alpha 
 - Continents come from three low-frequency noise octaves, so each world gets a few large landmasses with bays and peninsulas, not a spray of islands. Each type has a target land fraction, Earth has 29%, and the sea level is the quantile of the terrain field that leaves that fraction dry. Fine relief fades out at the coast so it cannot cut the shore into specks. A masked ridge term adds a few volcanic island chains. Ocean worlds keep their archipelagos.
 - Worlds are stored as seeds, not meshes. A saved world regenerates in about a second and the store stays small.
 - Small or coarse-pointer devices get a lower mesh detail, fewer plants, and no shadows.
+- The globe is a stylised miniature. A plant and a creature are small against the sphere, so a forest reads as a forest and not as a row of towers. A high-tier world places up to 10,500 plants, and a lush terran world fills that budget. The ocean shimmers on a period of about 14 seconds, so no swell travels across the water.
 
 ## Controls
 

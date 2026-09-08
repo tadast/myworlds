@@ -12,7 +12,7 @@ const LOW = isCoarse || isSmall || (navigator.hardwareConcurrency || 4) <= 4;
 const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet stays visible
 const Q = {
   detail: LOW ? 64 : 100,
-  maxFlora: LOW ? 2500 : 7000,
+  maxFlora: LOW ? 2500 : 10500,
   maxFauna: LOW ? 70 : 160,
   shadows: !LOW,
   dpr: Math.min(devicePixelRatio || 1, LOW ? 1.5 : 2),
@@ -226,13 +226,14 @@ function buildWorld(res) {
       roughness: pal.oceanIce ? 0.55 : 0.42, metalness: 0,
       emissive: pal.oceanLava ? pal.ocean : '#000000', emissiveIntensity: pal.oceanLava ? 0.9 : 0,
     });
-    const wobble = pal.oceanIce ? 0 : pal.oceanLava ? 0.0025 : 0.0012;
+    // a miniature ocean must shimmer, not swell: half the wobble, half the spatial frequency, a period near 14 s
+    const wobble = pal.oceanIce ? 0 : pal.oceanLava ? 0.0012 : 0.0006;
     oceanMat.onBeforeCompile = (sh) => {
       sh.uniforms.uTime = { value: 0 };
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float uTime;')
         .replace('#include <begin_vertex>', `#include <begin_vertex>
-          float w = sin(uTime * 1.6 + position.x * 55.0 + position.z * 31.0) * sin(uTime * 1.1 + position.y * 47.0);
+          float w = sin(uTime * 0.45 + position.x * 27.5 + position.z * 15.5) * sin(uTime * 0.31 + position.y * 23.5);
           transformed += normal * w * ${wobble.toFixed(5)};`);
       oceanMat.userData.shader = sh;
     };
@@ -252,7 +253,7 @@ function buildWorld(res) {
     }
     const up = new THREE.Vector3(0, 1, 0), nrm = new THREE.Vector3(), pos = new THREE.Vector3();
     const q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), s = new THREE.Vector3(), m = new THREE.Matrix4();
-    const baseScale = 0.011;
+    const baseScale = 0.0066; // 40% smaller than the first pass, so a forest reads as a forest
     const rng = mulberry32(7);
     for (const [kind, list] of kinds) {
       const geo = floraGeometry(kind, world.palette.flora);
@@ -550,7 +551,7 @@ function generate(seed, { save = true } = {}) {
       const t0 = performance.now();
       buildWorld(msg.result);
       resetCamera();
-      console.info(`[myworlds] "${seed}" ${msg.result.world.type} built in ${Math.round(performance.now() - t0)} ms, worker ${Math.round(t0 - genStart)} ms`);
+      console.info(`[myworlds] "${seed}" ${msg.result.world.type} built in ${Math.round(performance.now() - t0)} ms, worker ${Math.round(t0 - genStart)} ms, flora ${msg.result.world.floraCount}, fauna ${msg.result.world.faunaCount}`);
       renderInfo(msg.result.world);
       music.play(msg.result.world);
       if (save) saveWorld(msg.result.world);
@@ -686,7 +687,8 @@ addEventListener('resize', () => { if (inspector.open) inspector.resize(); });
 
 // pick a creature under a screen point: nearest projected instance on the visible hemisphere
 const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pn = new THREE.Vector3(), _pm = new THREE.Matrix4();
-function creatureAt(px, py, tolerance = 26) {
+// tolerance grew with the 30% smaller creatures, so a finger still finds one
+function creatureAt(px, py, tolerance = 34) {
   if (!current) return null;
   let best = null, bestD = tolerance;
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
@@ -718,7 +720,7 @@ canvas.addEventListener('pointerup', (e) => {
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
   if (moved > 6 || busy) return;
-  const kind = creatureAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 36 : 26);
+  const kind = creatureAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 52 : 34);
   if (kind !== null) inspect(kind);
 });
 let hoverTick = 0;

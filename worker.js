@@ -397,12 +397,12 @@ function generate(seed, opts) {
   // islands: the weight of the volcanic arcs that make small islands in the open sea.
   let land, amp, mountain, contFreq, islands, tempBias, snowLine, beachW, floraDensity, cloudCount;
   switch (type) {
-    case 'terran': land = rrange(rng, 0.22, 0.42); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.55, 0.85); islands = 0.2; tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = 0.6; cloudCount = Math.round(rrange(rng, 40, 70)); break;
-    case 'ocean': land = rrange(rng, 0.03, 0.12); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 0.8, 1.3); islands = 0.6; tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = 0.7; cloudCount = Math.round(rrange(rng, 55, 85)); break;
-    case 'desert': land = rng() < 0.6 ? rrange(rng, 0.75, 0.92) : 1; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.5, 0.8); islands = 0.1; tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = 0.15; cloudCount = Math.round(rrange(rng, 6, 18)); break;
-    case 'ice': land = rrange(rng, 0.3, 0.55); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.55, 0.9); islands = 0.15; tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = 0.12; cloudCount = Math.round(rrange(rng, 15, 30)); break;
-    case 'lava': land = rrange(rng, 0.35, 0.6); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 0.6, 1.0); islands = 0.3; tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = 0.1; cloudCount = Math.round(rrange(rng, 12, 28)); break;
-    case 'exotic': land = rrange(rng, 0.2, 0.6); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.5, 1.0); islands = 0.25; tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = 0.55; cloudCount = Math.round(rrange(rng, 25, 60)); break;
+    case 'terran': land = rrange(rng, 0.22, 0.42); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.55, 0.85); islands = 0.2; tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = 2.0; cloudCount = Math.round(rrange(rng, 40, 70)); break;
+    case 'ocean': land = rrange(rng, 0.03, 0.12); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 0.8, 1.3); islands = 0.6; tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = 1.6; cloudCount = Math.round(rrange(rng, 55, 85)); break;
+    case 'desert': land = rng() < 0.6 ? rrange(rng, 0.75, 0.92) : 1; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.5, 0.8); islands = 0.1; tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = 0.22; cloudCount = Math.round(rrange(rng, 6, 18)); break;
+    case 'ice': land = rrange(rng, 0.3, 0.55); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.55, 0.9); islands = 0.15; tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = 0.18; cloudCount = Math.round(rrange(rng, 15, 30)); break;
+    case 'lava': land = rrange(rng, 0.35, 0.6); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 0.6, 1.0); islands = 0.3; tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = 0.15; cloudCount = Math.round(rrange(rng, 12, 28)); break;
+    case 'exotic': land = rrange(rng, 0.2, 0.6); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.5, 1.0); islands = 0.25; tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = 1.4; cloudCount = Math.round(rrange(rng, 25, 60)); break;
   }
   world.amp = amp; world.land = land;
   world.hasOcean = land < 1;
@@ -523,7 +523,8 @@ function generate(seed, opts) {
   }
 
   post(82, 'Growing forests');
-  // flora candidates from unique vertices on habitable land, clustered by FM mask
+  // flora candidates from unique vertices on habitable land, clustered by FM mask.
+  // The densities above are high enough that a forest core saturates, so a lush world fills the maxFlora budget.
   const candidates = [];
   const frng2 = makeRng(seed + '|flora');
   for (let v = 0; v < vCount; v++) {
@@ -534,23 +535,23 @@ function generate(seed, opts) {
     switch (type) {
       case 'terran': case 'ocean':
         if (t < 0.12) break;
-        if (FM[v] + m * 0.5 > 0.05) { kind = t < 0.45 ? FLORA.PINE : (type === 'ocean' && h < 0.12 && t > 0.6 ? FLORA.PALM : FLORA.TREE); p = floraDensity * smoothstep(0.05, 0.4, FM[v] + m * 0.5); }
+        if (FM[v] + m * 0.5 > 0.02) { kind = t < 0.45 ? FLORA.PINE : (type === 'ocean' && h < 0.12 && t > 0.6 ? FLORA.PALM : FLORA.TREE); p = floraDensity * smoothstep(0.02, 0.35, FM[v] + m * 0.5); }
         break;
       case 'desert':
-        if (m > 0.35 && FM[v] > 0.1) { kind = FLORA.CACTUS; p = 0.35; }
-        else if (FM[v] > 0.4) { kind = FLORA.BOULDER; p = 0.12; }
+        if (m > 0.35 && FM[v] > 0.1) { kind = FLORA.CACTUS; p = 0.53; }
+        else if (FM[v] > 0.4) { kind = FLORA.BOULDER; p = 0.18; }
         break;
       case 'ice':
-        if (FM[v] > 0.3) { kind = FLORA.CRYSTAL; p = 0.25; }
-        else if (t > 0.15 && FM[v] + m * 0.5 > 0.1 && h < 0.3) { kind = FLORA.PINE; p = 0.3; }
+        if (FM[v] > 0.3) { kind = FLORA.CRYSTAL; p = 0.38; }
+        else if (t > 0.15 && FM[v] + m * 0.5 > 0.1 && h < 0.3) { kind = FLORA.PINE; p = 0.45; }
         break;
       case 'lava':
-        if (FM[v] > 0.35) { kind = FLORA.CRYSTAL; p = 0.2; }
-        else if (FM[v] > 0.15 && h < 0.2) { kind = FLORA.BOULDER; p = 0.15; }
+        if (FM[v] > 0.35) { kind = FLORA.CRYSTAL; p = 0.3; }
+        else if (FM[v] > 0.15 && h < 0.2) { kind = FLORA.BOULDER; p = 0.22; }
         break;
       case 'exotic':
         if (t < 0.1) break;
-        if (FM[v] + m * 0.5 > 0.05) { kind = FM[v] > 0.35 ? FLORA.CRYSTAL : (m > 0.1 ? FLORA.MUSHROOM : FLORA.TREE); p = floraDensity * smoothstep(0.05, 0.4, FM[v] + m * 0.5); }
+        if (FM[v] + m * 0.5 > 0.02) { kind = FM[v] > 0.35 ? FLORA.CRYSTAL : (m > 0.1 ? FLORA.MUSHROOM : FLORA.TREE); p = floraDensity * smoothstep(0.02, 0.35, FM[v] + m * 0.5); }
         break;
     }
     if (kind >= 0 && frng2() < p) candidates.push(v, kind);

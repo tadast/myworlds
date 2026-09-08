@@ -97,7 +97,8 @@
     periscope: { leash: 0, speed: 0, turn: 0, pause: 0, flies: false, shadow: true },
     plough: { leash: 0.012, speed: 0.002, turn: 1.0, pause: 0.5, flies: false, shadow: false },
   };
-  const HOVER = { sac: 0.014, wings: 0.02, fins: 0.03 };
+  // globe units. They follow the 30% cut in BASE_SCALE, so a flyer keeps the same gap in body lengths.
+  const HOVER = { sac: 0.0098, wings: 0.014, fins: 0.021 };
   const DENSITY = { land: 0.016, air: 0.007, sub: 0.045 };
 
   function rollGenome(rng, type, niche, cls, usedLoco, hasFlora, forceLoco) {

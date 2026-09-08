@@ -107,7 +107,7 @@ A coarse height map (384 by 192, lat/lon) is also sent, so the main thread can f
 
 ### Coordinate frame
 
-A creature is built in its own units. The base is at `y = 0`. `+y` is up. The animal faces `+z`. `BASE_SCALE` (0.011) times the creature scale converts to world units.
+A creature is built in its own units. The base is at `y = 0`. `+y` is up. The animal faces `+z`. `BASE_SCALE` (0.0077) times the creature scale converts to world units. The hover heights in `species.js` are in the same world units, so they follow every change to `BASE_SCALE`.
 
 ### `buildCreature(G, palette, flora)`
 
