@@ -6,6 +6,7 @@ import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker } from './site.js';
 import { Ground } from './ground.js';
+import { skyView } from './ground-sky.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -637,7 +638,10 @@ function stepDive(now) {
 function enterGround() {
   mode = 'ground';
   ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: TIER });
-  ground.load(null, { sunDir });   // issue 12 turns the sun to the site
+  // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
+  // knows planet.rotation.y, so the app turns them and the ground draws them
+  const view = skyView(current, lockedSite, sunDir);
+  ground.load(null, { sunDir: view.sunDir, view });
   ground.resize(innerWidth, innerHeight);
   showMarker(null, current);
   writeHash();
