@@ -1,0 +1,163 @@
+# Surface probe: issue set
+
+This directory holds the work items for the surface probe. Read this file first. Then read `docs/probe.md` for the decisions and `docs/fauna.md` for the fauna pipeline. Each issue file is self-contained enough for one agent to take it without the others.
+
+## The project in one page
+
+My Worlds is a static site: HTML, CSS, and JavaScript ES modules. No build step, no backend, no Node, no test framework. `vendor/` holds three.js and OrbitControls. Do not edit `vendor/`.
+
+Run it with:
+
+```sh
+ruby -rwebrick -e 's=WEBrick::HTTPServer.new(:Port => 5555, :DocumentRoot => Dir.pwd).start'
+```
+
+Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw` is the debug handle: `scene`, `camera`, `controls`, `renderer`, `current`, `generate`, `inspect`, `inspector`, `music`.
+
+| File | Role |
+|---|---|
+| `worker.js` | Web Worker. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map. Loads `species.js` with `importScripts`. Protocol: `postMessage({type:'generate', seed, opts})`, replies `progress` then `done` or `error`. |
+| `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
+| `species.js` | Classic script. Rolls two to four genomes per world with lore. No three.js. |
+| `fauna.js` | Creature geometry from a genome, rig shader, `makeMover`/`stepMover` steering, the inspector card. |
+| `phenomena.js` | The one natural activity per world at globe scale. |
+| `music.js` | Chip-tune per world. Not touched by this issue set. |
+| `index.html`, `style.css` | The page and the sidebar. |
+
+Conventions:
+
+- Write prose, comments, commit messages, and docs in ASD-STE100 Simplified Technical English. Short sentences, active voice, one term per meaning.
+- Branch names start with `tt/`. Commit inside this repository only.
+- Keep the worker free of three.js. Keep `species.js` free of three.js.
+- Flat-shaded vertex colours everywhere. No textures except baked impostor cards.
+- Every issue updates `README.md` "How it works" and the relevant file in `docs/` when it changes behaviour a reader would notice.
+- Every issue verifies the frame rate. See "Verification" below.
+
+## Scale facts
+
+Globe: radius 1 unit. Lore radius 3,200 to 9,800 km. Terrain relief 0.06 units. Terrain edge 0.0105 units. Flora 0.011 units. Fauna 0.012 to 0.02 units. Camera minimum `CAM_MIN = 1.11`, home 3.3, maximum 8.
+
+Ground: 1 unit = 1 metre. Patch 1,500 m square. Fog starts at 450 m from the site and is solid at 750 m. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
+
+Budgets:
+
+| Tier | Grid step | Ground flora | Ground fauna | Shadows |
+|---|---|---|---|---|
+| HIGH | 2 m | 20,000 | 300 | yes |
+| LOW | 4 m | 6,000 | 100 | no |
+
+`LOW` is already defined in `app.js` from pointer type, screen size, and core count.
+
+## Shared contracts
+
+Independent agents must agree on these. Do not change them inside an issue. If a contract must change, say so in the issue's summary and update this file in the same commit.
+
+### The site and the URL
+
+- A site is a lat and lon in degrees in the planet's local frame, the frame of the worker's `pos` arrays before `planet.rotation.y` is applied. Lat is `asin(y)`. Lon is `atan2(z, x)`. Both in degrees, two decimals. Lat in [-90, 90], lon in [-180, 180].
+- URL format: `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Without `@` the URL means orbit. The seed part is URL-encoded as today; the site part is plain.
+- Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
+
+### App mode
+
+`app.js` holds one state: `mode` in `'orbit' | 'descending' | 'ground' | 'ascending'`. Orbit is today's behaviour. The globe scene and `current` stay in memory in every mode. In `ground` mode the globe is not rendered and its `frame()` work is skipped.
+
+### The ground module
+
+`ground.js` is a new ES module on the main thread. It owns a second `THREE.Scene`, a second `PerspectiveCamera`, and a second `OrbitControls`, and it renders with the shared renderer. Shape:
+
+```js
+export class Ground {
+  constructor({ renderer, canvas, world, site, tier });  // tier: { grid, maxFlora, maxFauna, shadows }
+  load(result);       // the worker's patch-done result
+  update(t, dt);      // steering, LOD, camera clamps
+  render();           // renderer.render(this.scene, this.camera)
+  heightAt(x, z);     // metres, bilinear on the grid, 0 outside
+  dispose();
+}
+```
+
+Ground frame: x east, y up, z south. Origin at the site at sea level, so `heightAt` is the elevation above sea level in metres. The sun direction comes from the app, not the worker: `load(result, { sunDir })`, because only the app knows `planet.rotation.y`. Until issue 12 lands, pass `(1, 0.55, 0.8)` normalised like the globe.
+
+### The patch protocol
+
+Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, maxFlora, maxFauna, pulledKind } })`. `pulledKind` is the species id the site was pulled to, or `-1`.
+
+Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or `{ type: 'error', message }`. Transfer the buffers.
+
+`result`:
+
+```js
+{
+  patch: {
+    seed, lat, lon, size: 1500, grid, n,          // n = size / grid + 1 vertices per side
+    biome, palette,                               // the globe palette object and the biome name at the site
+    elevation,                                    // globe elevation at the site in metres above sea level
+    seaLevel: 0, hasSea, shore,                   // hasSea: any grid vertex below 0; shore: true when hasSea and any vertex above 0
+  },
+  heights: Float32Array(n * n),                   // row-major, row = z from north (-) to south (+), col = x from west to east
+  colors:  Float32Array(n * n * 3),               // per vertex, linear RGB 0..1
+  flora:   Float32Array(count * 8),               // x y z, nx ny nz, scale, kind  (same as the globe layout, metres)
+  groups:  Float32Array(groupCount * 6),          // x z, kind, count, spread, phase
+  members: Float32Array(memberCount * 4),         // group index, offset x, offset z, phase
+}
+```
+
+Terrain colours use the globe rules for beach, snow line, and forest mask, evaluated at the site with the patch noise for local variation.
+
+### Metres for a creature
+
+The lore size text in `species.js` is the source of truth. Add `Species.bodyMetres(G)` that returns the leading number of `sizeText` and the axis it measures, `'height'` or `'length'`. On the ground a creature is scaled so its geometry extent along that axis equals that number.
+
+### The sociality gene
+
+`G.social = { kind: 'solitary' | 'pair' | 'herd', n: 1 | 2 | 4..14, spread: metres }`. `spread` is the formation radius. Rolled in `species.js`, deterministic per seed.
+
+### LOD
+
+`ground.lod = { distance: 150, min: 40, max: 400 }` in metres. Near instances are full mesh; far instances are cards for flora and coarse meshes for fauna. One controller in `Ground.update()` moves `distance` from frame time. Expose it as `window.__mw.ground`.
+
+## Verification
+
+There is no test runner. Each issue verifies by hand in the served site and states the result in its summary. Use these checks:
+
+- Frame time: open with `?perf` once issue 11 exists, or before that, run in the console:
+  ```js
+  let n=0,s=0,l=performance.now();(function f(){const t=performance.now();s+=t-l;l=t;if(++n===300){console.log('avg ms',(s/n).toFixed(2));return}requestAnimationFrame(f)})()
+  ```
+  Target: the average frame time at or below `1000 / min(60, refreshRate)`.
+- Determinism: reload the same URL twice and confirm the same terrain, flora, and creatures.
+- Two seeds at least: one terran and one desert or ice. Check `__mw.current.world.type`.
+
+## Sequence and dependencies
+
+```
+01 globe-scale-fixes ─────────────────────────────────────────────┐
+02 site-url-and-pull ──► 03 descent-and-ascent-shell ──► 04 patch-terrain ──► 05 ground-sea ──┐
+                                        │                        ├──► 06 ground-camera ─────┤
+                                        │                        ├──► 07 ground-flora-lod ──┤
+                                        └──► 12 sky-continuity   │                          ├──► 11 adaptive-lod-and-perf ──► 13 low-tier-pass
+08 sociality-gene ───────────────────────────────────────────────►├──► 09 ground-fauna-groups ──► 10 far-fauna-coarse-mesh ──┘
+14, 15, 16 are phase two and need design first.
+```
+
+Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 and 09 both add to `ground.js`; keep flora and fauna in separate files, `ground-flora.js` and `ground-fauna.js`, to avoid merge pain.
+
+| # | Issue | Type | Blocked by |
+|---|---|---|---|
+| 01 | Globe scale fixes | AFK | none |
+| 02 | Site in the URL and the pull to life | AFK | none |
+| 03 | Descent and ascent shell | AFK | 02 |
+| 04 | Patch terrain from the worker | AFK | 03 |
+| 05 | Ground sea and shoreline | AFK | 04 |
+| 06 | Ground camera: pan, clamps, glide | AFK | 04 |
+| 07 | Ground flora with card impostors | AFK | 04 |
+| 08 | Sociality gene | AFK | none |
+| 09 | Ground fauna in groups | AFK | 04, 08 |
+| 10 | Far fauna coarse mesh | AFK | 09 |
+| 11 | Adaptive LOD and the perf overlay | AFK | 07, 10 |
+| 12 | Sky continuity: sun, moons, rings, clouds | AFK | 03 |
+| 13 | LOW tier pass | AFK | 05, 06, 11, 12 |
+| 14 | Ground-scale phenomena | HITL | 04, design |
+| 15 | Sea species | HITL | 05, 09, design |
+| 16 | Herd behaviour on the anchor | HITL | 09, design |
