@@ -5,6 +5,7 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker } from './site.js';
+import { Ground } from './ground.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -22,6 +23,14 @@ const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
 const CAM_MIN = 1.11, CAM_MAX = 8, CAM_HOME = 3.3;
 const PICK_RANGE = CAM_MIN + 0.1;   // the probe can pick a site inside this camera distance
+// the ground tier: the grid step in metres, the counts, and the shadows
+const TIER = LOW
+  ? { grid: 4, maxFlora: 6000, maxFauna: 100, shadows: false }
+  : { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
+const ZOOM_HOLD = 500;    // ms, a zoom must continue this long to send or to recall the probe
+const ZOOM_GAP = 250;     // ms, a longer gap between zoom steps ends the gesture
+const DIVE_MS = 1200;     // ms, the floor of the dive. Later issues hide the worker inside it.
+const FADE_MS = 600;      // ms, the fade out of the overlay after the switch
 
 // ---------------------------------------------------------------- dom
 const $ = (s) => document.querySelector(s);
@@ -39,6 +48,8 @@ const overlayBar = $('#overlay-bar');
 const toggleBtn = $('#toggle');
 const panel = $('#panel');
 const shareBtn = $('#share');
+const probeBtn = $('#probe');
+const diveEl = $('#dive');
 const muteBtn = $('#mute');
 const volInput = $('#vol');
 
@@ -443,11 +454,20 @@ function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.1);
   const t = clock.elapsedTime;
+  const now = performance.now();
+  if (dive) stepDive(now);
+  checkZoomHold(now);
+  if (mode === 'ground') {          // the globe stays in memory, but none of its work runs
+    ground.update(t, dt);
+    ground.render();
+    return;
+  }
   if (current) {
     const dist = camera.position.length();
     const zoomFactor = THREE.MathUtils.clamp((dist - CAM_MIN) / 1.6, 0.015, 1); // near the ground the world must hold still
     const hold = THREE.MathUtils.smoothstep(dist, PICK_RANGE, PICK_RANGE + 0.4);   // in the pick range it stops, so the site stays put
-    const spin = current.spin * zoomFactor * hold * (userActive ? 0.15 : 1);
+    // the planet holds still through a transition, so the fixed site cannot drift under the probe
+    const spin = mode === 'orbit' ? current.spin * zoomFactor * hold * (userActive ? 0.15 : 1) : 0;
     current.planet.rotation.y += spin * dt;
     current.cloudGroup.rotation.y += spin * 1.25 * dt;
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
@@ -467,16 +487,20 @@ function frame() {
       m.mesh.rotation.y += dt * 0.3;
     }
   }
-  // near the surface, drags and wheel steps must move the camera much less
-  const near = THREE.MathUtils.clamp((camera.position.length() - 1) / 2.3, 0.08, 1);
-  controls.rotateSpeed = 0.7 * near;
-  controls.zoomSpeed = 0.9 * Math.max(near, 0.2);
-  controls.update();
-  // near the surface, tilt the view toward the horizon so relief reads in profile
-  const d = camera.position.length();
-  const pitch = pitchFor(d);
-  if (pitch > 0) camera.rotateX(pitch);
-  updateSite(d, t);                 // the screen centre points where the pitched camera looks
+  if (mode === 'orbit') {
+    // near the surface, drags and wheel steps must move the camera much less
+    const near = THREE.MathUtils.clamp((camera.position.length() - 1) / 2.3, 0.08, 1);
+    controls.rotateSpeed = 0.7 * near;
+    controls.zoomSpeed = 0.9 * Math.max(near, 0.2);
+    controls.update();
+    // near the surface, tilt the view toward the horizon so relief reads in profile
+    const d = camera.position.length();
+    const pitch = pitchFor(d);
+    if (pitch > 0) camera.rotateX(pitch);
+    updateSite(d, t);               // the screen centre points where the pitched camera looks
+  } else {
+    showMarker(lockedSite, current); // the ring stays on the fixed site through the transition
+  }
   renderer.render(scene, camera);
 }
 function pitchFor(d) { return (1 - THREE.MathUtils.smoothstep(d, CAM_MIN, 2.3)) * 0.95; }
@@ -493,13 +517,24 @@ function updateSite(dist, t) {
   const canPick = !!current && current.world.type !== 'gas' && dist <= PICK_RANGE;
   site = canPick ? pullSite(pickSite(camera, current), current) : null;
   showMarker(site, current);
+  updateProbeBtn();
   if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows, but not every frame
 }
 
+// The hash carries the site only while the probe is down, because a site in the URL means the ground.
 function writeHash() {
   if (!current) return;
-  const url = siteToUrl(current.world.seed, site);
+  const onGround = mode === 'ground' || mode === 'descending';
+  const url = siteToUrl(current.world.seed, onGround ? lockedSite : null);
   if (url !== location.hash) history.replaceState(null, '', url);
+}
+
+// Drop the damped rest of a drag or a zoom. One update with the damping off clears the deltas.
+function flushControls() {
+  const damp = controls.enableDamping;
+  controls.enableDamping = false;
+  controls.update();
+  controls.enableDamping = damp;
 }
 
 // Put the camera at the minimum distance and turn it until the screen centre lands on the site.
@@ -507,6 +542,7 @@ function writeHash() {
 const _want = new THREE.Vector3(), _rotM = new THREE.Matrix4(), _turn = new THREE.Quaternion();
 function placeCameraOverSite(target) {
   if (!current || current.world.type === 'gas') return false;
+  flushControls();       // a damped drag or zoom must not pull the camera off the site
   current.planet.updateWorldMatrix(true, false);
   _rotM.extractRotation(current.planet.matrixWorld);
   siteDir(target.lat, target.lon, _want).applyMatrix4(_rotM).normalize();
@@ -527,6 +563,148 @@ function placeCameraOverSite(target) {
   controls.update();
   return true;
 }
+
+// ---------------------------------------------------------------- the probe: descent and ascent
+// The app holds one mode: orbit, descending, ground, or ascending. The globe scene stays in memory
+// in every mode. In ground mode the globe is not drawn and none of its per-frame work runs.
+let mode = 'orbit';
+let ground = null;        // the Ground instance while the probe is down
+let lockedSite = null;    // the site the probe dives to, fixed at the start of the descent
+let dive = null;          // { kind, phase, t0, dur, from, to, look }
+
+// The point over the site in world space, at the ground radius plus an extra height.
+function siteWorldPoint(target, extra, out = new THREE.Vector3()) {
+  current.planet.updateWorldMatrix(true, false);
+  _rotM.extractRotation(current.planet.matrixWorld);
+  siteDir(target.lat, target.lon, out);
+  const r = Math.max(groundRadius(current.world, current.heightMap, out), current.world.seaRadius || 0);
+  return out.applyMatrix4(_rotM).normalize().multiplyScalar(r + extra);
+}
+
+function canDescend() {
+  return mode === 'orbit' && !dive && !busy && !!current && current.world.type !== 'gas';
+}
+
+// Send the probe down. The site is fixed here, so nothing moves under the probe on the way.
+function descend(target = site) {
+  if (!canDescend() || !target) return;
+  lockedSite = { ...target };
+  mode = 'descending';
+  controls.enabled = false;
+  writeHash();
+  updateProbeBtn();
+  diveEl.style.background = current.world.palette.atmo || '#8fb7ff';
+  dive = {
+    kind: 'descend', phase: 'in', t0: performance.now(), dur: DIVE_MS,
+    from: camera.position.clone(),
+    to: siteWorldPoint(lockedSite, 0.004),
+    look: siteWorldPoint(lockedSite, -0.4),   // a point under the site holds the aim steady
+  };
+}
+
+// Recall the probe. The mirror of the descent: fade out, switch, place the camera over the site.
+function ascend() {
+  if (mode !== 'ground' || dive) return;
+  ground.controls.enabled = false;
+  updateProbeBtn();
+  dive = { kind: 'ascend', phase: 'in', t0: performance.now(), dur: FADE_MS };
+}
+
+function stepDive(now) {
+  const k = THREE.MathUtils.clamp((now - dive.t0) / dive.dur, 0, 1);
+  const e = THREE.MathUtils.smoothstep(k, 0, 1);
+  if (dive.phase === 'in') {
+    if (dive.kind === 'descend') {
+      camera.position.lerpVectors(dive.from, dive.to, e);
+      camera.lookAt(dive.look);
+    }
+    diveEl.style.opacity = String(e);
+    if (k < 1) return;
+    if (dive.kind === 'descend') enterGround(); else leaveGround();
+    dive.phase = 'out'; dive.t0 = now; dive.dur = FADE_MS;
+    return;
+  }
+  diveEl.style.opacity = String(1 - e);
+  if (k < 1) return;
+  diveEl.style.opacity = '0';
+  if (dive.kind === 'ascend') { mode = 'orbit'; controls.enabled = true; }
+  else if (ground) ground.controls.enabled = true;
+  dive = null;
+  updateProbeBtn();
+}
+
+// The switch into the ground scene, under an opaque overlay.
+function enterGround() {
+  mode = 'ground';
+  ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: TIER });
+  ground.load(null, { sunDir });   // issue 12 turns the sun to the site
+  ground.resize(innerWidth, innerHeight);
+  showMarker(null, current);
+  writeHash();
+}
+
+// The switch back to the globe, under an opaque overlay. Also the straight cut for a new world.
+function leaveGround() {
+  if (ground) { ground.dispose(); ground = null; }
+  if (mode === 'ground') mode = 'ascending';
+  if (lockedSite) placeCameraOverSite(lockedSite);
+  writeHash();
+}
+
+// A new world always returns to orbit, whatever the probe was doing.
+function abortProbe() {
+  if (mode === 'orbit' && !dive) return;
+  if (ground) { ground.dispose(); ground = null; }
+  dive = null;
+  lockedSite = null;
+  mode = 'orbit';
+  controls.enabled = true;
+  diveEl.style.opacity = '0';
+  updateProbeBtn();
+}
+
+function updateProbeBtn() {
+  if (!probeBtn) return;
+  const down = mode === 'ground';
+  const show = !dive && !busy && (down || (mode === 'orbit' && !!site));
+  probeBtn.hidden = !show;
+  probeBtn.textContent = down ? 'Recall the probe' : 'Send a probe to the surface';
+}
+
+// ---------------------------------------------------------------- the zoom hold
+// The camera cannot pass CAM_MIN, so a continued zoom is read from the wheel and the pinch,
+// not from the camera distance. Half a second of the same direction sends or recalls the probe.
+let zoomDir = 0, zoomSince = 0, zoomLast = 0;
+function noteZoom(dir) {
+  const now = performance.now();
+  if (dir !== zoomDir || now - zoomLast > ZOOM_GAP) { zoomDir = dir; zoomSince = now; }
+  zoomLast = now;
+}
+function checkZoomHold(now) {
+  if (!zoomDir || now - zoomLast > ZOOM_GAP || now - zoomSince < ZOOM_HOLD) return;
+  if (zoomDir < 0 && canDescend() && site && camera.position.length() <= CAM_MIN + 0.002) {
+    zoomDir = 0; descend();
+  } else if (zoomDir > 0 && mode === 'ground' && !dive && ground.atCeiling) {
+    zoomDir = 0; ascend();
+  }
+}
+canvas.addEventListener('wheel', (e) => { if (e.deltaY) noteZoom(e.deltaY < 0 ? -1 : 1); }, { passive: true });
+
+const pinch = new Map();
+canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') pinch.set(e.pointerId, [e.clientX, e.clientY]); });
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'touch' || !pinch.has(e.pointerId)) return;
+  const prev = [...pinch.values()];
+  pinch.set(e.pointerId, [e.clientX, e.clientY]);
+  if (prev.length !== 2) return;
+  const cur = [...pinch.values()];
+  const d0 = Math.hypot(prev[0][0] - prev[1][0], prev[0][1] - prev[1][1]);
+  const d1 = Math.hypot(cur[0][0] - cur[1][0], cur[0][1] - cur[1][1]);
+  if (Math.abs(d1 - d0) > 0.5) noteZoom(d1 > d0 ? -1 : 1);
+});
+const dropPinch = (e) => pinch.delete(e.pointerId);
+canvas.addEventListener('pointerup', dropPinch);
+canvas.addEventListener('pointercancel', dropPinch);
 
 // creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
 const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _m = new THREE.Matrix4();
@@ -577,6 +755,8 @@ function generate(seed, { save = true } = {}) {
   seed = seed.trim();
   if (!seed || busy) return;
   busy = true;
+  abortProbe();               // a new world always comes back to orbit
+  updateProbeBtn();
   const genStart = performance.now();
   overlay.classList.add("show");
   overlayBar.style.width = '2%';
@@ -598,11 +778,16 @@ function generate(seed, { save = true } = {}) {
       renderInfo(msg.result.world);
       music.play(msg.result.world);
       if (save) saveWorld(msg.result.world);
-      site = wanted && current.world.type !== 'gas' ? wanted : null;
+      const landing = wanted && current.world.type !== 'gas' ? wanted : null;
+      site = landing;
       writeHash();
       input.value = seed;
       if (COMPACT) setCollapsed(true);
-      setTimeout(() => { overlay.classList.remove("show"); busy = false; }, 250);
+      setTimeout(() => {
+        overlay.classList.remove("show"); busy = false;
+        // a shared link with a site lands the reader on the ground
+        if (landing) descend(landing); else updateProbeBtn();
+      }, 250);
     } else if (msg.type === 'error') {
       overlayLabel.textContent = 'Generation failed. See console.';
       console.error(msg.message);
@@ -727,7 +912,13 @@ function cycleInspect(dir) {
   inspect(kinds[(i + dir + kinds.length) % kinds.length]);
 }
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && inspector.open) inspector.hide(); });
-addEventListener('resize', () => { if (inspector.open) inspector.resize(); });
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  if (ground) ground.resize(innerWidth, innerHeight);
+  if (inspector.open) inspector.resize();
+});
 
 // pick a creature under a screen point: nearest projected instance on the visible hemisphere
 const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pn = new THREE.Vector3(), _pm = new THREE.Matrix4();
@@ -763,13 +954,13 @@ canvas.addEventListener('pointerup', (e) => {
   if (!downAt) return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
-  if (moved > 6 || busy) return;
+  if (moved > 6 || busy || mode !== 'orbit') return;   // the globe creatures are not on the screen on the ground
   const kind = creatureAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 52 : 34);
   if (kind !== null) inspect(kind);
 });
 let hoverTick = 0;
 canvas.addEventListener('pointermove', (e) => {
-  if (e.pointerType === 'touch' || downAt || (++hoverTick & 3)) return;
+  if (e.pointerType === 'touch' || downAt || mode !== 'orbit' || (++hoverTick & 3)) return;
   canvas.style.cursor = creatureAt(e.clientX, e.clientY) !== null ? 'pointer' : '';
 });
 
@@ -799,6 +990,7 @@ shareBtn.addEventListener('click', async () => {
   catch { shareBtn.textContent = url; }
   setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
 });
+probeBtn.addEventListener('click', () => { if (mode === 'ground') ascend(); else descend(); });
 // ---------------------------------------------------------------- music
 const music = new Music();
 function renderMusic() {
@@ -818,7 +1010,7 @@ addEventListener('hashchange', () => {
   const { seed, site: fromHash } = parseUrl(location.hash);
   if (!seed) return;
   if (!current || current.world.seed !== seed) { pendingSite = fromHash; generate(seed); }
-  else if (fromHash) { pendingSite = null; placeCameraOverSite(fromHash); }
+  else if (fromHash && mode === 'orbit') { pendingSite = null; placeCameraOverSite(fromHash); descend(fromHash); }
 });
 addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
@@ -837,4 +1029,10 @@ renderWorlds();
 }
 
 // debug handle (harmless in production)
-window.__mw = { scene, camera, controls, renderer, get current() { return current; }, get site() { return site; }, generate, inspect, inspector, music };
+window.__mw = {
+  scene, camera, controls, renderer, generate, inspect, inspector, music, descend, ascend,
+  get current() { return current; },
+  get site() { return site; },
+  get mode() { return mode; },
+  get ground() { return ground; },
+};

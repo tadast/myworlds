@@ -140,6 +140,18 @@ button.ghost {
 }
 button.ghost:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.3); }
 
+/* ---------- the probe button and the dive overlay */
+button.probe {
+  display: block; width: 100%; margin-top: 10px; padding: 9px 12px;
+  background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 12px; font: inherit; font-size: 13px; cursor: pointer;
+}
+button.probe:hover { border-color: var(--accent); color: var(--accent); }
+button.probe[hidden] { display: none; }
+
+/* The dive fades the screen to the atmosphere colour. The app sets the colour and the opacity. */
+#dive { position: fixed; inset: 0; z-index: 9; opacity: 0; pointer-events: none; }
+
 /* ---------- overlay */
 #overlay {
   position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
