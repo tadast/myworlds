@@ -81,7 +81,7 @@ A genome `G` is plain data. `fauna.js` reads these fields:
 
 ### Size in metres
 
-`Species.bodyMetres(G)` returns `{ metres, axis }`. `metres` is how large the animal is in the real world. `axis` is `height` or `length`, and it tells the ground code which extent of the geometry to match to `metres`. The `BODY` table holds a factor on `G.size` and the axis for each locomotion. A swarm is measured across the whole wheel.
+`Species.bodyMetres(G)` returns `{ metres, axis }`. `metres` is how large the animal is in the real world. `axis` is `height` or `length`, and it tells the ground code which extent of the geometry to match to `metres`. The `BODY` table holds a factor on `G.size` and the axis for each locomotion. A swarm is measured across the whole wheel. A hexapod measures along `length`, because its lore text says "long"; see the decision in `docs/issues/README.md`.
 
 `sizeText()` formats the same number, so the lore text and the ground scale cannot drift apart. The leading number of `lore.size` is always `bodyMetres(G).metres`.
 

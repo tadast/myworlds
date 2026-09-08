@@ -109,7 +109,7 @@ Terrain colours use the globe rules for beach, snow line, and forest mask, evalu
 
 The lore size text in `species.js` is the source of truth. Add `Species.bodyMetres(G)` that returns the leading number of `sizeText` and the axis it measures, `'height'` or `'length'`. On the ground a creature is scaled so its geometry extent along that axis equals that number.
 
-Open question, raised when issue 08 landed: issue 08 lists `hexapod` under `axis: 'height'`, but `sizeText` for a hexapod reads "2.2 m long". The code follows issue 08 today, so a ground hexapod scales to its number in height. Decide this before issue 09 scales fauna on the ground, and record the decision here.
+Decision, 2026-09-08: a hexapod measures along `length`. Issue 08 item 2 lists `hexapod` under `axis: 'height'`, but `sizeText` writes "2.2 m long", and the first line of this section makes the lore text the source of truth. The geometry agrees: a hexapod has short legs, a wide body, and its six legs sit along the body, so it reads as a long low crawler. A scale to height would make a 2.2 m hexapod about 7 m long. `BODY.hexapod.axis` in `species.js` is now `'length'`. The number and every lore text stay the same, so the globe does not change.
 
 ### The sociality gene
 

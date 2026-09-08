@@ -108,7 +108,7 @@
   // ground scale cannot drift apart.
   const BODY = {
     monopod: { k: 3.6, axis: 'height' }, biped: { k: 3.6, axis: 'height' }, tripod: { k: 3.6, axis: 'height' },
-    quad: { k: 2.6, axis: 'height' }, hexapod: { k: 2.2, axis: 'height' }, serpent: { k: 6, axis: 'length' },
+    quad: { k: 2.6, axis: 'height' }, hexapod: { k: 2.2, axis: 'length' }, serpent: { k: 6, axis: 'length' },
     sac: { k: 1.6, axis: 'height' }, wings: { k: 2.4, axis: 'length' }, fins: { k: 17, axis: 'length', whole: true },
     arch: { k: 2.8, axis: 'length' }, periscope: { k: 2.4, axis: 'height' }, plough: { k: 3, axis: 'length' },
   };
