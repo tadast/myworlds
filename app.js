@@ -29,7 +29,8 @@ const TIER = LOW
   : { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
 const ZOOM_HOLD = 500;    // ms, a zoom must continue this long to send or to recall the probe
 const ZOOM_GAP = 250;     // ms, a longer gap between zoom steps ends the gesture
-const DIVE_MS = 1200;     // ms, the floor of the dive. Later issues hide the worker inside it.
+const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
+const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
 const FADE_MS = 600;      // ms, the fade out of the overlay after the switch
 
 // ---------------------------------------------------------------- dom
@@ -50,6 +51,7 @@ const panel = $('#panel');
 const shareBtn = $('#share');
 const probeBtn = $('#probe');
 const diveEl = $('#dive');
+const diveLabel = $('#dive-label');
 const muteBtn = $('#mute');
 const volInput = $('#vol');
 
@@ -571,6 +573,33 @@ let mode = 'orbit';
 let ground = null;        // the Ground instance while the probe is down
 let lockedSite = null;    // the site the probe dives to, fixed at the start of the descent
 let dive = null;          // { kind, phase, t0, dur, from, to, look }
+let patchState = { done: true, result: null };   // the patch the worker builds during the dive
+
+// The patch for the site the probe dives to. The dive holds the screen until the reply lands,
+// so the reader never sees the ground build.
+function requestPatch(target) {
+  const t0 = performance.now();
+  patchState = { done: false, result: null };
+  if (diveLabel) diveLabel.textContent = 'Sending the probe';
+  patchJob = {
+    progress: (msg) => { if (diveLabel) diveLabel.textContent = msg.label; },
+    done: (result) => {
+      patchJob = null;
+      patchState = { done: true, result };
+      const p = result.patch;
+      console.info(`[myworlds] patch "${p.patchSeed}" ${p.biome} at ${p.elevation.toFixed(0)} m, grid ${p.grid} m, ${p.n}x${p.n}, worker ${Math.round(performance.now() - t0)} ms`);
+    },
+    fail: (message) => {
+      patchJob = null;
+      patchState = { done: true, result: null };
+      console.error('[myworlds] patch failed:', message);
+    },
+  };
+  getWorker().postMessage({
+    type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
+    opts: { grid: TIER.grid, size: 1500, maxFlora: TIER.maxFlora, maxFauna: TIER.maxFauna, pulledKind: target.kind ?? -1 },
+  });
+}
 
 // The point over the site in world space, at the ground radius plus an extra height.
 function siteWorldPoint(target, extra, out = new THREE.Vector3()) {
@@ -594,6 +623,7 @@ function descend(target = site) {
   writeHash();
   updateProbeBtn();
   diveEl.style.background = current.world.palette.atmo || '#8fb7ff';
+  requestPatch(lockedSite);
   dive = {
     kind: 'descend', phase: 'in', t0: performance.now(), dur: DIVE_MS,
     from: camera.position.clone(),
@@ -620,7 +650,10 @@ function stepDive(now) {
     }
     diveEl.style.opacity = String(e);
     if (k < 1) return;
+    // the switch waits for the patch, or for the guard, whichever comes first after the floor
+    if (dive.kind === 'descend' && !patchState.done && now - dive.t0 < PATCH_WAIT) return;
     if (dive.kind === 'descend') enterGround(); else leaveGround();
+    if (diveLabel) diveLabel.textContent = '';
     dive.phase = 'out'; dive.t0 = now; dive.dur = FADE_MS;
     return;
   }
@@ -637,7 +670,9 @@ function stepDive(now) {
 function enterGround() {
   mode = 'ground';
   ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: TIER });
-  ground.load(null, { sunDir });   // issue 12 turns the sun to the site
+  const t0 = performance.now();
+  ground.load(patchState.result, { sunDir });   // issue 12 turns the sun to the site
+  if (patchState.result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
   ground.resize(innerWidth, innerHeight);
   showMarker(null, current);
   writeHash();
@@ -657,9 +692,12 @@ function abortProbe() {
   if (ground) { ground.dispose(); ground = null; }
   dive = null;
   lockedSite = null;
+  patchJob = null;
+  patchState = { done: true, result: null };
   mode = 'orbit';
   controls.enabled = true;
   diveEl.style.opacity = '0';
+  if (diveLabel) diveLabel.textContent = '';
   updateProbeBtn();
 }
 
@@ -743,11 +781,24 @@ function updateMovers(t, dt) {
   for (const inst of dirty) { inst.instanceMatrix.needsUpdate = true; inst.geometry.attributes.aMove.needsUpdate = true; }
 }
 // ---------------------------------------------------------------- worker / generation
+// One worker serves two jobs: the globe and the ground patch. Only one of them runs at a time,
+// because a new world always recalls the probe first, so progress and error belong to the job
+// that is open.
 let worker = null;
 let busy = false;
+let genJob = null, patchJob = null;
 function getWorker() {
   if (worker) return worker;
   worker = new Worker('./worker.js');
+  worker.onmessage = (e) => {
+    const msg = e.data;
+    if (msg.type === 'done') { if (genJob) genJob.done(msg.result); return; }
+    if (msg.type === 'patch-done') { if (patchJob) patchJob.done(msg.result); return; }
+    const job = genJob || patchJob;
+    if (!job) return;
+    if (msg.type === 'progress') job.progress(msg);
+    else if (msg.type === 'error') job.fail(msg.message);
+  };
   return worker;
 }
 
@@ -762,12 +813,15 @@ function generate(seed, { save = true } = {}) {
   overlayBar.style.width = '2%';
   overlayLabel.textContent = 'Seeding the void';
   const w = getWorker();
-  w.onmessage = (e) => {
-    const msg = e.data;
-    if (msg.type === 'progress') {
+  patchJob = null;              // a new world drops the patch the probe was waiting for
+  genJob = {
+    progress: (msg) => {
       overlayBar.style.width = `${msg.pct.toFixed(0)}%`;
       overlayLabel.textContent = msg.label;
-    } else if (msg.type === 'done') {
+    },
+    done: (result) => {
+      const msg = { result };
+      genJob = null;
       overlayBar.style.width = "100%";
       const t0 = performance.now();
       buildWorld(msg.result);
@@ -788,11 +842,13 @@ function generate(seed, { save = true } = {}) {
         // a shared link with a site lands the reader on the ground
         if (landing) descend(landing); else updateProbeBtn();
       }, 250);
-    } else if (msg.type === 'error') {
+    },
+    fail: (message) => {
+      genJob = null;
       overlayLabel.textContent = 'Generation failed. See console.';
-      console.error(msg.message);
+      console.error(message);
       setTimeout(() => { overlay.classList.remove('show'); busy = false; }, 1500);
-    }
+    },
   };
   w.onerror = (err) => {
     console.error(err);

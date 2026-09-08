@@ -91,6 +91,7 @@ Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or 
 {
   patch: {
     seed, lat, lon, size: 1500, grid, n,          // n = size / grid + 1 vertices per side
+    patchSeed, radiusKm,                          // the patch seed string, and the planet radius in km
     biome, palette,                               // the globe palette object and the biome name at the site
     elevation,                                    // globe elevation at the site in metres above sea level
     seaLevel: 0, hasSea, shore,                   // hasSea: any grid vertex below 0; shore: true when hasSea and any vertex above 0
