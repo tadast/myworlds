@@ -159,6 +159,17 @@ button.probe[hidden] { display: none; }
 }
 #dive-label:empty { display: none; }
 
+/* The aim message. It tells the reader to choose the ground the probe lands on. It floats over
+   the scene and it takes no pointer event, because the reader taps the planet under it. */
+#aim {
+  position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 9;
+  margin: 0; padding: 7px 16px; border-radius: 12px;
+  background: rgba(7, 10, 22, 0.55); border: 1px solid var(--line); color: #fff;
+  font-size: 13px; letter-spacing: 0.02em; pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+#aim[hidden] { display: none; }
+
 /* ---------- overlay */
 #overlay {
   position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;

@@ -9,21 +9,21 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 ## Decisions
 
 1. **Two tiers with a hand-off.** The globe stays a stylised miniature for orbit. Past the minimum zoom, a probe descends to a ground patch at 1 unit = 1 m. A continuous true-scale zoom was rejected: it needs terrain LOD across six orders of magnitude and camera-relative rendering, because float32 runs out at about 1e-7 of the radius.
-2. **Landing site.** The site is the point under the screen centre. If a species home range lies within two patch widths, the target slides there during the descent. Open sea and ice landings stay possible. The site goes in the URL as `#Seed@lat,lon`. The patch seed is the hash of the world seed and the quantised lat and lon.
+2. **Landing site.** The site is the point under the pointer while the reader aims. Changed by issue 20; it was the point under the screen centre. If a species home range lies within two patch widths, the target slides there during the descent. Open sea and ice landings stay possible. The site goes in the URL as `#Seed@lat,lon`. The patch seed is the hash of the world seed and the quantised lat and lon.
 3. **Patch extent.** A fixed square patch 1.5 km across with a fog edge in the atmosphere colour. Fog starts at 60% of the patch radius. Streamed tiles were deferred.
 4. **Frame budget.** Device tiers set counts and the grid step. One runtime knob, the LOD distance, follows a rolling frame time toward the display refresh rate capped at 60. Shadows stay a device-tier decision. Far flora are 2-triangle cards baked per kind and palette at patch load. Far fauna are coarse meshes, because a card flips on a moving animal.
 5. **Population.** The unit is the group. Each species gets a sociality gene: solitary, pair, or herd of N. A solitary animal is a group of one. A group anchor runs the existing oscillator steering. Members hold a formation around the anchor with a short leash. Later herd behaviour attaches to the anchor. Budget: about 300 creatures on HIGH and 100 on LOW, in 10 to 30 groups. The species pulled to in decision 2 is always present. Other species appear when the patch biome matches their niche.
-6. **Descent and return.** A continued zoom past the minimum for about half a second starts the descent. A button "Send a probe to the surface" does the same. Zooming out past the patch ceiling, or "Recall the probe", starts the ascent. The worker generates the patch during the dive. The dive lasts as long as generation with a floor of 1.2 s, and the patch fades in from the fog colour. The globe scene stays in memory and paused. On the ground the globe is not drawn. A sky dome and fog take the atmosphere colour. The sun sits where the globe light falls at the site. Moons and rings are drawn far away in the sky. Clouds are a few flat sprites near the ceiling.
+6. **Descent and return.** The button "Send a probe to the surface" starts the aim, and a tap on the planet then starts the descent. Changed by issue 20; a continued zoom past the minimum used to start the descent on its own. Zooming out past the patch ceiling, or "Recall the probe", starts the ascent. The worker generates the patch during the dive. The dive lasts as long as generation with a floor of 1.2 s, and the patch fades in from the fog colour. The globe scene stays in memory and paused. On the ground the globe is not drawn. A sky dome and fog take the atmosphere colour. The sun sits where the globe light falls at the site. Moons and rings are drawn far away in the sky. Clouds are a few flat sprites near the ceiling.
 10. **Sky continuity, 2026-09-09.** `ground-sky.js` owns the sky. The app turns the globe sun, the moon orbits, and the ring plane into the frame of the site, because only the app knows `planet.rotation.y`. It passes them to `Ground.load(result, { sunDir, view })`.
     - **East and the right hand.** A positive `planet.rotation.y` takes +x toward -z, and lon counts from +x toward +z. East is therefore the direction of falling lon. With that east, the frame x east, y up, z south is right-handed and the sky is not mirrored.
     - **The dome carries no tone mapping.** The renderer applies the fog after the tone mapping and after the colour space, so far terrain ends at the plain fog colour. A tone-mapped dome lands on another colour and the horizon then shows a hard step. The dome takes `toneMapped: false` and the fog takes the horizon colour, so the two meet at one value. The sun tint also fades out at the horizon, because the fog cannot know about the sun.
-    - **The sky follows the camera.** The dome, the ring, and the moons stand in a group at the camera position. A fixed sky at the site fails: the camera climbs 1,200 m to the ceiling, and the ring then swings 16 degrees against a sky that must not move. One clipping plane at the height of the camera cuts the ring and the moons at the eye line, which is the horizon of a flat plane, so a moon sets there. This turns on `renderer.localClippingEnabled`, which only touches materials that carry planes.
+    - **The sky follows the camera.** The dome, the ring, and the moons stand in a group at the camera position. A fixed sky at the site fails: the camera climbs to the ceiling, and the ring then swings against a sky that must not move. Measured at the ceiling of 1,200 m the swing was 16 degrees; issue 20 lowered the ceiling to 500 m, which makes the swing smaller but does not remove it. One clipping plane at the height of the camera cuts the ring and the moons at the eye line, which is the horizon of a flat plane, so a moon sets there. This turns on `renderer.localClippingEnabled`, which only touches materials that carry planes.
     - **The ring plane is not the planet equator.** `ringMesh.rotation` leaves the ring normal near world +y, while the planet axis carries `world.tilt`. The ground band reads the world matrix of the globe ring, so it always shows what the globe shows. The band is a line through the zenith at the ring plane, and it opens to about 25 degrees at 30 to 40 degrees of latitude from that plane. Past about 45 degrees it sinks toward the horizon.
     - **The ring takes no light.** The sun can sit in the ring plane, and a lit ring then goes black. The band keeps the band colours and the band alpha of the globe ring and takes one flat brightness from the sun angle.
-    - **Clouds sit at 900 to 1,100 m**, under the 1,200 m ceiling, so the probe looks down on them from the ceiling and up at them from the ground.
+    - **Clouds sit at 900 to 1,100 m.** They stood under the ceiling of 1,200 m, so the probe looked down on them from the ceiling. Since issue 20 the ceiling is 500 m and the reader always looks up at them, which also takes a near cloud out of the reveal.
 7. **Ground terrain.** A square grid at 2 m per vertex on HIGH and 4 m on LOW, with a coarser rim that runs out to 3,150 units from the site. Height is the globe elevation at the site, a tilt from its gradient, and three new noise octaves seeded from the site. Relief is real metres, not the globe exaggeration. Flat-shaded vertex colours from the globe biome and palette with per-face noise. Beach, snow line, and forest mask follow the globe rules. A site within a few metres of sea level gets a sea plane with a shoreline. Waves are 2 m long at a 6 s period. No rivers or lakes in phase one.
 8. **Globe fixes.** Wave period from 3.9 s to about 14 s, spatial frequency halved, vertical wobble halved. Flora scaled down 40% and count raised 1.5x on HIGH. Fauna scaled down 30%, count unchanged. Minimum camera distance unchanged. The lore numbers stay, because they become true on the ground.
-9. **Ground camera.** OrbitControls with pan. Target clamped to the fog start. Camera height clamped between 2 m above the terrain and a 1.2 km ceiling. A click on a creature or the ground glides the target there. The creature inspector opens from the same click after the glide. LOW devices get the probe with 6,000 flora, 100 fauna, and no shadows.
+9. **Ground camera.** OrbitControls with pan. Target clamped to the fog start. Camera height clamped between 2 m above the terrain and a ceiling of 500 m. The ceiling was 1.2 km until issue 20. A click on a creature or the ground glides the target there. The creature inspector opens from the same click after the glide. LOW devices get the probe with 6,000 flora, 100 fauna, and no shadows.
 
 ## Implementation notes
 
@@ -63,9 +63,30 @@ The patch holds 1.13 million triangles. Two measurements set the shape of the me
 
 Added with issue 06. These notes record the decisions the issue text did not fix.
 
-**The fog opens with the height.** The reveal puts the camera 800 m up and the ceiling is 1,200 m, but the fog is solid at 750 m. A fixed fog therefore paints one flat colour over the whole patch from both heights, and the reader sees nothing to zoom into. So the far distance of the fog grows with the height of the camera over the site, 1.15 m per metre, and it stops at 2,100 m. The near distance keeps the ratio of 0.6, so the depth of the fade holds. At the ceiling the patch reads in full and the rim runs on to 3,150 units, well past the fog, so the ground never shows a cut. See "The rim carries the ground past the fog" below. `FOG_NEAR` and `FOG_FAR` keep their values and still set the pan limit and the fog at the ground.
+**The fog opens with the height.** The reveal puts the camera 450 m up and the ceiling is 500 m, but the fog is solid at 750 m. A fixed fog therefore paints one flat colour over the whole patch from both heights, and the reader sees nothing to zoom into. So the far distance of the fog grows with the height of the camera over the site, 1.15 m per metre, and it stops at 2,100 m. The near distance keeps the ratio of 0.6, so the depth of the fade holds. Since the ceiling of issue 20 the fog opens to 1,325 m at most, so the stop at 2,100 m no longer binds. At the ceiling the patch reads in full and the rim runs on to 3,150 units, well past the fog, so the ground never shows a cut. See "The rim carries the ground past the fog" below. `FOG_NEAR` and `FOG_FAR` keep their values and still set the pan limit and the fog at the ground.
 
-**The tilt is a band, not a lock.** The height sets the polar angle the view wants, from 0.62 rad at the ceiling to 1.40 rad at 60 m, and a band around that angle holds the play the reader keeps. The band is 0.06 rad at the ceiling and 0.25 rad at 60 m, so a zoom in turns the view from the patch below to the horizon on its own. Under 60 m the band opens to a half turn and the reader owns the angle. A hard lock was rejected: it takes the turn of the view away from the reader for the whole upper half of the range. A second limit caps the polar angle where the camera would meet the floor, so the controls do not fight the floor clamp and shake.
+**The tilt is a band, not a lock.** The height sets the polar angle the view wants, from 1.10 rad at the ceiling to 1.40 rad at 60 m, and a band around that angle holds the play the reader keeps. The band is 0.06 rad at the ceiling and 0.25 rad at 60 m, so a zoom in turns the view from the patch below to the horizon on its own. Under 60 m the band opens to a half turn and the reader owns the angle. A hard lock was rejected: it takes the turn of the view away from the reader for the whole upper half of the range. A second limit caps the polar angle where the camera would meet the floor, so the controls do not fight the floor clamp and shake.
+
+**The ground view must not read as a rectangle.** Added with issue 20. The patch holds a 2 m grid
+with knolls and rock, and it holds every plant. The rim outside it holds a 50 m grid with neither,
+and no plants at all. The two make one surface, but the detail stops at the edge of the box, 750
+units from the site, and from the air that line reads as a square of fine ground inside a smooth
+field.
+
+The fog cannot hide the line at any height while the view looks down. The fog opens 1.15 m for each
+metre of height, and the far edge of the box moves away only by the horizontal distance of the
+camera from the site, so the edge is inside the fog when `tan(polar angle) < FOG_LIFT`. The old
+`POLAR_HIGH` of 0.62 rad gives 0.71, under the limit at every height. Lowering the ceiling alone
+therefore could not work, because the tilt reaches `POLAR_HIGH` at whatever the ceiling is.
+
+So the ceiling comes down to 500 m and `POLAR_HIGH` goes up to 1.10 rad, which gives 1.97 and 1.74
+at the far side of the band. The reveal takes the same tilt: 450 m up and 884 m south. The plants
+take a second rule, because the fog does not hide a hard line of forest at 500 m either: the chance
+of a plant falls to zero over the last 300 units of the box, so the forest thins out instead of
+stopping. Measured on `Auralis@-38.00,18.00`, a flat inland cell: the square was plain at 1,200 m
+and it still read at 800 m; at the new ceiling, panned to each of the four limits and tilted to the
+foot of the band, nothing reads. The cost is the top-down view of the whole patch, which is the
+view the rectangle was in.
 
 **The pan limit stops the camera too.** The target cannot leave the fog start at 450 m. The first build clamped the target alone, so a pan that reached the limit slid the camera on over a target that could not follow, and the camera sank toward the ground. The clamp now moves the camera by the same step, so the whole view stops.
 
@@ -78,9 +99,10 @@ wide, a coast crosses the edge often, so the cut was the common case and not the
 
 The rim now comes from the worker as a second grid. It reads the same globe field and the same
 hill noise the patch reads, so the relief and the coast run on across the join. Three numbers set
-it. The reach is 3,150 units, because at the ceiling the camera stands at most 1,420 units from
-the site and the fog is solid at 2,100 units, so a ray from that height meets the ground 1,723
-units out; the reader can therefore never see the outer edge. The cell is 25 patch steps, which is
+it. The reach is 3,150 units. The ceiling of 1,200 m put the camera at most 1,420 units from the site
+with the fog solid at 2,100 units, so a ray from that height met the ground 1,723 units out. The
+ceiling of issue 20 asks for 2,830 units, so the value keeps its margin. The reader can therefore
+never see the outer edge. The cell is 25 patch steps, which is
 50 units on HIGH and 100 on LOW; it divides the box, so the edge of the patch lands on a rim grid
 line and every rim node there sits on a patch vertex. The globe field takes one sample per two rim
 cells, because the rim covers about 18 times the area of the cell and a grid at the density of the

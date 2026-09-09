@@ -1205,6 +1205,10 @@ const FLORA_SLOPE = 0.9;     // rise over run: a steeper cell takes only rock an
 const CLUMP_WAVE = 130;      // metres: the wavelength of the clumps inside the patch
 const CLUMP_AMP = 0.35;      // how far the clumps move the mask
 const FLORA_FLOOR = 0.02;    // the chance of a plant where the mask is at its lowest
+// The rim outside the box holds no plants. A hard line of forest at the edge of the box reads as
+// a rectangle from the air, so the chance of a plant falls to zero over the last FLORA_EDGE units
+// of the box. See "the rectangle" in ground.js. Issue 20.
+const FLORA_EDGE = 300;      // units, the band the plants thin out over at the edge of the box
 // metres, the size of one plant: tree, pine, cactus, crystal, mushroom, boulder, palm
 const FLORA_M = [[6, 14], [8, 18], [2, 5], [1.5, 6], [1, 3], [1, 4], [7, 12]];
 // the four cells the scan writes before the current one: west, north-west, north, north-east
@@ -1275,7 +1279,9 @@ function patchFlora(ctx, s) {
 
       // The density factor of the world type says how full a lush cell is. The floor keeps a dry
       // world from going empty, so a desert site still shows its sparse cactus and boulders.
-      if (rng() >= FLORA_FLOOR + (density - FLORA_FLOOR) * smoothstep(-0.35, 0.35, mask)) continue;
+      const ed = Math.min(half - Math.abs(x), half - Math.abs(z));
+      const edge = ed >= FLORA_EDGE ? 1 : smoothstep(0, FLORA_EDGE, ed);
+      if (rng() >= (FLORA_FLOOR + (density - FLORA_FLOOR) * smoothstep(-0.35, 0.35, mask)) * edge) continue;
 
       // The gap test reads the four neighbours the scan already wrote, so it reads every pair
       // once. A cell two steps away is at least 6 metres off, which is over the gap already.

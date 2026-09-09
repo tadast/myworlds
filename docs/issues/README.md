@@ -42,7 +42,7 @@ a cell of the globe 0.01 units of arc wide, about 74 km on a 7,352 km planet, an
 draws into that box. `patch.metresAcross` and `patch.metresUp` give the two scales, and
 `patch.span` gives the width of the cell in metres. A plant and a creature keep their lore size
 in units, so they read as normal against the ground and they are no longer the metres the lore
-says. A patch built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 3,150 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the 800 m reveal and from the 1,200 m ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
+says. A patch built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 3,150 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the reveal and from the ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Since issue 20 the camera ceiling is 500 m and the reveal is 450 m up and 884 m south, so the detail of the patch never reads as a rectangle. Camera floor 2 m above the terrain.
 
 Budgets:
 
@@ -69,7 +69,8 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - The pull to life runs before the snap and reaches half a cell, so a creature that lives in the
   cell claims the patch and the snap then puts the site back on the grid.
 - The marker is the square of the cell, not a symbol: what the square holds is what the ground
-  shows.
+  shows. It is therefore only a few pixels wide from far out, and the reader zooms in to see it.
+- Since issue 20 the marker shows only while the reader aims, and it follows the pointer.
 
 ### The rim
 
@@ -86,6 +87,8 @@ Independent agents must agree on these. Do not change them inside an issue. If a
   one surface and the reader sees no line.
 - The sea reaches 2,700 units from the camera target, which covers the fog and stays inside the
   rim. A patch with no water still gets a sea when the rim holds water.
+- The rim carries no plant. Since issue 20 the patch thins its plants away over its last 300
+  units, so the forest does not stop in a straight line at the edge of the box.
 
 ### The site and the URL
 
@@ -96,7 +99,7 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 
 ### App mode
 
-`app.js` holds one state: `mode` in `'orbit' | 'descending' | 'ground' | 'ascending'`. Orbit is today's behaviour. The globe scene and `current` stay in memory in every mode. In `ground` mode the globe is not rendered and its `frame()` work is skipped.
+`app.js` holds one state: `mode` in `'orbit' | 'descending' | 'ground' | 'ascending'`. Orbit is today's behaviour. Issue 20 adds one flag inside orbit, `aiming`: the reader has pressed the button and the next tap on the planet sends the probe. The globe scene and `current` stay in memory in every mode. In `ground` mode the globe is not rendered and its `frame()` work is skipped.
 
 ### The ground module
 
@@ -222,3 +225,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | open |
 | 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | CLOSED 603aa99 |
 | 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED f2daf0d |
+| 20 | The reader aims the probe, and the ground view holds no rectangle | AFK | 02, 06, 18, 19 | PENDING |
