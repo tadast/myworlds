@@ -47,6 +47,16 @@ Near sea level the hills and the knolls fall to a quarter and the rock to 40%, o
 
 **The sea level.** A patch needs the sea level of the globe, and the globe reads it as a quantile over its icosphere. The worker caches the context of the last world it built, so a patch for that world takes the exact value. A worker that never built the world falls back to the same quantile over 60,000 points of a Fibonacci sphere. That fallback is accurate to a few metres of elevation.
 
+### What makes the terrain fast
+
+The patch holds 1.13 million triangles. Two measurements set the shape of the mesh. Both come from a timer query of the graphics card around one `Ground.render`, at the camera the probe lands with, 60 samples.
+
+**The mesh is indexed.** A grid vertex belongs to six triangles. The first build repeated every vertex, so it fed 3.39 million vertices to the card for 1.13 million triangles. The indexed mesh feeds 592,000. That took the terrain from 8.75 ms to 6.8 ms. The colour is now per vertex, and the reader sees it smoothed over one cell of 2 m. `flatShading` still takes the normal from the derivatives, so the facets read as before.
+
+**The material is Lambert, not standard.** The terrain fills the frame, so its fragment shader sets the cost. A standard material runs a full reflection model for a surface that is rough and not metal. A Lambert material draws the same ground for about a third less time: 6.8 ms to 5.2 ms. `GROUND_GAIN` of 1.06 puts the mean pixel back where the standard material had it, because the sheen the Lambert model drops is nearly a constant over a rough surface. Measured against the standard material at the same camera and the same sun, the mean pixel moves by 1 part in 255 and no block of the frame moves by more than 6.
+
+**A coarser grid outside the fog does not help.** The obvious cut is to drop the resolution past the fog line. A test cut the drawn triangles from 727,000 to 323,000 and the frame time did not move: the card is not bound by triangles once the mesh is indexed. The cut would still show a seam at some camera positions, because the camera may stand anywhere over the patch. So the grid stays at one step everywhere, and a grid that follows the camera stays with issue 11.
+
 ## Phases
 
 - **Phase 0.** Globe fixes, decision 8.
