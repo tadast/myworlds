@@ -164,7 +164,7 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 01 | Globe scale fixes | AFK | none | CLOSED 6d232a6 |
 | 02 | Site in the URL and the pull to life | AFK | none | CLOSED 2e6ee86 |
 | 03 | Descent and ascent shell | AFK | 02 | CLOSED 2ca24b1 |
-| 04 | Patch terrain from the worker | AFK | 03 | open |
+| 04 | Patch terrain from the worker | AFK | 03 | CLOSED f61a39a |
 | 05 | Ground sea and shoreline | AFK | 04 | open |
 | 06 | Ground camera: pan, clamps, glide | AFK | 04 | open |
 | 07 | Ground flora with card impostors | AFK | 04 | open |

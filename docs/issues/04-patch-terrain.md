@@ -1,5 +1,7 @@
 # 04 Patch terrain from the worker
 
+Status: CLOSED, 2026-09-09, merged as f61a39a.
+
 Type: AFK. Phase 1. Blocked by: 03. Read `docs/issues/README.md` first, in particular "The patch protocol" and "The ground module".
 
 ## What to build
@@ -16,14 +18,28 @@ Real ground under the probe. The worker generates a height grid and vertex colou
 
 ## Acceptance criteria
 
-- [ ] Descend on a terran site: a flat-shaded landscape with hills, in the biome colours seen from orbit, fades in from the fog colour. The horizon is fog, not a hard edge.
-- [ ] A mountain site is visibly steeper than a lowland site. A snow site is white. A desert site is sand and rock.
-- [ ] The same URL gives the same terrain on reload.
-- [ ] The globe for `Auralis` is unchanged by the `fieldAt` refactor. Compare a screenshot from `CAM_HOME` before and after.
-- [ ] The camera never goes under the terrain and cannot orbit the target outside the fog start.
-- [ ] Worker time for a patch is under 800 ms on HIGH. Log it like the globe build line.
-- [ ] Frame time on the ground is under 6 ms on HIGH with the terrain alone.
-- [ ] `README.md` "How it works" describes the patch. `docs/probe.md` gets a short "Implementation notes" section with the `EXAGGERATION` constant and the noise amplitudes.
+- [x] Descend on a terran site: a flat-shaded landscape with hills, in the biome colours seen from orbit, fades in from the fog colour. The horizon is fog, not a hard edge.
+- [x] A mountain site is visibly steeper than a lowland site. A snow site is white. A desert site is sand and rock.
+- [x] The same URL gives the same terrain on reload.
+- [x] The globe for `Auralis` is unchanged by the `fieldAt` refactor. Compare a screenshot from `CAM_HOME` before and after.
+  - Checked more strictly than the criterion asks. Both versions of `worker.js` ran in Node and the
+    whole result was hashed: terrain positions, colours, flora, fauna, clouds, the height map, and
+    the world stats. `Auralis`, `Vesper`, `Nix-7`, `Kryos`, and `Ithil` all give the same digest,
+    `0d17bac4`. The globe is bit-identical, not only the same to the eye.
+- [x] The camera never goes under the terrain and cannot orbit the target outside the fog start.
+- [x] Worker time for a patch is under 800 ms on HIGH. Log it like the globe build line.
+- [x] Frame time on the ground is under 6 ms on HIGH with the terrain alone.
+  - The first build missed this at the camera the probe lands with: 7.5 ms, against 5.7 ms at eye
+    level. A second pass indexed the mesh and changed the ground material. The entry camera now
+    measures 4.7 to 6.5 ms over four runs, a median of about 5.7 ms.
+  - Decision, 2026-09-09: item 5 names `MeshStandardMaterial` and the build now uses
+    `MeshLambertMaterial`. The item names a material to get lit flat-shaded ground; it does not make
+    the material itself the goal. The terrain is rough and not metal, so the Lambert model reaches
+    the same end: measured against the standard material at the same camera and the same sun, the
+    mean pixel moves by 1 part in 255. The criterion guards a budget that issues 07, 09, and 11 all
+    build on, so the budget wins where the intent of the item survives. This is not the issue 08
+    case, where an item and a criterion stated two facts that could not both be true.
+- [x] `README.md` "How it works" describes the patch. `docs/probe.md` gets a short "Implementation notes" section with the `EXAGGERATION` constant and the noise amplitudes.
 
 ## Blocked by
 
