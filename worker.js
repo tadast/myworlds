@@ -1226,7 +1226,10 @@ function patchFlora(ctx, s) {
       const hg = h * hPerM;
       const t = siteT + (Math.max(elevation, 0) - Math.max(h, 0)) * hPerM * 0.55;
       const m = siteM - vary[gk] * 0.1 + Math.max(siteFM, 0) * 0.06;
-      if (biomeIndex(ctx, hg, t, m) <= 2) continue;   // the sea, the shallows, and the beach
+      // The beach band must be the metre-scale one of issue 05. The default is the band of the
+      // globe, which is a fraction of a planet radius: it calls every patch under a few hundred
+      // metres a beach, and then no plant grows anywhere near a coast.
+      if (biomeIndex(ctx, hg, t, m, BEACH_M * hPerM) <= 2) continue;   // sea, shallows, and beach
 
       const clump = noise.n3(x * fq + oc0, z * fq + oc1, 31.5) * CLUMP_AMP;
       const mc = m + clump * 0.5, mask = siteFM + clump + mc * 0.5;
