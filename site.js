@@ -4,8 +4,21 @@
 // arrays before planet.rotation.y turns them. Lat is asin(y). Lon is atan2(z, x). Two decimals.
 import * as THREE from 'three';
 
-export const PATCH_SIZE = 1500;      // metres, the side of a ground patch
-export const PULL_METRES = 3000;     // two patch widths, the reach of the pull to life
+export const PATCH_SIZE = 1500;      // units, the side of the ground box a patch draws into
+export const PULL_REACH = 0.5;       // parts of a cell: how far the pull to life looks
+
+// The patch cell. The reader picks a square of the globe and the whole square becomes the
+// ground. CELL is the arc of that square in globe units, so it is the same size on the screen
+// for every planet: about 62 px at the closest zoom, which the reader can see and aim at.
+// A finer square would be false precision. The globe draws its surface from an icosphere at
+// detail 100, which puts about 0.011 units between two vertices, so a square under CELL would
+// sit inside one facet and the coast the reader aims at would not be where the field puts it.
+//
+// The cell is far wider than the 1,500 unit box it draws into, so the ground holds an
+// artificial scale. worker.js gives the two numbers back as patch.metresAcross and
+// patch.metresUp. A plant and a creature keep their lore size in units, so they read as normal
+// against the ground and they are no longer the metres the lore text says.
+export const CELL = 0.01;
 
 const CENTRE = new THREE.Vector2(0, 0);
 const _ray = new THREE.Raycaster();
@@ -13,9 +26,30 @@ const _centre = new THREE.Vector3();
 const _hit = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _local = new THREE.Vector3();
-const _zAxis = new THREE.Vector3(0, 0, 1);
+const _east = new THREE.Vector3();
+const _north = new THREE.Vector3();
+const _corner = new THREE.Vector3();
 
 const round2 = (v) => Math.round(v * 100) / 100;
+
+// The cell that holds a site. The cells tile the globe: a band of latitude CELL wide, and inside
+// the band a step of longitude that keeps the cell square in metres. Near a pole that step would
+// pass a half turn, so it stops there and the top cell is the whole cap.
+export function snapSite(site) {
+  if (!site) return site;
+  const latStep = THREE.MathUtils.radToDeg(CELL);
+  const lat = THREE.MathUtils.clamp(Math.round(site.lat / latStep) * latStep, -90, 90);
+  const lonStep = Math.min(180, latStep / Math.max(Math.cos(THREE.MathUtils.degToRad(lat)), 1e-3));
+  let lon = Math.round(site.lon / lonStep) * lonStep;
+  if (lon > 180) lon -= 360;
+  if (lon < -180) lon += 360;
+  return { lat: round2(lat), lon: round2(lon), kind: site.kind };
+}
+
+// The metres of the globe one cell covers. The worker takes this as patch.span.
+export function cellSpan(world) {
+  return CELL * radiusKm(world) * 1000;
+}
 
 // The ground radius under a unit direction in planet space, from the worker's lat/lon height map.
 export function groundRadius(world, hm, dir) {
@@ -83,11 +117,13 @@ export function pickSite(camera, current) {
   return hit ? dirToSite(hit.local) : null;
 }
 
-// The pull to life. A creature home within two patch widths of the site takes the site.
-// The nearest home wins. The site keeps the species id it was pulled to, or -1.
+// The pull to life. A creature home inside the cell under the pick takes the site. The nearest
+// home wins. The site keeps the species id it was pulled to, or -1. The pull runs before the
+// snap, so a home anywhere in the cell puts its species on the patch, and the snap then returns
+// the site to the grid.
 export function pullSite(site, current) {
   if (!site || !current || !current.homes || !current.homes.length) return site;
-  const limit = PULL_METRES / (radiusKm(current.world) * 1000); // globe units, the radius is 1
+  const limit = CELL * PULL_REACH;                              // globe units, the radius is 1
   const dir = siteDir(site.lat, site.lon, _local);
   const homes = current.homes;
   let best = -1, bestD = limit;
@@ -136,19 +172,36 @@ export function siteToUrl(seed, site) {
 }
 
 // ---------------------------------------------------------------- the marker
-// A ring on the surface where the probe would land. 48 triangles.
+// The square of the cell the probe would land on. It is the true footprint of the patch, not a
+// symbol: what the square holds is what the ground shows. Eight vertices and eight triangles
+// draw the outline, and each vertex sits at the ground radius under it, so the square follows
+// the relief instead of floating over a hill.
+const RING_IN = 0.9;                 // the inner edge of the outline, as a part of the cell
+const LIFT = 0.0008;                 // globe units the outline floats, so it clears the surface
+// the four corners of the cell, in the order they go round it
+const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+
 let marker = null;
 
 function makeMarker() {
-  const geo = new THREE.RingGeometry(0.016, 0.023, 24, 1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
+  // two triangles per side: the outer corner, the next outer corner, and the two inner ones
+  const idx = [];
+  for (let i = 0; i < 4; i++) {
+    const a = i, b = (i + 1) % 4, c = 4 + b, d = 4 + i;
+    idx.push(a, b, c, a, c, d);
+  }
+  geo.setIndex(idx);
   const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'site-marker';
   mesh.renderOrder = 3;
+  mesh.frustumCulled = false;
   return mesh;
 }
 
-// Show the ring at the site on the planet. A null site takes the ring off the scene.
+// Show the square of the cell on the planet. A null site takes it off the scene.
 export function showMarker(site, current) {
   if (!site || !current) {
     if (marker && marker.parent) marker.parent.remove(marker);
@@ -161,9 +214,30 @@ export function showMarker(site, current) {
   }
   const pal = current.world.palette;
   marker.material.color.set(pal.fauna?.accent || '#ffffff');
-  const dir = siteDir(site.lat, site.lon, _local);
-  const r = Math.max(groundRadius(current.world, current.heightMap, dir), current.world.seaRadius || 0);
-  marker.position.copy(dir).multiplyScalar(r + 0.005);   // a sea site keeps the ring on the water
-  marker.quaternion.setFromUnitVectors(_zAxis, dir);
+
+  // the frame of the site: up, east, and north
+  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
+  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
+  const dir = _local.set(cla * clo, sla, cla * slo);
+  _east.set(-slo, 0, clo);
+  _north.set(-sla * clo, cla, -sla * slo);
+
+  const sea = current.world.seaRadius || 0;
+  const pos = marker.geometry.attributes.position;
+  const half = CELL / 2;
+  for (let ring = 0; ring < 2; ring++) {
+    const w = ring === 0 ? half : half * RING_IN;
+    for (let c = 0; c < 4; c++) {
+      _corner.copy(dir)
+        .addScaledVector(_east, CORNERS[c][0] * w)
+        .addScaledVector(_north, CORNERS[c][1] * w)
+        .normalize();
+      const r = Math.max(groundRadius(current.world, current.heightMap, _corner), sea) + LIFT;
+      pos.setXYZ(ring * 4 + c, _corner.x * r, _corner.y * r, _corner.z * r);
+    }
+  }
+  pos.needsUpdate = true;
+  marker.position.set(0, 0, 0);
+  marker.quaternion.identity();
   return marker;
 }

@@ -5,7 +5,7 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker, snapSite, cellSpan } from './site.js';
 import { Ground } from './ground.js';
 import { skyView } from './ground-sky.js';
 import { perf, Hud } from './perf.js';
@@ -519,14 +519,16 @@ function perfRows() {
 
 // ---------------------------------------------------------------- the landing site
 // The probe would land where the screen centre points. The site follows the crosshair, it snaps
-// to a creature home within two patch widths, and it goes in the URL as #Seed@lat,lon.
+// to the cell under it, and it goes in the URL as #Seed@lat,lon. The pull runs first, so a
+// creature that lives in the cell claims the patch; the snap then puts the site back on the grid,
+// and the square marker shows the reader the exact ground the probe would bring back.
 let site = null;          // { lat, lon, kind } or null outside the pick range
 let pendingSite = null;   // a site read from the URL, used once the world is built
 let hashAt = 0;
 
 function updateSite(dist, t) {
   const canPick = !!current && current.world.type !== 'gas' && dist <= PICK_RANGE;
-  site = canPick ? pullSite(pickSite(camera, current), current) : null;
+  site = canPick ? snapSite(pullSite(pickSite(camera, current), current)) : null;
   showMarker(site, current);
   updateProbeBtn();
   if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows, but not every frame
@@ -596,7 +598,7 @@ function requestPatch(target) {
       patchJob = null;
       patchState = { done: true, result };
       const p = result.patch;
-      console.info(`[myworlds] patch "${p.patchSeed}" ${p.biome} at ${p.elevation.toFixed(0)} m, grid ${p.grid} m, ${p.n}x${p.n}, worker ${Math.round(performance.now() - t0)} ms`);
+      console.info(`[myworlds] patch "${p.patchSeed}" ${p.biome} at ${p.elevation.toFixed(0)} m, cell ${(p.span / 1000).toFixed(1)} km, ${p.metresAcross.toFixed(0)} m/unit across and ${p.metresUp.toFixed(1)} up, ${p.n}x${p.n}, worker ${Math.round(performance.now() - t0)} ms`);
     },
     fail: (message) => {
       patchJob = null;
@@ -606,7 +608,10 @@ function requestPatch(target) {
   };
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
-    opts: { grid: Q.ground.grid, size: 1500, maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1 },
+    opts: {
+      grid: Q.ground.grid, size: 1500, span: cellSpan(current.world),
+      maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1,
+    },
   });
 }
 
