@@ -170,7 +170,7 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 07 | Ground flora with card impostors | AFK | 04 | CLOSED 71cc6d5 |
 | 08 | Sociality gene | AFK | none | CLOSED d223dee |
 | 09 | Ground fauna in groups | AFK | 04, 08 | CLOSED 2818c38 |
-| 10 | Far fauna coarse mesh | AFK | 09 | open |
+| 10 | Far fauna coarse mesh | AFK | 09 | CLOSED be45f37 |
 | 11 | Adaptive LOD and the perf overlay | AFK | 07, 10 | open |
 | 12 | Sky continuity: sun, moons, rings, clouds | AFK | 03 | CLOSED acf2a18 |
 | 13 | LOW tier pass | AFK | 05, 06, 11, 12 | open |
