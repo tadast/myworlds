@@ -19,6 +19,8 @@ export const FOG_FAR = 750;          // metres, where the fog is solid
 export const SKY_RADIUS = 5000;      // metres, the sky dome
 export const CEILING = 1200;         // metres, the camera ceiling above the site
 export const FLOOR = 2;              // metres, the camera floor above the terrain
+const SHADOW_BOX = 200;     // metres, the half width of the shadow box around the target
+
 export const CAM_START = 800;        // metres, the camera starts this far up and this far south
 export const RIM = 1500;             // metres, how far the coarse rim reaches from the site
 
@@ -234,14 +236,26 @@ export class Ground {
     // so the height of the site must not move it. The colour and the strength come from the sky.
     const sun = new THREE.DirectionalLight(this.sky.sunColor, this.sky.sunIntensity);
     sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6);
-    // The sun does not cast yet, so nothing on the ground draws a shadow. The near plants of
-    // ground-flora.js already carry castShadow on HIGH and the terrain already carries
-    // receiveShadow, so the ground needs only this one flag and a shadow box. Measured on issue
-    // 07: a 2,048 map over a box of 200 m costs 2.2 ms at eye level and 2.3 ms at the entry
-    // camera, and it takes the frame to 7.5 ms before the sea of issue 05 exists. The reader
-    // gains nothing at the entry camera, because no plant is near enough to cast there. So the
-    // decision belongs with the one runtime knob of issue 11, not here.
+    // The sun casts on HIGH, which is what the budget table promises. A shadow box of 200 m
+    // around the target holds the plants the reader can see; _driveShadow() moves it every frame.
+    // The map costs about 2.2 ms, so the sun only casts when the camera is low enough that a near
+    // mesh exists at all. Above the LOD distance every plant is a card, no card casts, and the map
+    // would draw nothing. That is why the reader pays for the shadow at the water line and not at
+    // the ceiling.
+    sun.castShadow = !!this.tier.shadows;
+    if (sun.castShadow) {
+      sun.shadow.mapSize.set(2048, 2048);
+      const c = sun.shadow.camera;
+      c.left = -SHADOW_BOX; c.right = SHADOW_BOX; c.top = SHADOW_BOX; c.bottom = -SHADOW_BOX;
+      c.near = SKY_RADIUS * 0.6 - SHADOW_BOX * 4;
+      c.far = SKY_RADIUS * 0.6 + SHADOW_BOX * 4;
+      sun.shadow.bias = -0.0006;
+      sun.shadow.normalBias = 0.6;
+      c.updateProjectionMatrix();
+    }
+    this.sun = sun;
     this.content.add(sun);
+    this.content.add(sun.target);
     this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night));
 
     // The reveal: the camera starts 800 m up and 800 m south of the site, and it looks at the
@@ -437,6 +451,7 @@ export class Ground {
       fog.near = fog.far * (FOG_NEAR / FOG_FAR);
     }
 
+    this._driveShadow();
     if (this.fauna) this.fauna.update(t, dt);
     // the sky follows the camera, so it must move after every clamp
     if (this.sky) this.sky.update(t, dt, this.camera);
@@ -445,6 +460,22 @@ export class Ground {
 
     // the LOD walk reads the camera, so it runs after the clamps too
     if (this.flora) this.flora.update(this.camera);
+  }
+
+  // The shadow box follows the target and only lives near the ground. A plant casts only while it
+  // is a near mesh, and a plant is a near mesh only within lod.distance of the camera. So a camera
+  // higher than that distance has no caster under it, and the map would cost 2.2 ms to draw an
+  // empty frame. The margin of 1.2 keeps the shadow through the hysteresis band of the LOD walk.
+  _driveShadow() {
+    const sun = this.sun;
+    if (!sun || !this.tier.shadows) return;
+    const p = this.camera.position, tg = this.controls.target;
+    const high = p.y - this._groundAt(p.x, p.z) > this.lod.distance * 1.2;
+    sun.castShadow = !high;
+    if (high) return;
+    sun.target.position.set(tg.x, tg.y, tg.z);
+    sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6).add(sun.target.position);
+    sun.target.updateMatrixWorld();
   }
 
   // ---------------------------------------------------------------- the feel of the controls
