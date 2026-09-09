@@ -1111,6 +1111,11 @@ const HILL_M = 25, HILL_WAVE = 400;    // metres: the hills that carry the shape
 const KNOLL_M = 6, KNOLL_WAVE = 90;    // metres: the knolls a walker sees
 const ROCK_M = 1.2, ROCK_WAVE = 14;    // metres: the rock the ground shows at the feet
 const SHORE_DAMP = 45;                 // metres: the band where the patch noise fades at the shore
+// The patch covers a square of the globe that the reader can see and aim at. That square is far
+// wider than the ground box it draws into, so the ground box holds an artificial scale: one unit
+// is K metres across and V metres up. See "The patch cell" in docs/issues/README.md.
+const FIELD_N = 65;                    // samples of the globe field across the patch, per side
+const TARGET_RELIEF = 120;             // units: how much large-scale relief a patch aims to show
 const SLOPE_ROCK = [0.55, 1.15];       // the slope band where the ground turns to bare rock
 const BIOME_NAME = ['ocean', 'shallows', 'beach', 'tundra', 'snow', 'rock', 'forest', 'grass', 'dry', 'desert'];
 // The shore, in metres. The globe paints its beach over a band of the elevation field that stands
@@ -1199,7 +1204,7 @@ const GAP_DI = [-1, -1, 0, 1], GAP_DJ = [0, -1, -1, -1];
 // jitters inside its cell, and a plant closer than FLORA_GAP to a neighbour is dropped. The
 // stride sampling at the end is the one packFauna uses.
 function patchFlora(ctx, s) {
-  const { heights, vary, n, grid, half, size, hPerM, elevation, siteT, siteM, siteFM, noise, rng } = s;
+  const { heights, vary, n, grid, half, size, hPerM, hPerU, cellT, cellM, cellF, noise, rng } = s;
   const maxFlora = s.maxFlora | 0;
   if (maxFlora <= 0 || !ctx.P.flora || ctx.P.flora.length === 0) return new Float32Array(0);
 
@@ -1223,16 +1228,16 @@ function patchFlora(ctx, s) {
       const dhx = (heights[gk + 1] - heights[gk - 1]) / (2 * grid);
       const dhz = (heights[gk + n] - heights[gk - n]) / (2 * grid);
 
-      const hg = h * hPerM;
-      const t = siteT + (Math.max(elevation, 0) - Math.max(h, 0)) * hPerM * 0.55;
-      const m = siteM - vary[gk] * 0.1 + Math.max(siteFM, 0) * 0.06;
+      const hg = h * hPerU;
+      const t = cellT[gk];
+      const m = cellM[gk] - vary[gk] * 0.1 + Math.max(cellF[gk], 0) * 0.06;
       // The beach band must be the metre-scale one of issue 05. The default is the band of the
       // globe, which is a fraction of a planet radius: it calls every patch under a few hundred
       // metres a beach, and then no plant grows anywhere near a coast.
       if (biomeIndex(ctx, hg, t, m, BEACH_M * hPerM) <= 2) continue;   // sea, shallows, and beach
 
       const clump = noise.n3(x * fq + oc0, z * fq + oc1, 31.5) * CLUMP_AMP;
-      const mc = m + clump * 0.5, mask = siteFM + clump + mc * 0.5;
+      const mc = m + clump * 0.5, mask = cellF[gk] + clump + mc * 0.5;
 
       // The kind. The globe separates its kinds by a field it reads at continent scale, so that
       // field holds one value over 1,500 m and it cannot separate anything inside a patch. The
@@ -1315,16 +1320,17 @@ const ANCHOR_TRIES = 48;      // how many places one group tries before it gives
 function patchNiches(ctx, g) {
   const out = new Set();
   const step = Math.max(1, Math.round(NICHE_STEP / g.grid));
-  const f = g.siteFM, beachW = ctx.beachW;
+  const beachW = ctx.beachW;
   for (let j = 0; j < g.n; j += step) {
     const zm = -g.half + j * g.grid;
     if (Math.abs(zm) > NICHE_REACH) continue;
     for (let i = 0; i < g.n; i += step) {
       const xm = -g.half + i * g.grid;
       if (xm * xm + zm * zm > NICHE_REACH * NICHE_REACH) continue;
-      const k = j * g.n + i, hm = g.heights[k], h = hm * g.H_PER_M;
-      const t = g.siteT + (Math.max(g.elevation, 0) - Math.max(hm, 0)) * g.H_PER_M * 0.55;
-      const m = g.siteM - g.vary[k] * 0.1 + Math.max(f, 0) * 0.06;
+      const k = j * g.n + i, hm = g.heights[k], h = hm * g.hPerU;
+      const t = g.cellT[k];
+      const f = g.cellF[k];
+      const m = g.cellM[k] - g.vary[k] * 0.1 + Math.max(f, 0) * 0.06;
       const beach = h > 0 && h < beachW;
       const lowland = h > beachW && h < 0.3;
       if (beach && t > 0.1) out.add('beach');
@@ -1431,6 +1437,12 @@ function patch(seed, lat, lon, opts) {
   const radiusM = ctx.radiusKm * 1000;
   const M_PER_H = ctx.amp * radiusM / EXAGGERATION;   // globe elevation units to metres
   const H_PER_M = 1 / M_PER_H;
+  // K: metres of the globe across one unit of the ground box. The reader picks a cell on the
+  // globe, and the whole cell lands in the box, so K is the width of the cell over the width of
+  // the box. A patch with no span keeps the old behaviour, where one unit is one metre.
+  const span = opts.span > 0 ? opts.span : size;
+  const K = span / size;
+  const spanHalf = span / 2;
 
   // the frame of the site on the globe: up, east, and south
   const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
@@ -1452,11 +1464,51 @@ function patch(seed, lat, lon, opts) {
   const siteH = fld.h, siteT = fld.t, siteM = fld.m, siteFM = fld.fm;
   const elevation = siteH * M_PER_H;
 
-  // The tilt: the gradient of the globe elevation across the patch. The globe holds nothing
-  // below about 50 km, so this tilt is gentle. The hills below carry the relief a walker sees.
-  const hE = fieldOn(half, 0).h, hW = fieldOn(-half, 0).h;
-  const hS = fieldOn(0, half).h, hN = fieldOn(0, -half).h;
-  const gx = (hE - hW) * M_PER_H / size, gz = (hS - hN) * M_PER_H / size;
+  // The globe field across the patch. The patch used to take one linear tilt, because over
+  // 1,500 m the globe field is a plane. A cell is tens of kilometres wide, so the field bends
+  // inside it and a coast can cross it. The field is read on a coarse grid and interpolated:
+  // FIELD_N squared reads cost about 1% of the reads the globe itself makes.
+  const FN = FIELD_N, FN1 = FN - 1;
+  const fH = new Float32Array(FN * FN);    // globe elevation in metres
+  const fT = new Float32Array(FN * FN);
+  const fM = new Float32Array(FN * FN);
+  const fF = new Float32Array(FN * FN);
+  let reliefLo = Infinity, reliefHi = -Infinity;
+  for (let b = 0; b < FN; b++) {
+    const zc = (-spanHalf + b * (span / FN1));
+    for (let a = 0; a < FN; a++) {
+      fieldOn(-spanHalf + a * (span / FN1), zc);
+      const q = b * FN + a, hm = fld.h * M_PER_H;
+      fH[q] = hm; fT[q] = fld.t; fM[q] = fld.m; fF[q] = fld.fm;
+      if (hm < reliefLo) reliefLo = hm;
+      if (hm > reliefHi) reliefHi = hm;
+    }
+    if ((b & 7) === 0) post(8 + (b / FN) * 10, 'Reading the site');
+  }
+
+  // V: metres of the globe up one unit of the ground box. A cell that holds a mountain range
+  // would fill the box from floor to ceiling at true height, and a cell on a plain would be a
+  // flat sheet. So the relief of the cell sets V, and every patch shows about TARGET_RELIEF
+  // units of large-scale shape, with the metre-scale hills below as the texture on it. A cell
+  // flatter than TARGET_RELIEF keeps V = 1 and stays at true height.
+  const reliefM = Math.max(0, reliefHi - reliefLo);
+  const V = Math.max(1, reliefM / TARGET_RELIEF);
+  const hPerU = H_PER_M * V;       // one unit of the ground box in globe elevation units
+
+  // The globe field at a point of the ground box, bilinear over the coarse grid.
+  const fInv = FN1 / size;
+  const gf = { h: 0, t: 0, m: 0, fm: 0 };
+  const fieldUnit = (xm, zm) => {
+    const u = clamp((xm + half) * fInv, 0, FN1 - 1e-4), w = clamp((zm + half) * fInv, 0, FN1 - 1e-4);
+    const a = u | 0, b = w | 0, du = u - a, dw = w - b;
+    const q = b * FN + a, q2 = q + FN;
+    const w00 = (1 - du) * (1 - dw), w10 = du * (1 - dw), w01 = (1 - du) * dw, w11 = du * dw;
+    gf.h = (fH[q] * w00 + fH[q + 1] * w10 + fH[q2] * w01 + fH[q2 + 1] * w11) / V;
+    gf.t = fT[q] * w00 + fT[q + 1] * w10 + fT[q2] * w01 + fT[q2 + 1] * w11;
+    gf.m = fM[q] * w00 + fM[q + 1] * w10 + fM[q2] * w01 + fM[q2 + 1] * w11;
+    gf.fm = fF[q] * w00 + fF[q + 1] * w10 + fF[q2] * w01 + fF[q2 + 1] * w11;
+    return gf;
+  };
 
   // A site high on the globe stands in a mountain range, so its hills are tall. A lowland site
   // gets gentle hills. Without this the patch would look the same on a peak and on a plain.
@@ -1472,15 +1524,20 @@ function patch(seed, lat, lon, opts) {
   post(20, 'Raising the ground');
   const heights = new Float32Array(n * n);
   const vary = new Float32Array(n * n);
+  const cellT = new Float32Array(n * n);    // the globe temperature and moisture bend across a
+  const cellM = new Float32Array(n * n);    // cell too, so the colour and the plants read them
+  const cellF = new Float32Array(n * n);    // per cell and not once at the site
   const fh = 1 / HILL_WAVE, fk = 1 / KNOLL_WAVE, fr = 1 / ROCK_WAVE;
   let hasSea = false, hasLand = false;
   // Far from the sea the damping is 1 everywhere, so the whole patch skips the test.
-  const inland = Math.abs(elevation) - (Math.abs(gx) + Math.abs(gz)) * half > SHORE_DAMP;
+  const inland = Math.min(Math.abs(reliefLo), Math.abs(reliefHi)) / V > SHORE_DAMP
+    && (reliefLo > 0 || reliefHi < 0);
   for (let j = 0; j < n; j++) {
     const zm = -half + j * grid;
     for (let i = 0; i < n; i++) {
       const xm = -half + i * grid;
-      const base = elevation + gx * xm + gz * zm;
+      const f = fieldUnit(xm, zm);
+      const base = f.h;
       const hn = pnoise.n3(xm * fh + oh0, zm * fh + oh1, 0.5);
       const knolls = pnoise.n3(xm * fk + ok0, zm * fk + ok1, 11.5) * KNOLL_M;
       const rock = pnoise.n3(xm * fr + or0, zm * fr + or1, 23.5) * ROCK_M;
@@ -1491,6 +1548,10 @@ function patch(seed, lat, lon, opts) {
       const k = j * n + i;
       heights[k] = h;
       vary[k] = hn;   // the hill field also varies the moisture: a hollow is wetter than a crest
+      // the globe lapse rate: cellT holds the temperature the patch height earns, not the
+      // temperature of the globe surface the field read
+      cellT[k] = f.t + (Math.max(base, 0) - Math.max(h, 0)) * hPerU * 0.55;
+      cellM[k] = f.m; cellF[k] = f.fm;
       if (h < 0) hasSea = true; else hasLand = true;
     }
     if ((j & 31) === 0) post(20 + (j / n) * 45, 'Raising the ground');
@@ -1507,15 +1568,16 @@ function patch(seed, lat, lon, opts) {
     const iz = j > 0 && j < n - 1 ? invZ : 1 / grid;
     for (let i = 0; i < n; i++) {
       const k = jn + i;
-      const h = heights[k], hg = h * H_PER_M;
+      const h = heights[k], hg = h * hPerU;
       const i1 = i > 0 ? i - 1 : i, i2 = i < n - 1 ? i + 1 : i;
       const ix = i > 0 && i < n - 1 ? invZ : 1 / grid;
       const dhx = (heights[jn + i2] - heights[jn + i1]) * ix;
       const dhz = (heights[j2 + i] - heights[j1 + i]) * iz;
-      // the globe lapse rate, so a hilltop inside the patch can hold snow the valley cannot
-      const t = siteT + (Math.max(elevation, 0) - Math.max(h, 0)) * H_PER_M * 0.55;
-      // the forest mask lifts the moisture a little, so a site inside a forest cluster reads green
-      const m = siteM - vary[k] * 0.1 + Math.max(siteFM, 0) * 0.06;
+      // the lapse rate is already in cellT, so a hilltop inside the patch can hold snow the
+      // valley cannot
+      const t = cellT[k];
+      // the forest mask lifts the moisture a little, so a cell inside a forest cluster reads green
+      const m = cellM[k] - vary[k] * 0.1 + Math.max(cellF[k], 0) * 0.06;
       biomeTint(ctx, biomeIndex(ctx, hg, t, m, beachH), hg, k, tint);
       // Under the water line the bed darkens from the shallow tint to the deep tint over DEEP_M
       // metres, so shallow water reads through the translucent sea plane of ground-sea.js.
@@ -1541,19 +1603,20 @@ function patch(seed, lat, lon, opts) {
 
   post(94, 'Growing the plants');
   const flora = patchFlora(ctx, {
-    heights, vary, n, grid, half, size, hPerM: H_PER_M, elevation,
-    siteT, siteM, siteFM, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000,
+    heights, vary, n, grid, half, size, hPerM: H_PER_M, hPerU,
+    cellT, cellM, cellF, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000,
   });
 
   post(96, 'Calling the animals');
   const { groups, members } = patchFauna(ctx, opts, {
-    pseed, heights, vary, n, grid, half, elevation, siteT, siteM, siteFM, H_PER_M,
+    pseed, heights, vary, n, grid, half, hPerU, cellT, cellM, cellF,
   });
 
   post(98, 'Almost there');
   const result = {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
+      span, metresAcross: K, metresUp: V,
       biome: BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM, BEACH_M * H_PER_M)],
       palette: ctx.world.palette,
       elevation, radiusKm: ctx.radiusKm,

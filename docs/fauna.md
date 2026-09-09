@@ -85,6 +85,12 @@ A genome `G` is plain data. `fauna.js` reads these fields:
 
 `sizeText()` formats the same number, so the lore text and the ground scale cannot drift apart. The leading number of `lore.size` is always `bodyMetres(G).metres`.
 
+Since issue 19 the ground box holds an artificial scale, because it draws a cell of the globe tens
+of kilometres wide. `bodyMetres` still gives the number the lore states, and the ground still
+scales the geometry to it, so an animal reads as normal against a plant and against the terrain
+texture. It is no longer that many metres of the planet. `patch.metresAcross` and
+`patch.metresUp` give the two scales of the box.
+
 ### The sociality gene
 
 `G.social` says how the species groups: `{ kind, n, spread }`. The weights come from the locomotion. A quad or a hexapod is usually a herd animal. A serpent, a sac, and a sky whale are usually alone. A swarm is always a herd. Herd `n` is 4 to 14, a pair is 2, and a solitary animal is 1. `spread` is `n` times the body metres times 0.8, so a herd of large animals has room.

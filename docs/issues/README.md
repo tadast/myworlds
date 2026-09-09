@@ -37,7 +37,12 @@ Conventions:
 
 Globe: radius 1 unit. Lore radius 3,200 to 9,800 km. Terrain relief 0.06 units. Terrain edge 0.0105 units. Flora 0.011 units. Fauna 0.012 to 0.02 units. Camera minimum `CAM_MIN = 1.11`, home 3.3, maximum 8.
 
-Ground: 1 unit = 1 metre. Patch 1,500 m square. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the 800 m reveal and from the 1,200 m ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
+Ground: the box is 1,500 units square. Since issue 19 one unit is not one metre: the reader picks
+a cell of the globe 0.01 units of arc wide, about 74 km on a 7,352 km planet, and the whole cell
+draws into that box. `patch.metresAcross` and `patch.metresUp` give the two scales, and
+`patch.span` gives the width of the cell in metres. A plant and a creature keep their lore size
+in units, so they read as normal against the ground and they are no longer the metres the lore
+says. A patch built with no `span` keeps one unit to one metre. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the 800 m reveal and from the 1,200 m ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
 
 Budgets:
 
@@ -52,11 +57,26 @@ Budgets:
 
 Independent agents must agree on these. Do not change them inside an issue. If a contract must change, say so in the issue's summary and update this file in the same commit.
 
+### The patch cell
+
+- `CELL = 0.01` globe units of arc, in `site.js`. It is the width of the square the reader picks
+  and the width of the ground the probe brings back. It is the same size on the screen for every
+  planet, about 62 px at `CAM_MIN`.
+- `snapSite(site)` puts a site on the cell grid: latitude to steps of `CELL`, and longitude to a
+  step that keeps the cell square in metres. It is idempotent and it keeps `kind`.
+- `cellSpan(world)` gives the width of the cell in metres. `app.js` passes it as `opts.span` on
+  the patch message.
+- The pull to life runs before the snap and reaches half a cell, so a creature that lives in the
+  cell claims the patch and the snap then puts the site back on the grid.
+- The marker is the square of the cell, not a symbol: what the square holds is what the ground
+  shows.
+
 ### The site and the URL
 
 - A site is a lat and lon in degrees in the planet's local frame, the frame of the worker's `pos` arrays before `planet.rotation.y` is applied. Lat is `asin(y)`. Lon is `atan2(z, x)`. Both in degrees, two decimals. Lat in [-90, 90], lon in [-180, 180].
 - URL format: `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Without `@` the URL means orbit. The seed part is URL-encoded as today; the site part is plain.
 - Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
+- Patch message options: `{ grid, size, span, maxFlora, maxFauna, pulledKind }`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19.
 
 ### App mode
 
@@ -182,3 +202,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
 | 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | open |
 | 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | open |
+| 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED PENDING |
