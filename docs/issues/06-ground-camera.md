@@ -1,5 +1,7 @@
 # 06 Ground camera: pan, clamps, glide
 
+Status: CLOSED, 2026-09-09, merged as e2839d4.
+
 Type: AFK. Phase 1. Blocked by: 04. Read `docs/issues/README.md` first.
 
 ## What to build
@@ -15,12 +17,12 @@ The camera on the ground becomes a way to explore, not just to look.
 
 ## Acceptance criteria
 
-- [ ] From the ceiling you can zoom to 2 m above the ground in a smooth series of wheel steps without overshoot into the terrain.
-- [ ] Pan moves across the patch and stops at the fog start. The target never sinks under a hill.
-- [ ] A click on the ground glides the view there. A drag does not.
-- [ ] On a phone emulation all four gestures work and the sidebar sheet still folds on a tap.
-- [ ] No change to the globe controls.
-- [ ] `README.md` "Controls" describes the ground controls.
+- [x] From the ceiling you can zoom to 2 m above the ground in a smooth series of wheel steps without overshoot into the terrain.
+- [x] Pan moves across the patch and stops at the fog start. The target never sinks under a hill.
+- [x] A click on the ground glides the view there. A drag does not.
+- [x] On a phone emulation all four gestures work and the sidebar sheet still folds on a tap.
+- [x] No change to the globe controls.
+- [x] `README.md` "Controls" describes the ground controls.
 
 ## Blocked by
 

@@ -165,11 +165,11 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 02 | Site in the URL and the pull to life | AFK | none | CLOSED 2e6ee86 |
 | 03 | Descent and ascent shell | AFK | 02 | CLOSED 2ca24b1 |
 | 04 | Patch terrain from the worker | AFK | 03 | CLOSED f61a39a |
-| 05 | Ground sea and shoreline | AFK | 04 | open |
-| 06 | Ground camera: pan, clamps, glide | AFK | 04 | open |
-| 07 | Ground flora with card impostors | AFK | 04 | open |
+| 05 | Ground sea and shoreline | AFK | 04 | CLOSED 5367a1b |
+| 06 | Ground camera: pan, clamps, glide | AFK | 04 | CLOSED e2839d4 |
+| 07 | Ground flora with card impostors | AFK | 04 | CLOSED 71cc6d5 |
 | 08 | Sociality gene | AFK | none | CLOSED d223dee |
-| 09 | Ground fauna in groups | AFK | 04, 08 | open |
+| 09 | Ground fauna in groups | AFK | 04, 08 | CLOSED 2818c38 |
 | 10 | Far fauna coarse mesh | AFK | 09 | open |
 | 11 | Adaptive LOD and the perf overlay | AFK | 07, 10 | open |
 | 12 | Sky continuity: sun, moons, rings, clouds | AFK | 03 | CLOSED acf2a18 |

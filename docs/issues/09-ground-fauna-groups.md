@@ -1,5 +1,7 @@
 # 09 Ground fauna in groups
 
+Status: CLOSED, 2026-09-09, merged as 2818c38.
+
 Type: AFK. Phase 1. Blocked by: 04, 08. Read `docs/issues/README.md` first, in particular "The patch protocol", "Metres for a creature", and "The sociality gene". Read `docs/fauna.md`.
 
 ## What to build
@@ -19,10 +21,30 @@ Animals on the ground at their lore size, placed and steered as groups. Renderin
 - [x] A herd species stops and starts together. A pair stays together. A solitary animal roams alone.
 - [x] Creatures stand on the ground on slopes. Flyers clear hills.
 - [x] A creature of "4 m at the shoulder" measures 4 m against the 2 m grid, and a "17 m" flyer is visibly huge.
+  - The first half is exact: a "4.5 m at the shoulder" grazer measures 4.500 m tall, which is 2.25
+    cells of the 2 m grid. A "3.1 m long" hexapod measures 3.10 m long, which is the axis the
+    contract settled.
+  - Decision, 2026-09-09: the second half cannot happen, and the issue itself is the reason. The
+    17 m number belongs to a `fins` sky whale, whose niche is always `sea` or `cloud`, and item 1
+    holds both back for issue 15. The numbered items win over the criteria, by the precedent of
+    issue 08, so the criterion passes on the part the build can reach. The largest flyer placed is
+    a 10 m swarm in herds of 13. Issue 15 should check the 17 m case when it lands the sea species.
 - [x] Clicking a creature opens its inspector card.
 - [x] Same URL gives the same groups on reload.
 - [x] Frame time on a site with 300 creatures at 30 m above ground is under 12 ms on HIGH with terrain, sea, and flora present. Report the steering walk time.
 - [x] `docs/fauna.md` gets a section "Ground tier" with the group model.
+
+## Decisions
+
+**The hexapod axis.** Settled before this issue started: a hexapod measures along `length`. See
+"Metres for a creature" in `docs/issues/README.md`. A 3.1 m hexapod measures 3.10 m long and 0.77 m
+tall.
+
+**One click path, not two.** This issue bound its own tap listener, because issue 06 was built in
+parallel and its seam could not be seen. Issue 06 owns the ground click and glides to the animal
+before it opens the card. At the merge the two became one: `GroundFauna.pickHit()` returns the kind
+and the world point, `ground.js` fills the seam of issue 06 with it, and the listener of this file
+is gone. Two listeners would have opened the card before the glide ran.
 
 ## Blocked by
 

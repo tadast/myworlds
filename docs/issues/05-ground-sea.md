@@ -1,5 +1,7 @@
 # 05 Ground sea and shoreline
 
+Status: CLOSED, 2026-09-09, merged as 5367a1b.
+
 Type: AFK. Phase 1. Blocked by: 04. Read `docs/issues/README.md` first.
 
 ## What to build
@@ -14,12 +16,21 @@ Water on the ground where the site is near or below sea level, with waves that r
 
 ## Acceptance criteria
 
-- [ ] Descend on a coast: the shoreline follows the terrain, the beach strip is sand, and the water has slow facets that move. No swell crosses the whole patch in a few seconds.
-- [ ] Descend on open sea: water to the fog in every direction, camera cannot go under the surface.
-- [ ] Descend inland: no sea plane, no cost.
-- [ ] Lava and ice worlds show their own sea look as on the globe.
-- [ ] Frame time on a coastal site is under 7 ms on HIGH with the sea added.
-- [ ] `README.md` "How it works" mentions the ground sea.
+- [x] Descend on a coast: the shoreline follows the terrain, the beach strip is sand, and the water has slow facets that move. No swell crosses the whole patch in a few seconds.
+- [x] Descend on open sea: water to the fog in every direction, camera cannot go under the surface.
+- [x] Descend inland: no sea plane, no cost.
+- [x] Lava and ice worlds show their own sea look as on the globe.
+- [x] Frame time on a coastal site is under 7 ms on HIGH with the sea added.
+- [x] `README.md` "How it works" mentions the ground sea.
+
+## Decisions
+
+**`patch.biome` now reads at metre scale, 2026-09-09.** The beach band of the globe is a fraction of
+a planet radius, so every patch under about 270 m of elevation was painted sand and named `beach`,
+and a beach strip could not read against it. The band is now in metres. Issues 07 and 09 match their
+niches against this field, so both were re-checked after the merge: `Vesper@10.00,150.00` still
+places 20,000 plants and 299 animals, and the coastal site `Auralis@-4.25,15.95` reports `shallows`
+and places 29 solitary animals and no plants, which is correct for water.
 
 ## Blocked by
 
