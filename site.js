@@ -1,4 +1,4 @@
-// myworlds — the landing site: the pick under the screen centre, the pull to life, the marker, and the URL.
+// myworlds — the landing site: the pick under the pointer, the pull to life, the marker, and the URL.
 //
 // A site is a lat and a lon in degrees in the planet's local frame, the frame of the worker's
 // arrays before planet.rotation.y turns them. Lat is asin(y). Lon is atan2(z, x). Two decimals.
@@ -84,14 +84,15 @@ export function radiusKm(world) {
   return km > 0 ? km : 6000;
 }
 
-// The ray from the screen centre, down onto the surface. Returns the hit direction in the
-// planet's local frame and in world space, or null when the centre misses the planet.
-export function pickDirs(camera, current) {
+// The ray from a point of the screen, down onto the surface. The point is in normalised device
+// coordinates and it is the screen centre when the caller gives none. Returns the hit direction in
+// the planet's local frame and in world space, or null when the ray misses the planet.
+export function pickDirs(camera, current, ndc = CENTRE) {
   if (!current || current.world.type === 'gas') return null;
   camera.updateMatrixWorld();
   current.planet.updateWorldMatrix(true, false);
   _centre.setFromMatrixPosition(current.planet.matrixWorld);
-  _ray.setFromCamera(CENTRE, camera);
+  _ray.setFromCamera(ndc, camera);
   const o = _ray.ray.origin, d = _ray.ray.direction;
   const ox = o.x - _centre.x, oy = o.y - _centre.y, oz = o.z - _centre.z;
   const b = ox * d.x + oy * d.y + oz * d.z;
@@ -111,9 +112,9 @@ export function pickDirs(camera, current) {
   return { local: _local.clone(), world: _dir.clone() };
 }
 
-// The site under the screen centre, or null.
-export function pickSite(camera, current) {
-  const hit = pickDirs(camera, current);
+// The site under a point of the screen, or null. The point is the screen centre by default.
+export function pickSite(camera, current, ndc) {
+  const hit = pickDirs(camera, current, ndc);
   return hit ? dirToSite(hit.local) : null;
 }
 

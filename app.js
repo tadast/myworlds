@@ -35,12 +35,12 @@ const Q = {
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
 const CAM_MIN = 1.11, CAM_MAX = 8, CAM_HOME = 3.3;
-const PICK_RANGE = CAM_MIN + 0.1;   // the probe can pick a site inside this camera distance
+const PICK_RANGE = CAM_MIN + 0.1;   // the globe holds still inside this camera distance
 // `?perf` shows the frame time, the LOD knob, and the counts of the frame. Without the flag the
 // page builds no element and does no work for it.
 const PERF = new URLSearchParams(location.search).has('perf');
 const HUD_MS = 500;       // ms, the overlay reads twice a second
-const ZOOM_HOLD = 500;    // ms, a zoom must continue this long to send or to recall the probe
+const ZOOM_HOLD = 500;    // ms, a zoom out must continue this long to recall the probe
 const ZOOM_GAP = 250;     // ms, a longer gap between zoom steps ends the gesture
 const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
 const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
@@ -63,6 +63,7 @@ const toggleBtn = $('#toggle');
 const panel = $('#panel');
 const shareBtn = $('#share');
 const probeBtn = $('#probe');
+const aimEl = $('#aim');
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
 const muteBtn = $('#mute');
@@ -448,7 +449,8 @@ function step(now) {
     const zoomFactor = THREE.MathUtils.clamp((dist - CAM_MIN) / 1.6, 0.015, 1); // near the ground the world must hold still
     const hold = THREE.MathUtils.smoothstep(dist, PICK_RANGE, PICK_RANGE + 0.4);   // in the pick range it stops, so the site stays put
     // the planet holds still through a transition, so the fixed site cannot drift under the probe
-    const spin = mode === 'orbit' ? current.spin * zoomFactor * hold * (userActive ? 0.15 : 1) : 0;
+    // the planet also holds still while the reader aims, so the square cannot drift off the ground
+    const spin = mode === 'orbit' && !aiming ? current.spin * zoomFactor * hold * (userActive ? 0.15 : 1) : 0;
     current.planet.rotation.y += spin * dt;
     current.cloudGroup.rotation.y += spin * 1.25 * dt;
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
@@ -478,7 +480,7 @@ function step(now) {
     const d = camera.position.length();
     const pitch = pitchFor(d);
     if (pitch > 0) camera.rotateX(pitch);
-    updateSite(d, t);               // the screen centre points where the pitched camera looks
+    updateSite(t);                  // the square follows the pointer while the reader aims
   } else {
     showMarker(lockedSite, current); // the ring stays on the fixed site through the transition
   }
@@ -518,17 +520,16 @@ function perfRows() {
 }
 
 // ---------------------------------------------------------------- the landing site
-// The probe would land where the screen centre points. The site follows the crosshair, it snaps
-// to the cell under it, and it goes in the URL as #Seed@lat,lon. The pull runs first, so a
+// The probe lands where the reader taps. The site follows the pointer while the aim is on, it
+// snaps to the cell under it, and it goes in the URL as #Seed@lat,lon. The pull runs first, so a
 // creature that lives in the cell claims the patch; the snap then puts the site back on the grid,
 // and the square marker shows the reader the exact ground the probe would bring back.
-let site = null;          // { lat, lon, kind } or null outside the pick range
+let site = null;          // { lat, lon, kind } or null while the aim is off
 let pendingSite = null;   // a site read from the URL, used once the world is built
 let hashAt = 0;
 
-function updateSite(dist, t) {
-  const canPick = !!current && current.world.type !== 'gas' && dist <= PICK_RANGE;
-  site = canPick ? snapSite(pullSite(pickSite(camera, current), current)) : null;
+function updateSite(t) {
+  site = aiming ? snapSite(pullSite(pickSite(camera, current, aimNdc), current)) : null;
   showMarker(site, current);
   updateProbeBtn();
   if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows, but not every frame
@@ -575,6 +576,45 @@ function placeCameraOverSite(target) {
   }
   controls.update();
   return true;
+}
+
+// ---------------------------------------------------------------- the aim
+// The reader presses the button, the app shows the message, and the next tap on the planet sends
+// the probe to the cell under the tap. The square follows the pointer while the aim is on, so the
+// reader sees the ground before the tap. A drag turns the planet and sends nothing.
+let aiming = false;
+const aimNdc = new THREE.Vector2(0, 0);
+
+// The pointer in normalised device coordinates, the frame the raycaster reads.
+function setAimNdc(x, y) {
+  const r = canvas.getBoundingClientRect();
+  aimNdc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+}
+
+function startAim() {
+  if (aiming || !canDescend()) return;
+  aiming = true;
+  aimEl.hidden = false;
+  canvas.style.cursor = 'crosshair';
+  if (COMPACT) setCollapsed(true);   // the sheet covers the planet the reader must tap
+  updateProbeBtn();
+}
+
+function stopAim() {
+  if (!aiming) return;
+  aiming = false;
+  aimEl.hidden = true;
+  canvas.style.cursor = '';
+  site = null;
+  showMarker(null, current);
+  updateProbeBtn();
+}
+
+// The tap that sends the probe. A tap that misses the planet keeps the aim on.
+function aimAt(x, y) {
+  setAimNdc(x, y);
+  const target = snapSite(pullSite(pickSite(camera, current, aimNdc), current));
+  if (target) descend(target);
 }
 
 // ---------------------------------------------------------------- the probe: descent and ascent
@@ -631,6 +671,7 @@ function canDescend() {
 // Send the probe down. The site is fixed here, so nothing moves under the probe on the way.
 function descend(target = site) {
   if (!canDescend() || !target) return;
+  stopAim();
   lockedSite = { ...target };
   mode = 'descending';
   controls.enabled = false;
@@ -707,6 +748,7 @@ function leaveGround() {
 
 // A new world always returns to orbit, whatever the probe was doing.
 function abortProbe() {
+  stopAim();
   if (mode === 'orbit' && !dive) return;
   if (ground) { ground.dispose(); ground = null; }
   perf.reset();
@@ -725,8 +767,8 @@ let probeLabel = '';
 function updateProbeBtn() {
   if (!probeBtn) return;
   const down = mode === 'ground';
-  const show = !dive && !busy && (down || (mode === 'orbit' && !!site));
-  const label = down ? 'Recall the probe' : 'Send a probe to the surface';
+  const show = !dive && !busy && (down || canDescend());
+  const label = down ? 'Recall the probe' : aiming ? 'Cancel the probe' : 'Send a probe to the surface';
   const changed = probeBtn.hidden === show || probeLabel !== label;
   probeBtn.hidden = !show;
   probeBtn.textContent = label;
@@ -737,8 +779,9 @@ function updateProbeBtn() {
 }
 
 // ---------------------------------------------------------------- the zoom hold
-// The camera cannot pass CAM_MIN, so a continued zoom is read from the wheel and the pinch,
-// not from the camera distance. Half a second of the same direction sends or recalls the probe.
+// The camera cannot pass the ground ceiling, so a continued zoom is read from the wheel and the
+// pinch, not from the camera distance. Half a second of zoom out at the ceiling recalls the
+// probe. A zoom in sends no probe: the reader sends it with the button and a tap.
 let zoomDir = 0, zoomSince = 0, zoomLast = 0;
 function noteZoom(dir) {
   const now = performance.now();
@@ -747,11 +790,7 @@ function noteZoom(dir) {
 }
 function checkZoomHold(now) {
   if (!zoomDir || now - zoomLast > ZOOM_GAP || now - zoomSince < ZOOM_HOLD) return;
-  if (zoomDir < 0 && canDescend() && site && camera.position.length() <= CAM_MIN + 0.002) {
-    zoomDir = 0; descend();
-  } else if (zoomDir > 0 && mode === 'ground' && !dive && ground.atCeiling) {
-    zoomDir = 0; ascend();
-  }
+  if (zoomDir > 0 && mode === 'ground' && !dive && ground.atCeiling) { zoomDir = 0; ascend(); }
 }
 canvas.addEventListener('wheel', (e) => { if (e.deltaY) noteZoom(e.deltaY < 0 ? -1 : 1); }, { passive: true });
 
@@ -833,7 +872,7 @@ function generate(seed, { save = true } = {}) {
   seed = seed.trim();
   if (!seed || busy) return;
   busy = true;
-  abortProbe();               // a new world always comes back to orbit
+  abortProbe();               // a new world always comes back to orbit and drops the aim
   updateProbeBtn();
   const genStart = performance.now();
   overlay.classList.add("show");
@@ -860,7 +899,6 @@ function generate(seed, { save = true } = {}) {
       music.play(msg.result.world);
       if (save) saveWorld(msg.result.world);
       const landing = wanted && current.world.type !== 'gas' ? wanted : null;
-      site = landing;
       writeHash();
       input.value = seed;
       if (COMPACT) setCollapsed(true);
@@ -1032,17 +1070,19 @@ function creatureAt(px, py, tolerance = 34) {
   return best;
 }
 let downAt = null;
-canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; if (aiming) setAimNdc(e.clientX, e.clientY); });
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt) return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
   if (moved > 6 || busy || mode !== 'orbit') return;   // the globe creatures are not on the screen on the ground
+  if (aiming) { aimAt(e.clientX, e.clientY); return; }  // the tap sends the probe, it does not open a card
   const kind = creatureAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 52 : 34);
   if (kind !== null) inspect(kind);
 });
 let hoverTick = 0;
 canvas.addEventListener('pointermove', (e) => {
+  if (aiming) { setAimNdc(e.clientX, e.clientY); return; }
   if (e.pointerType === 'touch' || downAt || mode !== 'orbit' || (++hoverTick & 3)) return;
   canvas.style.cursor = creatureAt(e.clientX, e.clientY) !== null ? 'pointer' : '';
 });
@@ -1087,7 +1127,11 @@ shareBtn.addEventListener('click', async () => {
   catch { shareBtn.textContent = url; }
   setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
 });
-probeBtn.addEventListener('click', () => { if (mode === 'ground') ascend(); else descend(); });
+probeBtn.addEventListener('click', () => {
+  if (mode === 'ground') ascend();
+  else if (aiming) stopAim();
+  else startAim();
+});
 // ---------------------------------------------------------------- music
 const music = new Music();
 function renderMusic() {
@@ -1111,7 +1155,9 @@ addEventListener('hashchange', () => {
 });
 addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
-  if (e.key === 'Escape' && !creatureCard.hidden) inspector.hide();
+  if (e.key !== 'Escape') return;
+  if (!creatureCard.hidden) inspector.hide();
+  else stopAim();
 });
 if (COMPACT) setCollapsed(true);
 

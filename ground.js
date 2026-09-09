@@ -18,7 +18,8 @@ export const PATCH_SIZE = 1500;      // metres, the side of the patch
 export const FOG_NEAR = 450;         // metres, where the fog starts
 export const FOG_FAR = 750;          // metres, where the fog is solid
 export const SKY_RADIUS = 5000;      // metres, the sky dome
-export const CEILING = 1200;         // metres, the camera ceiling above the site
+// The ceiling and the tilt hold the edge of the box out of sight. See "the rectangle" below.
+export const CEILING = 500;          // metres, the camera ceiling above the site
 export const FLOOR = 2;              // metres, the camera floor above the terrain
 const SHADOW_BOX = 200;     // metres, the half width of the shadow box around the target
 // The shadow gate follows the LOD distance, so it must not switch on and off while the knob
@@ -41,18 +42,34 @@ const LOD_START = 150;      // metres, where the knob starts before the store sa
 const LOD_MIN = 40;         // metres, the floor of the knob
 const LOD_MAX = 400;        // metres, the ceiling of the knob. The tier may lower it; LOW asks 250.
 
-export const CAM_START = 800;        // metres, the camera starts this far up and this far south
+export const CAM_START = 450;        // metres, the height the camera starts at over the site
 // The rim: the ground outside the patch. It must reach past the fog, or its outer edge shows.
 // At the ceiling the camera stands at most FOG_NEAR + CEILING * tan(POLAR_HIGH + POLAR_BAND),
-// about 1,420 units, from the site, and the fog is solid at FOG_MAX. A ray from that height
-// meets the ground sqrt(FOG_MAX^2 - CEILING^2), about 1,723 units, out. So the ground must run
-// to about 3,143 units. See _rimGeometry().
+// about 1,600 units, from the site, and the fog is solid at FOG_FAR + FOG_LIFT * CEILING, about
+// 1,325 units. A ray from that height meets the ground sqrt(1325^2 - CEILING^2), about 1,227
+// units, out. So the ground must run to about 2,830 units. RIM keeps the wider value of issue
+// 18, which the ceiling of 1,200 m asked for. See _rimGeometry().
 export const RIM = 3150;             // units, how far the rim reaches from the site
+
+// ---------------------------------------------------------------- the rectangle, issue 20
+// The patch holds a 2 m grid with knolls and rock. The rim outside it holds a 50 m grid with
+// neither. The two make one surface, but the detail stops at the edge of the box, 750 units from
+// the site. The fog must hide that edge.
+//
+// The fog opens FOG_LIFT metres for each metre of height, and the far edge of the box moves away
+// only by the horizontal distance of the camera from the site. So the edge shows when
+//
+//     tan(polar angle) < FOG_LIFT
+//
+// A camera that looks straight down therefore always shows the box, at any height. POLAR_HIGH
+// holds the tilt over that limit at the ceiling: tan(1.10) is 1.97, and tan(1.10 - POLAR_BAND)
+// is 1.74. Measured on Auralis at -38.00,18.00, a flat inland cell: the square reads at 1,200 m,
+// it still reads at 800 m, and nothing reads at 500 m.
 
 // ---------------------------------------------------------------- the camera, issue 06
 const TARGET_LIFT = 1;      // metres, the target floats this far over the terrain
 const TILT_FREE = 60;       // metres, under this height the reader owns the polar angle
-const POLAR_HIGH = 0.62;    // rad, the polar angle at the ceiling: the view looks down
+const POLAR_HIGH = 1.10;    // rad, the polar angle at the ceiling: the view looks out and down
 const POLAR_LOW = 1.40;     // rad, the polar angle at TILT_FREE: the view looks out
 const POLAR_BAND = 0.06;    // rad, the play the reader keeps at the ceiling
 const POLAR_WIDE = 0.25;    // rad, the play the reader keeps at TILT_FREE
@@ -62,9 +79,10 @@ const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a gl
 const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
 const TAP_SLOP = 6;         // px, a pointer that moves more than this is a drag, not a tap
 const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
-// The fog opens with the height of the camera. The reader lands 800 m up, and a fog that is solid
+// The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
-// the ground fades out before the rim ends and the reader never sees a cut edge. See RIM.
+// the ground fades out before the rim ends and the reader never sees a cut edge. See RIM. The
+// ceiling of issue 20 keeps the fog under 1,325 m, so FOG_MAX no longer binds.
 const FOG_LIFT = 1.15;      // metres of fog distance per metre of height
 const FOG_MAX = 2100;       // metres, the widest the fog opens
 
@@ -312,12 +330,13 @@ export class Ground {
     this.content.add(sun.target);
     this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night));
 
-    // The reveal: the camera starts 800 m up and 800 m south of the site, and it looks at the
-    // site. The reader sees the patch from over the fog and zooms in.
+    // The reveal: the camera starts CAM_START up and south of the site by the same tilt the
+    // ceiling holds, and it looks at the site. The reader sees the patch from over the fog and
+    // zooms in. The tilt keeps the edge of the box in the fog. See "the rectangle" above.
     this.glide = null;
     this.controls.target.set(0, this.base + TARGET_LIFT, 0);
     this.camera.up.set(0, 1, 0);
-    this.camera.position.set(0, this.base + CAM_START, CAM_START);
+    this.camera.position.set(0, this.base + CAM_START, CAM_START * Math.tan(POLAR_HIGH));
     this.controls.update();
     return this;
   }
