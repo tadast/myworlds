@@ -55,6 +55,8 @@ The patch holds 1.13 million triangles. Two measurements set the shape of the me
 
 **The material is Lambert, not standard.** The terrain fills the frame, so its fragment shader sets the cost. A standard material runs a full reflection model for a surface that is rough and not metal. A Lambert material draws the same ground for about a third less time: 6.8 ms to 5.2 ms. `GROUND_GAIN` of 1.06 puts the mean pixel back where the standard material had it, because the sheen the Lambert model drops is nearly a constant over a rough surface. Measured against the standard material at the same camera and the same sun, the mean pixel moves by 1 part in 255 and no block of the frame moves by more than 6.
 
+**The beach band of the globe is not a beach on the ground.** The globe paints its beach where the elevation field is below `beachW`, about 0.03 units. A globe unit is `amp * radiusKm * 1000 / 40` metres, so that band stands for about 270 m of ground. At 1 m per unit it paints a whole coastal patch as sand, and no beach strip can read. Added with issue 05: `biomeIndex()` takes the width of the beach band, and the patch passes `BEACH_M = 1.5` metres. Under the water line the patch also drops the slope rule for bare rock and mixes the bed from the shallow colour to the deep colour over `DEEP_M = 12` metres, so shallow water reads through the translucent sea. A low patch that read as one sand field now reads as grass, forest, or dry ground with a sand strip at the water.
+
 **A coarser grid outside the fog does not help.** The obvious cut is to drop the resolution past the fog line. A test cut the drawn triangles from 727,000 to 323,000 and the frame time did not move: the card is not bound by triangles once the mesh is indexed. The cut would still show a seam at some camera positions, because the camera may stand anywhere over the patch. So the grid stays at one step everywhere, and a grid that follows the camera stays with issue 11.
 
 ### The ground camera
@@ -106,6 +108,22 @@ a 2,048 map over a box of 200 m costs 2.2 ms at eye level and 2.3 ms at the entr
 every terrain fragment then runs the nine taps of the soft filter. That takes the frame to 7.5 ms
 before the sea exists, and it buys nothing at the entry camera, where no plant stands near enough to
 cast. The decision therefore belongs with the one runtime knob of issue 11.
+
+### What the sea costs
+
+Added with issue 05, the ground sea. The numbers come from a timer query of the graphics card around one `Ground.render`, at the camera the probe lands with, on a coastal site, with a draw buffer of 3,024 by 1,572. 140 samples.
+
+**The sea is bound by its triangles, not by its pixels.** A first build put 1 m cells over a square 1,120 m each way from the camera target: 449,000 triangles for 2.7 ms. A test at one fifth of the pixels cut that by 0.3 ms, so the pixels are not the cost. The terrain behaves the same way at this camera: 4.6 ms at full size and 4.2 ms at one fifth. The note above says the card is not bound by triangles; that holds for the terrain at 1.13 million triangles, but a second mesh of half a million pushes the frame past the budget.
+
+Three cuts brought it back under the budget.
+
+**Flat water needs no grid.** The waves fade to zero by 200 m from the camera target, so every cell past that draws a flat face. One large quad then takes the same colour, the same light, and the same fog as a thousand small ones: the light is constant over a flat face, and the fog depth is a varying, so the renderer reads it per pixel and a wide triangle fogs correctly. The sea is now a square of 1 m cells 200 m each way, an 8 m ring to 264 m, and a 108 m ring to 1,128 m: 324,000 triangles. The wave zone and the first ring meet on a line at y = 0, so the join needs no shared step and shows no crack.
+
+**A block under land draws nothing.** The wave zone splits into 6 by 6 meshes. A mesh hides when the drawn ground stands more than 1 m over the water everywhere under it, read every 4 m. The test can only keep too much, and the terrain is opaque, so the reader loses no water. On the coast it drops 12 of the 36 meshes and takes the drawn sea to 217,000 triangles. The mask runs again when the plane follows the target to a new whole metre.
+
+**The water keeps one side.** At a low eye the waves turn about half the facets away from the camera. A double-sided material draws them all; the front side alone saved 0.5 to 0.7 ms. The camera floor holds the eye 2 m over the water, so nothing is lost.
+
+Measured on `Auralis@-4.25,15.95`, a coast with 52% of the patch under water: terrain alone p10 3.83, median 5.18, p90 7.85; with the sea p10 5.07, median 6.56, p90 9.46. The sea adds about 1.4 ms. Another browser tab shared the card during the run, which is what the wide p90 shows; a paired run that turned the sea on and off frame by frame put the cost at 1.8 ms.
 
 ## Phases
 
