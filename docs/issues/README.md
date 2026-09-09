@@ -37,7 +37,7 @@ Conventions:
 
 Globe: radius 1 unit. Lore radius 3,200 to 9,800 km. Terrain relief 0.06 units. Terrain edge 0.0105 units. Flora 0.011 units. Fauna 0.012 to 0.02 units. Camera minimum `CAM_MIN = 1.11`, home 3.3, maximum 8.
 
-Ground: 1 unit = 1 metre. Patch 1,500 m square. Fog starts at 450 m from the site and is solid at 750 m. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
+Ground: 1 unit = 1 metre. Patch 1,500 m square. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the 800 m reveal and from the 1,200 m ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
 
 Budgets:
 
