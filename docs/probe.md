@@ -57,6 +57,20 @@ The patch holds 1.13 million triangles. Two measurements set the shape of the me
 
 **A coarser grid outside the fog does not help.** The obvious cut is to drop the resolution past the fog line. A test cut the drawn triangles from 727,000 to 323,000 and the frame time did not move: the card is not bound by triangles once the mesh is indexed. The cut would still show a seam at some camera positions, because the camera may stand anywhere over the patch. So the grid stays at one step everywhere, and a grid that follows the camera stays with issue 11.
 
+### The ground camera
+
+Added with issue 06. These notes record the decisions the issue text did not fix.
+
+**The fog opens with the height.** The reveal puts the camera 800 m up and the ceiling is 1,200 m, but the fog is solid at 750 m. A fixed fog therefore paints one flat colour over the whole patch from both heights, and the reader sees nothing to zoom into. So the far distance of the fog grows with the height of the camera over the site, 1.15 m per metre, and it stops at 2,100 m. The near distance keeps the ratio of 0.6, so the depth of the fade holds. At the ceiling the patch reads in full and the rim still fades out before its edge at 1,500 m, so the ground never shows a cut. `FOG_NEAR` and `FOG_FAR` keep their values and still set the pan limit and the fog at the ground.
+
+**The tilt is a band, not a lock.** The height sets the polar angle the view wants, from 0.62 rad at the ceiling to 1.40 rad at 60 m, and a band around that angle holds the play the reader keeps. The band is 0.06 rad at the ceiling and 0.25 rad at 60 m, so a zoom in turns the view from the patch below to the horizon on its own. Under 60 m the band opens to a half turn and the reader owns the angle. A hard lock was rejected: it takes the turn of the view away from the reader for the whole upper half of the range. A second limit caps the polar angle where the camera would meet the floor, so the controls do not fight the floor clamp and shake.
+
+**The pan limit stops the camera too.** The target cannot leave the fog start at 450 m. The first build clamped the target alone, so a pan that reached the limit slid the camera on over a target that could not follow, and the camera sank toward the ground. The clamp now moves the camera by the same step, so the whole view stops.
+
+**The tap marches the height field.** A tap needs the point of the ground under the pointer. A triangle test against the terrain runs over a million faces. A march along the ray over the height grid costs about 450 steps and a bisection, it reads the rim as well as the patch, and it does not care which meshes issues 05, 07, and 09 add later.
+
+**The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)` and `ground.onCreatureTap(hit)`. A tap asks `pickCreature` first. A hit glides to `hit.point` and calls `onCreatureTap` when the glide ends, so the inspector opens after the glide. Without issue 09 both are null and every tap is a ground tap.
+
 ## Phases
 
 - **Phase 0.** Globe fixes, decision 8.
