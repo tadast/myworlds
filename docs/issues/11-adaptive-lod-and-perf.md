@@ -1,5 +1,7 @@
 # 11 Adaptive LOD and the perf overlay
 
+Status: CLOSED, 2026-09-09, merged as 54563e6.
+
 Type: AFK. Phase 1. Blocked by: 07, 10. Read `docs/issues/README.md` first, in particular "LOD" and "Verification".
 
 ## What to build
@@ -65,6 +67,16 @@ samples, with the tab in front and `document.visibilityState === "visible"` in e
   picture, which is what the floor is for.
 - The shadow gate at 56 m over the ground, with the knob driven from 400 m to 40 m and back: one
   switch off at a knob of 41 m, one switch on at 53 m, none between.
+
+## Verified at merge
+
+The manager re-ran criterion 2 on `main` at `Vesper@10.00,150.00`, 45 m over the ground, with the
+graphics card loaded by a raised pixel ratio. The knob walked down
+400, 289, 246, 209, 151, 128, 93, 79, 67, 48, 41, 40 and, when the load went, back up
+40, 44, 48, 59, 64, 78, 86, 94, 114, 126, 138, 167, 184, 202, 245, 269, 326, 358, 394, 400.
+Both halves work. The overlay reads frame 16.59 ms at 60 fps, work 2.35 ms, target 16.67 ms,
+lod 400 m, flora 3,923 near and 14,966 cards, fauna 122 near and 177 coarse, shadow on, 51 draw
+calls and 742k triangles.
 
 ## Blocked by
 
