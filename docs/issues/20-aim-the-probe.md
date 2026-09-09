@@ -1,6 +1,6 @@
 # 20 The reader aims the probe, and the ground view holds no rectangle
 
-Status: CLOSED, 2026-09-10, merged as PENDING.
+Status: CLOSED, 2026-09-10, merged as ecf59db.
 
 Type: AFK. Phase 2. Blocked by: 02, 06, 18, 19. Read `docs/issues/README.md` first.
 
