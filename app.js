@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
-import { BASE_SCALE, buildCreature, faunaMaterial, mergeGeos, M4, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
+import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
+import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker } from './site.js';
 import { Ground } from './ground.js';
 import { skyView } from './ground-sky.js';
@@ -153,51 +154,6 @@ const atmoInnerMat = (color, strength) => new THREE.ShaderMaterial({
       float i = pow(rim, 3.5) * 0.55 * strength; gl_FragColor = vec4(color, i); }`,
   side: THREE.FrontSide, transparent: true, depthWrite: false,
 });
-
-// ---------------------------------------------------------------- geometry helpers
-
-// unit-height flora, base at origin, y up
-function floraGeometry(kind, fc) {
-  const { canopy, canopy2, trunk } = fc;
-  switch (kind) {
-    case 0: // round tree
-      return mergeGeos([
-        { geo: new THREE.CylinderGeometry(0.1, 0.14, 0.45, 5), color: trunk, matrix: M4(0, 0.22, 0) },
-        { geo: new THREE.IcosahedronGeometry(0.5, 0), color: canopy, matrix: M4(0, 0.75, 0, 1, 0.9, 1, 0.3, 0.2) },
-      ]);
-    case 1: // pine
-      return mergeGeos([
-        { geo: new THREE.CylinderGeometry(0.08, 0.12, 0.35, 5), color: trunk, matrix: M4(0, 0.17, 0) },
-        { geo: new THREE.ConeGeometry(0.42, 0.6, 6), color: canopy, matrix: M4(0, 0.5, 0) },
-        { geo: new THREE.ConeGeometry(0.3, 0.5, 6), color: canopy, matrix: M4(0, 0.85, 0) },
-      ]);
-    case 2: // cactus
-      return mergeGeos([
-        { geo: new THREE.CylinderGeometry(0.16, 0.18, 1, 6), color: canopy, matrix: M4(0, 0.5, 0) },
-        { geo: new THREE.CylinderGeometry(0.1, 0.1, 0.45, 5), color: canopy, matrix: M4(0.22, 0.6, 0, 1, 1, 1, 0, 0.9) },
-      ]);
-    case 3: // crystal
-      return mergeGeos([
-        { geo: new THREE.OctahedronGeometry(0.28, 0), color: canopy, matrix: M4(0, 0.55, 0, 1, 2.2, 1, 0.15, 0.1) },
-        { geo: new THREE.OctahedronGeometry(0.18, 0), color: canopy, matrix: M4(0.2, 0.3, 0.1, 1, 1.8, 1, 0.2, -0.5) },
-      ]);
-    case 4: // mushroom
-      return mergeGeos([
-        { geo: new THREE.CylinderGeometry(0.12, 0.16, 0.6, 5), color: trunk, matrix: M4(0, 0.3, 0) },
-        { geo: new THREE.IcosahedronGeometry(0.5, 1), color: canopy2, matrix: M4(0, 0.7, 0, 1, 0.55, 1) },
-      ]);
-    case 5: // boulder
-      return mergeGeos([
-        { geo: new THREE.DodecahedronGeometry(0.4, 0), color: canopy2, matrix: M4(0, 0.25, 0, 1.2, 0.8, 1, 0.4, 0.3) },
-      ]);
-    case 6: // palm
-      return mergeGeos([
-        { geo: new THREE.CylinderGeometry(0.07, 0.11, 0.8, 5), color: trunk, matrix: M4(0.05, 0.4, 0, 1, 1, 1, 0, -0.12) },
-        { geo: new THREE.ConeGeometry(0.45, 0.25, 5), color: canopy, matrix: M4(0.12, 0.72, 0, 1, 1, 1, Math.PI, 0) },
-        { geo: new THREE.ConeGeometry(0.35, 0.2, 5), color: canopy, matrix: M4(0.12, 0.85, 0, 1, 1, 1, 0, 0.4) },
-      ]);
-  }
-}
 
 // ---------------------------------------------------------------- world building
 let current = null; // { group, spin, oceanMat, cloudGroup, moons, ringMesh, data }
