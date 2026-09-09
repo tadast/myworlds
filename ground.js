@@ -22,7 +22,14 @@ export const RIM = 1500;             // metres, how far the coarse rim reaches f
 const CHUNKS = 10;           // the fine terrain splits into 10 by 10 meshes, so the frustum culls it
 const RIM_STEP = 4;          // the rim uses this many grid steps per cell
 const RIM_DEPTH = 2;         // cells outward. The rim is flat, so it needs no more.
-const FACE_JITTER = 0.055;   // the lightness noise per face, so the ground is not one flat swatch
+const JITTER = 0.055;        // the lightness noise per vertex, so the ground is not one flat swatch
+const TILE = 16;             // cells per tile in the index order, to keep the vertex cache warm
+// The terrain fills the frame, so its fragment shader sets the cost. A standard material runs a
+// full reflection model for a surface that is rough and not metal, and the reader cannot see the
+// difference. A Lambert material draws the same ground for about a third less time. The gain puts
+// the mean pixel back where the standard material had it: the sheen the Lambert model drops is a
+// small constant over a rough surface.
+const GROUND_GAIN = 1.06;
 
 const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 
@@ -41,28 +48,17 @@ function writeTri(pos, o, ax, ay, az, bx, by, bz, cx, cy, cz) {
   return o + 9;
 }
 
-// The colour of one face: the mean of its three vertex colours, times a lightness jitter.
-// The worker paints per vertex, so the jitter has to live here to stay per face. The face id
-// comes from the grid, so the same patch always draws the same jitter.
-function writeFace(col, o, C, a, b, c, id) {
-  const j = 1 + (hash1(id) - 0.5) * 2 * FACE_JITTER;
-  for (let k = 0; k < 3; k++) {
-    const v = (C[a * 3 + k] + C[b * 3 + k] + C[c * 3 + k]) / 3 * j;
-    col[o + k] = v; col[o + 3 + k] = v; col[o + 6 + k] = v;
-  }
-  return o + 9;
-}
-
 function writeFlat(col, o, tint) {
   for (let k = 0; k < 3; k++) { col[o + k] = tint[k]; col[o + 3 + k] = tint[k]; col[o + 6 + k] = tint[k]; }
   return o + 9;
 }
 
 // flatShading takes the normal from the derivatives, so the mesh carries no normal attribute
-function makeGeometry(pos, col) {
+function makeGeometry(pos, col, idx) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  if (idx) geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeBoundingSphere();
   return geo;
 }
@@ -168,21 +164,15 @@ export class Ground {
   }
 
   // ---------------------------------------------------------------- the terrain mesh
-  // The patch is a square height grid. The mesh is non-indexed with one colour per face, so the
-  // flat shading reads like the globe. The fine grid splits into chunks, because one mesh of a
-  // million triangles cannot be culled and the camera sees only a part of it.
+  // The patch is a square height grid. The mesh is indexed and flat-shaded, so it reads like the
+  // globe. The grid splits into chunks, because one mesh of a million triangles cannot be culled
+  // and the camera sees only a part of it.
   _buildTerrain() {
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    mat.color.setScalar(GROUND_GAIN);
     this.terrainMat = mat;
-    const cells = this.n - 1;
-    for (let cj = 0; cj < CHUNKS; cj++) {
-      const j0 = Math.floor(cj * cells / CHUNKS), j1 = Math.floor((cj + 1) * cells / CHUNKS);
-      for (let ci = 0; ci < CHUNKS; ci++) {
-        const i0 = Math.floor(ci * cells / CHUNKS), i1 = Math.floor((ci + 1) * cells / CHUNKS);
-        if (i1 <= i0 || j1 <= j0) continue;
-        this.content.add(this._mesh(this._chunkGeometry(i0, i1, j0, j1), mat));
-      }
-    }
+    this._addBlocks(0, this.n - 1, 0, this.n - 1, mat);
+
     // The rim fills the fog out to RIM metres. It holds the height of the patch edge, so it needs
     // cells only along the edge and two cells outward.
     const h = this.half, r = RIM;
@@ -192,31 +182,63 @@ export class Ground {
     this.content.add(this._mesh(this._bandGeometry(h, r, -h, h), mat));
   }
 
+  // Split a cell range into blocks of about one tenth of the patch, so the frustum can cull them.
+  _addBlocks(i0, i1, j0, j1, mat) {
+    const b = Math.ceil((this.n - 1) / CHUNKS);
+    for (let j = j0; j < j1; j += b) {
+      const je = Math.min(j + b, j1);
+      for (let i = i0; i < i1; i += b) {
+        this.content.add(this._mesh(this._gridGeometry(i, Math.min(i + b, i1), j, je), mat));
+      }
+    }
+  }
+
   _mesh(geo, mat) {
     const m = new THREE.Mesh(geo, mat);
     m.receiveShadow = !!this.tier.shadows;
     return m;
   }
 
-  // One block of the fine grid, from cell i0 to i1 and j0 to j1.
-  _chunkGeometry(i0, i1, j0, j1) {
+  // One block of the terrain, from cell i0 to i1 and j0 to j1.
+  // The mesh is indexed: a grid vertex belongs to six triangles, so an indexed block runs the
+  // vertex shader about six times less than a block that repeats every vertex. flatShading still
+  // takes the normal from the derivatives, so the facets stay. The colour is per vertex and the
+  // reader sees it smoothed over one cell, which the eye cannot separate from a colour per face.
+  // The index runs in tiles of TILE cells, so a vertex stays in the cache of the graphics card
+  // between the two rows that use it.
+  _gridGeometry(i0, i1, j0, j1) {
     const n = this.n, g = this.grid, half = this.half, H = this.heights, C = this.result.colors;
-    const tris = (i1 - i0) * (j1 - j0) * 2;
-    const pos = new Float32Array(tris * 9), col = new Float32Array(tris * 9);
-    let o = 0, f = 0;
-    for (let j = j0; j < j1; j++) {
-      for (let i = i0; i < i1; i++) {
-        const x0 = -half + i * g, x1 = x0 + g;
-        const z0 = -half + j * g, z1 = z0 + g;
-        const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
-        // two triangles per cell, wound so the normal points up
-        o = writeTri(pos, o, x0, H[a], z0, x0, H[c], z1, x1, H[d], z1);
-        f = writeFace(col, f, C, a, c, d, a * 2);
-        o = writeTri(pos, o, x0, H[a], z0, x1, H[d], z1, x1, H[b], z0);
-        f = writeFace(col, f, C, a, d, b, a * 2 + 1);
+    const w = i1 - i0 + 1, d = j1 - j0 + 1;
+    const pos = new Float32Array(w * d * 3), col = new Float32Array(w * d * 3);
+    let o = 0;
+    for (let j = j0; j <= j1; j++) {
+      const z = -half + j * g, jn = j * n;
+      for (let i = i0; i <= i1; i++) {
+        const k = jn + i, c3 = k * 3;
+        pos[o] = -half + i * g; pos[o + 1] = H[k]; pos[o + 2] = z;
+        const t = 1 + (hash1(k) - 0.5) * 2 * JITTER;
+        col[o] = C[c3] * t; col[o + 1] = C[c3 + 1] * t; col[o + 2] = C[c3 + 2] * t;
+        o += 3;
       }
     }
-    return makeGeometry(pos, col);
+    const idx = w * d > 65536 ? new Uint32Array((w - 1) * (d - 1) * 6) : new Uint16Array((w - 1) * (d - 1) * 6);
+    let m = 0;
+    for (let js = 0; js < d - 1; js += TILE) {
+      const je = Math.min(js + TILE, d - 1);
+      for (let is = 0; is < w - 1; is += TILE) {
+        const ie = Math.min(is + TILE, w - 1);
+        for (let j = js; j < je; j++) {
+          for (let i = is; i < ie; i++) {
+            const a = j * w + i, b = a + 1, c = a + w, e = c + 1;
+            // two triangles per cell, wound so the normal points up
+            idx[m] = a; idx[m + 1] = c; idx[m + 2] = e;
+            idx[m + 3] = a; idx[m + 4] = e; idx[m + 5] = b;
+            m += 6;
+          }
+        }
+      }
+    }
+    return makeGeometry(pos, col, idx);
   }
 
   // One band of the rim. The heights and the colours come from the nearest point of the patch,
