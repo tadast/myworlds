@@ -1289,6 +1289,122 @@ function patchFlora(ctx, s) {
   return flora;
 }
 
+// ---------------------------------------------------------------- the fauna of a patch
+// The globe scatters single animals over a whole world. The ground shows a few animals close up,
+// so it places them as groups: one anchor per group, and the members of the group around it. The
+// sociality gene gives the count and the formation radius. See docs/fauna.md, "Ground tier".
+const GROUP_REACH = 600;      // metres: an anchor starts this close to the site, inside the fog rim
+const GROUPS_MIN = 10, GROUPS_MAX = 30;   // groups per patch
+const NICHE_REACH = 300;      // metres: a niche this close to the site puts its species on the patch
+const NICHE_STEP = 30;        // metres between the samples of the niche test
+const ANCHOR_TRIES = 48;      // how many places one group tries before it gives up
+
+// The niches the patch holds at the site and within NICHE_REACH metres of it. The tests are the
+// ones makeFauna() runs on the globe, so a species that lives on this ground from orbit also lives
+// on this patch. Temperature and moisture come from the same rules the colour pass uses.
+function patchNiches(ctx, g) {
+  const out = new Set();
+  const step = Math.max(1, Math.round(NICHE_STEP / g.grid));
+  const f = g.siteFM, beachW = ctx.beachW;
+  for (let j = 0; j < g.n; j += step) {
+    const zm = -g.half + j * g.grid;
+    if (Math.abs(zm) > NICHE_REACH) continue;
+    for (let i = 0; i < g.n; i += step) {
+      const xm = -g.half + i * g.grid;
+      if (xm * xm + zm * zm > NICHE_REACH * NICHE_REACH) continue;
+      const k = j * g.n + i, hm = g.heights[k], h = hm * g.H_PER_M;
+      const t = g.siteT + (Math.max(g.elevation, 0) - Math.max(hm, 0)) * g.H_PER_M * 0.55;
+      const m = g.siteM - g.vary[k] * 0.1 + Math.max(f, 0) * 0.06;
+      const beach = h > 0 && h < beachW;
+      const lowland = h > beachW && h < 0.3;
+      if (beach && t > 0.1) out.add('beach');
+      if (lowland && m > -0.2 && m < 0.22 && f < 0.1 && t > 0.35) out.add('meadow');
+      if (lowland && m > 0.22 && f > 0.05) out.add('forest');
+      if (lowland && t > 0.15) out.add('lowland');
+      if (h > beachW && h < 0.6) out.add('dune');
+      if (h > beachW && h < 0.35 && t > -0.05) out.add('snow');
+      if (h > 0.15 && h < 0.6) out.add('ash');
+      if (h < -0.08) out.add('sea');
+    }
+  }
+  return out;
+}
+
+// The groups of one patch.
+//   groups:  x z, kind, count, spread, phase        (6 floats per group)
+//   members: group index, offset x, offset z, phase (4 floats per member)
+// A member offset is the place of the animal in the formation, in metres from the anchor.
+function patchFauna(ctx, opts, g) {
+  const empty = { groups: new Float32Array(0), members: new Float32Array(0) };
+  const species = ctx.world.species || [];
+  const maxFauna = opts.maxFauna || 0;
+  if (!species.length || maxFauna <= 0) return empty;
+
+  // Which species live here. The site was pulled to one species, so that one is always present.
+  // A sea species and a cloud flyer wait for issue 15; this patch has no water and no cloud deck
+  // to put them in.
+  const niches = patchNiches(ctx, g);
+  const pulled = opts.pulledKind === undefined ? -1 : opts.pulledKind;
+  const present = [];
+  for (const G of species) {
+    if (G.niche === 'sea' || G.niche === 'cloud') continue;
+    if (G.id === pulled) present.unshift(G);           // the pulled species leads, so it gets a group
+    else if (niches.has(G.niche)) present.push(G);
+  }
+  if (!present.length) return empty;
+
+  const rng = makeRng(`${g.pseed}|fauna`);
+  const hAt = (x, z) => {
+    const i = clamp(Math.round((x + g.half) / g.grid), 0, g.n - 1);
+    const j = clamp(Math.round((z + g.half) / g.grid), 0, g.n - 1);
+    return g.heights[j * g.n + i];
+  };
+
+  const target = Math.round(rrange(rng, GROUPS_MIN, GROUPS_MAX));
+  const anchors = [], rows = [];
+  let total = 0;
+  for (let k = 0; k < target; k++) {
+    const G = present[k % present.length];
+    const s = G.social || { n: 1, spread: 4 };
+    const count = s.n;
+    if (total + count > maxFauna) break;
+    const spread = Math.max(3, s.spread);
+    const reach = Math.max(60, Math.min(GROUP_REACH, g.half - spread - 40));
+    let x = 0, z = 0, placed = false;
+    for (let a = 0; a < ANCHOR_TRIES; a++) {
+      const ang = rng() * Math.PI * 2, r = Math.sqrt(rng()) * reach;
+      x = Math.cos(ang) * r; z = Math.sin(ang) * r;
+      if (G.cls !== 'air' && hAt(x, z) <= 0) continue;   // a walker and a burrower stand on land
+      let clear = true;
+      for (const p of anchors) {
+        const need = Math.max(spread, p.spread) * 2;     // groups sit at least spread * 2 apart
+        const dx = p.x - x, dz = p.z - z;
+        if (dx * dx + dz * dz < need * need) { clear = false; break; }
+      }
+      if (clear) { placed = true; break; }
+    }
+    if (!placed) continue;
+    anchors.push({ x, z, kind: G.id, count, spread, phase: rng() * Math.PI * 2 });
+    // the formation: a jittered ring, so the members share the space and do not stand on one another
+    const gi = anchors.length - 1, turn = rng();
+    for (let i = 0; i < count; i++) {
+      const ang = ((i + turn) / count + rrange(rng, -0.14, 0.14)) * Math.PI * 2;
+      const r = count === 1 ? 0 : spread * rrange(rng, 0.45, 1);
+      rows.push([gi, Math.cos(ang) * r, Math.sin(ang) * r, rng() * Math.PI * 2]);
+    }
+    total += count;
+  }
+  if (!anchors.length) return empty;
+
+  const groups = new Float32Array(anchors.length * 6);
+  anchors.forEach((a, i) => {
+    groups.set([a.x, a.z, a.kind, a.count, a.spread, a.phase], i * 6);
+  });
+  const members = new Float32Array(rows.length * 4);
+  rows.forEach((r, i) => members.set(r, i * 4));
+  return { groups, members };
+}
+
 // A ground patch at one site: a square height grid and a colour per vertex, both in the frame
 // x east, y up, z south, with the origin at the site at sea level.
 function patch(seed, lat, lon, opts) {
@@ -1403,14 +1519,18 @@ function patch(seed, lat, lon, opts) {
     if ((j & 31) === 0) post(66 + (j / n) * 30, 'Painting the ground');
   }
 
-  post(96, 'Growing the plants');
+  post(94, 'Growing the plants');
   const flora = patchFlora(ctx, {
     heights, vary, n, grid, half, size, hPerM: H_PER_M, elevation,
     siteT, siteM, siteFM, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000,
   });
 
+  post(96, 'Calling the animals');
+  const { groups, members } = patchFauna(ctx, opts, {
+    pseed, heights, vary, n, grid, half, elevation, siteT, siteM, siteFM, H_PER_M,
+  });
+
   post(98, 'Almost there');
-  const groups = new Float32Array(0), members = new Float32Array(0);
   const result = {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,

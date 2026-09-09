@@ -205,6 +205,80 @@ Uniforms and instance attributes:
 
 `Inspector.show(G, palette, groundColor, seed)` builds the creature again as an `InstancedMesh` with one instance, so the same shader and the same `aMove` attribute apply. It runs the same steering model with time sped up by 2.5 and the turn rate halved. The leash maps to `walkR` (3.0 units) of the ground disc (`groundR`, 3.6 units), and the position is clamped just inside the disc edge, so the animal walks long arcs over the whole disc. It draws a trail of the last 160 points and fills the card from `G.lore`. `cardHover(G)` lifts flyers off the ground disc.
 
+## Ground tier
+
+The globe scatters single animals over a whole world. The ground shows a few animals close up, so
+it places them as groups. The group model has three parts: the worker rolls the groups, the app
+scales each species to its lore size, and one mover carries the whole group.
+
+### The group model
+
+`patchFauna()` in `worker.js` fills two arrays of the patch result:
+
+| Array | Floats per row | Fields |
+|---|---|---|
+| `groups` | 6 | anchor `x`, anchor `z`, `kind`, `count`, `spread`, `phase` |
+| `members` | 4 | group index, offset `x`, offset `z`, `phase` |
+
+The anchor is the point the group holds. It is never drawn. The offsets place the members of the
+group around the anchor on a jittered ring inside `spread`, so no two animals stand in one place.
+
+**Which species are present.** The species the site was pulled to is always present; the app sends
+its id as `opts.pulledKind`, or -1. Any other species is present when its niche is on the patch.
+`patchNiches()` samples the patch grid within 300 m of the site and runs the tests `makeFauna()`
+runs on the globe, with the temperature and the moisture of the colour pass. A `sea` species and a
+`cloud` flyer are not placed; issue 15 gives them their water and their cloud deck.
+
+**How many.** Each patch holds 10 to 30 groups, round robin over the present species, and the total
+member count stays under `opts.maxFauna` (300 on HIGH, 100 on LOW). An anchor starts within 600 m
+of the site, so no group is born in the fog. Two anchors sit at least `spread * 2` apart. A land
+anchor and a sub anchor stand on land above sea level.
+
+Everything above comes from `makeRng(patchSeed + '|fauna')`, so one URL always gives one set of
+groups.
+
+### Scale in metres
+
+`GroundFauna` builds each species once with `buildCreature()` and measures the bounding box of the
+geometry. `Species.bodyMetres(G)` gives the number the lore states and the axis it measures: a
+height measures along y, a length along z, because a creature faces +z in its own frame. The scale
+makes that extent equal the number. A "4.5 m at the shoulder" quad is then 4.5 m tall against the
+2 m terrain grid, and a "3.1 m long" hexapod is 3.1 m from nose to tail.
+
+### Steering
+
+`ground-fauna.js` gives each anchor one mover from `makeMover()`, in metres:
+
+- Leash 60 to 200 m, from `G.move.leash`. An arch and a periscope keep a leash of 0, so they never
+  travel.
+- Speed 0.5 to 6 m/s, from `G.move.speed` times `MPS_PER_UNIT`.
+- Turn rate `G.move.turn * TURN_GAIN`. The globe turns an animal about a leash of 0.03 units. The
+  ground leash is thousands of times wider, so the turn rate comes down with it. Without this the
+  animal would wind in tight circles instead of crossing its range.
+
+A walker turns away from the water and from the edge of the patch, as `updateMovers()` does on the
+globe. Each member then eases toward its place in the formation, which turns with the anchor, and
+adds a small wobble of its own. A serpent and a plough follow the anchor path from a ring buffer
+with a lag per member, so the chain reads. A land animal and a sub animal stand on `heightAt` and
+tilt to the normal of the terrain under their feet. A flyer holds its height above the ground under
+it, 12 to 40 m, so it clears a hill.
+
+The activity uniform `aMove` comes from the anchor, so a whole herd stops and starts together.
+
+### Cost
+
+One `InstancedMesh` per species. `Ground.update()` calls `GroundFauna.update()`, which walks the
+groups, then the members, then marks the instance matrices. On a site with 299 creatures the walk
+costs about 0.14 ms, and the animals add about 0.4 ms to the graphics card. `window.__mw.ground.fauna`
+holds the live state: `count`, `groups`, `members`, `kinds`, and `stepMs`.
+
+### The inspector on the ground
+
+`GroundFauna.pickAt()` uses the measure `creatureAt()` uses on the globe: project the base of the
+animal and a point one body up, then take the distance from the tap to that segment. The globe test
+also drops an animal on the far side of the planet; on the ground the frustum does that. A tap
+opens the card of the species through the `onInspect` callback of `Ground`.
+
 ## Checklist for changes
 
 - Add a locomotion: add it to `LOCO`, `PLAN`, `HEAD`, `EXTRAS`, `MOVE`, and `NOUN`, `GENUS`, `ORIGIN` in `species.js`. Add its legs or body in `buildCreature()`, and a carriage in `rigConstants()` if it moves in a new way.

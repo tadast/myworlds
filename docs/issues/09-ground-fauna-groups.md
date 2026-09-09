@@ -15,16 +15,50 @@ Animals on the ground at their lore size, placed and steered as groups. Renderin
 
 ## Acceptance criteria
 
-- [ ] Descend on a pulled site: the pulled species is there in a group of the size the lore states, and moves as a group. Members do not overlap or drift apart.
-- [ ] A herd species stops and starts together. A pair stays together. A solitary animal roams alone.
-- [ ] Creatures stand on the ground on slopes. Flyers clear hills.
-- [ ] A creature of "4 m at the shoulder" measures 4 m against the 2 m grid, and a "17 m" flyer is visibly huge.
-- [ ] Clicking a creature opens its inspector card.
-- [ ] Same URL gives the same groups on reload.
-- [ ] Frame time on a site with 300 creatures at 30 m above ground is under 12 ms on HIGH with terrain, sea, and flora present. Report the steering walk time.
-- [ ] `docs/fauna.md` gets a section "Ground tier" with the group model.
+- [x] Descend on a pulled site: the pulled species is there in a group of the size the lore states, and moves as a group. Members do not overlap or drift apart.
+- [x] A herd species stops and starts together. A pair stays together. A solitary animal roams alone.
+- [x] Creatures stand on the ground on slopes. Flyers clear hills.
+- [x] A creature of "4 m at the shoulder" measures 4 m against the 2 m grid, and a "17 m" flyer is visibly huge.
+- [x] Clicking a creature opens its inspector card.
+- [x] Same URL gives the same groups on reload.
+- [x] Frame time on a site with 300 creatures at 30 m above ground is under 12 ms on HIGH with terrain, sea, and flora present. Report the steering walk time.
+- [x] `docs/fauna.md` gets a section "Ground tier" with the group model.
 
 ## Blocked by
 
 - 04 Patch terrain from the worker
 - 08 Sociality gene
+
+## Summary
+
+Checked by hand in Chrome on the served site, HIGH tier, viewport 1300 by 677 CSS pixels at a
+device pixel ratio of 2.
+
+- **Pulled site.** `#Aurora` in orbit, the crosshair on a creature home, `__mw.site.kind` 0. The
+  descent put the "Shell walker" on the ground in 7 groups of 5, which is what its lore says:
+  "Indifferent, herds of five". Over 9 s the anchor of one group moved as one body, the nearest two
+  members stayed 4.4 to 9.2 m apart, and the farthest member stayed 13 to 18 m from the anchor,
+  inside the formation radius of 18 m.
+- **Sociality.** The activity of the herd fell together from 0.69 to 0.39, because every member
+  reads the anchor. The serpent pair of `#Nova@-49.00,-81.00` held 5.5 to 6.5 m apart while both
+  members travelled together, and the second one trailed the first. The solitary drifter of Aurora
+  roamed 600 m away from the herd, alone.
+- **Ground contact.** Over all 41 animals of the Aurora site the largest gap between the animal and
+  `heightAt` was 0. Land animals tilt to the slope, up to 19.5 degrees. Over 141 flyers on
+  `#Aurora@-58.00,-20.00` the clearance error was 0, the hovers ran 12.2 to 39.5 m, and one flyer
+  held 32.53 m while the ground under it rose from 362.5 to 367.6 m.
+- **Metres.** "4.5 m at the shoulder" measured 4.500 m tall against the 2 m grid, that is 2.25 grid
+  cells. "3.1 m long" measured 3.10 m long and 0.77 m tall, and "5.7 m tall" measured 5.70 m. No
+  "17 m" flyer can appear yet: that number belongs to a `fins` sky whale, whose niche is always
+  `sea` or `cloud`, and item 1 of this issue holds those back for issue 15. The largest flyer that
+  is placed is the 10 m "Crested swarm", in herds of 13 over a formation radius of 104 m.
+- **Inspector.** A tap on a grazer on `#Nova@-65.00,48.00` opened the card of the "Tusked grazer".
+- **Determinism.** `#Nova@-65.00,48.00` reloaded gives the same 23 groups and 299 members, and the
+  same hash over every anchor, spread, hover, leash, speed, and member offset.
+- **Frame time.** `#Nova@-65.00,48.00`, 299 creatures, camera 30 m above the ground. A timer query
+  around `Ground.render`, 60 samples: p10 3.75 ms, median 5.42 ms, p90 5.53 ms. The same camera
+  with the animals hidden: p10 2.30 ms, median 5.02 ms, p90 5.22 ms. The animals cost about 0.4 ms.
+  The wall-clock frame time is 16.5 ms, pinned at the 60 Hz refresh, so it shows no headroom. The
+  steering walk costs 0.14 ms for 299 creatures. **The sea of issue 05 and the flora of issue 07
+  were not present**, because those issues run in parallel. The terrain alone measured 5.47 ms at
+  the entry camera and 5.02 ms at 30 m in the same session.

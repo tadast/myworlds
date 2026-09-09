@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from './ground-sky.js';
 import { Flora } from './ground-flora.js';
+import { GroundFauna } from './ground-fauna.js';
 
 export const PATCH_SIZE = 1500;      // metres, the side of the patch
 export const FOG_NEAR = 450;         // metres, where the fog starts
@@ -88,8 +89,9 @@ function makeGeometry(pos, col, idx) {
 
 export class Ground {
   // tier: { grid, maxFlora, maxFauna, shadows }
-  constructor({ renderer, canvas, world, site, tier }) {
+  constructor({ renderer, canvas, world, site, tier, onInspect }) {
     this.renderer = renderer;
+    this.onInspect = onInspect || null;   // the app opens the inspector card for a tapped creature
     this.canvas = canvas;
     this.world = world;
     this.site = site;
@@ -97,6 +99,7 @@ export class Ground {
     this.result = null;
     this.sky = null;
     this.flora = null;
+    this.fauna = null;
     this.atCeiling = false;
     this.lod = { distance: 150, min: 40, max: 400 };   // metres, one knob for issue 11
     // the height grid of the patch, and the ground height at the site
@@ -200,6 +203,22 @@ export class Ground {
       plane.receiveShadow = !!this.tier.shadows;
       this.content.add(plane);
     }
+
+    // The animals of this site, in groups. They keep their own file, so issue 07 can add the flora
+    // beside them and neither issue touches the file of the other.
+    this.fauna = new GroundFauna({
+      result, world: this.world, tier: this.tier, camera: this.camera, canvas: this.canvas,
+      heightAt: (x, z) => this.heightAt(x, z), onInspect: this.onInspect,
+    });
+    this.content.add(this.fauna.group);
+
+    // Fill the seam of issue 06: a tap on an animal glides to it first, then opens its card.
+    this.pickCreature = (nx, ny, e) => {
+      const r = this.canvas.getBoundingClientRect();
+      const px = (nx + 1) / 2 * r.width, py = (1 - ny) / 2 * r.height;
+      return this.fauna.pickHit(px, py, e && e.pointerType === 'touch' ? 52 : 34);
+    };
+    this.onCreatureTap = (hit) => { if (this.onInspect) this.onInspect(hit.kind); };
 
     // A directional light takes its direction from the position and the target, not the distance,
     // so the height of the site must not move it. The colour and the strength come from the sky.
@@ -406,6 +425,7 @@ export class Ground {
       fog.near = fog.far * (FOG_NEAR / FOG_FAR);
     }
 
+    if (this.fauna) this.fauna.update(t, dt);
     // the sky follows the camera, so it must move after every clamp
     if (this.sky) this.sky.update(t, dt, this.camera);
     // the LOD walk reads the camera, so it runs after the clamps too
@@ -574,6 +594,7 @@ export class Ground {
 
   _clear() {
     if (this.flora) { this.flora.dispose(); this.flora = null; }
+    if (this.fauna) { this.fauna.dispose(); this.fauna = null; }
     this.content.traverse((o) => {
       if (o === this.content) return;
       if (o.geometry) o.geometry.dispose();

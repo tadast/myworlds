@@ -626,7 +626,7 @@ function stepDive(now) {
 // The switch into the ground scene, under an opaque overlay.
 function enterGround() {
   mode = 'ground';
-  ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: TIER });
+  ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: TIER, onInspect: inspect });
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
   const view = skyView(current, lockedSite, sunDir);
