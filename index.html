@@ -98,6 +98,10 @@
     </div>
   </div>
 
+  <!-- The worker loads species.js too. The page needs it for Species.bodyMetres(), because the
+       ground scales a creature to the size its lore states. A classic script runs before a module,
+       so window.Species is there when app.js starts. -->
+  <script src="./species.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
