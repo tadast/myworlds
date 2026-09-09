@@ -125,6 +125,18 @@ Three cuts brought it back under the budget.
 
 Measured on `Auralis@-4.25,15.95`, a coast with 52% of the patch under water: terrain alone p10 3.83, median 5.18, p90 7.85; with the sea p10 5.07, median 6.56, p90 9.46. The sea adds about 1.4 ms. Another browser tab shared the card during the run, which is what the wide p90 shows; a paired run that turned the sea on and off frame by frame put the cost at 1.8 ms.
 
+### What the knob follows
+
+Added with issue 11, the adaptive LOD. The numbers come from a timer query of the graphics card around one `Ground.render`, 40 samples per run, on an Apple M2 with a 60 Hz display and a draw buffer of 2,600 by 1,354.
+
+**The frame interval cannot ask for a step out.** Decision 4 gives the knob one number: the rolling frame time against the target. The display holds that interval at the refresh, so on a machine with room to spare the average sits at 16.67 ms and never falls 30% under the target. The knob would then come down under load and stay down for the rest of the session. So the clock keeps a second number, the work the app does inside one frame callback, and the two steps read one number each. The knob comes down when the interval misses the target by 10%, and it goes out when the interval sits at the refresh and the work is under 70% of the target. On a machine that draws without a vertical sync the two rules agree, because the work is then a part of the interval.
+
+**A step down buys three seconds of quiet.** At the height where the machine sits exactly at the refresh, a step out breaks the refresh and the next step comes back in. The cool time bounds that ring to one swing of 15% every few seconds instead of one every half second.
+
+**The shadow gate needs a band.** The sun casts only while the camera is lower than the LOD distance over the ground, so the knob now moves the gate. One threshold rings: the shadow starts, the frame gets slower, the knob comes in, the gate goes over the camera, the shadow stops. The gate now turns off over 1.35 LOD distances and back on under 1.05, a band of 29% against a step of 15%, and it holds each state for 1.5 s. Measured at 56 m over the ground on `Vesper@10.00,150.00`, with the knob driven from 400 m to the 40 m floor and back: one switch off at 41 m and one switch on at 53 m, none between.
+
+**The knob spends the room it finds.** On this machine the forest site settles at the 400 m ceiling at every camera height, and the frame holds the refresh. At 45 m over the ground that is 3,955 near plants and 122 near animals instead of about 500 and 16 at the 150 m start, for a median of 5.79 ms against 5.61 ms before the issue. The coast `Auralis@-4.25,15.95` at 27 m reads 7.51 ms at 400 m against 6.62 ms at 150 m. Under a load the knob walks from 400 m to the 40 m floor in 7.5 s, and it walks back in 12 s once the load goes.
+
 ## Phases
 
 - **Phase 0.** Globe fixes, decision 8.

@@ -12,6 +12,7 @@ import { Sky } from './ground-sky.js';
 import { Flora } from './ground-flora.js';
 import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
+import { perf } from './perf.js';
 
 export const PATCH_SIZE = 1500;      // metres, the side of the patch
 export const FOG_NEAR = 450;         // metres, where the fog starts
@@ -20,6 +21,22 @@ export const SKY_RADIUS = 5000;      // metres, the sky dome
 export const CEILING = 1200;         // metres, the camera ceiling above the site
 export const FLOOR = 2;              // metres, the camera floor above the terrain
 const SHADOW_BOX = 200;     // metres, the half width of the shadow box around the target
+// The shadow gate follows the LOD distance, so it must not switch on and off while the knob
+// moves. It turns off over SHADOW_OFF LOD distances of height and back on under SHADOW_ON, and it
+// holds each state for SHADOW_DWELL. See _driveShadow().
+const SHADOW_OFF = 1.35;
+const SHADOW_ON = 1.05;
+const SHADOW_DWELL = 1500;  // ms
+
+// ---------------------------------------------------------------- the LOD controller, issue 11
+const LOD_PERIOD = 500;     // ms between two decisions
+const LOD_OVER = 1.1;       // over the target by this much: come down
+const LOD_UNDER = 0.7;      // under the target by this much: go out
+const LOD_STEADY = 1.02;    // the interval sits at the refresh, so no frame is late
+const LOD_DOWN = 0.85;      // the step down
+const LOD_UP = 1.1;         // the step up
+const LOD_COOL = 3000;      // ms, the quiet time a step down buys before a step up
+const LOD_STORE = 'myworlds.lod.v1';
 
 export const CAM_START = 800;        // metres, the camera starts this far up and this far south
 export const RIM = 1500;             // metres, how far the coarse rim reaches from the site
@@ -59,6 +76,26 @@ const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 
 // scratch vectors for the camera work, so no frame allocates
 const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
+
+// The settled LOD distance per tier. A tier is its own entry, because a low tier holds a
+// different value and the reader can move between the two on one machine.
+function lodKey(tier) {
+  return `${tier.grid}|${tier.maxFlora}|${tier.maxFauna}|${tier.shadows ? 1 : 0}`;
+}
+function readLod(key) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LOD_STORE) || '{}');
+    const v = all[key];
+    return typeof v === 'number' && isFinite(v) ? v : null;
+  } catch { return null; }
+}
+function writeLod(key, value) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LOD_STORE) || '{}');
+    all[key] = Math.round(value);
+    localStorage.setItem(LOD_STORE, JSON.stringify(all));
+  } catch { /* a full or blocked store is not worth a broken frame */ }
+}
 
 // small integer hash, the one the worker jitters its faces with
 function hash1(i) {
@@ -105,7 +142,20 @@ export class Ground {
     this.fauna = null;
     this.sea = null;
     this.atCeiling = false;
-    this.lod = { distance: 150, min: 40, max: 400 };   // metres, one knob for issue 11
+    // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
+    // it. _driveLod() moves it from the frame time; the last settled value comes from the store,
+    // so the next landing on this machine starts near the right value.
+    this.lod = { distance: 150, min: 40, max: 400 };
+    this._lodKey = lodKey(this.tier);
+    this._stored = readLod(this._lodKey);
+    if (this._stored !== null) {
+      this.lod.distance = Math.min(this.lod.max, Math.max(this.lod.min, this._stored));
+    }
+    this._lodAt = performance.now();
+    this._lodDown = 0;
+    this._lodPrev = this.lod.distance;
+    this._shadowOn = false;
+    this._shadowAt = 0;
     // the height grid of the patch, and the ground height at the site
     this.heights = null;
     this.n = 0; this.grid = 0; this.half = PATCH_SIZE / 2;
@@ -173,6 +223,8 @@ export class Ground {
     this.result = result;
     if (sunDir) this.sunDir.copy(sunDir).normalize();
     this._clear();
+    this._shadowOn = false;      // the camera arrives 800 m up, where nothing casts
+    this._shadowAt = 0;
 
     const p = result && result.patch;
     this.heights = p ? result.heights : null;
@@ -452,6 +504,8 @@ export class Ground {
       fog.near = fog.far * (FOG_NEAR / FOG_FAR);
     }
 
+    // the knob moves before the three parts that read it: the shadow gate, the animals, the plants
+    this._driveLod();
     this._driveShadow();
     if (this.fauna) this.fauna.update(t, dt);
     // the sky follows the camera, so it must move after every clamp
@@ -463,20 +517,72 @@ export class Ground {
     if (this.flora) this.flora.update(this.camera);
   }
 
+  // The LOD controller: one knob, from the frame time. Every LOD_PERIOD it reads the rolling
+  // averages of perf.js. Over the target it pulls the distance in, and with room to spare it
+  // pushes the distance out. The value stays inside [min, max]. The clock drops the dive, the
+  // first second after load, and any frame over 100 ms, so a tab switch cannot move the knob.
+  //
+  // The two steps read two numbers, because one number cannot answer both questions. The frame
+  // interval says the machine is late, but the display holds it at the refresh, so it can never
+  // fall 30% under the target and it can never ask for a step out. The work of the frame can. So
+  // the knob comes down when the interval misses the target, and it goes out when the interval
+  // sits at the refresh and the app uses less than 70% of the frame. A step down also buys
+  // LOD_COOL of quiet, so the knob cannot ring around the value where the machine is exactly at
+  // the refresh.
+  _driveLod() {
+    const now = performance.now();
+    if (now - this._lodAt < LOD_PERIOD) return;
+    this._lodAt = now;
+    if (!perf.ready) return;
+    const lod = this.lod, avg = perf.avg, work = perf.avgWork, target = perf.target;
+    let d = lod.distance;
+    if (avg > target * LOD_OVER) { d *= LOD_DOWN; this._lodDown = now; }
+    else if (avg < target * LOD_STEADY && work < target * LOD_UNDER && now - this._lodDown > LOD_COOL) d *= LOD_UP;
+    lod.distance = Math.min(lod.max, Math.max(lod.min, d));
+    // A value that holds over two decisions is settled. It goes to the store, but only when it
+    // has moved away from the value that is already there, so a settled site writes once.
+    if (lod.distance === this._lodPrev
+      && (this._stored === null || Math.abs(lod.distance - this._stored) > lod.distance * 0.02)) {
+      this._stored = lod.distance;
+      writeLod(this._lodKey, lod.distance);
+    }
+    this._lodPrev = lod.distance;
+  }
+
   // The shadow box follows the target and only lives near the ground. A plant and an animal cast
   // only while they are near meshes, and both are near meshes only within lod.distance of the
   // camera. So a camera higher than that distance has no caster under it, and the map would cost
-  // 2.2 ms to draw an empty frame. The margin of 1.2 keeps the shadow through the hysteresis band.
+  // 2.2 ms to draw an empty frame.
+  //
+  // The gate now moves with the knob, and the knob moves with the frame time the shadow itself
+  // sets. A single threshold would therefore ring: the shadow starts, the frame gets slower, the
+  // knob comes in, the gate goes over the camera, the shadow stops. So the gate takes two
+  // thresholds and a dwell. It turns off over SHADOW_OFF distances of height and back on under
+  // SHADOW_ON, which is a band of 29%, wider than one step of the knob at 15%. It also holds each
+  // state for SHADOW_DWELL, which is three decisions of the controller.
   _driveShadow() {
     const sun = this.sun;
     if (!sun || !this.tier.shadows) return;
-    const p = this.camera.position, tg = this.controls.target;
-    const high = p.y - this._groundAt(p.x, p.z) > this.lod.distance * 1.2;
-    sun.castShadow = !high;
-    if (high) return;
+    const tg = this.controls.target;
+    const h = this.cameraHeight;
+    const now = performance.now();
+    const want = h < this.lod.distance * (this._shadowOn ? SHADOW_OFF : SHADOW_ON);
+    if (want !== this._shadowOn && now - this._shadowAt > SHADOW_DWELL) {
+      this._shadowOn = want;
+      this._shadowAt = now;
+    }
+    sun.castShadow = this._shadowOn;
+    if (!this._shadowOn) return;
     sun.target.position.set(tg.x, tg.y, tg.z);
     sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6).add(sun.target.position);
     sun.target.updateMatrixWorld();
+  }
+
+  // The height of the camera over the ground under it, in metres. The shadow gate reads it, and
+  // the overlay of `?perf` shows it. It follows the rim, so it holds outside the patch as well.
+  get cameraHeight() {
+    const p = this.camera.position;
+    return p.y - this._groundAt(p.x, p.z);
   }
 
   // ---------------------------------------------------------------- the feel of the controls

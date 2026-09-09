@@ -8,6 +8,7 @@ import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker } from './site.js';
 import { Ground } from './ground.js';
 import { skyView } from './ground-sky.js';
+import { perf, Hud } from './perf.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -29,6 +30,10 @@ const PICK_RANGE = CAM_MIN + 0.1;   // the probe can pick a site inside this cam
 const TIER = LOW
   ? { grid: 4, maxFlora: 6000, maxFauna: 100, shadows: false }
   : { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
+// `?perf` shows the frame time, the LOD knob, and the counts of the frame. Without the flag the
+// page builds no element and does no work for it.
+const PERF = new URLSearchParams(location.search).has('perf');
+const HUD_MS = 500;       // ms, the overlay reads twice a second
 const ZOOM_HOLD = 500;    // ms, a zoom must continue this long to send or to recall the probe
 const ZOOM_GAP = 250;     // ms, a longer gap between zoom steps ends the gesture
 const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
@@ -409,11 +414,22 @@ function buildWorld(res) {
 
 // ---------------------------------------------------------------- render loop
 const clock = new THREE.Clock();
+// The clock counts the frame first, so the LOD controller of the ground reads this frame. A frame
+// during the dive or during a world build says nothing about the scene the reader is in. The work
+// of the frame is measured around step(), because the frame interval alone cannot show the
+// headroom the machine has left. See perf.js.
 function frame() {
   requestAnimationFrame(frame);
+  const now = performance.now();
+  perf.frame(now, !!dive || busy);
+  if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
+  step(now);
+  perf.work(performance.now() - now);
+}
+
+function step(now) {
   const dt = Math.min(clock.getDelta(), 0.1);
   const t = clock.elapsedTime;
-  const now = performance.now();
   if (dive) stepDive(now);
   checkZoomHold(now);
   if (mode === 'ground') {          // the globe stays in memory, but none of its work runs
@@ -464,6 +480,36 @@ function frame() {
 }
 function pitchFor(d) { return (1 - THREE.MathUtils.smoothstep(d, CAM_MIN, 2.3)) * 0.95; }
 requestAnimationFrame(frame);
+
+// ---------------------------------------------------------------- the perf overlay
+// The rows of `?perf`, read twice a second at the top of the frame. renderer.info holds the
+// numbers of the last frame the renderer drew, because the renderer clears them inside render().
+const hud = PERF ? new Hud() : null;
+let hudAt = 0;
+function perfRows() {
+  const r = renderer.info.render;
+  const fps = perf.avg > 0 ? 1000 / perf.avg : 0;
+  const rows = [
+    ['mode', mode],
+    ['frame', `${perf.avg.toFixed(2)} ms   ${fps.toFixed(0)} fps`],
+    ['work', `${perf.avgWork.toFixed(2)} ms`],
+    ['target', `${perf.target.toFixed(2)} ms   ${perf.hz} Hz${perf.hzDone ? '' : ' (estimating)'}`],
+  ];
+  if (mode === 'ground' && ground) {
+    const f = ground.flora, a = ground.fauna;
+    rows.push(['lod', `${ground.lod.distance.toFixed(0)} m   [${ground.lod.min}, ${ground.lod.max}]`]);
+    rows.push(['flora', f ? `${f.nearCount} near / ${f.cardCount} cards` : 'none']);
+    rows.push(['fauna', a ? `${a.nearCount} near / ${a.farCount} coarse` : 'none']);
+    rows.push(['shadow', ground.sun && ground.sun.castShadow ? 'on' : 'off']);
+    rows.push(['height', `${ground.cameraHeight.toFixed(0)} m over the ground`]);
+  } else if (current) {
+    rows.push(['world', `${current.world.seed}  ${current.world.type}`]);
+    rows.push(['flora', `${current.world.floraCount || 0} plants`]);
+    rows.push(['fauna', `${current.world.faunaCount || 0} animals`]);
+  }
+  rows.push(['draws', `${r.calls} calls   ${(r.triangles / 1000).toFixed(0)}k tris`]);
+  return rows;
+}
 
 // ---------------------------------------------------------------- the landing site
 // The probe would land where the screen centre points. The site follows the crosshair, it snaps
@@ -634,6 +680,7 @@ function enterGround() {
   ground.load(patchState.result, { sunDir: view.sunDir, view });
   if (patchState.result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
   ground.resize(innerWidth, innerHeight);
+  perf.reset();       // the orbit frames say nothing about the ground
   showMarker(null, current);
   writeHash();
 }
@@ -641,6 +688,7 @@ function enterGround() {
 // The switch back to the globe, under an opaque overlay. Also the straight cut for a new world.
 function leaveGround() {
   if (ground) { ground.dispose(); ground = null; }
+  perf.reset();       // the ground frames say nothing about the globe
   if (mode === 'ground') mode = 'ascending';
   if (lockedSite) placeCameraOverSite(lockedSite);
   writeHash();
@@ -650,6 +698,7 @@ function leaveGround() {
 function abortProbe() {
   if (mode === 'orbit' && !dive) return;
   if (ground) { ground.dispose(); ground = null; }
+  perf.reset();
   dive = null;
   lockedSite = null;
   patchJob = null;
@@ -1046,7 +1095,7 @@ renderWorlds();
 
 // debug handle (harmless in production)
 window.__mw = {
-  scene, camera, controls, renderer, generate, inspect, inspector, music, descend, ascend,
+  scene, camera, controls, renderer, generate, inspect, inspector, music, descend, ascend, perf,
   get current() { return current; },
   get site() { return site; },
   get mode() { return mode; },
