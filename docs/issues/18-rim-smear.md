@@ -1,6 +1,6 @@
 # 18 The rim smears the patch edge into streaks
 
-Status: CLOSED, 2026-09-09, merged as PENDING.
+Status: CLOSED, 2026-09-09, merged as 603aa99.
 
 Type: AFK. Phase 2. Blocked by: 04, 05. Read `docs/issues/README.md` first.
 
