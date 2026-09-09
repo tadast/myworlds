@@ -31,6 +31,16 @@ Plants on the ground at metre scale, dense enough to be a forest, with two level
 
 ## Decisions
 
+**A coast grew no plants until 24a29d9, found at integration.** `patchFlora` asked `biomeIndex` for
+the biome of a cell and passed no beach width, so the call took the default, the band of the globe.
+That band is a fraction of a planet radius, about 330 m of elevation on Auralis, so every cell of
+every low patch read as beach and the walk skipped it. No patch under a few hundred metres grew one
+plant, which is most coastal and lowland sites. This issue wrote the call before issue 05 made the
+band metre scale, and issue 05 changed only the call sites it could see. Neither agent could find
+it alone: this issue had no sea, and issue 05 did not count plants. The whole stack on the coast
+`Auralis@-4.25,15.95` then measures 6.62 ms at 30 m, with terrain, sea, 20,000 plants, animals, and
+the shadow, against the 10 ms of the frame-time criterion.
+
 **The sun had to become a caster, 2026-09-09.** Item 5 asks the near meshes to cast on HIGH and the
 budget table promises shadows on HIGH, but nothing on the ground cast a shadow: issue 04 set
 `receiveShadow` on the terrain and no light was ever made a caster, so the `castShadow` flags were

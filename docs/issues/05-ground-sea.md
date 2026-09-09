@@ -32,6 +32,10 @@ niches against this field, so both were re-checked after the merge: `Vesper@10.0
 places 20,000 plants and 299 animals, and the coastal site `Auralis@-4.25,15.95` reports `shallows`
 and places 29 solitary animals and no plants, which is correct for water.
 
+**A note found at integration.** The metre band did not reach `patchFlora` of issue 07, which took
+the globe band by default and skipped every cell of a low patch. Fixed in 24a29d9. See the decision
+in `docs/issues/07-ground-flora-lod.md`.
+
 ## Blocked by
 
 - 04 Patch terrain from the worker
