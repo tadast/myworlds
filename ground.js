@@ -42,7 +42,12 @@ const LOD_MIN = 40;         // metres, the floor of the knob
 const LOD_MAX = 400;        // metres, the ceiling of the knob. The tier may lower it; LOW asks 250.
 
 export const CAM_START = 800;        // metres, the camera starts this far up and this far south
-export const RIM = 1500;             // metres, how far the coarse rim reaches from the site
+// The rim: the ground outside the patch. It must reach past the fog, or its outer edge shows.
+// At the ceiling the camera stands at most FOG_NEAR + CEILING * tan(POLAR_HIGH + POLAR_BAND),
+// about 1,420 units, from the site, and the fog is solid at FOG_MAX. A ray from that height
+// meets the ground sqrt(FOG_MAX^2 - CEILING^2), about 1,723 units, out. So the ground must run
+// to about 3,143 units. See _rimGeometry().
+export const RIM = 3150;             // units, how far the rim reaches from the site
 
 // ---------------------------------------------------------------- the camera, issue 06
 const TARGET_LIFT = 1;      // metres, the target floats this far over the terrain
@@ -58,14 +63,12 @@ const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
 const TAP_SLOP = 6;         // px, a pointer that moves more than this is a drag, not a tap
 const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
 // The fog opens with the height of the camera. The reader lands 800 m up, and a fog that is solid
-// at 750 m would show one flat colour there. The far distance holds under the rim edge, so the
-// ground still fades out and the rim never shows a cut edge.
+// at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
+// the ground fades out before the rim ends and the reader never sees a cut edge. See RIM.
 const FOG_LIFT = 1.15;      // metres of fog distance per metre of height
 const FOG_MAX = 2100;       // metres, the widest the fog opens
 
 const CHUNKS = 10;           // the fine terrain splits into 10 by 10 meshes, so the frustum culls it
-const RIM_STEP = 4;          // the rim uses this many grid steps per cell
-const RIM_DEPTH = 2;         // cells outward. The rim is flat, so it needs no more.
 const JITTER = 0.055;        // the lightness noise per vertex, so the ground is not one flat swatch
 const TILE = 16;             // cells per tile in the index order, to keep the vertex cache warm
 // The terrain fills the frame, so its fragment shader sets the cost. A standard material runs a
@@ -79,6 +82,7 @@ const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 
 // scratch vectors for the camera work, so no frame allocates
 const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
+const _tint = [0, 0, 0];   // scratch colour for the rim rows
 
 // The settled LOD distance per tier. A tier is its own entry, because a low tier holds a
 // different value and the reader can move between the two on one machine. The ceiling is part
@@ -107,19 +111,6 @@ function hash1(i) {
   i = Math.imul(i ^ (i >>> 16), 2246822507);
   i = Math.imul(i ^ (i >>> 13), 3266489909);
   return ((i ^ (i >>> 16)) >>> 0) / 4294967296;
-}
-
-// One triangle into a non-indexed position buffer. Returns the next write offset.
-function writeTri(pos, o, ax, ay, az, bx, by, bz, cx, cy, cz) {
-  pos[o] = ax; pos[o + 1] = ay; pos[o + 2] = az;
-  pos[o + 3] = bx; pos[o + 4] = by; pos[o + 5] = bz;
-  pos[o + 6] = cx; pos[o + 7] = cy; pos[o + 8] = cz;
-  return o + 9;
-}
-
-function writeFlat(col, o, tint) {
-  for (let k = 0; k < 3; k++) { col[o + k] = tint[k]; col[o + 3 + k] = tint[k]; col[o + 6 + k] = tint[k]; }
-  return o + 9;
 }
 
 // flatShading takes the normal from the derivatives, so the mesh carries no normal attribute
@@ -163,8 +154,9 @@ export class Ground {
     this._lodPrev = this.lod.distance;
     this._shadowOn = false;
     this._shadowAt = 0;
-    // the height grid of the patch, and the ground height at the site
+    // the height grid of the patch, the coarse grid of the rim, and the ground height at the site
     this.heights = null;
+    this.rim = null;
     this.n = 0; this.grid = 0; this.half = PATCH_SIZE / 2;
     this.base = 0;
 
@@ -238,6 +230,8 @@ export class Ground {
     this.n = p ? p.n : 0;
     this.grid = p ? p.grid : 0;
     this.half = p ? p.size / 2 : PATCH_SIZE / 2;
+    this.rim = null;
+    if (p) this._loadRim(result);
     this.base = this.heightAt(0, 0);
 
     // The sky: a gradient dome, the moons, the ring, and the clouds of this world. The fog takes
@@ -337,14 +331,8 @@ export class Ground {
     mat.color.setScalar(GROUND_GAIN);
     this.terrainMat = mat;
     this._addBlocks(0, this.n - 1, 0, this.n - 1, mat);
-
-    // The rim fills the fog out to RIM metres. It holds the height of the patch edge, so it needs
-    // cells only along the edge and two cells outward.
-    const h = this.half, r = RIM;
-    this.content.add(this._mesh(this._bandGeometry(-r, r, -r, -h), mat));
-    this.content.add(this._mesh(this._bandGeometry(-r, r, h, r), mat));
-    this.content.add(this._mesh(this._bandGeometry(-r, -h, -h, h), mat));
-    this.content.add(this._mesh(this._bandGeometry(h, r, -h, h), mat));
+    // The rim carries the ground out past the fog, in one mesh with the same material.
+    if (this.rim) this.content.add(this._mesh(this._rimGeometry(), mat));
   }
 
   // The plants of the patch. ground-flora.js owns the meshes, the cards, and the LOD walk.
@@ -418,50 +406,157 @@ export class Ground {
     return makeGeometry(pos, col, idx);
   }
 
-  // One band of the rim. The heights and the colours come from the nearest point of the patch,
-  // so the band joins the edge and stays flat outward. The band keeps the step along the edge of
-  // the patch and takes only RIM_DEPTH cells outward, because it is flat that way.
-  _bandGeometry(x0, x1, z0, z1) {
-    const step = this.grid * RIM_STEP;
-    let nx = Math.max(1, Math.round((x1 - x0) / step)), nz = Math.max(1, Math.round((z1 - z0) / step));
-    if (x1 - x0 < z1 - z0) nx = Math.min(nx, RIM_DEPTH); else nz = Math.min(nz, RIM_DEPTH);
-    const pos = new Float32Array(nx * nz * 2 * 9), col = new Float32Array(nx * nz * 2 * 9);
-    const xs = new Float32Array(nx + 1), zs = new Float32Array(nz + 1);
-    for (let i = 0; i <= nx; i++) xs[i] = x0 + (x1 - x0) * i / nx;
-    for (let j = 0; j <= nz; j++) zs[j] = z0 + (z1 - z0) * j / nz;
-    const tint = [0, 0, 0];
-    let o = 0, f = 0;
-    for (let j = 0; j < nz; j++) {
-      for (let i = 0; i < nx; i++) {
-        const xa = xs[i], xb = xs[i + 1], za = zs[j], zb = zs[j + 1];
-        const ya = this._edgeHeight(xa, za), yb = this._edgeHeight(xb, za);
-        const yc = this._edgeHeight(xa, zb), yd = this._edgeHeight(xb, zb);
-        o = writeTri(pos, o, xa, ya, za, xa, yc, zb, xb, yd, zb);
-        this._edgeColor((xa + xb) / 2, (za + zb) / 2, tint);
-        f = writeFlat(col, f, tint);
-        o = writeTri(pos, o, xa, ya, za, xb, yd, zb, xb, yb, za);
-        f = writeFlat(col, f, tint);
+  // ---------------------------------------------------------------- the rim, issue 18
+  // The worker sends a coarse grid that reaches RIM units from the site. Its cell is a whole
+  // number of patch steps and it divides the box, so every rim node on the edge of the patch sits
+  // on a patch vertex. The rim takes the height and the colour of those nodes from the patch, and
+  // the two grids then hold one value at the join.
+  _loadRim(result) {
+    this.rim = null;
+    const r = result.patch && result.patch.rim;
+    if (!r || !result.rimHeights || !result.rimColors) return;
+    const rim = {
+      h: result.rimHeights, c: result.rimColors, n: r.n, step: r.step, out: r.out,
+      d: Math.round((r.out - this.half) / r.step),   // rim cells from the outer edge to the patch
+      cols: Math.round(this.half * 2 / r.step),      // rim cells across the patch
+      m: Math.round(r.step / this.grid),             // patch steps per rim cell
+    };
+    this.rim = rim;
+
+    const n = this.n, rn = rim.n, d = rim.d, m = rim.m;
+    const H = this.heights, C = result.colors, RH = rim.h, RC = rim.c;
+    const take = (ri, rj, pi, pj) => {
+      const q = rj * rn + ri, s = pj * n + pi;
+      RH[q] = H[s];
+      RC[q * 3] = C[s * 3]; RC[q * 3 + 1] = C[s * 3 + 1]; RC[q * 3 + 2] = C[s * 3 + 2];
+    };
+    for (let a = 0; a <= rim.cols; a++) {
+      const p = a * m;
+      take(d + a, d, p, 0);                 // the north edge of the patch
+      take(d + a, rn - 1 - d, p, n - 1);    // the south edge
+      take(d, d + a, 0, p);                 // the west edge
+      take(rn - 1 - d, d + a, n - 1, p);    // the east edge
+    }
+  }
+
+  // One mesh and one material for the whole rim. It holds the coarse cells outside the patch and
+  // four dense strips that tie the coarse grid to the patch.
+  //
+  // A strip carries one vertex per patch step on the edge of the patch, and the same count on the
+  // first coarse line of the rim. A height read along a grid line of the rim lies on the straight
+  // edge of the coarse cell beyond it. So the outer side of a strip lies on that cell, the inner
+  // side lies on the patch, and neither side leaves a crack where the two steps meet.
+  _rimGeometry() {
+    const rim = this.rim, rn = rim.n, s = rim.step, out = rim.out;
+    const n = this.n, half = this.half, grid = this.grid, C = this.result.colors;
+    const lo = rim.d, hi = rn - 1 - rim.d;           // the rim lines on the edge of the patch
+    const across = (k) => k >= lo && k < hi;         // a cell inside the width of the patch
+    const strip = (i, j) => (across(i) && (j === lo - 1 || j === hi))
+      || (across(j) && (i === lo - 1 || i === hi));  // a cell a dense strip draws
+
+    let cells = 0;
+    for (let j = 0; j < rn - 1; j++) {
+      for (let i = 0; i < rn - 1; i++) {
+        if (across(i) && across(j)) continue;        // the patch draws it
+        if (strip(i, j)) continue;
+        cells++;
       }
     }
-    return makeGeometry(pos, col);
+    const vCount = rn * rn + 8 * n;                  // the coarse nodes, and two rows per strip
+    const pos = new Float32Array(vCount * 3), col = new Float32Array(vCount * 3);
+    const tris = cells * 2 + 4 * (n - 1) * 2;
+    const idx = vCount > 65536 ? new Uint32Array(tris * 3) : new Uint16Array(tris * 3);
+
+    let o = 0;
+    for (let j = 0; j < rn; j++) {
+      const z = -out + j * s;
+      for (let i = 0; i < rn; i++) {
+        const k = j * rn + i, c3 = k * 3;
+        pos[o] = -out + i * s; pos[o + 1] = rim.h[k]; pos[o + 2] = z;
+        col[o] = rim.c[c3]; col[o + 1] = rim.c[c3 + 1]; col[o + 2] = rim.c[c3 + 2];
+        o += 3;
+      }
+    }
+    let m = 0;
+    for (let j = 0; j < rn - 1; j++) {
+      for (let i = 0; i < rn - 1; i++) {
+        if (across(i) && across(j)) continue;
+        if (strip(i, j)) continue;
+        const a = j * rn + i, b = a + 1, c = a + rn, e = c + 1;
+        idx[m] = a; idx[m + 1] = c; idx[m + 2] = e;
+        idx[m + 3] = a; idx[m + 4] = e; idx[m + 5] = b;
+        m += 6;
+      }
+    }
+
+    // One row of a strip on the edge of the patch. It repeats the patch vertex, jitter included,
+    // so the two meshes hold one colour as well as one height.
+    let v = rn * rn;
+    const patchRow = (pi, pj, di, dj) => {
+      const first = v;
+      for (let a = 0; a < n; a++) {
+        const k = (pj + dj * a) * n + (pi + di * a), c3 = k * 3;
+        pos[o] = -half + (pi + di * a) * grid;
+        pos[o + 1] = this.heights[k];
+        pos[o + 2] = -half + (pj + dj * a) * grid;
+        const t = 1 + (hash1(k) - 0.5) * 2 * JITTER;
+        col[o] = C[c3] * t; col[o + 1] = C[c3 + 1] * t; col[o + 2] = C[c3 + 2] * t;
+        o += 3; v++;
+      }
+      return first;
+    };
+    // One row of a strip on the first coarse line, read at the step of the patch.
+    const rimRow = (x0, z0, dx, dz) => {
+      const first = v;
+      for (let a = 0; a < n; a++) {
+        const x = x0 + dx * a, z = z0 + dz * a;
+        pos[o] = x; pos[o + 1] = this._rimAt(x, z); pos[o + 2] = z;
+        this._rimColorAt(x, z, _tint);
+        col[o] = _tint[0]; col[o + 1] = _tint[1]; col[o + 2] = _tint[2];
+        o += 3; v++;
+      }
+      return first;
+    };
+    // Two rows into triangles. Row A lies at the smaller z, or at the larger x, so the normal
+    // points up, as it does over the patch.
+    const bind = (A, B) => {
+      for (let a = 0; a < n - 1; a++) {
+        idx[m] = A + a; idx[m + 1] = B + a; idx[m + 2] = B + a + 1;
+        idx[m + 3] = A + a; idx[m + 4] = B + a + 1; idx[m + 5] = A + a + 1;
+        m += 6;
+      }
+    };
+    bind(rimRow(-half, -half - s, grid, 0), patchRow(0, 0, 1, 0));          // north
+    bind(patchRow(0, n - 1, 1, 0), rimRow(-half, half + s, grid, 0));       // south
+    bind(patchRow(0, 0, 0, 1), rimRow(-half - s, -half, 0, grid));          // west
+    bind(rimRow(half + s, -half, 0, grid), patchRow(n - 1, 0, 0, 1));       // east
+    return makeGeometry(pos, col, idx);
   }
 
-  // The nearest grid index of the patch to a point, clamped into the grid.
-  _edgeIndex(x, z) {
-    const n = this.n, g = this.grid, half = this.half;
-    const i = Math.min(n - 1, Math.max(0, Math.round((x + half) / g)));
-    const j = Math.min(n - 1, Math.max(0, Math.round((z + half) / g)));
-    return j * n + i;
+  // The height of the rim at a point, bilinear on the coarse grid and clamped to its edge.
+  _rimAt(x, z) {
+    const r = this.rim;
+    if (!r) return 0;
+    const n = r.n, s = r.step, out = r.out, H = r.h;
+    const u = Math.min(n - 1, Math.max(0, (x + out) / s)), w = Math.min(n - 1, Math.max(0, (z + out) / s));
+    const i0 = Math.min(n - 2, Math.floor(u)), j0 = Math.min(n - 2, Math.floor(w));
+    const fx = u - i0, fz = w - j0;
+    const a = H[j0 * n + i0], b = H[j0 * n + i0 + 1];
+    const c = H[(j0 + 1) * n + i0], d = H[(j0 + 1) * n + i0 + 1];
+    return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
   }
 
-  _edgeHeight(x, z) {
-    return this.heights ? this.heights[this._edgeIndex(x, z)] : 0;
-  }
-
-  _edgeColor(x, z, out) {
-    const k = this._edgeIndex(x, z) * 3, C = this.result.colors;
-    out[0] = C[k]; out[1] = C[k + 1]; out[2] = C[k + 2];
-    return out;
+  _rimColorAt(x, z, out3) {
+    const r = this.rim, n = r.n, s = r.step, out = r.out, C = r.c;
+    const u = Math.min(n - 1, Math.max(0, (x + out) / s)), w = Math.min(n - 1, Math.max(0, (z + out) / s));
+    const i0 = Math.min(n - 2, Math.floor(u)), j0 = Math.min(n - 2, Math.floor(w));
+    const fx = u - i0, fz = w - j0;
+    const a = (j0 * n + i0) * 3, b = a + 3, c = ((j0 + 1) * n + i0) * 3, d = c + 3;
+    for (let k = 0; k < 3; k++) {
+      out3[k] = (C[a + k] * (1 - fx) + C[b + k] * fx) * (1 - fz)
+        + (C[c + k] * (1 - fx) + C[d + k] * fx) * fz;
+    }
+    return out3;
   }
 
   update(t, dt) {
@@ -729,12 +824,15 @@ export class Ground {
     return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
   }
 
-  // The drawn ground height, the rim included. The rim holds the height of the patch edge, so a
-  // point outside the patch reads the height of the nearest edge point.
+  // The drawn ground height, the rim included. Inside the patch it reads the fine grid, and
+  // outside it reads the coarse grid of the rim, which is what the reader sees there.
   _groundAt(x, z) {
     if (!this.heights) return 0;
-    const h = this.half - this.grid * 0.5;
-    return this.heightAt(Math.min(h, Math.max(-h, x)), Math.min(h, Math.max(-h, z)));
+    const h = this.half;
+    if (x > -h && x < h && z > -h && z < h) return this.heightAt(x, z);
+    if (this.rim) return this._rimAt(x, z);
+    const e = h - this.grid * 0.5;
+    return this.heightAt(Math.min(e, Math.max(-e, x)), Math.min(e, Math.max(-e, z)));
   }
 
   dispose() {
@@ -749,6 +847,7 @@ export class Ground {
     this.scene.clear();
     this.result = null;
     this.heights = null;
+    this.rim = null;
     this.sky = null;
     this.sea = null;
   }

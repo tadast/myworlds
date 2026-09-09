@@ -1115,6 +1115,16 @@ const SHORE_DAMP = 45;                 // metres: the band where the patch noise
 // wider than the ground box it draws into, so the ground box holds an artificial scale: one unit
 // is K metres across and V metres up. See "The patch cell" in docs/issues/README.md.
 const FIELD_N = 65;                    // samples of the globe field across the patch, per side
+// The rim, issue 18. The rim is the ground the patch stands in: it runs from the edge of the box
+// out past the fog, so the reader at the ceiling sees relief in every direction and no square
+// edge. RIM_REACH is the default reach in units; ground.js sends the value it needs. A rim cell
+// is RIM_CELL patch steps, so a low tier draws a coarser rim, and the rim reads the globe field
+// once per RIM_FIELD_CELLS rim cells.
+const RIM_REACH = 3150;                // units from the site to the outer edge of the rim
+const RIM_CELL = 25;                   // patch grid steps per rim cell
+const RIM_FIELD_CELLS = 2;             // rim cells per sample of the globe field over the rim
+const RIM_FIELD_MAX = 65;              // the most samples the rim field takes, per side
+const EDGE_CELLS = 2;                  // rim cells the patch fades its knolls and its rock over
 const TARGET_RELIEF = 120;             // units: how much large-scale relief a patch aims to show
 const SLOPE_ROCK = [0.55, 1.15];       // the slope band where the ground turns to bare rock
 const BIOME_NAME = ['ocean', 'shallows', 'beach', 'tundra', 'snow', 'rock', 'forest', 'grass', 'dry', 'desert'];
@@ -1515,6 +1525,19 @@ function patch(seed, lat, lon, opts) {
   const relief = clamp(siteH / Math.max(ctx.snowLine, 0.2), 0, 1.4);
   const hillAmp = HILL_M * ctx.mountain * clamp(0.35 + 1.25 * relief, 0.2, 1.8);
 
+  // The frame of the rim. The patch reads it too, because it fades its own fine noise out over
+  // the last EDGE_CELLS rim cells: the rim cannot carry the knolls and the rock, so a patch that
+  // held them to its last row would end on a line the reader can see from the ceiling.
+  const rimReach = opts.rim > 0 ? opts.rim : RIM_REACH;
+  let rimCell = RIM_CELL;
+  while (rimCell > 1 && (size / (grid * rimCell)) % 1 !== 0) rimCell--;
+  const rimStep = grid * rimCell;
+  const rimCols = size / rimStep;                  // rim cells across the patch
+  const rimD = Math.max(1, Math.ceil((rimReach - half) / rimStep));
+  const rimOut = half + rimD * rimStep;
+  const rimN = 2 * rimD + rimCols + 1;
+  const edgeFade = EDGE_CELLS * rimStep;
+
   const pseed = `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}`;
   const prng = makeRng(pseed);
   const pnoise = new Noise(makeRng(pseed));
@@ -1534,13 +1557,19 @@ function patch(seed, lat, lon, opts) {
     && (reliefLo > 0 || reliefHi < 0);
   for (let j = 0; j < n; j++) {
     const zm = -half + j * grid;
+    const ez = half - Math.abs(zm);
     for (let i = 0; i < n; i++) {
       const xm = -half + i * grid;
       const f = fieldUnit(xm, zm);
       const base = f.h;
       const hn = pnoise.n3(xm * fh + oh0, zm * fh + oh1, 0.5);
-      const knolls = pnoise.n3(xm * fk + ok0, zm * fk + ok1, 11.5) * KNOLL_M;
-      const rock = pnoise.n3(xm * fr + or0, zm * fr + or1, 23.5) * ROCK_M;
+      // The knolls and the rock fade out over the last cells of the rim, where the rim takes the
+      // ground over. Both waves are shorter than a rim cell, so the rim cannot carry them, and a
+      // patch that held them to its last row would draw a line the reader sees from the ceiling.
+      const e = Math.min(ez, half - Math.abs(xm));
+      const fade = e >= edgeFade ? 1 : smoothstep(0, edgeFade, e);
+      const knolls = pnoise.n3(xm * fk + ok0, zm * fk + ok1, 11.5) * KNOLL_M * fade;
+      const rock = pnoise.n3(xm * fr + or0, zm * fr + or1, 23.5) * ROCK_M * fade;
       // The globe flattens its fine relief at the coast. The patch does the same, so the shore
       // of issue 05 meets the water on a gentle slope and not on a field of specks.
       const damp = inland ? 1 : smoothstep(0, SHORE_DAMP, Math.abs(base));
@@ -1601,6 +1630,110 @@ function patch(seed, lat, lon, opts) {
     if ((j & 31) === 0) post(66 + (j / n) * 30, 'Painting the ground');
   }
 
+  // ---------------------------------------------------------------- the rim, issue 18
+  // The rim carries the ground from the edge of the patch out past the fog. It reads the same
+  // globe field and the same hill noise the patch reads, so the relief and the coast run on
+  // across the join instead of stopping at a square edge.
+  //
+  // The rim cell is a whole number of patch steps and it divides the box, so the edge of the
+  // patch lands on a rim grid line and every rim node there sits on a patch vertex. The rim leaves
+  // out the knolls and the rock of the patch, because both are shorter than one rim cell and a
+  // coarse grid would only sample them as noise. It keeps the hills, which run over several cells.
+  //
+  // The rim covers about 18 times the area of the cell, so it reads the globe field on its own
+  // grid: one sample per RIM_FIELD_CELLS rim cells. A grid at the density of the patch would cost
+  // more than the whole build.
+  post(93, 'Widening the view');
+  const RN = Math.max(17, Math.min(RIM_FIELD_MAX, Math.round(rimN / RIM_FIELD_CELLS))), RN1 = RN - 1;
+  const rHf = new Float32Array(RN * RN);   // globe elevation in metres
+  const rTf = new Float32Array(RN * RN);
+  const rMf = new Float32Array(RN * RN);
+  const rFf = new Float32Array(RN * RN);
+  const rimM = rimOut * K;                 // metres of the globe from the site to the rim edge
+  const rimStepM = 2 * rimM / RN1;
+  for (let b = 0; b < RN; b++) {
+    const zc = -rimM + b * rimStepM;
+    for (let a = 0; a < RN; a++) {
+      fieldOn(-rimM + a * rimStepM, zc);
+      const q = b * RN + a;
+      rHf[q] = fld.h * M_PER_H; rTf[q] = fld.t; rMf[q] = fld.m; rFf[q] = fld.fm;
+    }
+  }
+
+  // The globe field at a point of the rim, bilinear over the coarse grid. It divides by the same
+  // V the patch uses, so the rim meets the patch at the join instead of standing over or under it.
+  const rInv = RN1 / (2 * rimOut);
+  const rf = { h: 0, t: 0, m: 0, fm: 0 };
+  const rimFieldAt = (xm, zm) => {
+    const u = clamp((xm + rimOut) * rInv, 0, RN1 - 1e-4), w = clamp((zm + rimOut) * rInv, 0, RN1 - 1e-4);
+    const a = u | 0, b = w | 0, du = u - a, dw = w - b;
+    const q = b * RN + a, q2 = q + RN;
+    const w00 = (1 - du) * (1 - dw), w10 = du * (1 - dw), w01 = (1 - du) * dw, w11 = du * dw;
+    rf.h = (rHf[q] * w00 + rHf[q + 1] * w10 + rHf[q2] * w01 + rHf[q2 + 1] * w11) / V;
+    rf.t = rTf[q] * w00 + rTf[q + 1] * w10 + rTf[q2] * w01 + rTf[q2 + 1] * w11;
+    rf.m = rMf[q] * w00 + rMf[q + 1] * w10 + rMf[q2] * w01 + rMf[q2 + 1] * w11;
+    rf.fm = rFf[q] * w00 + rFf[q + 1] * w10 + rFf[q2] * w01 + rFf[q2 + 1] * w11;
+    return rf;
+  };
+
+  const rimHeights = new Float32Array(rimN * rimN);
+  const rimVary = new Float32Array(rimN * rimN);
+  const rimT = new Float32Array(rimN * rimN);
+  const rimMo = new Float32Array(rimN * rimN);
+  const rimFm = new Float32Array(rimN * rimN);
+  let rimSea = false;
+  for (let j = 0; j < rimN; j++) {
+    const zm = -rimOut + j * rimStep;
+    for (let i = 0; i < rimN; i++) {
+      const xm = -rimOut + i * rimStep;
+      const f = rimFieldAt(xm, zm);
+      const base = f.h;
+      const hn = pnoise.n3(xm * fh + oh0, zm * fh + oh1, 0.5);
+      const damp = smoothstep(0, SHORE_DAMP, Math.abs(base));
+      const h = base + hn * hillAmp * (0.25 + 0.75 * damp);
+      const k = j * rimN + i;
+      rimHeights[k] = h;
+      rimVary[k] = hn;
+      rimT[k] = f.t + (Math.max(base, 0) - Math.max(h, 0)) * hPerU * 0.55;
+      rimMo[k] = f.m; rimFm[k] = f.fm;
+      if (h < 0) rimSea = true;
+    }
+  }
+
+  const rimColors = new Float32Array(rimN * rimN * 3);
+  const rimInvZ = 1 / (2 * rimStep);
+  for (let j = 0; j < rimN; j++) {
+    const jn = j * rimN;
+    const j1 = j > 0 ? jn - rimN : jn, j2 = j < rimN - 1 ? jn + rimN : jn;
+    const iz = j > 0 && j < rimN - 1 ? rimInvZ : 1 / rimStep;
+    for (let i = 0; i < rimN; i++) {
+      const k = jn + i;
+      const h = rimHeights[k], hg = h * hPerU;
+      const i1 = i > 0 ? i - 1 : i, i2 = i < rimN - 1 ? i + 1 : i;
+      const ix = i > 0 && i < rimN - 1 ? rimInvZ : 1 / rimStep;
+      const dhx = (rimHeights[jn + i2] - rimHeights[jn + i1]) * ix;
+      const dhz = (rimHeights[j2 + i] - rimHeights[j1 + i]) * iz;
+      const t = rimT[k];
+      const m = rimMo[k] - rimVary[k] * 0.1 + Math.max(rimFm[k], 0) * 0.06;
+      biomeTint(ctx, biomeIndex(ctx, hg, t, m, beachH), hg, k, tint);
+      if (h < 0) {
+        const dp = smoothstep(0, DEEP_M, -h);
+        tint[0] = lerp(P.shallow[0], P.deep[0], dp);
+        tint[1] = lerp(P.shallow[1], P.deep[1], dp);
+        tint[2] = lerp(P.shallow[2], P.deep[2], dp);
+      }
+      const rk = P.rock && h > 0 ? smoothstep(SLOPE_ROCK[0], SLOPE_ROCK[1], Math.sqrt(dhx * dhx + dhz * dhz)) : 0;
+      const o = k * 3;
+      if (rk > 0) {
+        rimColors[o] = lerp(tint[0], P.rock[0], rk);
+        rimColors[o + 1] = lerp(tint[1], P.rock[1], rk);
+        rimColors[o + 2] = lerp(tint[2], P.rock[2], rk);
+      } else {
+        rimColors[o] = tint[0]; rimColors[o + 1] = tint[1]; rimColors[o + 2] = tint[2];
+      }
+    }
+  }
+
   post(94, 'Growing the plants');
   const flora = patchFlora(ctx, {
     heights, vary, n, grid, half, size, hPerM: H_PER_M, hPerU,
@@ -1617,15 +1750,17 @@ function patch(seed, lat, lon, opts) {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
       span, metresAcross: K, metresUp: V,
+      rim: { out: rimOut, step: rimStep, n: rimN, hasSea: rimSea },
       biome: BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM, BEACH_M * H_PER_M)],
       palette: ctx.world.palette,
       elevation, radiusKm: ctx.radiusKm,
       seaLevel: 0, hasSea, shore: hasSea && hasLand,
     },
-    heights, colors, flora, groups, members,
+    heights, colors, flora, groups, members, rimHeights, rimColors,
   };
   self.postMessage({ type: 'patch-done', result },
-    [heights.buffer, colors.buffer, flora.buffer, groups.buffer, members.buffer]);
+    [heights.buffer, colors.buffer, flora.buffer, groups.buffer, members.buffer,
+      rimHeights.buffer, rimColors.buffer]);
 }
 
 self.onmessage = (e) => {

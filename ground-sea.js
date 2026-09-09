@@ -20,7 +20,11 @@ export const FINE = 200;        // metres, the reach of the 1 m cells from the c
 export const FINE_STEP = 1;
 export const MID = 264;         // metres, the reach of the 8 m ring
 export const MID_STEP = 8;
-export const REACH = 1128;      // metres, the far edge of the sea from the camera target
+// The sea must fill the fog from anywhere the camera stands. At the ceiling the camera sits at
+// most CEILING * tan(POLAR_HIGH + POLAR_BAND), about 970 units, from its target, and it sees the
+// ground sqrt(FOG_MAX^2 - CEILING^2), about 1,723 units, out. So the water runs to 2,700 units
+// from the target, which also holds it inside the rim. See RIM in ground.js.
+export const REACH = 2700;      // units, the far edge of the sea from the camera target
 export const FAR_STEP = 108;    // metres, the cell of the flat water past MID
 export const BLOCKS = 6;        // the wave zone splits into 6 by 6 meshes, to cull and to mask them
 export const MASK_STEP = 4;     // metres, the stride the mask reads the terrain at
@@ -50,11 +54,14 @@ function samples(a, b, step) {
 }
 
 export class Sea {
-  // Returns a sea, or null when the site needs none. The world must own an ocean and the patch
-  // must hold at least one vertex below sea level. An inland patch then costs nothing.
+  // Returns a sea, or null when the site needs none. The world must own an ocean, and the patch
+  // or the rim around it must hold at least one point below sea level. An inland site then costs
+  // nothing. The rim counts because a cell often ends at a coast: the water then runs from the
+  // edge of the patch out to the fog, as the ground does.
   static create(opts) {
     const { world, patch } = opts;
-    if (!world || !patch || !world.hasOcean || !patch.hasSea) return null;
+    const wet = patch && (patch.hasSea || (patch.rim && patch.rim.hasSea));
+    if (!world || !patch || !world.hasOcean || !wet) return null;
     if (!(world.palette && world.palette.ocean)) return null;
     return new Sea(opts);
   }
@@ -66,8 +73,9 @@ export class Sea {
     this.waveBlocks = [];
     this._cx = NaN; this._cz = NaN;
     this.level = patch.seaLevel || 0;
-    // open sea: every vertex of the patch lies below the water line
-    this.open = !patch.shore;
+    // open sea: every vertex of the patch lies below the water line. A patch that holds no water
+    // at all is not open sea, it is land with a coast somewhere out in the rim.
+    this.open = patch.hasSea && !patch.shore;
     this.color = new THREE.Color(pal.ocean);
     this.lava = !!pal.oceanLava;
     this.ice = !!pal.oceanIce;

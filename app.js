@@ -6,7 +6,7 @@ import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker, snapSite, cellSpan } from './site.js';
-import { Ground } from './ground.js';
+import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
 import { perf, Hud } from './perf.js';
 
@@ -609,7 +609,7 @@ function requestPatch(target) {
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
     opts: {
-      grid: Q.ground.grid, size: 1500, span: cellSpan(current.world),
+      grid: Q.ground.grid, size: 1500, span: cellSpan(current.world), rim: RIM,
       maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1,
     },
   });

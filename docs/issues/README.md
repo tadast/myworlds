@@ -42,7 +42,7 @@ a cell of the globe 0.01 units of arc wide, about 74 km on a 7,352 km planet, an
 draws into that box. `patch.metresAcross` and `patch.metresUp` give the two scales, and
 `patch.span` gives the width of the cell in metres. A plant and a creature keep their lore size
 in units, so they read as normal against the ground and they are no longer the metres the lore
-says. A patch built with no `span` keeps one unit to one metre. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the 800 m reveal and from the 1,200 m ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
+says. A patch built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 3,150 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the 800 m reveal and from the 1,200 m ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Camera ceiling 1,200 m. Camera floor 2 m above the terrain.
 
 Budgets:
 
@@ -71,12 +71,28 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - The marker is the square of the cell, not a symbol: what the square holds is what the ground
   shows.
 
+### The rim
+
+- The rim is the ground outside the box. It reaches `RIM = 3150` units from the site, which is set by
+  the fog: at the ceiling the camera stands at most 1,420 units from the site and the fog is solid
+  at `FOG_MAX` of 2,100 units, so a ray from the ceiling meets the ground 1,723 units out. The reader
+  therefore never sees the outer edge of the rim.
+- The worker builds it. A rim cell is 25 patch steps, 50 units on HIGH and 100 on LOW, and it
+  divides the box, so the edge of the patch lands on a rim grid line and every rim node there sits
+  on a patch vertex. `ground.js` copies the height and the colour of those nodes from the patch.
+- The rim reads the globe field on its own grid, one sample per two rim cells. It carries the
+  hills of the patch but not the knolls and the rock, which are shorter than one rim cell. The
+  patch fades its knolls and its rock out over the last two rim cells, so the two grids meet on
+  one surface and the reader sees no line.
+- The sea reaches 2,700 units from the camera target, which covers the fog and stays inside the
+  rim. A patch with no water still gets a sea when the rim holds water.
+
 ### The site and the URL
 
 - A site is a lat and lon in degrees in the planet's local frame, the frame of the worker's `pos` arrays before `planet.rotation.y` is applied. Lat is `asin(y)`. Lon is `atan2(z, x)`. Both in degrees, two decimals. Lat in [-90, 90], lon in [-180, 180].
 - URL format: `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Without `@` the URL means orbit. The seed part is URL-encoded as today; the site part is plain.
 - Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
-- Patch message options: `{ grid, size, span, maxFlora, maxFauna, pulledKind }`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19.
+- Patch message options: `{ grid, size, span, rim, maxFlora, maxFauna, pulledKind }`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `ground.js` exports the value as `RIM`.
 
 ### App mode
 
@@ -101,7 +117,7 @@ Ground frame: x east, y up, z south. Origin at the site at sea level, so `height
 
 ### The patch protocol
 
-Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, maxFlora, maxFauna, pulledKind } })`. `pulledKind` is the species id the site was pulled to, or `-1`.
+Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, span, rim, maxFlora, maxFauna, pulledKind } })`. `pulledKind` is the species id the site was pulled to, or `-1`.
 
 Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or `{ type: 'error', message }`. Transfer the buffers.
 
@@ -115,12 +131,15 @@ Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or 
     biome, palette,                               // the globe palette object and the biome name at the site
     elevation,                                    // globe elevation at the site in metres above sea level
     seaLevel: 0, hasSea, shore,                   // hasSea: any grid vertex below 0; shore: true when hasSea and any vertex above 0
+    rim: { out, step, n, hasSea },                // issue 18: the coarse grid outside the box. out and step in units
   },
   heights: Float32Array(n * n),                   // row-major, row = z from north (-) to south (+), col = x from west to east
   colors:  Float32Array(n * n * 3),               // per vertex, linear RGB 0..1
   flora:   Float32Array(count * 8),               // x y z, nx ny nz, scale, kind  (same as the globe layout, metres)
   groups:  Float32Array(groupCount * 6),          // x z, kind, count, spread, phase
   members: Float32Array(memberCount * 4),         // group index, offset x, offset z, phase
+  rimHeights: Float32Array(rim.n * rim.n),        // issue 18: the rim, row-major as heights, in the same units
+  rimColors:  Float32Array(rim.n * rim.n * 3),
 }
 ```
 
@@ -201,5 +220,5 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 15 | Sea species | HITL | 05, 09, design | open |
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
 | 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | open |
-| 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | open |
+| 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | CLOSED PENDING |
 | 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED f2daf0d |
