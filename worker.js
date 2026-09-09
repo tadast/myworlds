@@ -1113,12 +1113,19 @@ const ROCK_M = 1.2, ROCK_WAVE = 14;    // metres: the rock the ground shows at t
 const SHORE_DAMP = 45;                 // metres: the band where the patch noise fades at the shore
 const SLOPE_ROCK = [0.55, 1.15];       // the slope band where the ground turns to bare rock
 const BIOME_NAME = ['ocean', 'shallows', 'beach', 'tundra', 'snow', 'rock', 'forest', 'grass', 'dry', 'desert'];
+// The shore, in metres. The globe paints its beach over a band of the elevation field that stands
+// for hundreds of metres on the ground, because a globe face is about 50 km wide. At 1 m per unit
+// that band would paint the whole patch as sand, so the patch reads the shore in metres: the sand
+// strip is 1.5 m of elevation, and the sea bed reaches the deep colour 12 m under the water line.
+const BEACH_M = 1.5;
+const DEEP_M = 12;
 
-// The biome of one point, by the rules the globe paints with.
-function biomeIndex(ctx, h, t, m) {
+// The biome of one point, by the rules the globe paints with. beachW carries the width of the
+// beach band, so the patch can ask for a strip in metres where the globe asks for its own band.
+function biomeIndex(ctx, h, t, m, beachW = ctx.beachW) {
   if (h < -0.12) return 0;
   if (h < 0) return 1;
-  if (h < ctx.beachW) return t < 0.25 ? 3 : 2;
+  if (h < beachW) return t < 0.25 ? 3 : 2;
   if (t < 0.12 || h > ctx.snowLine + (t - 0.5) * 0.4) return 4;
   if (h > ctx.snowLine - 0.2 + (t - 0.5) * 0.25) return 5;
   if (t < 0.28) return 3;
@@ -1258,6 +1265,7 @@ function patch(seed, lat, lon, opts) {
   const colors = new Float32Array(n * n * 3);
   const tint = [0, 0, 0];
   const invZ = 1 / (2 * grid);
+  const beachH = BEACH_M * H_PER_M;   // the sand strip, in the elevation units biomeIndex reads
   for (let j = 0; j < n; j++) {
     const jn = j * n;
     const j1 = j > 0 ? jn - n : jn, j2 = j < n - 1 ? jn + n : jn;
@@ -1273,8 +1281,17 @@ function patch(seed, lat, lon, opts) {
       const t = siteT + (Math.max(elevation, 0) - Math.max(h, 0)) * H_PER_M * 0.55;
       // the forest mask lifts the moisture a little, so a site inside a forest cluster reads green
       const m = siteM - vary[k] * 0.1 + Math.max(siteFM, 0) * 0.06;
-      biomeTint(ctx, biomeIndex(ctx, hg, t, m), hg, k, tint);
-      const rk = P.rock ? smoothstep(SLOPE_ROCK[0], SLOPE_ROCK[1], Math.sqrt(dhx * dhx + dhz * dhz)) : 0;
+      biomeTint(ctx, biomeIndex(ctx, hg, t, m, beachH), hg, k, tint);
+      // Under the water line the bed darkens from the shallow tint to the deep tint over DEEP_M
+      // metres, so shallow water reads through the translucent sea plane of ground-sea.js.
+      if (h < 0) {
+        const dp = smoothstep(0, DEEP_M, -h);
+        tint[0] = lerp(P.shallow[0], P.deep[0], dp);
+        tint[1] = lerp(P.shallow[1], P.deep[1], dp);
+        tint[2] = lerp(P.shallow[2], P.deep[2], dp);
+      }
+      // bare rock reads on a dry slope. Under the water the depth carries the colour instead.
+      const rk = P.rock && h > 0 ? smoothstep(SLOPE_ROCK[0], SLOPE_ROCK[1], Math.sqrt(dhx * dhx + dhz * dhz)) : 0;
       const o = k * 3;
       if (rk > 0) {
         colors[o] = lerp(tint[0], P.rock[0], rk);
@@ -1292,7 +1309,7 @@ function patch(seed, lat, lon, opts) {
   const result = {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
-      biome: BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM)],
+      biome: BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM, BEACH_M * H_PER_M)],
       palette: ctx.world.palette,
       elevation, radiusKm: ctx.radiusKm,
       seaLevel: 0, hasSea, shore: hasSea && hasLand,

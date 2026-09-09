@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from './ground-sky.js';
+import { Sea } from './ground-sea.js';
 
 export const PATCH_SIZE = 1500;      // metres, the side of the patch
 export const FOG_NEAR = 450;         // metres, where the fog starts
@@ -73,6 +74,7 @@ export class Ground {
     this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
     this.result = null;
     this.sky = null;
+    this.sea = null;
     this.atCeiling = false;
     this.lod = { distance: 150, min: 40, max: 400 };   // metres, one knob for issue 11
     // the height grid of the patch, and the ground height at the site
@@ -135,6 +137,14 @@ export class Ground {
     this.scene.fog.color.copy(this.sky.horizon);
     this.scene.background = this.sky.horizon.clone();
     this.content.add(this.sky.group);
+
+    // The sea: a plane at sea level with waves, when the world owns an ocean and the patch dips
+    // below the water line. See ground-sea.js. Over open sea it also tints the fog.
+    this.sea = Sea.create({ world: this.world, patch: p, heightAt: (x, z) => this._groundAt(x, z) });
+    if (this.sea) {
+      this.content.add(this.sea.group);
+      this.sea.tintFog(this.scene);
+    }
 
     if (p) this._buildTerrain();
     else {
@@ -308,12 +318,15 @@ export class Ground {
     }
     this.atCeiling = this.camera.position.y >= ceiling - 1;
 
-    // the floor: the camera stays FLOOR metres above the terrain
-    const floor = this._groundAt(p.x, p.z) + FLOOR;
+    // the floor: the camera stays FLOOR metres above the terrain, and above the sea over water
+    const ground = this._groundAt(p.x, p.z);
+    const floor = (this.sea ? Math.max(ground, this.sea.level) : ground) + FLOOR;
     if (p.y < floor) { p.y = floor; this.controls.update(); }
 
     // the sky follows the camera, so it must move after every clamp
     if (this.sky) this.sky.update(t, dt, this.camera);
+    // the sea follows the target, so it must move after the target clamp
+    if (this.sea) this.sea.update(t, tg);
   }
 
   render() {
@@ -355,6 +368,7 @@ export class Ground {
     this.result = null;
     this.heights = null;
     this.sky = null;
+    this.sea = null;
   }
 
   _clear() {
