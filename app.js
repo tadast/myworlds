@@ -15,21 +15,27 @@ const isCoarse = matchMedia('(pointer: coarse)').matches;
 const isSmall = Math.min(innerWidth, innerHeight) < 600;
 const LOW = isCoarse || isSmall || (navigator.hardwareConcurrency || 4) <= 4;
 const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet stays visible
+// One object holds the whole device tier. `Q` is the globe, and `Q.ground` is the probe. Every
+// part that must know the tier reads it from here: the worker request, the Ground constructor,
+// and through the Ground the flora, the fauna, the sky, and the LOD knob.
+//
+// The LOW row of the budget table: a 4 m grid, 6,000 plants, 100 animals, and no shadows. It
+// also caps the LOD knob at 250 m, because a weak machine cannot spend the room a fast one
+// finds, and a knob that walks to 400 m only walks back down again.
 const Q = {
   detail: LOW ? 64 : 100,
   maxFlora: LOW ? 2500 : 10500,
   maxFauna: LOW ? 70 : 160,
   shadows: !LOW,
   dpr: Math.min(devicePixelRatio || 1, LOW ? 1.5 : 2),
+  ground: LOW
+    ? { grid: 4, maxFlora: 6000, maxFauna: 100, shadows: false, lodMax: 250 }
+    : { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true, lodMax: 400 },
 };
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
 const CAM_MIN = 1.11, CAM_MAX = 8, CAM_HOME = 3.3;
 const PICK_RANGE = CAM_MIN + 0.1;   // the probe can pick a site inside this camera distance
-// the ground tier: the grid step in metres, the counts, and the shadows
-const TIER = LOW
-  ? { grid: 4, maxFlora: 6000, maxFauna: 100, shadows: false }
-  : { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
 // `?perf` shows the frame time, the LOD knob, and the counts of the frame. Without the flag the
 // page builds no element and does no work for it.
 const PERF = new URLSearchParams(location.search).has('perf');
@@ -600,7 +606,7 @@ function requestPatch(target) {
   };
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
-    opts: { grid: TIER.grid, size: 1500, maxFlora: TIER.maxFlora, maxFauna: TIER.maxFauna, pulledKind: target.kind ?? -1 },
+    opts: { grid: Q.ground.grid, size: 1500, maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1 },
   });
 }
 
@@ -672,7 +678,7 @@ function stepDive(now) {
 // The switch into the ground scene, under an opaque overlay.
 function enterGround() {
   mode = 'ground';
-  ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: TIER, onInspect: inspect });
+  ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: Q.ground, onInspect: inspect });
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
   const view = skyView(current, lockedSite, sunDir);
@@ -710,12 +716,19 @@ function abortProbe() {
   updateProbeBtn();
 }
 
+let probeLabel = '';
 function updateProbeBtn() {
   if (!probeBtn) return;
   const down = mode === 'ground';
   const show = !dive && !busy && (down || (mode === 'orbit' && !!site));
+  const label = down ? 'Recall the probe' : 'Send a probe to the surface';
+  const changed = probeBtn.hidden === show || probeLabel !== label;
   probeBtn.hidden = !show;
-  probeBtn.textContent = down ? 'Recall the probe' : 'Send a probe to the surface';
+  probeBtn.textContent = label;
+  probeLabel = label;
+  // The button only moves into view when it appears or when it changes what it says. A call on
+  // every frame of the dive would fight the scroll of the reader.
+  if (show && changed) showProbeBtn();
 }
 
 // ---------------------------------------------------------------- the zoom hold
@@ -1036,10 +1049,24 @@ diceBtn.addEventListener('click', () => {
   const w = WORDS[Math.floor(Math.random() * WORDS.length)] + '-' + Math.floor(Math.random() * 900 + 100);
   input.value = w; generate(w);
 });
+// The body of the sidebar is the one scroll region. On a phone the sheet holds about 390 px of
+// it, and a world with a tall card pushes the probe button under the footer, where the reader
+// cannot see it. So an expand brings the button into view. Measured on a 375 by 667 viewport
+// with `Auralis`: the button stood at y 629 with the footer over it, and the scroll of 214 px
+// brings it to y 415.
+function showProbeBtn() {
+  if (!probeBtn || probeBtn.hidden || panel.classList.contains('collapsed')) return;
+  const body = panel.querySelector('.body');
+  if (!body) return;
+  const b = body.getBoundingClientRect(), p = probeBtn.getBoundingClientRect();
+  if (p.top >= b.top && p.bottom <= b.bottom) return;   // it already shows: do not move the scroll
+  probeBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
 function setCollapsed(on) {
   panel.classList.toggle('collapsed', on);
   toggleBtn.setAttribute('aria-expanded', String(!on));
   toggleBtn.setAttribute('aria-label', on ? 'Expand sidebar' : 'Collapse sidebar');
+  if (!on) showProbeBtn();
 }
 toggleBtn.addEventListener('click', () => setCollapsed(!panel.classList.contains('collapsed')));
 panel.querySelector('header').addEventListener('click', (e) => {

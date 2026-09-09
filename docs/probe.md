@@ -137,6 +137,31 @@ Added with issue 11, the adaptive LOD. The numbers come from a timer query of th
 
 **The knob spends the room it finds.** On this machine the forest site settles at the 400 m ceiling at every camera height, and the frame holds the refresh. At 45 m over the ground that is 3,955 near plants and 122 near animals instead of about 500 and 16 at the 150 m start, for a median of 5.79 ms against 5.61 ms before the issue. The coast `Auralis@-4.25,15.95` at 27 m reads 7.51 ms at 400 m against 6.62 ms at 150 m. Under a load the knob walks from 400 m to the 40 m floor in 7.5 s, and it walks back in 12 s once the load goes.
 
+### What the low tier gets
+
+Added with issue 13. The numbers come from the same timer query of the graphics card around one `Ground.render`, on an Apple M2 with a 60 Hz display, at least 40 samples per run.
+
+**One object holds the tier.** `Q.ground` in `app.js` carries the grid step, the plant cap, the animal cap, the shadow flag, and the LOD ceiling. The worker request, the `Ground` constructor, the flora, the fauna, the sky, and the knob all read that one object, so a change to the budget table is a change to one line.
+
+**The knob takes a lower ceiling on LOW.** The ceiling is 400 m on HIGH and 250 m on LOW. A weak machine cannot hold the frame at 400 m, so a knob that walks out to 400 m only walks back down again, and the reader sees the plants swap twice for nothing. The `localStorage` key of issue 11 now carries the ceiling as well, so a value that settled at 400 m on HIGH cannot come back into a LOW session; the constructor also clamps whatever it reads, which repairs an entry that a build before this issue wrote.
+
+**LOW costs about a third less than HIGH at the same pixels.** Measured on `Vesper@10.00,150.00` at 45 m over the ground, both tiers at a draw buffer of 2,600 by 1,354:
+
+| Tier | p10 | median | p90 | app work |
+|---|---|---|---|---|
+| HIGH: 2 m grid, 20,000 plants, 299 animals, shadows | 5.01 ms | 5.84 ms | 8.62 ms | 2.72 ms |
+| LOW: 4 m grid, 6,000 plants, 91 animals, no shadows | 1.64 ms | 3.73 ms | 3.98 ms | 1.83 ms |
+
+At the pixel count a phone really asks for, 589 by 1,090, the same LOW site reads 1.19 / 1.31 / 1.43 ms, and the coast `Auralis@-4.25,15.95` with terrain, sea, plants, and animals reads 1.65 / 1.78 / 1.88 ms.
+
+**No shadow costs nothing on LOW.** `renderer.shadowMap.enabled` never turns on, the light takes no shadow map, no ground mesh takes `receiveShadow`, and the gate of issue 11 returns at its first line. The shadow pass therefore does not exist on the low tier, rather than drawing an empty map.
+
+**The worker is not the limit.** A LOW patch is a grid of 376 by 376 against 751 by 751 on HIGH, so it costs about a third of the time. In Chrome on this machine a LOW patch takes 74 to 407 ms, and outside the browser, in Node with a stub for `self`, the median is 281 ms against 930 ms on HIGH. The floor of the dive is 1,200 ms, so the build hides inside it with room to spare and the rock octave keeps its full reach. The three noise octaves cost about 45 ms each of the 281 ms; a cut of the rock octave to a circle of 500 m saves 27 ms, which is not worth a ring in the terrain where the octave stops.
+
+**The overlay moved to the top right.** The sidebar owns the left of a wide screen from the top to the foot, and on a screen under 600 px it docks at the foot as a sheet. The overlay of `?perf` draws over the page, so at the lower left it covered the probe button of the sheet: measured on a viewport of 375 by 667, the old box stood at y 488 to 659 and the button at y 560 to 595. The top right is free in both layouts.
+
+**The sheet hid the probe button as well.** The body of the sidebar is the one scroll region, and on a viewport of 375 by 667 it holds 386 px of a scroll height of 1,496 px. A world with a tall card then puts the probe button at y 629, under the footer at y 626 to 667, and the reader who opens the sheet sees no button at all. So an expand of the sheet, and a change of what the button says, bring it into view. The scroll only moves while the button stands outside the body, so the reader who scrolled somewhere else keeps that place, and a wide screen where the button already shows never moves.
+
 ## Phases
 
 - **Phase 0.** Globe fixes, decision 8.
