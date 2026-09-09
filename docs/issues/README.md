@@ -46,7 +46,7 @@ Budgets:
 | HIGH | 2 m | 20,000 | 300 | yes |
 | LOW | 4 m | 6,000 | 100 | no |
 
-`LOW` is already defined in `app.js` from pointer type, screen size, and core count.
+`LOW` is already defined in `app.js` from pointer type, screen size, and core count. Since issue 13 the whole row lives in one object, `Q.ground` in `app.js`, which also holds `lodMax`.
 
 ## Shared contracts
 
@@ -119,6 +119,8 @@ Decision, 2026-09-08: a hexapod measures along `length`. Issue 08 item 2 lists `
 ### LOD
 
 `ground.lod = { distance: 150, min: 40, max: 400 }` in metres. Near instances are full mesh; far instances are cards for flora and coarse meshes for fauna. One controller in `Ground.update()` moves `distance` from frame time. Expose it as `window.__mw.ground`.
+
+Changed by issue 13, 2026-09-09: `max` is a tier value, not a constant. The tier passes `lodMax`, which is 400 on HIGH and 250 on LOW, and `Ground` puts it in `lod.max`. `min` and the start of 150 do not change. The `localStorage` key of issue 11 now carries `lodMax` too, so a value that settled on HIGH cannot come back into a LOW session, and the constructor clamps whatever it reads.
 
 ## Verification
 

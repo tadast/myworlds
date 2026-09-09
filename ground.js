@@ -37,6 +37,9 @@ const LOD_DOWN = 0.85;      // the step down
 const LOD_UP = 1.1;         // the step up
 const LOD_COOL = 3000;      // ms, the quiet time a step down buys before a step up
 const LOD_STORE = 'myworlds.lod.v1';
+const LOD_START = 150;      // metres, where the knob starts before the store says otherwise
+const LOD_MIN = 40;         // metres, the floor of the knob
+const LOD_MAX = 400;        // metres, the ceiling of the knob. The tier may lower it; LOW asks 250.
 
 export const CAM_START = 800;        // metres, the camera starts this far up and this far south
 export const RIM = 1500;             // metres, how far the coarse rim reaches from the site
@@ -78,9 +81,11 @@ const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
 
 // The settled LOD distance per tier. A tier is its own entry, because a low tier holds a
-// different value and the reader can move between the two on one machine.
+// different value and the reader can move between the two on one machine. The ceiling is part
+// of the key, so a value that settled at 400 m on HIGH cannot come back into a LOW session. The
+// constructor also clamps what it reads, so an old entry from before this issue is safe too.
 function lodKey(tier) {
-  return `${tier.grid}|${tier.maxFlora}|${tier.maxFauna}|${tier.shadows ? 1 : 0}`;
+  return `${tier.grid}|${tier.maxFlora}|${tier.maxFauna}|${tier.shadows ? 1 : 0}|${tier.lodMax || LOD_MAX}`;
 }
 function readLod(key) {
   try {
@@ -135,7 +140,7 @@ export class Ground {
     this.canvas = canvas;
     this.world = world;
     this.site = site;
-    this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
+    this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true, lodMax: LOD_MAX };
     this.result = null;
     this.sky = null;
     this.flora = null;
@@ -144,8 +149,10 @@ export class Ground {
     this.atCeiling = false;
     // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
     // it. _driveLod() moves it from the frame time; the last settled value comes from the store,
-    // so the next landing on this machine starts near the right value.
-    this.lod = { distance: 150, min: 40, max: 400 };
+    // so the next landing on this machine starts near the right value. The tier sets the ceiling:
+    // 400 m on HIGH and 250 m on LOW.
+    const max = this.tier.lodMax || LOD_MAX;
+    this.lod = { distance: Math.min(LOD_START, max), min: LOD_MIN, max };
     this._lodKey = lodKey(this.tier);
     this._stored = readLod(this._lodKey);
     if (this._stored !== null) {

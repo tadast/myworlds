@@ -104,12 +104,17 @@ export const perf = new Perf();
 // ---------------------------------------------------------------- the overlay
 // The app builds this only with `?perf` in the query string, so the page pays nothing without the
 // flag: no element, no style, and no work in the frame loop.
+//
+// The overlay stands at the top right. The sidebar owns the left of a wide screen from the top to
+// the foot, and on a narrow screen it docks at the foot as a sheet, so both the lower left and
+// the lower edge belong to it. The overlay draws over the page, so a box at the lower left hid
+// the probe button of the sheet on a phone. The top right is free in both layouts.
 export class Hud {
   constructor() {
     const el = document.createElement('div');
     el.id = 'perf-hud';
     el.style.cssText = [
-      'position:fixed', 'left:8px', 'bottom:8px', 'z-index:60',
+      'position:fixed', 'right:8px', 'top:max(8px,env(safe-area-inset-top))', 'z-index:60',
       'padding:6px 9px', 'border-radius:6px',
       'background:rgba(6,10,22,.78)', 'color:#cfe0ff',
       'font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace',
