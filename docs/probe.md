@@ -21,7 +21,7 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
     - **The ring plane is not the planet equator.** `ringMesh.rotation` leaves the ring normal near world +y, while the planet axis carries `world.tilt`. The ground band reads the world matrix of the globe ring, so it always shows what the globe shows. The band is a line through the zenith at the ring plane, and it opens to about 25 degrees at 30 to 40 degrees of latitude from that plane. Past about 45 degrees it sinks toward the horizon.
     - **The ring takes no light.** The sun can sit in the ring plane, and a lit ring then goes black. The band keeps the band colours and the band alpha of the globe ring and takes one flat brightness from the sun angle.
     - **Clouds sit at 900 to 1,100 m**, under the 1,200 m ceiling, so the probe looks down on them from the ceiling and up at them from the ground.
-7. **Ground terrain.** A square grid at 2 m per vertex on HIGH and 4 m on LOW, with a coarser rim. Height is the globe elevation at the site, a tilt from its gradient, and three new noise octaves seeded from the site. Relief is real metres, not the globe exaggeration. Flat-shaded vertex colours from the globe biome and palette with per-face noise. Beach, snow line, and forest mask follow the globe rules. A site within a few metres of sea level gets a sea plane with a shoreline. Waves are 2 m long at a 6 s period. No rivers or lakes in phase one.
+7. **Ground terrain.** A square grid at 2 m per vertex on HIGH and 4 m on LOW, with a coarser rim that runs out to 3,150 units from the site. Height is the globe elevation at the site, a tilt from its gradient, and three new noise octaves seeded from the site. Relief is real metres, not the globe exaggeration. Flat-shaded vertex colours from the globe biome and palette with per-face noise. Beach, snow line, and forest mask follow the globe rules. A site within a few metres of sea level gets a sea plane with a shoreline. Waves are 2 m long at a 6 s period. No rivers or lakes in phase one.
 8. **Globe fixes.** Wave period from 3.9 s to about 14 s, spatial frequency halved, vertical wobble halved. Flora scaled down 40% and count raised 1.5x on HIGH. Fauna scaled down 30%, count unchanged. Minimum camera distance unchanged. The lore numbers stay, because they become true on the ground.
 9. **Ground camera.** OrbitControls with pan. Target clamped to the fog start. Camera height clamped between 2 m above the terrain and a 1.2 km ceiling. A click on a creature or the ground glides the target there. The creature inspector opens from the same click after the glide. LOW devices get the probe with 6,000 flora, 100 fauna, and no shadows.
 
@@ -63,11 +63,41 @@ The patch holds 1.13 million triangles. Two measurements set the shape of the me
 
 Added with issue 06. These notes record the decisions the issue text did not fix.
 
-**The fog opens with the height.** The reveal puts the camera 800 m up and the ceiling is 1,200 m, but the fog is solid at 750 m. A fixed fog therefore paints one flat colour over the whole patch from both heights, and the reader sees nothing to zoom into. So the far distance of the fog grows with the height of the camera over the site, 1.15 m per metre, and it stops at 2,100 m. The near distance keeps the ratio of 0.6, so the depth of the fade holds. At the ceiling the patch reads in full and the rim still fades out before its edge at 1,500 m, so the ground never shows a cut. `FOG_NEAR` and `FOG_FAR` keep their values and still set the pan limit and the fog at the ground.
+**The fog opens with the height.** The reveal puts the camera 800 m up and the ceiling is 1,200 m, but the fog is solid at 750 m. A fixed fog therefore paints one flat colour over the whole patch from both heights, and the reader sees nothing to zoom into. So the far distance of the fog grows with the height of the camera over the site, 1.15 m per metre, and it stops at 2,100 m. The near distance keeps the ratio of 0.6, so the depth of the fade holds. At the ceiling the patch reads in full and the rim runs on to 3,150 units, well past the fog, so the ground never shows a cut. See "The rim carries the ground past the fog" below. `FOG_NEAR` and `FOG_FAR` keep their values and still set the pan limit and the fog at the ground.
 
 **The tilt is a band, not a lock.** The height sets the polar angle the view wants, from 0.62 rad at the ceiling to 1.40 rad at 60 m, and a band around that angle holds the play the reader keeps. The band is 0.06 rad at the ceiling and 0.25 rad at 60 m, so a zoom in turns the view from the patch below to the horizon on its own. Under 60 m the band opens to a half turn and the reader owns the angle. A hard lock was rejected: it takes the turn of the view away from the reader for the whole upper half of the range. A second limit caps the polar angle where the camera would meet the floor, so the controls do not fight the floor clamp and shake.
 
 **The pan limit stops the camera too.** The target cannot leave the fog start at 450 m. The first build clamped the target alone, so a pan that reached the limit slid the camera on over a target that could not follow, and the camera sank toward the ground. The clamp now moves the camera by the same step, so the whole view stops.
+
+**The rim carries the ground past the fog.** The patch is one cell of the globe drawn into a box
+1,500 units square. Outside that box the ground has to come from somewhere, and the first rim held
+the height and the colour of the nearest point on the edge of the patch. That clamp dragged one
+edge cell over a whole band: along a side the streaks ran parallel, at a corner they fanned out,
+and the sea stayed flat, so a coast stopped in a straight line. Since a cell is tens of kilometres
+wide, a coast crosses the edge often, so the cut was the common case and not the rare one.
+
+The rim now comes from the worker as a second grid. It reads the same globe field and the same
+hill noise the patch reads, so the relief and the coast run on across the join. Three numbers set
+it. The reach is 3,150 units, because at the ceiling the camera stands at most 1,420 units from
+the site and the fog is solid at 2,100 units, so a ray from that height meets the ground 1,723
+units out; the reader can therefore never see the outer edge. The cell is 25 patch steps, which is
+50 units on HIGH and 100 on LOW; it divides the box, so the edge of the patch lands on a rim grid
+line and every rim node there sits on a patch vertex. The globe field takes one sample per two rim
+cells, because the rim covers about 18 times the area of the cell and a grid at the density of the
+patch would cost more than the whole build.
+
+Two rules keep the join clean. `ground.js` copies the height and the colour of the rim nodes on the
+edge from the patch, and it draws four dense strips that carry one vertex per patch step on the
+edge and the same count on the first coarse line of the rim. A height read along a grid line of
+the rim lies on the straight edge of the coarse cell beyond it, so neither side of a strip leaves
+a crack. The patch also fades its knolls and its rock out over the last two rim cells: both waves
+are shorter than one rim cell, so the rim cannot carry them, and a patch that held them to its
+last row would draw a line the reader sees from the ceiling.
+
+The sea follows. It now reaches 2,700 units from the camera target, which covers the fog from any
+height and still stays inside the rim, and a patch with no water gets a sea when the rim holds
+water. The whole rim is one mesh with the material of the terrain, and it costs under 0.1 ms of
+draw time.
 
 **The tap marches the height field.** A tap needs the point of the ground under the pointer. A triangle test against the terrain runs over a million faces. A march along the ray over the height grid costs about 450 steps and a bisection, it reads the rim as well as the patch, and it does not care which meshes issues 05, 07, and 09 add later.
 
