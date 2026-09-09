@@ -16,8 +16,14 @@ const CARRY = { WALK: 0, HOP: 1, WAVE: 2, FLOAT: 3, ARCH: 4, RISE: 5 };
 
 // ---------------------------------------------------------------- geometry helpers
 const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
-const cyl = (rt, rb, h, s = 5) => new THREE.CylinderGeometry(rt, rb, h, s);
-const cone = (r, h, s = 5) => new THREE.ConeGeometry(r, h, s);
+const oct = (r) => new THREE.OctahedronGeometry(r, 0);
+// An icosahedron of radius r reaches 0.8507 r along an axis, and a dodecahedron reaches 0.9342 r,
+// because neither one has a vertex on the axis. An octahedron has one, so it reaches r. The coarse
+// build shrinks its octahedra by these factors, so a coarse part reaches as far as the part it
+// replaces and the outline holds through the swap.
+const ICO_REACH = 0.8507, DODECA_REACH = 0.9342;
+const cyl = (rt, rb, h, s = 5, open = false) => new THREE.CylinderGeometry(rt, rb, h, s, 1, open);
+const cone = (r, h, s = 5, open = false) => new THREE.ConeGeometry(r, h, s, 1, open);
 const dodeca = (r) => new THREE.DodecahedronGeometry(r, 0);
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 export const M4 = (x, y, z, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0, ry = 0) =>
@@ -25,13 +31,13 @@ export const M4 = (x, y, z, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0, ry = 0) =>
 const _up = V3(0, 1, 0);
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-// a cylinder between two points
-function seg(a, b, r, color, r2 = r, sides = 4, glow = 0) {
+// a cylinder between two points. r is the radius at a, r2 the radius at b.
+function seg(a, b, r, color, r2 = r, sides = 4, glow = 0, open = false) {
   const d = V3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
   const len = d.length();
   const q = new THREE.Quaternion().setFromUnitVectors(_up, d.clone().normalize());
   const m = new THREE.Matrix4().compose(V3((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2), q, V3(1, 1, 1));
-  return { geo: cyl(r2, r, len, sides), color, matrix: m, glow };
+  return { geo: cyl(r2, r, len, sides, open), color, matrix: m, glow };
 }
 
 export function mergeGeos(parts) {
@@ -161,13 +167,33 @@ function legPlan(G, len) {
 }
 
 // ---------------------------------------------------------------- creature geometry (base at y = 0, +y up, faces +z)
-export function buildCreature(G, pal, flora) {
+// detail: 'full' for a creature the reader can walk up to, 'coarse' for one past the LOD distance.
+// A coarse creature is a dozen pixels tall, so it keeps the silhouette and the rig and drops
+// everything the reader cannot resolve at that size:
+//   - a ball is an octahedron (8 triangles), not an icosahedron (20) or a dodecahedron (36);
+//   - a tube is a three-sided open cylinder, and a cone is a three-sided open cone;
+//   - a leg is one tapered bone from the hip to the foot, with no knee, no pad, and no bellows;
+//   - the head keeps its ball and its nod, and loses the beak, the tusks, the eyes, and the rest;
+//   - a chain body is one tapered tube, not a string of balls;
+//   - of the extras only the sail and the plates stay, because only those two break the outline.
+// Every part keeps its rig record, so one shader animates both levels of detail. The leg swing
+// runs at half the amplitude, so the silhouette does not shimmer at a small pixel size.
+// The build stays under 80 triangles for every species. See docs/fauna.md, "Ground tier".
+export const COARSE_SWING = 0.5;   // the part of the full leg swing a coarse creature keeps
+export function buildCreature(G, pal, flora, detail = 'full') {
+  const coarse = detail === 'coarse';
   const { body, body2, accent, glow } = G.colors;
   const sand = (pal && pal.fauna && pal.fauna.sand) || body2;
   const moss = flora ? flora.canopy : accent, trunk = flora ? flora.trunk : body2;
   const parts = [];
   const P = (geo, color, matrix, o = {}) => parts.push({ geo, color, matrix, glow: o.glow || 0, rig: o.rig || [RIG.NONE, 0, 0, 1], pivot: o.pivot || [0, 0, 0], pivot2: o.pivot2 || o.pivot || [0, 0, 0] });
   const PS = (sg, o) => P(sg.geo, sg.color, sg.matrix, o);
+  // the primitives of this build: the full set, or the cheapest shape that holds the same outline
+  const ball = coarse ? (r) => oct(r * ICO_REACH) : (r, d = 0) => ico(r, d);
+  const block = coarse ? (r) => oct(r * DODECA_REACH) : dodeca;
+  const spike = coarse ? (r, h) => cone(r, h, 3, true) : cone;
+  const bone = (a, b, r, color, r2 = r, sides = 4, glowV = 0) =>
+    seg(a, b, r, color, r2, coarse ? 3 : sides, glowV, coarse);
   const R = G.bodyR, land = G.cls === 'land', air = G.cls === 'air', sub = G.cls === 'sub';
   const B = bodySections(G);
   const len = B.front - B.back;
@@ -183,11 +209,12 @@ export function buildCreature(G, pal, flora) {
   if (G.plan === 'swarm') {
     // a glowing core and nine two-winged shards wheeling around it
     const core = [0, yc, 0];
-    P(ico(0.05 + R * 0.15), glow, M4(...core), { glow: 1, rig: [RIG.PULSE, 0, 0.15, 1], pivot: core });
+    P(ball(0.05 + R * 0.15), glow, M4(...core), { glow: 1, rig: [RIG.PULSE, 0, 0.15, 1], pivot: core });
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2, r = R * 1.3 + (i % 2) * R * 0.6, y = yc - 0.18 + (i % 3) * 0.17;
       const x = Math.cos(a) * r, z = Math.sin(a) * r, rig = [RIG.SPIN, 0, 1.4, 1];
-      P(ico(0.028), body2, M4(x, y, z, 1, 1, 1.6, 0, 0, -a), { rig, pivot: core });
+      // the wheel reads from the nine shards; the coarse build keeps all nine and drops their beads
+      if (!coarse) P(ball(0.028), body2, M4(x, y, z, 1, 1, 1.6, 0, 0, -a), { rig, pivot: core });
       P(new THREE.TetrahedronGeometry(0.08), accent, M4(x, y, z, 1.7, 0.25, 0.6, 0, 0, -a), { glow: 0.3, rig, pivot: core });
     }
     return mergeGeos(parts);
@@ -198,7 +225,7 @@ export function buildCreature(G, pal, flora) {
     B.secs = [];
     for (let i = 0; i < n; i++) {
       const u = i / (n - 1), z = (0.5 - u) * span, y = Math.sin(u * Math.PI) * peak, r = R * (0.75 + 0.25 * Math.sin(u * Math.PI));
-      P(ico(r), i % 2 ? accent : body, M4(0, y, z), { glow: i % 2 ? 0.15 : 0 });
+      P(ball(r), i % 2 ? accent : body, M4(0, y, z), { glow: i % 2 ? 0.15 : 0 });
       B.secs.push({ z, y, r, s: [1, 1, 1] });
     }
     B.front = span / 2 + R; B.back = -span / 2 - R; B.top = R; yc = 0;
@@ -208,14 +235,24 @@ export function buildCreature(G, pal, flora) {
     yc = 0.05 + (n - 1) * step; B.secs = [];
     for (let i = 0; i < n; i++) {
       const u = i / (n - 1), y = 0.05 + i * step, r = R * (0.85 - 0.3 * u);
-      P(ico(r), i % 2 ? body2 : body, M4(0, y, 0, 1, 1.1, 1));
+      P(ball(r), i % 2 ? body2 : body, M4(0, y, 0, 1, 1.1, 1));
       B.secs.push({ z: 0, y: y - yc, r, s: [1, 1.1, 1] });
     }
     B.front = R * 0.5; B.back = -R * 0.5; B.top = R * 0.55; B.bot = -R * 0.55;
+  } else if (coarse && G.plan === 'chain') {
+    // A chain of seven balls is the widest body in the set. The coarse build joins the section
+    // centres with tapered tubes instead: one tube per joint, and the two end tubes reach out by
+    // the end radius, so the body holds the length the full build has.
+    const n = B.secs.length, sz = B.secs[0].s[2], k = ICO_REACH;
+    for (let i = 0; i < n - 1; i++) {
+      const a = B.secs[i], b = B.secs[i + 1];
+      const za = a.z + (i === 0 ? a.r * k * sz : 0), zb = b.z - (i === n - 2 ? b.r * k * sz : 0);
+      PS(bone([0, yc + a.y, za], [0, yc + b.y, zb], a.r * k, i % 2 ? body2 : body, b.r * k));
+    }
   } else {
     for (const s of B.secs) {
       const color = s.second || s.alt ? body2 : (G.loco === 'sac' ? accent : body);
-      const geo = s.shape === 'dodeca' ? dodeca(s.r) : ico(s.r, s.d || 0);
+      const geo = s.shape === 'dodeca' ? block(s.r) : ball(s.r, s.d || 0);
       const o = G.loco === 'sac' ? { glow: 0.35, rig: [RIG.PULSE, 0, 0.05, 1], pivot: [0, yc, 0] } : {};
       P(geo, color, M4(0, yc + s.y, s.z, ...s.s), o);
     }
@@ -249,6 +286,13 @@ export function buildCreature(G, pal, flora) {
       knee = [hip[0] + dx * h * kOut, insect ? hy + h * 0.15 : h * 0.55, hip[2] + dz * h * kOut + h * (insect ? 0.05 : 0.22)];
     } else knee = [(hip[0] + foot[0]) / 2, (hip[1] + foot[1]) / 2, (hip[2] + foot[2]) / 2];
     const rig = (w) => ({ rig: [RIG.LEG, L.phase, stride, w * bend], pivot: hip, pivot2: knee });
+    if (coarse) {
+      // one tapered bone from the hip to the foot. The knee point sits on the hip, so the shader
+      // folds nothing and the whole leg pitches about the hip. The swing runs at half the
+      // amplitude, so a leg a few pixels long does not shimmer.
+      PS(bone(hip, foot, th * 1.1, body2, 0), { rig: [RIG.LEG, L.phase, stride * COARSE_SWING, 0], pivot: hip, pivot2: hip });
+      continue;
+    }
     if (G.loco === 'monopod') {
       // a bellows spring: a thin core and a stack of tapered rings. The hop carriage stretches it from the foot.
       PS(seg(hip, foot, th * 0.3, body2, th * 0.3, 5), rig(0));
@@ -274,15 +318,17 @@ export function buildCreature(G, pal, flora) {
   else if (tall) {
     neckBase = [0, yc + B.top * 0.4, B.front * 0.85];
     H = [0, yc + B.top + headR * 0.6, B.front + headR * 0.6];
-    const s = seg(neckBase, H, headR * 0.35, body2, headR * 0.45);
+    const s = bone(neckBase, H, headR * 0.35, body2, headR * 0.45);
     P(s.geo, s.color, s.matrix, { rig: [RIG.NOD, 0, 0.12, 1], pivot: neckBase });
   } else { neckBase = [0, yc, B.front * 0.8]; H = [0, yc + B.top * 0.2, B.front + headR * 0.7]; }
   const nod = { rig: [RIG.NOD, 0, G.head === 'lure' ? 0.04 : G.loco === 'periscope' ? 0.08 : 0.12, 1], pivot: neckBase };
   const nodG = (g) => ({ ...nod, glow: g });
   const eyeR = clamp(headR * 0.25, 0.02, 0.05);
   const eyes = () => { for (const sx of [-1, 1]) P(ico(eyeR), glow, M4(H[0] + sx * headR * 0.55, H[1] + headR * 0.25, H[2] + headR * 0.8), nodG(0.6)); };
-  if (G.head !== 'none' || G.loco === 'periscope') P(ico(headR), G.plan === 'chain' ? body : body2, M4(H[0], H[1], H[2], 0.85, 0.85, 1.25), nod);
-  switch (G.head) {
+  if (G.head !== 'none' || G.loco === 'periscope') P(ball(headR), G.plan === 'chain' ? body : body2, M4(H[0], H[1], H[2], 0.85, 0.85, 1.25), nod);
+  // the head furniture and the eyes measure a fraction of a metre: past the LOD distance the head
+  // is a ball of a few pixels and none of them can be told apart from it
+  switch (coarse ? 'coarse' : G.head) {
     case 'beak':
       P(cone(headR * 0.35, headR * 1.4, 4), body2, M4(H[0], H[1] - headR * 0.1, H[2] + headR * 1.2, 1, 1, 1, Math.PI / 2, 0), nod); eyes(); break;
     case 'mandibles':
@@ -309,7 +355,7 @@ export function buildCreature(G, pal, flora) {
       for (const sx of [-1, 1]) P(cone(headR * 0.22, headR * 1.5, 4), glow, M4(H[0] + sx * headR * 0.55, H[1] - headR * 0.5, H[2] + headR * 1.0, 1, 1, 1, 1.3, 0), nodG(0.3));
       eyes(); break;
     default:
-      if (land || sub) eyes();
+      if (!coarse && (land || sub)) eyes();
   }
 
   // ---- locomotion extras: wings, fins, the sac's vent
@@ -321,37 +367,46 @@ export function buildCreature(G, pal, flora) {
       const root = [sx * Math.max(probe.hw(yw, z) * 0.8, R * 0.3), yw, z];
       const m = M4(root[0], root[1], root[2], sx, 1, 1, 0, sx * 0.12);
       const o = { glow: 0.3, rig: [RIG.WING, ph, 0.55, sx * span], pivot: root };
-      P(wingGeo(span, chord), accent, m, o);
-      const bone = seg([0, 0.004, 0], [span * 0.95, 0.004, -chord * 0.2], 0.012, body2, 0.02, 4);
-      P(bone.geo, bone.color, bone.matrix.premultiply(m), { ...o, glow: 0 });
+      // one panel per sheet at distance, and no leading-edge bone: the sheet is the silhouette
+      P(wingGeo(span, chord, coarse ? 1 : 5), accent, m, o);
+      if (coarse) continue;
+      const rib = seg([0, 0.004, 0], [span * 0.95, 0.004, -chord * 0.2], 0.012, body2, 0.02, 4);
+      P(rib.geo, rib.color, rib.matrix.premultiply(m), { ...o, glow: 0 });
     }
   }
   if (G.loco === 'fins') {
     for (const sx of [-1, 1]) {
       const root = [sx * R * 0.7, yc, B.front * 0.15];
-      P(cone(R * 0.9, R * 2, 4), accent, M4(sx * R * 1.8, yc, B.front * 0.15, 0.14, 1, 1, 0, -sx * 1.4), { glow: 0.3, rig: [RIG.WING, 0, 0.2, sx * R * 2.2], pivot: root });
+      P(spike(R * 0.9, R * 2, 4), accent, M4(sx * R * 1.8, yc, B.front * 0.15, 0.14, 1, 1, 0, -sx * 1.4), { glow: 0.3, rig: [RIG.WING, 0, 0.2, sx * R * 2.2], pivot: root });
     }
-    for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) {
-      const y = yc - R * 0.15, z = B.front * 0.55 + i * R * 0.3;
-      P(ico(R * 0.1), body2, M4(sx * probe.hw(y, z) * 0.97, y, z, 0.6, 1, 1));
+    // the gill beads and the belly glow are decoration on the flank: they do not carry the outline
+    if (!coarse) {
+      for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) {
+        const y = yc - R * 0.15, z = B.front * 0.55 + i * R * 0.3;
+        P(ico(R * 0.1), body2, M4(sx * probe.hw(y, z) * 0.97, y, z, 0.6, 1, 1));
+      }
+      P(ico(R * 0.65, 1), glow, M4(0, yc - R * 0.65, B.front * 0.2, 0.7, 0.35, 1.9), { glow: 0.8 });
     }
-    P(ico(R * 0.65, 1), glow, M4(0, yc - R * 0.65, B.front * 0.2, 0.7, 0.35, 1.9), { glow: 0.8 });
   }
   if (G.loco === 'sac') {
     const base = [0, yc + B.bot - 0.02, 0];
-    P(cyl(R * 0.33, R * 0.2, 0.09, 6), body2, M4(base[0], base[1] - 0.02, base[2]));
-    P(ico(R * 0.18), glow, M4(base[0], base[1] - 0.07, base[2]), { glow: 1, rig: [RIG.PULSE, 1, 0.2, 1], pivot: [base[0], base[1] - 0.07, base[2]] });
-    P(ico(R * 0.17), body2, M4(0, yc + B.top + 0.02, 0.02));
-    for (const [sx, dz] of [[-1, 0.04], [1, -0.05]]) P(ico(R * 0.4), accent, M4(sx * R * 0.9, yc + R * 0.2, dz, 1, 1.2, 1), { glow: 0.25, rig: [RIG.PULSE, 2, 0.05, 1], pivot: [0, yc, 0] });
+    P(cyl(R * 0.33, R * 0.2, 0.09, coarse ? 3 : 6, coarse), body2, M4(base[0], base[1] - 0.02, base[2]));
+    P(ball(R * 0.18), glow, M4(base[0], base[1] - 0.07, base[2]), { glow: 1, rig: [RIG.PULSE, 1, 0.2, 1], pivot: [base[0], base[1] - 0.07, base[2]] });
+    P(ball(R * 0.17), body2, M4(0, yc + B.top + 0.02, 0.02));
+    for (const [sx, dz] of [[-1, 0.04], [1, -0.05]]) P(ball(R * 0.4), accent, M4(sx * R * 0.9, yc + R * 0.2, dz, 1, 1.2, 1), { glow: 0.25, rig: [RIG.PULSE, 2, 0.05, 1], pivot: [0, yc, 0] });
   }
 
   // ---- extras
   const top = yc + B.top;
   for (const e of G.extras) {
+    // A coarse creature keeps only the sail and the plates. Every other extra is a bead, a spike,
+    // a feeler, or a mound of a few centimetres, and none of them reaches the outline at distance.
+    if (coarse && e !== 'sail' && e !== 'plates') continue;
     switch (e) {
       case 'sail': {
         const bz = B.back * 0.15 + B.front * 0.1, base = [0, (probe.top(0, bz) ?? top) - 0.02, bz], sh = 0.35 + R;
-        P(cone(R * 1.1, sh, 4), accent, M4(base[0], base[1] + sh * 0.45, base[2], 0.1, 1, 1.5, -0.25, 0), { glow: 0.45, rig: [RIG.SWAY, 0, 0.04, 1], pivot: base });
+        P(spike(R * 1.1, sh, 4), accent, M4(base[0], base[1] + sh * 0.45, base[2], 0.1, 1, 1.5, -0.25, 0), { glow: 0.45, rig: [RIG.SWAY, 0, 0.04, 1], pivot: base });
+        if (coarse) break;      // the ribs sit inside the sheet of the sail
         for (const zk of [0.3, -0.05, -0.4]) {
           const z = base[2] + zk * R * 1.5, s = seg([0, base[1], z], [0, base[1] + sh * 0.85 * (1 - Math.abs(zk) * 0.5), z * 1.2 - 0.05], 0.008, body2, 0.006);
           P(s.geo, s.color, s.matrix, { rig: [RIG.SWAY, 0, 0.04, 1], pivot: base });
@@ -411,6 +466,10 @@ export function buildCreature(G, pal, flora) {
         break;
       }
       case 'plates':
+        if (coarse) {   // one shell over the back holds the same raised outline as the two plates
+          P(block(R * 0.7), body, M4(0, yc + B.top * 0.5, 0, 1.1, 0.45, 1.6));
+          break;
+        }
         P(dodeca(R * 0.7), body, M4(0, yc + B.top * 0.5, B.front * 0.3, 1.1, 0.45, 0.9));
         P(dodeca(R * 0.65), body, M4(0, yc + B.top * 0.55, B.back * 0.3, 1, 0.4, 0.85));
         break;

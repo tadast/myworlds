@@ -8,6 +8,13 @@
 // mover, and each member follows its anchor. The anchor is not drawn. One animal of the group can
 // stop, but the group stops together, because the whole group reads the activity of the anchor.
 //
+// A species draws at two levels of detail, as the flora does in ground-flora.js. An animal closer
+// to the camera than ground.lod.distance goes to the near mesh, which is the full creature. An
+// animal past it goes to the far mesh, which is the coarse creature of under 80 triangles. One
+// walk per frame reads the distance of every animal and writes it to one of the two meshes, with
+// a band of 10% around the LOD distance, so an animal at the boundary cannot flicker. Both meshes
+// share one material, so one shader animates both and the graphics card compiles one program.
+//
 // Ground frame: x east, y up, z south. One unit is one metre.
 import * as THREE from 'three';
 import { buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, hopGait, hopBurst } from './fauna.js';
@@ -23,12 +30,14 @@ const TRAIL_LEN = 64;        // samples of the anchor path, for the species that
 const TRAIL_STEP = 0.1;      // seconds between two samples of the path
 const WATER_MARGIN = 0.5;    // metres above sea level a walker keeps
 const PICK_TOL = 34;         // pixels: how near a tap must come to a creature
+const HYSTERESIS = 0.05;     // ±5% around the LOD distance: a band of 10%, as ground-flora.js uses
+const DEFAULT_LOD = { distance: 150 };   // the fallback when no owner passes its lod knob
 
 const HALF_PI = Math.PI / 2;
 const _up = new THREE.Vector3(), _fwd = new THREE.Vector3(), _rgt = new THREE.Vector3();
 const _pos = new THREE.Vector3(), _mat = new THREE.Matrix4();
 const _pw = new THREE.Vector3(), _pb = new THREE.Vector3();
-const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pm = new THREE.Matrix4();
+const _pv = new THREE.Vector3(), _pt = new THREE.Vector3();
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 
@@ -75,18 +84,22 @@ export function groundMove(G) {
 
 export class GroundFauna {
   // heightAt(x, z) gives the elevation in metres. onInspect(kind) opens the inspector card.
-  constructor({ result, world, tier, heightAt, camera, canvas, onInspect }) {
+  // lod is the shared LOD knob of the ground: { distance, min, max } in metres.
+  constructor({ result, world, tier, heightAt, camera, canvas, onInspect, lod }) {
     this.world = world;
     this.tier = tier;
     this.heightAt = heightAt;
     this.camera = camera;
     this.canvas = canvas;
     this.onInspect = onInspect || null;
+    this.lod = lod || DEFAULT_LOD;
     this.group = new THREE.Group();
-    this.kinds = [];        // one entry per species drawn: { G, inst, mat, scale }
+    this.kinds = [];        // one entry per species drawn: { G, kind, near, far, mat, scale }
     this.groups = [];       // one entry per anchor
     this.members = [];      // one entry per animal
     this.count = 0;
+    this.nearCount = 0;     // animals drawn as full meshes this frame
+    this.farCount = 0;      // animals drawn as coarse meshes this frame
     this.stepMs = 0;
     this._down = null;
 
@@ -99,6 +112,19 @@ export class GroundFauna {
     this._build(patch, gs, ms, rng);
     // Issue 06 owns the ground click. ground.js reads pickHit() through its seam, so this file
     // binds no listener of its own: two listeners would open the card before the glide ran.
+  }
+
+  // One instanced mesh with room for every member of a species. The walk sets count every frame.
+  _mesh(geo, mat, n, casts) {
+    geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
+    const inst = new THREE.InstancedMesh(geo, mat, n);
+    inst.frustumCulled = false;     // the animals move every frame, so the bounding sphere is stale
+    inst.castShadow = casts;
+    inst.receiveShadow = !!this.tier.shadows;
+    inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    inst.count = 0;
+    return inst;
   }
 
   // ---------------------------------------------------------------- the build
@@ -116,21 +142,31 @@ export class GroundFauna {
     for (const [k, n] of perKind) {
       const G = species[k];
       if (!G) continue;
-      const geo = buildCreature(G, pal, pal.flora);
-      const scale = metreScale(G, geo);
-      geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array(n), 1));
-      geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
+      const full = buildCreature(G, pal, pal.flora);
+      const coarse = buildCreature(G, pal, pal.flora, 'coarse');
+      // One scale for both levels of detail, measured on the full creature. The lore size is the
+      // size of the near mesh, and the far mesh must match it or the swap would jump.
+      const scale = metreScale(G, full);
+      // Both meshes share the material, so the shader compiles once and one uTime drives both.
       const mat = faunaMaterial(G);
-      const inst = new THREE.InstancedMesh(geo, mat, n);
-      inst.userData.kind = k;
-      inst.frustumCulled = false;     // the animals move every frame, so the bounding sphere is stale
-      inst.castShadow = !!this.tier.shadows && G.move.shadow;
-      inst.receiveShadow = !!this.tier.shadows;
-      inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      const entry = { G, inst, mat, scale, next: 0 };
+      const near = this._mesh(full, mat, n, !!this.tier.shadows && G.move.shadow);
+      // A far mesh never casts. It holds no real shape, and the sun only casts at all while the
+      // camera is under the LOD distance, where every animal near the reader is a near mesh.
+      const far = this._mesh(coarse, mat, n, false);
+      const entry = {
+        G, kind: k, near, far, mat, scale,
+        nearN: 0, farN: 0, phaseDirty: true,
+        tris: { full: full.attributes.position.count / 3, coarse: coarse.attributes.position.count / 3 },
+      };
       byKind.set(k, entry);
       this.kinds.push(entry);
-      this.group.add(inst);
+      this.group.add(near);
+      this.group.add(far);
+    }
+    // the triangle budget of the coarse build, per species, as the issue asks
+    if (this.kinds.length) {
+      console.info('[myworlds] ground fauna triangles per creature: '
+        + this.kinds.map((e) => `${e.G.lore.name} ${e.tris.coarse} coarse / ${e.tris.full} full`).join(', '));
     }
 
     // the anchors: one mover each, in metres
@@ -157,37 +193,58 @@ export class GroundFauna {
       this.groups.push(g);
     }
 
-    // the members: a place in the formation, a phase, and a slot in the instanced mesh
+    // the members: a place in the formation, a phase, and a level of detail
     for (let i = 0; i < ms.length; i += 4) {
       const g = this.groups[ms[i]];
       if (!g) continue;
-      const e = g.entry, j = e.next++;
-      e.inst.geometry.attributes.aPhase.setX(j, ms[i + 3]);
+      const e = g.entry;
       const m = {
-        g, inst: e.inst, j, i: g.n++, scale: e.scale,
+        g, e, i: g.n++, scale: e.scale,
         dx: ms[i + 1], dz: ms[i + 2], phase: ms[i + 3],
         x: g.x + ms[i + 1], z: g.z + ms[i + 2], heading: g.heading,
         wob: Math.max(0.4, g.spread * MEMBER_WOBBLE),
         f1: 0.11 + rng() * 0.2, p1: rng() * 6.28, f2: 0.09 + rng() * 0.18, p2: rng() * 6.28,
+        // the level of detail: 0 near, 1 far. The slot in that mesh is set by the walk.
+        far: 1, mesh: null, slot: -1, px: 0, py: 0, pz: 0,
       };
       this.members.push(m);
       this.count++;
     }
-    for (const e of this.kinds) e.inst.geometry.attributes.aPhase.needsUpdate = true;
     this.update(0, 0);      // put every animal on the ground before the first frame is drawn
   }
 
   // ---------------------------------------------------------------- the step
+  // One pass over the anchors, then one over the animals. The second pass places an animal and
+  // sorts it into the near mesh or the far mesh in the same step, so no matrix is written twice.
   update(t, dt) {
     if (!this.members.length) return;
     const t0 = performance.now();
+    const c = this.camera ? this.camera.position : null;
+    this._cx = c ? c.x : 0; this._cy = c ? c.y : 0; this._cz = c ? c.z : 0;
+    const d = this.lod.distance;
+    this._in2 = (d * (1 - HYSTERESIS)) ** 2;
+    this._out2 = (d * (1 + HYSTERESIS)) ** 2;
+    for (const e of this.kinds) { e.nearN = 0; e.farN = 0; }
     for (const g of this.groups) if (g) this._stepGroup(g, t, dt);
     for (const m of this.members) this._stepMember(m, t, dt);
+    let near = 0, far = 0;
     for (const e of this.kinds) {
-      e.inst.instanceMatrix.needsUpdate = true;
-      e.inst.geometry.attributes.aMove.needsUpdate = true;
+      e.near.count = e.nearN; e.far.count = e.farN;
+      near += e.nearN; far += e.farN;
+      e.near.instanceMatrix.needsUpdate = true;
+      e.far.instanceMatrix.needsUpdate = true;
+      e.near.geometry.attributes.aMove.needsUpdate = true;
+      e.far.geometry.attributes.aMove.needsUpdate = true;
+      // the phase of an animal only moves when the animal changes its slot, which is rare
+      if (e.phaseDirty) {
+        e.near.geometry.attributes.aPhase.needsUpdate = true;
+        e.far.geometry.attributes.aPhase.needsUpdate = true;
+        e.phaseDirty = false;
+      }
       if (e.mat.userData.shader) e.mat.userData.shader.uniforms.uTime.value = t;
     }
+    this.nearCount = near;
+    this.farCount = far;
     const ms = performance.now() - t0;
     this.stepMs = this.stepMs ? this.stepMs * 0.9 + ms * 0.1 : ms;
   }
@@ -262,8 +319,23 @@ export class GroundFauna {
     const s = m.scale;
     _mat.makeBasis(_rgt.multiplyScalar(s), _up.multiplyScalar(s), _fwd.multiplyScalar(s));
     _mat.setPosition(_pos.set(nx, y, nz));
-    m.inst.setMatrixAt(m.j, _mat);
-    m.inst.geometry.attributes.aMove.setX(m.j, g.act);
+    m.px = nx; m.py = y; m.pz = nz;      // the pick reads these, so it needs no matrix read back
+
+    // The level of detail. The band around the LOD distance holds an animal on the side it is on
+    // until it is clearly past the other side, so an animal at the boundary cannot flicker.
+    const ex = nx - this._cx, ey = y - this._cy, ez = nz - this._cz;
+    const dd = ex * ex + ey * ey + ez * ez;
+    m.far = m.far === 0 ? (dd > this._out2 ? 1 : 0) : (dd < this._in2 ? 0 : 1);
+    const e = m.e;
+    const inst = m.far ? e.far : e.near;
+    const slot = m.far ? e.farN++ : e.nearN++;
+    if (m.mesh !== inst || m.slot !== slot) {
+      m.mesh = inst; m.slot = slot;
+      inst.geometry.attributes.aPhase.setX(slot, m.phase);
+      e.phaseDirty = true;
+    }
+    inst.setMatrixAt(slot, _mat);
+    inst.geometry.attributes.aMove.setX(slot, g.act);
   }
 
   // ---------------------------------------------------------------- the inspector click
@@ -278,18 +350,19 @@ export class GroundFauna {
     return hit ? hit.kind : null;
   }
 
-  // The creature under a screen point, with the world point to glide to, or null.
+  // The creature under a screen point, with the world point to glide to, or null. The walk keeps
+  // the base point and the scale of every animal, so the test reads the same numbers whether the
+  // animal draws as a near mesh or as a far one.
   pickHit(px, py, tolerance = PICK_TOL) {
     const cam = this.camera;
     if (!cam || !this.members.length) return null;
     const el = this.canvas, w = el ? el.clientWidth : 1, h = el ? el.clientHeight : 1;
     let best = null, bestD = tolerance;
-    for (const e of this.kinds) e.inst.updateWorldMatrix(true, false);
+    this.group.updateWorldMatrix(true, false);
+    const root = this.group.matrixWorld;
     for (const m of this.members) {
-      m.inst.getMatrixAt(m.j, _pm);
-      _pv.setFromMatrixPosition(_pm).applyMatrix4(m.inst.matrixWorld);
-      const up = Math.hypot(_pm.elements[4], _pm.elements[5], _pm.elements[6]);
-      _pt.set(_pv.x, _pv.y + up * 1.1, _pv.z);
+      _pv.set(m.px, m.py, m.pz).applyMatrix4(root);
+      _pt.set(m.px, m.py + m.scale * 1.1, m.pz).applyMatrix4(root);
       _pw.copy(_pv);                       // the world point, before project() overwrites it
       _pv.project(cam); _pt.project(cam);
       if (_pv.z > 1) continue;
@@ -298,14 +371,15 @@ export class GroundFauna {
       const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1;
       const u = clamp(((px - ax) * lx + (py - ay) * ly) / ll, 0, 1);
       const d = Math.hypot(ax + lx * u - px, ay + ly * u - py) - Math.sqrt(ll) * 0.25;
-      if (d < bestD) { bestD = d; best = { kind: m.inst.userData.kind, point: _pb.copy(_pw).clone() }; }
+      if (d < bestD) { bestD = d; best = { kind: m.e.kind, point: _pb.copy(_pw).clone() }; }
     }
     return best;
   }
 
   dispose() {
-    for (const e of this.kinds) { e.inst.geometry.dispose(); e.mat.dispose(); }
+    for (const e of this.kinds) { e.near.geometry.dispose(); e.far.geometry.dispose(); e.mat.dispose(); }
     this.group.clear();
     this.kinds = []; this.groups = []; this.members = []; this.count = 0;
+    this.nearCount = 0; this.farCount = 0;
   }
 }
