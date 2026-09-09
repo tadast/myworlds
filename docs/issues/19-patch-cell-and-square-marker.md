@@ -1,6 +1,6 @@
 # 19 The patch cell and the square marker
 
-Status: CLOSED, 2026-09-09, merged as PENDING.
+Status: CLOSED, 2026-09-09, merged as f2daf0d.
 
 Type: AFK. Phase 2. Blocked by: 02, 04, 05. Read `docs/issues/README.md` first.
 

@@ -202,4 +202,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
 | 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | open |
 | 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | open |
-| 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED PENDING |
+| 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED f2daf0d |
