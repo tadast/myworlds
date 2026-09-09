@@ -175,7 +175,7 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 10 | Far fauna coarse mesh | AFK | 09 | CLOSED be45f37 |
 | 11 | Adaptive LOD and the perf overlay | AFK | 07, 10 | CLOSED 54563e6 |
 | 12 | Sky continuity: sun, moons, rings, clouds | AFK | 03 | CLOSED acf2a18 |
-| 13 | LOW tier pass | AFK | 05, 06, 11, 12 | open |
+| 13 | LOW tier pass | AFK | 05, 06, 11, 12 | CLOSED 4f861c1 |
 | 14 | Ground-scale phenomena | HITL | 04, design | open |
 | 15 | Sea species | HITL | 05, 09, design | open |
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
