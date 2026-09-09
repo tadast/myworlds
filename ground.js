@@ -16,8 +16,27 @@ export const FOG_FAR = 750;          // metres, where the fog is solid
 export const SKY_RADIUS = 5000;      // metres, the sky dome
 export const CEILING = 1200;         // metres, the camera ceiling above the site
 export const FLOOR = 2;              // metres, the camera floor above the terrain
-export const CAM_START = 300;        // metres, the camera starts this far up and this far south
+export const CAM_START = 800;        // metres, the camera starts this far up and this far south
 export const RIM = 1500;             // metres, how far the coarse rim reaches from the site
+
+// ---------------------------------------------------------------- the camera, issue 06
+const TARGET_LIFT = 1;      // metres, the target floats this far over the terrain
+const TILT_FREE = 60;       // metres, under this height the reader owns the polar angle
+const POLAR_HIGH = 0.62;    // rad, the polar angle at the ceiling: the view looks down
+const POLAR_LOW = 1.40;     // rad, the polar angle at TILT_FREE: the view looks out
+const POLAR_BAND = 0.06;    // rad, the play the reader keeps at the ceiling
+const POLAR_WIDE = 0.25;    // rad, the play the reader keeps at TILT_FREE
+const SPEED_SPAN = 400;     // metres, the height where a wheel step reaches its full size
+const GLIDE_S = 0.8;        // seconds, the glide to a tapped point
+const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a glide
+const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
+const TAP_SLOP = 6;         // px, a pointer that moves more than this is a drag, not a tap
+const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
+// The fog opens with the height of the camera. The reader lands 800 m up, and a fog that is solid
+// at 750 m would show one flat colour there. The far distance holds under the rim edge, so the
+// ground still fades out and the rim never shows a cut edge.
+const FOG_LIFT = 1.15;      // metres of fog distance per metre of height
+const FOG_MAX = 2100;       // metres, the widest the fog opens
 
 const CHUNKS = 10;           // the fine terrain splits into 10 by 10 meshes, so the frustum culls it
 const RIM_STEP = 4;          // the rim uses this many grid steps per cell
@@ -32,6 +51,9 @@ const TILE = 16;             // cells per tile in the index order, to keep the v
 const GROUND_GAIN = 1.06;
 
 const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
+
+// scratch vectors for the camera work, so no frame allocates
+const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
 
 // small integer hash, the one the worker jitters its faces with
 function hash1(i) {
@@ -95,13 +117,40 @@ export class Ground {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.enablePan = false;         // issue 06 adds the pan and the glide
     this.controls.rotateSpeed = 0.5;
     this.controls.zoomSpeed = 0.9;
     this.controls.minDistance = 5;
     this.controls.maxDistance = SKY_RADIUS * 0.5;   // the ceiling clamp stops the camera, not this
-    this.controls.maxPolarAngle = Math.PI * 0.495;  // the camera stays above the ground plane
+    this.controls.maxPolarAngle = Math.PI * 0.495;  // the start value; _drive() sets it per frame
     this.controls.enabled = false;                  // the app turns the controls on after the dive
+    // The pan slides the target over the ground, not over the screen, so a drag walks the reader
+    // across the patch. The right button and two fingers pan. One finger turns the view, and a
+    // pinch zooms. _drive() sets the three speeds from the height every frame.
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = false;
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+
+    // the glide of a tap, and the pointer state that tells a tap from a drag
+    this.glide = null;
+    this._tap = null;
+    this._pointers = 0;
+    // The seam for issue 09. It sets pickCreature to a function that returns the creature under
+    // the pointer, { point, kind } or null. A tap on a creature glides to it, and the app then
+    // opens the inspector through onCreatureTap. A tap on the ground needs neither of them.
+    this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind } | null
+    this.onCreatureTap = null;   // (hit) => void, called when the glide ends
+    this._bound = {
+      down: (e) => this._onDown(e),
+      move: (e) => this._onMove(e),
+      up: (e) => this._onUp(e),
+      wheel: () => { this.glide = null; },   // a wheel step takes the camera back from the glide
+    };
+    canvas.addEventListener('pointerdown', this._bound.down, { passive: true });
+    canvas.addEventListener('pointermove', this._bound.move, { passive: true });
+    canvas.addEventListener('pointerup', this._bound.up, { passive: true });
+    canvas.addEventListener('pointercancel', this._bound.up, { passive: true });
+    canvas.addEventListener('wheel', this._bound.wheel, { passive: true });
 
     this.content = new THREE.Group();
     this.scene.add(this.content);
@@ -155,8 +204,10 @@ export class Ground {
     this.content.add(sun);
     this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night));
 
-    // the camera starts 300 m up and 300 m south of the site, and it looks at the site
-    this.controls.target.set(0, this.base, 0);
+    // The reveal: the camera starts 800 m up and 800 m south of the site, and it looks at the
+    // site. The reader sees the patch from over the fog and zooms in.
+    this.glide = null;
+    this.controls.target.set(0, this.base + TARGET_LIFT, 0);
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(0, this.base + CAM_START, CAM_START);
     this.controls.update();
@@ -288,32 +339,165 @@ export class Ground {
   }
 
   update(t, dt) {
+    this._drive();               // the speeds and the tilt, both from the height of the camera
     this.controls.update();
+    if (this.glide) this._stepGlide(dt);
     const p = this.camera.position, tg = this.controls.target;
 
-    // the target stays inside the fog, so the view always holds ground the reader can see
+    // The target stays inside the fog, so the view always holds ground the reader can see. The
+    // camera takes the same step, so a pan that reaches the limit stops the whole view there
+    // instead of sliding the camera on over a target that cannot follow.
     const tr = Math.hypot(tg.x, tg.z);
     if (tr > FOG_NEAR) {
-      const k = FOG_NEAR / tr;
-      tg.x *= k; tg.z *= k;
-      this.controls.update();
+      const k = FOG_NEAR / tr - 1;
+      const dx = tg.x * k, dz = tg.z * k;
+      tg.x += dx; tg.z += dz;
+      p.x += dx; p.z += dz;
     }
+
+    // The target rides the terrain, so it never sinks under a hill. The camera takes the same
+    // step, which holds the view direction and the distance while the reader pans over relief.
+    const lift = this._groundAt(tg.x, tg.z) + TARGET_LIFT - tg.y;
+    if (Math.abs(lift) > 1e-4) { tg.y += lift; p.y += lift; }
 
     // the ceiling: shorten the offset from the target, so the view direction holds
     const ceiling = this.base + CEILING;
     const dy = p.y - tg.y, room = ceiling - tg.y;
-    if (dy > room && room > 0) {
-      p.sub(tg).multiplyScalar(room / dy).add(tg);
-      this.controls.update();
-    }
-    this.atCeiling = this.camera.position.y >= ceiling - 1;
+    if (dy > room && room > 0) p.sub(tg).multiplyScalar(room / dy).add(tg);
+    this.atCeiling = p.y >= ceiling - 1;
 
     // the floor: the camera stays FLOOR metres above the terrain
     const floor = this._groundAt(p.x, p.z) + FLOOR;
-    if (p.y < floor) { p.y = floor; this.controls.update(); }
+    if (p.y < floor) p.y = floor;
+
+    // The clamps move the camera after controls.update() aimed it, so it must aim again. One
+    // lookAt costs far less than a second controls.update(), and a second update would apply
+    // the damping twice and make every drag run faster than the reader asked for.
+    this.camera.lookAt(tg);
+
+    // The fog opens with the height, so the patch reads from the ceiling and closes in at the
+    // ground. The ratio of the near to the far distance holds, so the depth of the fade holds.
+    const fog = this.scene.fog;
+    if (fog) {
+      fog.far = Math.min(FOG_FAR + FOG_LIFT * Math.max(0, p.y - this.base), FOG_MAX);
+      fog.near = fog.far * (FOG_NEAR / FOG_FAR);
+    }
 
     // the sky follows the camera, so it must move after every clamp
     if (this.sky) this.sky.update(t, dt, this.camera);
+  }
+
+  // ---------------------------------------------------------------- the feel of the controls
+  // The height of the camera sets the speeds and the tilt. Near the ground a wheel step moves a
+  // metre or two and the view looks out at the horizon. At the ceiling a step moves about a
+  // hundred metres and the view looks down on the patch, as the globe does with its pitch.
+  _drive() {
+    const p = this.camera.position, tg = this.controls.target;
+    const h = Math.max(0, p.y - this._groundAt(p.x, p.z));
+    const near = THREE.MathUtils.clamp(h / SPEED_SPAN, 0.06, 1);
+    this.controls.rotateSpeed = 0.35 + 0.35 * near;
+    this.controls.zoomSpeed = 0.9 + 1.6 * near;
+    this.controls.panSpeed = 0.5 + 0.5 * near;
+
+    // The tilt runs from the ceiling down to TILT_FREE. The height sets the polar angle the view
+    // wants, and a band around it holds the play the reader keeps. The band is narrow high up, so
+    // the view turns from the patch below to the horizon as the reader comes down. Under
+    // TILT_FREE the band opens to a half turn and the reader owns the polar angle.
+    const k = THREE.MathUtils.smoothstep(h, TILT_FREE, CEILING);
+    const free = 1 - THREE.MathUtils.smoothstep(h, TILT_FREE, TILT_FREE * 2);
+    const want = THREE.MathUtils.lerp(POLAR_LOW, POLAR_HIGH, k);
+    const band = THREE.MathUtils.lerp(THREE.MathUtils.lerp(POLAR_WIDE, POLAR_BAND, k), Math.PI, free);
+    // At this distance the camera meets the floor at this polar angle, and it cannot pass it.
+    const d = Math.max(1e-3, p.distanceTo(tg));
+    const cap = Math.acos(THREE.MathUtils.clamp((this._groundAt(p.x, p.z) + FLOOR - tg.y) / d, -0.32, 1));
+    const min = Math.max(0.05, want - band);
+    this.controls.minPolarAngle = min;
+    this.controls.maxPolarAngle = Math.max(min + 0.01, Math.min(cap, want + band));
+  }
+
+  // ---------------------------------------------------------------- the glide
+  // A tap moves the target to the point under the pointer over GLIDE_S seconds with an ease-out.
+  // A camera over GLIDE_HIGH metres from its target also comes a third of the way in, so a tap
+  // from high up both aims and closes. The reader keeps the view direction: only the offset
+  // length changes, so a turn during the glide still works.
+  glideTo(point, done) {
+    const to = point.clone();
+    const r = Math.hypot(to.x, to.z);
+    if (r > FOG_NEAR) { const k = FOG_NEAR / r; to.x *= k; to.z *= k; }
+    to.y = this._groundAt(to.x, to.z) + TARGET_LIFT;
+    const d0 = this.camera.position.distanceTo(this.controls.target);
+    const d1 = d0 > GLIDE_HIGH ? d0 * (1 - GLIDE_PULL) : d0;
+    this.glide = { k: 0, from: this.controls.target.clone(), to, d0, d1, done: done || null };
+    return this.glide;
+  }
+
+  _stepGlide(dt) {
+    const g = this.glide;
+    g.k = Math.min(1, g.k + dt / GLIDE_S);
+    const e = 1 - Math.pow(1 - g.k, 3);
+    const p = this.camera.position, tg = this.controls.target;
+    const off = _off.copy(p).sub(tg);
+    tg.lerpVectors(g.from, g.to, e);
+    p.copy(tg).add(off.setLength(THREE.MathUtils.lerp(g.d0, g.d1, e)));
+    if (g.k >= 1) { this.glide = null; if (g.done) g.done(); }
+  }
+
+  // Where the ray from a point on the screen meets the ground, or null. The terrain is a height
+  // field, so a march over the field costs less than a triangle test over a million faces, and it
+  // reads the rim as well. The step grows with the distance, because a far cell covers few pixels.
+  groundAtPointer(nx, ny) {
+    const o = this.camera.position;
+    const d = _dir.set(nx, ny, 0.5).unproject(this.camera).sub(o).normalize();
+    let t = 0.5;
+    if (o.y + d.y * t <= this._groundAt(o.x + d.x * t, o.z + d.z * t)) return _hit.copy(o).addScaledVector(d, t).clone();
+    while (t < RAY_FAR) {
+      const t1 = Math.min(RAY_FAR, t + Math.max(1, t * 0.02));
+      if (o.y + d.y * t1 <= this._groundAt(o.x + d.x * t1, o.z + d.z * t1)) {
+        let lo = t, hi = t1;
+        for (let i = 0; i < 24; i++) {
+          const m = (lo + hi) / 2;
+          if (o.y + d.y * m <= this._groundAt(o.x + d.x * m, o.z + d.z * m)) hi = m; else lo = m;
+        }
+        return _hit.copy(o).addScaledVector(d, hi).clone();
+      }
+      if (t1 >= RAY_FAR) break;
+      t = t1;
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- the pointer
+  // A tap glides. A drag does not, so a turn, a pan, and a pinch stay free of the glide. The
+  // handlers never call preventDefault, so the sheet of the sidebar still folds on a tap.
+  _onDown(e) {
+    this._pointers++;
+    if (this._pointers > 1) { this._tap = null; return; }   // two fingers pan or pinch
+    const mouse = e.pointerType === 'mouse';
+    this._tap = (!mouse || e.button === 0) ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+  }
+
+  _onMove(e) {
+    const tap = this._tap;
+    if (!tap || e.pointerId !== tap.id) return;
+    if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) { this._tap = null; this.glide = null; }
+  }
+
+  _onUp(e) {
+    this._pointers = Math.max(0, this._pointers - 1);
+    const tap = this._tap;
+    this._tap = null;
+    if (!tap || tap.id !== e.pointerId || e.type === 'pointercancel' || !this.controls.enabled) return;
+    if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) return;
+    const r = this.canvas.getBoundingClientRect();
+    const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+    const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
+    const creature = this.pickCreature ? this.pickCreature(nx, ny, e) : null;   // the seam of issue 09
+    if (creature && creature.point) {
+      this.glideTo(creature.point, () => { if (this.onCreatureTap) this.onCreatureTap(creature); });
+      return;
+    }
+    const hit = this.groundAtPointer(nx, ny);
+    if (hit) this.glideTo(hit);
   }
 
   render() {
@@ -349,6 +533,12 @@ export class Ground {
   }
 
   dispose() {
+    this.canvas.removeEventListener('pointerdown', this._bound.down);
+    this.canvas.removeEventListener('pointermove', this._bound.move);
+    this.canvas.removeEventListener('pointerup', this._bound.up);
+    this.canvas.removeEventListener('pointercancel', this._bound.up);
+    this.canvas.removeEventListener('wheel', this._bound.wheel);
+    this.glide = null;
     this.controls.dispose();
     this._clear();
     this.scene.clear();
