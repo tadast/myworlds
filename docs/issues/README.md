@@ -156,7 +156,8 @@ Three traps that make a good build look broken, or a bad one look good:
                                         │                        ├──► 07 ground-flora-lod ──┤
                                         └──► 12 sky-continuity   │                          ├──► 11 adaptive-lod-and-perf ──► 13 low-tier-pass
 08 sociality-gene ───────────────────────────────────────────────►├──► 09 ground-fauna-groups ──► 10 far-fauna-coarse-mesh ──┘
-14, 15, 16 are phase two and need design first.
+14, 15, 16 are phase two and need design first. 17 and 18 are defects found after the
+phase one merge; they need no design and can run at any time.
 ```
 
 Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 and 09 both add to `ground.js`; keep flora and fauna in separate files, `ground-flora.js` and `ground-fauna.js`, to avoid merge pain.
@@ -179,3 +180,5 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 14 | Ground-scale phenomena | HITL | 04, design | open |
 | 15 | Sea species | HITL | 05, 09, design | open |
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
+| 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | open |
+| 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | open |
