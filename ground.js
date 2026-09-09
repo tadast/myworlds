@@ -217,10 +217,11 @@ export class Ground {
     }
 
     // The animals of this site, in groups. They keep their own file, so issue 07 can add the flora
-    // beside them and neither issue touches the file of the other.
+    // beside them and neither issue touches the file of the other. The animals take the same LOD
+    // knob the plants take: a near mesh under lod.distance, a coarse mesh past it.
     this.fauna = new GroundFauna({
       result, world: this.world, tier: this.tier, camera: this.camera, canvas: this.canvas,
-      heightAt: (x, z) => this.heightAt(x, z), onInspect: this.onInspect,
+      heightAt: (x, z) => this.heightAt(x, z), onInspect: this.onInspect, lod: this.lod,
     });
     this.content.add(this.fauna.group);
 
@@ -462,10 +463,10 @@ export class Ground {
     if (this.flora) this.flora.update(this.camera);
   }
 
-  // The shadow box follows the target and only lives near the ground. A plant casts only while it
-  // is a near mesh, and a plant is a near mesh only within lod.distance of the camera. So a camera
-  // higher than that distance has no caster under it, and the map would cost 2.2 ms to draw an
-  // empty frame. The margin of 1.2 keeps the shadow through the hysteresis band of the LOD walk.
+  // The shadow box follows the target and only lives near the ground. A plant and an animal cast
+  // only while they are near meshes, and both are near meshes only within lod.distance of the
+  // camera. So a camera higher than that distance has no caster under it, and the map would cost
+  // 2.2 ms to draw an empty frame. The margin of 1.2 keeps the shadow through the hysteresis band.
   _driveShadow() {
     const sun = this.sun;
     if (!sun || !this.tier.shadows) return;

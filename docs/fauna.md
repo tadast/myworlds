@@ -10,7 +10,7 @@ The fauna pipeline has four stages. Each stage lives in one file.
 |---|---|---|---|
 | 1. Roll the species | `species.js` | Web Worker | `world.species`: an array of genomes with lore |
 | 2. Place the creatures | `worker.js` | Web Worker | `fauna`: a `Float32Array`, 9 floats per creature |
-| 3. Build and animate | `fauna.js` | Main thread | One `InstancedMesh` per species, one rig shader |
+| 3. Build and animate | `fauna.js` | Main thread | One `InstancedMesh` per species on the globe, two on the ground, one rig shader |
 | 4. Steer and inspect | `app.js`, `fauna.js` | Main thread | Roaming on the height map, the inspector card |
 
 The same seed always gives the same species, the same names, and the same placement. All randomness comes from the seeded `makeRng()` streams in the worker.
@@ -126,7 +126,10 @@ A coarse height map (384 by 192, lat/lon) is also sent, so the main thread can f
 
 A creature is built in its own units. The base is at `y = 0`. `+y` is up. The animal faces `+z`. `BASE_SCALE` (0.0077) times the creature scale converts to world units. The hover heights in `species.js` are in the same world units, so they follow every change to `BASE_SCALE`.
 
-### `buildCreature(G, palette, flora)`
+### `buildCreature(G, palette, flora, detail)`
+
+`detail` is `'full'` by default, or `'coarse'` for a creature past the LOD distance of the ground.
+The globe and the inspector card always take the full build. See "Two levels of detail" below.
 
 The builder makes a list of parts. Each part is `{ geo, color, matrix, glow, rig, pivot }`. `mergeGeos()` merges them into one non-indexed `BufferGeometry` with these attributes:
 
@@ -239,11 +242,50 @@ groups.
 
 ### Scale in metres
 
-`GroundFauna` builds each species once with `buildCreature()` and measures the bounding box of the
+`GroundFauna` builds each species with `buildCreature()` and measures the bounding box of the full
 geometry. `Species.bodyMetres(G)` gives the number the lore states and the axis it measures: a
 height measures along y, a length along z, because a creature faces +z in its own frame. The scale
 makes that extent equal the number. A "4.5 m at the shoulder" quad is then 4.5 m tall against the
-2 m terrain grid, and a "3.1 m long" hexapod is 3.1 m from nose to tail.
+2 m terrain grid, and a "3.1 m long" hexapod is 3.1 m from nose to tail. The two levels of detail
+below share that one scale, so a swap cannot change the size of an animal.
+
+### Two levels of detail
+
+A patch holds up to 300 animals, and a full creature is 100 to 980 triangles. Three hundred full
+rigs would cost the graphics card more than the terrain does, and past 150 m an animal is about a
+dozen pixels tall. So each species draws from two instanced meshes, as the flora does in
+`ground-flora.js`: a near mesh of full creatures, and a far mesh of coarse ones.
+
+`buildCreature(G, palette, flora, detail)` takes `'full'` or `'coarse'`. The coarse build keeps the
+outline and every rig record, and it drops what the reader cannot resolve at that size:
+
+- A ball is an octahedron of 8 triangles, not an icosahedron of 20 or a dodecahedron of 36. The
+  octahedron shrinks by 0.8507 or by 0.9342, because neither of the other two solids has a vertex
+  on an axis, so the coarse part reaches exactly as far as the part it replaces.
+- A tube is a three-sided open cylinder. A cone is a three-sided open cone.
+- A leg is one tapered bone from the hip to the foot, with no knee, no pad, and no bellows. The
+  knee point sits on the hip, so the shader folds nothing and the whole leg pitches about the hip.
+- The head keeps its ball and its nod. The beak, the mandibles, the stalks, the lure, the crest,
+  the tusks, and the eyes go: each measures a fraction of a metre.
+- A chain body is one tapered tube, not a string of balls. The two end joints reach out by the end
+  radius, so the body holds the length of the full build.
+- Of the extras only the sail and the plates stay, because only those two break the outline. The
+  sail loses its ribs and the plates become one shell.
+- A wing sheet takes one panel and loses its leading-edge bone. A swarm keeps its nine shards and
+  loses their beads. A sky whale loses its gill beads and its belly glow.
+- The leg swing runs at half the amplitude (`COARSE_SWING`), so a leg of a few pixels does not
+  shimmer.
+
+The coarse build is 16 to 70 triangles over every species the roll can make, against a target of
+80. A biped spindle is 55, a quad dome 52, and a tripod blob 31.
+
+The walk that places the animals also sorts them. An animal nearer to the camera than
+`ground.lod.distance` goes to the near mesh, and an animal past it goes to the far mesh. A band of
+10% around the distance holds an animal on the side it is on until it is clearly past the other
+side, so an animal at the boundary cannot flicker. Both meshes take one material, so the graphics
+card compiles one program and one `uTime` drives both. The far mesh casts no shadow: it holds no
+real shape, and the sun casts only while the camera is under the LOD distance, where every animal
+near the reader is a near mesh anyway.
 
 ### Steering
 
@@ -267,10 +309,13 @@ The activity uniform `aMove` comes from the anchor, so a whole herd stops and st
 
 ### Cost
 
-One `InstancedMesh` per species. `Ground.update()` calls `GroundFauna.update()`, which walks the
-groups, then the members, then marks the instance matrices. On a site with 299 creatures the walk
-costs about 0.14 ms, and the animals add about 0.4 ms to the graphics card. `window.__mw.ground.fauna`
-holds the live state: `count`, `groups`, `members`, `kinds`, and `stepMs`.
+Two `InstancedMesh` per species, near and far. `Ground.update()` calls `GroundFauna.update()`,
+which walks the groups, then the members, and writes each member into the near mesh or the far one
+in the same step, so no matrix is written twice. On a site with 299 creatures the walk costs about
+0.10 ms. At the 1,200 m ceiling all 299 are coarse, which takes 200,000 triangles out of the frame
+and about 1 ms off the graphics card. `window.__mw.ground.fauna` holds the live state: `count`,
+`nearCount`, `farCount`, `groups`, `members`, `kinds`, and `stepMs`. Each entry of `kinds` carries
+`tris`, the triangle count of both builds, and the build logs the same numbers per species.
 
 ### The inspector on the ground
 
