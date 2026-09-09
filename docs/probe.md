@@ -71,6 +71,42 @@ Added with issue 06. These notes record the decisions the issue text did not fix
 
 **The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)` and `ground.onCreatureTap(hit)`. A tap asks `pickCreature` first. A hit glides to `hit.point` and calls `onCreatureTap` when the glide ends, so the inspector opens after the glide. Without issue 09 both are null and every tap is a ground tap.
 
+### What the flora costs
+
+Added with issue 07. Measured with a timer query of the graphics card around one `Ground.render`, at a
+forest site of 20,000 plants on HIGH, over about 1,300 samples. The sea of issue 05 was not built yet.
+
+| Camera | p10 | median | p90 |
+|---|---|---|---|
+| Entry, 300 m over the site | 3.93 ms | 5.21 ms | 6.99 ms |
+| Eye level, 30 m over the ground | 2.76 ms | 4.37 ms | 5.53 ms |
+
+**The flora is nearly free at eye level.** The terrain alone measures 4.43 ms at the same camera, so
+20,000 plants cost about 0 ms there. A card holds few pixels, and the canopy stands in front of the
+terrain, so the depth test drops the terrain fragments the canopy hides. The gain and the cost cancel.
+
+**The card holds one light, so the shader adds the rest.** A card is baked once per kind with the sun
+behind the eye, at the true height of the sun. That one picture cannot follow the eye: a reader who
+turns to face the sun sees a lit mesh beside a card that holds the same light it always held. So the
+card shader dims the whole card by the angle between the eye and the sun on the ground plane, down to
+the share of the light the sky gives. The two levels of detail then meet at one brightness at every
+camera angle, and the switch at 150 m does not show.
+
+**The card carries no mipmaps.** A mipmap averages the alpha of a thin trunk toward zero, and the far
+half of the forest fades away under an alpha test. A card is small on the screen, so it stays sharp.
+
+**The walk copies six numbers for a card, not sixteen.** A card slot holds a diagonal scale and a
+translation, and the instanced mesh starts every slot at the identity, so the nine zeros and the one
+never change. The first build copied the whole matrix and the walk took 0.6 ms; it now takes 0.4 ms
+for 20,000 plants, and 0.15 ms when the arrays are already in the cache of the processor.
+
+**The sun does not cast yet.** The near plants already carry `castShadow` on HIGH and the terrain
+already carries `receiveShadow`, so the ground needs one flag on the light and a shadow box. Measured:
+a 2,048 map over a box of 200 m costs 2.2 ms at eye level and 2.3 ms at the entry camera, because
+every terrain fragment then runs the nine taps of the soft filter. That takes the frame to 7.5 ms
+before the sea exists, and it buys nothing at the entry camera, where no plant stands near enough to
+cast. The decision therefore belongs with the one runtime knob of issue 11.
+
 ## Phases
 
 - **Phase 0.** Globe fixes, decision 8.

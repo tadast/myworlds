@@ -1173,6 +1173,122 @@ function contextFor(seed) {
   return ctx;
 }
 
+// ---------------------------------------------------------------- the flora of the patch
+// The globe reads the moisture and the forest mask at continent scale, so both hold nearly one
+// value over 1,500 m. The patch keeps the kind rules of the globe and adds a clump field of its
+// own, so a forest site shows glades and a desert site shows cactus in the hollows.
+const FLORA_CELL = 6;        // metres: one plant to a cell, and the cap thins the rest away
+const FLORA_GAP = 3;         // metres: the least distance between two plants
+const FLORA_SLOPE = 0.9;     // rise over run: a steeper cell takes only rock and boulders
+const CLUMP_WAVE = 130;      // metres: the wavelength of the clumps inside the patch
+const CLUMP_AMP = 0.35;      // how far the clumps move the mask
+const FLORA_FLOOR = 0.02;    // the chance of a plant where the mask is at its lowest
+// metres, the size of one plant: tree, pine, cactus, crystal, mushroom, boulder, palm
+const FLORA_M = [[6, 14], [8, 18], [2, 5], [1.5, 6], [1, 3], [1, 4], [7, 12]];
+// the four cells the scan writes before the current one: west, north-west, north, north-east
+const GAP_DI = [-1, -1, 0, 1], GAP_DJ = [0, -1, -1, -1];
+
+// The plants of one patch. One cell of FLORA_CELL metres holds at most one plant, the plant
+// jitters inside its cell, and a plant closer than FLORA_GAP to a neighbour is dropped. The
+// stride sampling at the end is the one packFauna uses.
+function patchFlora(ctx, s) {
+  const { heights, vary, n, grid, half, size, hPerM, elevation, siteT, siteM, siteFM, noise, rng } = s;
+  const maxFlora = s.maxFlora | 0;
+  if (maxFlora <= 0 || !ctx.P.flora || ctx.P.flora.length === 0) return new Float32Array(0);
+
+  const type = ctx.type, density = ctx.floraDensity;
+  const cells = Math.max(1, Math.floor(size / FLORA_CELL)), cw = size / cells;
+  const oc0 = rng() * 90, oc1 = rng() * 90, fq = 1 / CLUMP_WAVE;
+  const gap2 = FLORA_GAP * FLORA_GAP, N = cells * cells;
+  const cX = new Float32Array(N), cY = new Float32Array(N), cZ = new Float32Array(N);
+  const nX = new Float32Array(N), nY = new Float32Array(N), nZ = new Float32Array(N);
+  const cS = new Float32Array(N), cK = new Int8Array(N).fill(-1);
+  let found = 0;
+
+  for (let j = 0; j < cells; j++) {
+    for (let i = 0; i < cells; i++) {
+      const x = -half + (i + rng()) * cw, z = -half + (j + rng()) * cw;
+      // the grid vertex under the plant, and the height and the slope there
+      const gi = clamp(Math.round((x + half) / grid), 1, n - 2);
+      const gj = clamp(Math.round((z + half) / grid), 1, n - 2);
+      const gk = gj * n + gi, h = heights[gk];
+      if (h < 0) continue;                       // the sea holds no plants
+      const dhx = (heights[gk + 1] - heights[gk - 1]) / (2 * grid);
+      const dhz = (heights[gk + n] - heights[gk - n]) / (2 * grid);
+
+      const hg = h * hPerM;
+      const t = siteT + (Math.max(elevation, 0) - Math.max(h, 0)) * hPerM * 0.55;
+      const m = siteM - vary[gk] * 0.1 + Math.max(siteFM, 0) * 0.06;
+      if (biomeIndex(ctx, hg, t, m) <= 2) continue;   // the sea, the shallows, and the beach
+
+      const clump = noise.n3(x * fq + oc0, z * fq + oc1, 31.5) * CLUMP_AMP;
+      const mc = m + clump * 0.5, mask = siteFM + clump + mc * 0.5;
+
+      // The kind. The globe separates its kinds by a field it reads at continent scale, so that
+      // field holds one value over 1,500 m and it cannot separate anything inside a patch. The
+      // clump field can, so it picks between the flora kinds of the world, and the moisture only
+      // moves the split: a wetter desert then grows more cactus and fewer boulders.
+      // The temperature still gates flora away from a cold world, as it does on the globe.
+      const wet = clamp(mc, -0.25, 0.25);
+      let kind = -1;
+      switch (type) {
+        case 'terran': case 'ocean':
+          if (t < 0.12) break;
+          kind = t < 0.45 ? FLORA.PINE : (type === 'ocean' && hg < 0.12 && t > 0.6 ? FLORA.PALM : FLORA.TREE);
+          break;
+        case 'desert': kind = clump > -wet ? FLORA.CACTUS : FLORA.BOULDER; break;
+        case 'ice': kind = clump > 0 ? FLORA.CRYSTAL : FLORA.PINE; break;
+        case 'lava': kind = clump > 0 ? FLORA.CRYSTAL : FLORA.BOULDER; break;
+        case 'exotic':
+          if (t < 0.1) break;
+          kind = clump > 0.12 ? FLORA.CRYSTAL : (clump < -0.12 ? FLORA.MUSHROOM : FLORA.TREE);
+          break;
+      }
+      if (kind < 0) continue;
+      // only rock stands on a steep cell
+      if (Math.hypot(dhx, dhz) > FLORA_SLOPE && kind !== FLORA.BOULDER && kind !== FLORA.CRYSTAL) continue;
+
+      // The density factor of the world type says how full a lush cell is. The floor keeps a dry
+      // world from going empty, so a desert site still shows its sparse cactus and boulders.
+      if (rng() >= FLORA_FLOOR + (density - FLORA_FLOOR) * smoothstep(-0.35, 0.35, mask)) continue;
+
+      // The gap test reads the four neighbours the scan already wrote, so it reads every pair
+      // once. A cell two steps away is at least 6 metres off, which is over the gap already.
+      let close = false;
+      for (let d = 0; d < 4 && !close; d++) {
+        const ni = i + GAP_DI[d], nj = j + GAP_DJ[d];
+        if (ni < 0 || nj < 0 || ni >= cells) continue;
+        const nk = nj * cells + ni;
+        if (cK[nk] < 0) continue;
+        const ddx = cX[nk] - x, ddz = cZ[nk] - z;
+        close = ddx * ddx + ddz * ddz < gap2;
+      }
+      if (close) continue;
+
+      const ci = j * cells + i, inv = 1 / Math.hypot(dhx, 1, dhz), mm = FLORA_M[kind];
+      cX[ci] = x; cY[ci] = h; cZ[ci] = z;
+      nX[ci] = -dhx * inv; nY[ci] = inv; nZ[ci] = -dhz * inv;
+      cS[ci] = rrange(rng, mm[0], mm[1]);
+      cK[ci] = kind;
+      found++;
+    }
+  }
+
+  const keep = Math.min(found, maxFlora);
+  const stride = found / Math.max(keep, 1);
+  const idx = new Int32Array(found);
+  let f = 0;
+  for (let ci = 0; ci < N; ci++) if (cK[ci] >= 0) idx[f++] = ci;
+  const flora = new Float32Array(keep * 8);   // x y z, nx ny nz, scale, kind
+  for (let i = 0; i < keep; i++) {
+    const ci = idx[Math.floor(i * stride)], o = i * 8;
+    flora[o] = cX[ci]; flora[o + 1] = cY[ci]; flora[o + 2] = cZ[ci];
+    flora[o + 3] = nX[ci]; flora[o + 4] = nY[ci]; flora[o + 5] = nZ[ci];
+    flora[o + 6] = cS[ci]; flora[o + 7] = cK[ci];
+  }
+  return flora;
+}
+
 // A ground patch at one site: a square height grid and a colour per vertex, both in the frame
 // x east, y up, z south, with the origin at the site at sea level.
 function patch(seed, lat, lon, opts) {
@@ -1287,8 +1403,14 @@ function patch(seed, lat, lon, opts) {
     if ((j & 31) === 0) post(66 + (j / n) * 30, 'Painting the ground');
   }
 
-  post(97, 'Almost there');
-  const flora = new Float32Array(0), groups = new Float32Array(0), members = new Float32Array(0);
+  post(96, 'Growing the plants');
+  const flora = patchFlora(ctx, {
+    heights, vary, n, grid, half, size, hPerM: H_PER_M, elevation,
+    siteT, siteM, siteFM, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000,
+  });
+
+  post(98, 'Almost there');
+  const groups = new Float32Array(0), members = new Float32Array(0);
   const result = {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,

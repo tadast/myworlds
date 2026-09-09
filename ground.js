@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from './ground-sky.js';
+import { Flora } from './ground-flora.js';
 
 export const PATCH_SIZE = 1500;      // metres, the side of the patch
 export const FOG_NEAR = 450;         // metres, where the fog starts
@@ -95,6 +96,7 @@ export class Ground {
     this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true };
     this.result = null;
     this.sky = null;
+    this.flora = null;
     this.atCeiling = false;
     this.lod = { distance: 150, min: 40, max: 400 };   // metres, one knob for issue 11
     // the height grid of the patch, and the ground height at the site
@@ -185,8 +187,10 @@ export class Ground {
     this.scene.background = this.sky.horizon.clone();
     this.content.add(this.sky.group);
 
-    if (p) this._buildTerrain();
-    else {
+    if (p) {
+      this._buildTerrain();
+      this._buildFlora(result);
+    } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(PATCH_SIZE, PATCH_SIZE, 1, 1),
@@ -201,6 +205,13 @@ export class Ground {
     // so the height of the site must not move it. The colour and the strength come from the sky.
     const sun = new THREE.DirectionalLight(this.sky.sunColor, this.sky.sunIntensity);
     sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6);
+    // The sun does not cast yet, so nothing on the ground draws a shadow. The near plants of
+    // ground-flora.js already carry castShadow on HIGH and the terrain already carries
+    // receiveShadow, so the ground needs only this one flag and a shadow box. Measured on issue
+    // 07: a 2,048 map over a box of 200 m costs 2.2 ms at eye level and 2.3 ms at the entry
+    // camera, and it takes the frame to 7.5 ms before the sea of issue 05 exists. The reader
+    // gains nothing at the entry camera, because no plant is near enough to cast there. So the
+    // decision belongs with the one runtime knob of issue 11, not here.
     this.content.add(sun);
     this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night));
 
@@ -231,6 +242,18 @@ export class Ground {
     this.content.add(this._mesh(this._bandGeometry(-r, r, h, r), mat));
     this.content.add(this._mesh(this._bandGeometry(-r, -h, -h, h), mat));
     this.content.add(this._mesh(this._bandGeometry(h, r, -h, h), mat));
+  }
+
+  // The plants of the patch. ground-flora.js owns the meshes, the cards, and the LOD walk.
+  _buildFlora(result) {
+    if (!result.flora || result.flora.length === 0) return;
+    this.flora = new Flora({
+      renderer: this.renderer, flora: result.flora, palette: result.patch.palette,
+      tier: this.tier, sky: this.sky, lod: this.lod, cut: FOG_FAR * 1.2,
+      groundColor: this.groundColor,
+    });
+    this.content.add(this.flora.group);
+    console.info(`[myworlds] ground flora ${this.flora.count} plants in ${this.flora.kinds.length} kinds`);
   }
 
   // Split a cell range into blocks of about one tenth of the patch, so the frustum can cull them.
@@ -385,6 +408,8 @@ export class Ground {
 
     // the sky follows the camera, so it must move after every clamp
     if (this.sky) this.sky.update(t, dt, this.camera);
+    // the LOD walk reads the camera, so it runs after the clamps too
+    if (this.flora) this.flora.update(this.camera);
   }
 
   // ---------------------------------------------------------------- the feel of the controls
@@ -548,6 +573,7 @@ export class Ground {
   }
 
   _clear() {
+    if (this.flora) { this.flora.dispose(); this.flora = null; }
     this.content.traverse((o) => {
       if (o === this.content) return;
       if (o.geometry) o.geometry.dispose();
