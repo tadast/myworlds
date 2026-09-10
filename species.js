@@ -168,7 +168,10 @@
       bodyR: loco === 'fins' ? rr(rng, 0.26, 0.34) : loco === 'tripod' ? rr(rng, 0.08, 0.13) : loco === 'hexapod' ? rr(rng, 0.24, 0.34) : rr(rng, 0.16, 0.3),
       stretch: plan === 'spindle' && cls === 'land' ? 0.6 : 1,
       legLen: { monopod: rr(rng, 0.35, 0.6), biped: rr(rng, 0.45, 0.8), tripod: rr(rng, 0.4, 0.65), quad: rr(rng, 0.25, 0.5), hexapod: rr(rng, 0.14, 0.26) }[loco] || 0,
-      jointed: loco === 'quad' ? rng() < 0.35 : rng() < 0.75,
+      // A leg with a knee folds in the swing, and the fold is the strongest sign that the animal
+      // walks and does not slide. A quad used to get a knee only a third of the time, so most
+      // four-legged animals walked on straight columns. It keeps one roll, so a seed keeps its set.
+      jointed: loco === 'quad' ? rng() < 0.7 : rng() < 0.75,
       gait: 1, flap: 1, slow: rr(rng, 0.8, 1.3),
       size: 1, hover: HOVER[loco] || 0,
       move: { ...MOVE[loco] },

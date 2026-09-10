@@ -6,7 +6,12 @@
 //
 // The worker gives one anchor per group and one offset per member. This file gives each anchor a
 // mover, and each member follows its anchor. The anchor is not drawn. One animal of the group can
-// stop, but the group stops together, because the whole group reads the activity of the anchor.
+// stop, but the group stops together, because every speed in the group comes from the one anchor.
+//
+// Each animal keeps its own gait clock, and the clock runs off the ground the animal covers, not
+// off the wall clock. A foot on the ground then holds its place while the body passes over it, so
+// no animal skids. Each animal also keeps its own turn, so it leans into a curve, shortens the
+// stride of its inside legs, and never turns tighter than the circle its body can walk.
 //
 // A species draws at two levels of detail, as the flora does in ground-flora.js. An animal closer
 // to the camera than ground.lod.distance goes to the near mesh, which is the full creature. An
@@ -17,7 +22,7 @@
 //
 // Ground frame: x east, y up, z south. One unit is one metre.
 import * as THREE from 'three';
-import { buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, hopGait, hopBurst } from './fauna.js';
+import { buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked, hopGait, hopBurst } from './fauna.js';
 
 export const LEASH = [60, 200];        // metres: how far a group roams from its anchor
 export const AIR_HOVER = [12, 40];     // metres above the ground for an air group
@@ -26,6 +31,11 @@ export const SPEED_M = [0.5, 6];       // metres per second: a grazer, and a run
 const TURN_GAIN = 0.22;      // the globe turn rates are for a 0.03 unit leash; the ground leash is wider
 const MEMBER_EASE = 1.2;     // 1/s: how fast a member closes on its place in the formation
 const MEMBER_WOBBLE = 0.18;  // the wobble of a member, as a part of the formation radius
+const WOBBLE_SPEED = 0.35;   // the wobble may not carry a member faster than this part of its cruise
+const MEMBER_RUSH = 1.35;    // the fastest a member may travel, as a part of its cruise speed
+const HEADING_EASE = 3;      // 1/s: how fast a member turns toward the way it travels
+const SPEED_EASE = 6;        // 1/s: the low pass on the measured speed of a member
+const TURN_RADIUS = 1.3;     // the tightest circle an animal can walk, in body lengths
 const TRAIL_LEN = 64;        // samples of the anchor path, for the species that follow it with a lag
 const TRAIL_STEP = 0.1;      // seconds between two samples of the path
 const WATER_MARGIN = 0.5;    // metres above sea level a walker keeps
@@ -73,13 +83,23 @@ export function metreScale(G, geo) {
 // come down with it, or the animal would wind in circles instead of crossing its range.
 export function groundMove(G) {
   const mv = G.move;
-  if (mv.leash <= 0) return { ...mv, leash: 0, speed: 0 };   // an arch and a periscope never travel
+  if (mv.leash <= 0) return { ...mv, leash: 0, speed: 0, turnR: 0 };   // an arch and a periscope never travel
   return {
     leash: clamp(60 + mv.leash * 2200, LEASH[0], LEASH[1]),
     speed: clamp(mv.speed * MPS_PER_UNIT, SPEED_M[0], SPEED_M[1]),
     turn: mv.turn * TURN_GAIN,
+    turnR: turnRadius(G),
     pause: mv.pause, flies: mv.flies, shadow: mv.shadow,
   };
+}
+
+// The tightest circle an animal can walk, in metres. A body cannot pivot on the spot and slide
+// sideways out of it: a long animal turns wide, and a turn tighter than this asks it to slow down.
+// A flyer banks round a wider circle still, because it cannot stop in the air.
+export function turnRadius(G) {
+  const B = self.Species ? self.Species.bodyMetres(G) : null;
+  const m = B ? B.metres : 3;
+  return Math.max(2, m * TURN_RADIUS * (G.cls === 'air' ? 3 : 1));
 }
 
 export class GroundFauna {
@@ -118,6 +138,9 @@ export class GroundFauna {
   _mesh(geo, mat, n, casts) {
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
+    // the gait clock and the turn of each animal; the walk writes both every frame
+    geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aTurn', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
     const inst = new THREE.InstancedMesh(geo, mat, n);
     inst.frustumCulled = false;     // the animals move every frame, so the bounding sphere is stale
     inst.castShadow = casts;
@@ -156,6 +179,8 @@ export class GroundFauna {
       const entry = {
         G, kind: k, near, far, mat, scale,
         nearN: 0, farN: 0, phaseDirty: true,
+        // the gait clock of this species, and the tightest circle it walks
+        locked: gaitLocked(G), turnR: turnRadius(G), hipY: full.userData.hipY || 0,
         tris: { full: full.attributes.position.count / 3, coarse: coarse.attributes.position.count / 3 },
       };
       byKind.set(k, entry);
@@ -198,12 +223,20 @@ export class GroundFauna {
       const g = this.groups[ms[i]];
       if (!g) continue;
       const e = g.entry;
+      const top = Math.max(g.mover.speed, 0.01);
+      const f1 = 0.11 + rng() * 0.2, f2 = 0.09 + rng() * 0.18;
+      // The wobble is a real drift over the ground, and the legs have to carry the animal through
+      // it, so it may not run faster than a part of the cruise speed. A wide formation used to give
+      // a wobble that carried a member as fast as it walks, and it walked its whole range sideways.
+      const wob = Math.min(Math.max(0.4, g.spread * MEMBER_WOBBLE), (WOBBLE_SPEED * top) / Math.max(f1, f2));
       const m = {
-        g, e, i: g.n++, scale: e.scale,
+        g, e, i: g.n++, scale: e.scale, top,
         dx: ms[i + 1], dz: ms[i + 2], phase: ms[i + 3],
         x: g.x + ms[i + 1], z: g.z + ms[i + 2], heading: g.heading,
-        wob: Math.max(0.4, g.spread * MEMBER_WOBBLE),
-        f1: 0.11 + rng() * 0.2, p1: rng() * 6.28, f2: 0.09 + rng() * 0.18, p2: rng() * 6.28,
+        wob, f1, p1: rng() * 6.28, f2, p2: rng() * 6.28,
+        // its own speed, its own gait clock, and its own turn: a member does not travel at the
+        // speed of the anchor, and a leg that swings at the speed of the anchor slides.
+        spd: 0, turn: 0, gait: e.locked ? makeGait(g.G, e.scale, top * MEMBER_RUSH, e.hipY) : null,
         // the level of detail: 0 near, 1 far. The slot in that mesh is set by the walk.
         far: 1, mesh: null, slot: -1, px: 0, py: 0, pz: 0,
       };
@@ -235,6 +268,10 @@ export class GroundFauna {
       e.far.instanceMatrix.needsUpdate = true;
       e.near.geometry.attributes.aMove.needsUpdate = true;
       e.far.geometry.attributes.aMove.needsUpdate = true;
+      e.near.geometry.attributes.aGait.needsUpdate = true;
+      e.far.geometry.attributes.aGait.needsUpdate = true;
+      e.near.geometry.attributes.aTurn.needsUpdate = true;
+      e.far.geometry.attributes.aTurn.needsUpdate = true;
       // the phase of an animal only moves when the animal changes its slot, which is rare
       if (e.phaseDirty) {
         e.near.geometry.attributes.aPhase.needsUpdate = true;
@@ -276,6 +313,11 @@ export class GroundFauna {
 
   // One animal. It holds its place in the formation, but on a short leash: it eases toward the
   // place instead of snapping to it, and it breathes on its own two oscillators.
+  //
+  // Its legs read the ground it covers, not the ground its anchor covers. A member closing on the
+  // formation, or drifting on its wobble, travels at its own speed, so it keeps its own gait clock
+  // and its own turn. The group still stops together, because every speed here comes from the one
+  // anchor, and the wobble stops with it.
   _stepMember(m, t, dt) {
     const g = m.g;
     let tx, tz;
@@ -290,18 +332,41 @@ export class GroundFauna {
       const c = Math.cos(g.heading), s = Math.sin(g.heading);
       tx = g.x + m.dx * c - m.dz * s;
       tz = g.z + m.dx * s + m.dz * c;
-      tx += Math.sin(t * m.f1 + m.p1) * m.wob;
-      tz += Math.cos(t * m.f2 + m.p2) * m.wob;
+      // the wobble fades out with the activity of the anchor, so a herd at rest stands still
+      const wob = m.wob * g.act;
+      tx += Math.sin(t * m.f1 + m.p1) * wob;
+      tz += Math.cos(t * m.f2 + m.p2) * wob;
     }
     const k = dt > 0 ? 1 - Math.exp(-MEMBER_EASE * dt) : 1;
-    const nx = m.x + (tx - m.x) * k, nz = m.z + (tz - m.z) * k;
-    const vx = nx - m.x, vz = nz - m.z;
+    let vx = (tx - m.x) * k, vz = (tz - m.z) * k;
+    // No animal may travel faster than it can run. The formation turns with the anchor, and a
+    // member out on the rim of a wide formation would be swung round at several times its cruise
+    // speed, faster than its legs could ever carry it. It falls behind instead, and the formation
+    // stretches through the turn and closes again after it.
+    let step = Math.sqrt(vx * vx + vz * vz);
+    const maxStep = m.top * MEMBER_RUSH * (dt > 0 ? dt : 1);
+    if (step > maxStep && step > 1e-9) { const f = maxStep / step; vx *= f; vz *= f; step = maxStep; }
+    const nx = m.x + vx, nz = m.z + vz;
     m.x = nx; m.z = nz;
-    // it turns to face the way it travels, and it holds its heading while it stands still
-    if (vx * vx + vz * vz > 1e-6) {
+    // the ground it covered this frame, low passed: the gait clock and the leg swing both read it
+    const spd = dt > 0 ? step / dt : 0;
+    m.spd += (spd - m.spd) * (dt > 0 ? Math.min(1, dt * SPEED_EASE) : 1);
+    const act = g.flies ? 1 : speedActivity(m.spd, m.top);
+    // It turns to face the way it travels, and it holds its heading while it stands still. The turn
+    // is no tighter than the circle its body can walk, so it cannot spin on the spot and slide.
+    let rate = 0;
+    if (vx * vx + vz * vz > 1e-10) {
       const want = Math.atan2(vz, vx);
-      m.heading += wrapAngle(want - m.heading) * (dt > 0 ? Math.min(1, dt * 3) : 1);
+      let turn = wrapAngle(want - m.heading) * (dt > 0 ? Math.min(1, dt * HEADING_EASE) : 1);
+      const cap = turnCap(m.spd, m.top, m.e.turnR) * (dt > 0 ? dt : 1);
+      turn = clamp(turn, -cap, cap);
+      m.heading = wrapAngle(m.heading + turn);
+      rate = dt > 0 ? turn / dt : 0;
     }
+    // the lean, the head, and the stride of the inside legs all read this one number
+    const lean = turnLean(m.spd, rate, m.top, m.e.turnR);
+    m.turn += (lean - m.turn) * (dt > 0 ? Math.min(1, dt * HEADING_EASE) : 1);
+    if (m.gait) stepGait(m.gait, m.spd, act, dt);
 
     const gh = this.heightAt(nx, nz);
     // a flyer holds its height above the ground under it, so it clears a hill
@@ -335,7 +400,10 @@ export class GroundFauna {
       e.phaseDirty = true;
     }
     inst.setMatrixAt(slot, _mat);
-    inst.geometry.attributes.aMove.setX(slot, g.act);
+    const at = inst.geometry.attributes;
+    at.aMove.setX(slot, act);
+    at.aGait.setX(slot, m.gait ? m.gait.phase : 0);
+    at.aTurn.setX(slot, m.turn);
   }
 
   // ---------------------------------------------------------------- the inspector click

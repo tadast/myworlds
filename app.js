@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
-import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
+import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, makeGait, stepGait, gaitLocked, hopGait, hopBurst, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan } from './site.js';
 import { Ground, RIM } from './ground.js';
@@ -288,6 +288,9 @@ function buildWorld(res) {
       list.forEach((i, j) => { phases[j] = fauna[i * 9 + 8]; });
       geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
       geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(list.length).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
+      // the gait clock and the turn of each creature; updateMovers() writes both as it steers
+      geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1).setUsage(THREE.DynamicDrawUsage));
+      geo.setAttribute('aTurn', new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1).setUsage(THREE.DynamicDrawUsage));
       const mat = faunaMaterial(G);
       faunaMats.push(mat);
       const inst = new THREE.InstancedMesh(geo, mat, list.length);
@@ -309,8 +312,12 @@ function buildWorld(res) {
           // tangent basis for roaming; hover is the gap between the home point and the ground under it
           const t1 = new THREE.Vector3().crossVectors(nrm, Math.abs(nrm.y) < 0.9 ? up : new THREE.Vector3(1, 0, 0)).normalize();
           const t2 = new THREE.Vector3().crossVectors(nrm, t1).normalize();
-          const st = makeMover(rng, G.move);
+          // The tightest circle it can walk, in globe units. A creature is about one unit long in
+          // its own frame, so its scale is its length, and a body turns about a body and a half.
+          const st = makeMover(rng, { ...G.move, turnR: sc * (G.cls === 'air' ? 4 : 1.5) });
           st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
+          // the gait clock: the leg cycle runs off the ground it covers, so its feet do not slide
+          st.gait = gaitLocked(G) ? makeGait(G, sc, st.speed, geo.userData.hipY) : null;
           if (G.loco === 'monopod') { st.hop = hopGait(G); st.phase = phases[j]; } // a hopper moves in bursts, in step with its shader hop
           const g0 = groundRadius(world, heightMap, nrm);
           st.hover = pos.length() - g0;
@@ -888,10 +895,18 @@ function updateMovers(t, dt) {
     _m.makeBasis(_r.multiplyScalar(mv.sc), _u.multiplyScalar(mv.sc), _f.multiplyScalar(mv.sc));
     _m.setPosition(_p);
     mv.inst.setMatrixAt(mv.j, _m);
-    if (!mv.flies) mv.inst.geometry.attributes.aMove.setX(mv.j, moverActivity(mv)); // legs only swing while it walks
+    const at = mv.inst.geometry.attributes;
+    const act = mv.flies ? 1 : moverActivity(mv);
+    if (!mv.flies) at.aMove.setX(mv.j, act);   // legs only swing while it walks
+    if (mv.gait) at.aGait.setX(mv.j, stepGait(mv.gait, mv.spd, act, dt));
+    at.aTurn.setX(mv.j, mv.turnN);   // turnN already falls to zero as the animal slows
     dirty.add(mv.inst);
   }
-  for (const inst of dirty) { inst.instanceMatrix.needsUpdate = true; inst.geometry.attributes.aMove.needsUpdate = true; }
+  for (const inst of dirty) {
+    const at = inst.geometry.attributes;
+    inst.instanceMatrix.needsUpdate = true;
+    at.aMove.needsUpdate = true; at.aGait.needsUpdate = true; at.aTurn.needsUpdate = true;
+  }
 }
 // ---------------------------------------------------------------- worker / generation
 // One worker serves two jobs: the globe and the ground patch. Only one of them runs at a time,
