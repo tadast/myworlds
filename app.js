@@ -3,9 +3,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
-import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, hopGait, hopBurst, Inspector } from './fauna.js';
+import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, makeGait, stepGait, gaitLocked, hopGait, hopBurst, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, siteToUrl, parseUrl, showMarker, snapSite, cellSpan } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan } from './site.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
 import { perf, Hud } from './perf.js';
@@ -289,6 +289,9 @@ function buildWorld(res) {
       list.forEach((i, j) => { phases[j] = fauna[i * 9 + 8]; });
       geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
       geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(list.length).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
+      // the gait clock and the turn of each creature; updateMovers() writes both as it steers
+      geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1).setUsage(THREE.DynamicDrawUsage));
+      geo.setAttribute('aTurn', new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1).setUsage(THREE.DynamicDrawUsage));
       const mat = faunaMaterial(G);
       faunaMats.push(mat);
       const inst = new THREE.InstancedMesh(geo, mat, list.length);
@@ -310,8 +313,12 @@ function buildWorld(res) {
           // tangent basis for roaming; hover is the gap between the home point and the ground under it
           const t1 = new THREE.Vector3().crossVectors(nrm, Math.abs(nrm.y) < 0.9 ? up : new THREE.Vector3(1, 0, 0)).normalize();
           const t2 = new THREE.Vector3().crossVectors(nrm, t1).normalize();
-          const st = makeMover(rng, G.move);
+          // The tightest circle it can walk, in globe units. A creature is about one unit long in
+          // its own frame, so its scale is its length, and a body turns about a body and a half.
+          const st = makeMover(rng, { ...G.move, turnR: sc * (G.cls === 'air' ? 4 : 1.5) });
           st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
+          // the gait clock: the leg cycle runs off the ground it covers, so its feet do not slide
+          st.gait = gaitLocked(G) ? makeGait(G, sc, st.speed, geo.userData.hipY) : null;
           if (G.loco === 'monopod') { st.hop = hopGait(G); st.phase = phases[j]; } // a hopper moves in bursts, in step with its shader hop
           const g0 = groundRadius(world, heightMap, nrm);
           st.hover = pos.length() - g0;
@@ -443,6 +450,7 @@ function step(now) {
   if (mode === 'ground') {          // the globe stays in memory, but none of its work runs
     ground.update(t, dt);
     ground.render();
+    if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows the ground camera
     return;
   }
   if (current) {
@@ -528,6 +536,7 @@ function perfRows() {
 // and the square marker shows the reader the exact ground the probe would bring back.
 let site = null;          // { lat, lon, kind } or null while the aim is off
 let pendingSite = null;   // a site read from the URL, used once the world is built
+let pendingView = null;   // a camera read from the URL: the orbit one on build, the ground one on landing
 let hashAt = 0;
 
 function updateSite(t) {
@@ -537,12 +546,35 @@ function updateSite(t) {
   if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows, but not every frame
 }
 
-// The hash carries the site only while the probe is down, because a site in the URL means the ground.
+// The whole view as a hash: the seed, the site while the probe is down, and the camera. The site
+// goes in only while the probe is down, because a site in the URL means the ground.
+function viewHash() {
+  if (!current) return '';
+  const onGround = mode === 'ground' || mode === 'descending';
+  const view = onGround ? (mode === 'ground' && ground ? ground.view : null) : orbitView();
+  return viewToUrl(current.world.seed, onGround ? lockedSite : null, view);
+}
+
+// The address bar follows the view, so the reader can copy it as well as press the share button.
+// replaceState writes no history entry and fires no hashchange, and the write only runs when the
+// text changed, so a camera at rest writes nothing.
 function writeHash() {
   if (!current) return;
-  const onGround = mode === 'ground' || mode === 'descending';
-  const url = siteToUrl(current.world.seed, onGround ? lockedSite : null);
+  const url = viewHash();
   if (url !== location.hash) history.replaceState(null, '', url);
+}
+
+// The orbit camera in the frame of the planet: the point of the globe under it and how far out it
+// stands, in globe radii. The planet spins, so a direction in world space would not point at the
+// same ground a minute later. The frame loop adds the pitch, and the pitch follows the distance,
+// so these three numbers hold the whole view.
+function orbitView() {
+  if (!current) return null;
+  const dist = camera.position.length();
+  if (!(dist > 0)) return null;
+  current.planet.updateWorldMatrix(true, false);
+  const s = dirToSite(current.planet.worldToLocal(_view.copy(camera.position)).normalize());
+  return { kind: 'orbit', lat: s.lat, lon: s.lon, dist };
 }
 
 // Drop the damped rest of a drag or a zoom. One update with the damping off clears the deltas.
@@ -553,9 +585,27 @@ function flushControls() {
   controls.enableDamping = damp;
 }
 
+const _want = new THREE.Vector3(), _rotM = new THREE.Matrix4(), _turn = new THREE.Quaternion();
+const _view = new THREE.Vector3();
+
+// Put the orbit camera where a link asks: over the point of the globe it names, at the distance it
+// names. The mirror of orbitView(). Returns false when there is no camera in the URL, and the
+// caller then falls back to the camera a new world gets.
+function placeCameraAtView(v) {
+  if (!current || !v || v.kind !== 'orbit') return false;
+  flushControls();
+  current.planet.updateWorldMatrix(true, false);
+  _rotM.extractRotation(current.planet.matrixWorld);
+  siteDir(v.lat, v.lon, _want).applyMatrix4(_rotM).normalize();
+  controls.target.set(0, 0, 0);
+  camera.up.set(0, 1, 0);
+  camera.position.copy(_want).multiplyScalar(THREE.MathUtils.clamp(v.dist, CAM_MIN, CAM_MAX));
+  controls.update();
+  return true;
+}
+
 // Put the camera at the minimum distance and turn it until the screen centre lands on the site.
 // The view pitches toward the horizon near the surface, so the answer needs a few steps.
-const _want = new THREE.Vector3(), _rotM = new THREE.Matrix4(), _turn = new THREE.Quaternion();
 function placeCameraOverSite(target) {
   if (!current || current.world.type === 'gas') return false;
   flushControls();       // a damped drag or zoom must not pull the camera off the site
@@ -733,6 +783,8 @@ function enterGround() {
   const t0 = performance.now();
   ground.load(patchState.result, { sunDir: view.sunDir, view });
   if (patchState.result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
+  if (pendingView) ground.setView(pendingView);   // a shared link brings its own camera
+  pendingView = null;
   ground.resize(innerWidth, innerHeight);
   perf.reset();       // the orbit frames say nothing about the ground
   showMarker(null, current);
@@ -756,6 +808,7 @@ function abortProbe() {
   perf.reset();
   dive = null;
   lockedSite = null;
+  pendingView = null;
   patchJob = null;
   patchState = { done: true, result: null };
   mode = 'orbit';
@@ -843,10 +896,18 @@ function updateMovers(t, dt) {
     _m.makeBasis(_r.multiplyScalar(mv.sc), _u.multiplyScalar(mv.sc), _f.multiplyScalar(mv.sc));
     _m.setPosition(_p);
     mv.inst.setMatrixAt(mv.j, _m);
-    if (!mv.flies) mv.inst.geometry.attributes.aMove.setX(mv.j, moverActivity(mv)); // legs only swing while it walks
+    const at = mv.inst.geometry.attributes;
+    const act = mv.flies ? 1 : moverActivity(mv);
+    if (!mv.flies) at.aMove.setX(mv.j, act);   // legs only swing while it walks
+    if (mv.gait) at.aGait.setX(mv.j, stepGait(mv.gait, mv.spd, act, dt));
+    at.aTurn.setX(mv.j, mv.turnN);   // turnN already falls to zero as the animal slows
     dirty.add(mv.inst);
   }
-  for (const inst of dirty) { inst.instanceMatrix.needsUpdate = true; inst.geometry.attributes.aMove.needsUpdate = true; }
+  for (const inst of dirty) {
+    const at = inst.geometry.attributes;
+    inst.instanceMatrix.needsUpdate = true;
+    at.aMove.needsUpdate = true; at.aGait.needsUpdate = true; at.aTurn.needsUpdate = true;
+  }
 }
 // ---------------------------------------------------------------- worker / generation
 // One worker serves two jobs: the globe and the ground patch. Only one of them runs at a time,
@@ -895,12 +956,15 @@ function generate(seed, { save = true } = {}) {
       buildWorld(msg.result);
       const wanted = pendingSite;
       pendingSite = null;
-      if (!(wanted && placeCameraOverSite(wanted))) resetCamera();
+      const orbit = pendingView && pendingView.kind === 'orbit' ? pendingView : null;
+      if (orbit) pendingView = null;
+      if (!(wanted && placeCameraOverSite(wanted)) && !placeCameraAtView(orbit)) resetCamera();
       console.info(`[myworlds] "${seed}" ${msg.result.world.type} built in ${Math.round(performance.now() - t0)} ms, worker ${Math.round(t0 - genStart)} ms, flora ${msg.result.world.floraCount}, fauna ${msg.result.world.faunaCount}`);
       renderInfo(msg.result.world);
       music.play(msg.result.world);
       if (save) saveWorld(msg.result.world);
       const landing = wanted && current.world.type !== 'gas' ? wanted : null;
+      if (!landing) pendingView = null;   // no landing, so a ground camera in the URL has no ground
       writeHash();
       input.value = seed;
       if (COMPACT) setCollapsed(true);
@@ -1124,7 +1188,7 @@ panel.querySelector('header').addEventListener('click', (e) => {
 if (COMPACT) canvas.addEventListener('pointerdown', () => setCollapsed(true));
 shareBtn.addEventListener('click', async () => {
   if (!current) return;
-  const url = location.origin + location.pathname + siteToUrl(current.world.seed, site);
+  const url = location.origin + location.pathname + viewHash();
   try { await navigator.clipboard.writeText(url); shareBtn.textContent = 'Copied!'; }
   catch { shareBtn.textContent = url; }
   setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
@@ -1150,10 +1214,12 @@ muteBtn.addEventListener('click', () => music.setMuted(!music.settings.muted));
 volInput.addEventListener('input', () => music.setVolume(volInput.value / 100));
 
 addEventListener('hashchange', () => {
-  const { seed, site: fromHash } = parseUrl(location.hash);
+  const { seed, site: fromHash, view } = parseUrl(location.hash);
   if (!seed) return;
-  if (!current || current.world.seed !== seed) { pendingSite = fromHash; generate(seed); }
-  else if (fromHash && mode === 'orbit') { pendingSite = null; placeCameraOverSite(fromHash); descend(fromHash); }
+  if (!current || current.world.seed !== seed) { pendingSite = fromHash; pendingView = view; generate(seed); }
+  else if (mode !== 'orbit') return;
+  else if (fromHash) { pendingSite = null; pendingView = view; placeCameraOverSite(fromHash); descend(fromHash); }
+  else { pendingSite = null; pendingView = null; placeCameraAtView(view); }
 });
 addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
@@ -1170,6 +1236,7 @@ renderWorlds();
   const saved = loadWorlds();
   const seed = fromHash.seed || (saved.length ? saved[saved.length - 1].seed : WORDS[Math.floor(Math.random() * WORDS.length)]);
   pendingSite = fromHash.site;
+  pendingView = fromHash.view;
   generate(seed);
 }
 

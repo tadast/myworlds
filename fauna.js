@@ -153,14 +153,35 @@ function bodySections(G) {
   return { secs: [], front: R, back: -R, top: R, bot: -R };
 }
 
+// How far a leg swings, and how much of one cycle its foot stays on the ground (the duty factor).
+// A walking quadruped keeps a foot down for about two thirds of a cycle, so three feet carry it at
+// every moment; an insect runs an alternating tripod, so its duty is nearer a half. The shader
+// reads the duty factor and the gait clock reads the swing; see "the gait clock" below.
+export const LEG_SWING = { monopod: 0, biped: 0.5, tripod: 0.45, quad: 0.4, hexapod: 0.35 };
+export const LEG_DUTY = { monopod: 0.5, biped: 0.6, tripod: 0.6, quad: 0.65, hexapod: 0.55 };
+
+// A footfall order, as a part of the cycle. A leg touches down when its cycle wraps, and a larger
+// phase touches down earlier, so the phase is the complement of the footfall.
+const footPhase = (f) => ((1 - f) % 1) * Math.PI * 2;
+
 // legs: hip z, outward direction (x, z), and gait phase per locomotion; the hip x comes from the body width
+// The local +x axis is the left of the animal: the frame is right handed and the animal faces +z,
+// so up cross forward is +x.
 function legPlan(G, len) {
   const out = [];
   switch (G.loco) {
     case 'monopod': out.push({ z: 0, dir: [0, 0], phase: 0 }); break;
     case 'biped': for (const sx of [-1, 1]) out.push({ z: 0, dir: [sx, 0], phase: sx < 0 ? 0 : Math.PI }); break;
     case 'tripod': for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2 + 0.5; out.push({ z: Math.sin(a) * len * 0.22, dir: [Math.cos(a), Math.sin(a)], phase: i * 2.09 }); } break;
-    case 'quad': for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) out.push({ z: sz * len * 0.3, dir: [sx, 0], phase: sx * sz > 0 ? 0 : Math.PI }); break;
+    // A quad walks the lateral sequence every four-legged animal on Earth walks: left hind, left
+    // fore, right hind, right fore, a quarter of a cycle apart. The two-beat diagonal pair it ran
+    // before is a trot, and a trot at a walking speed reads as a hobble, because only two feet ever
+    // carry the body. With four beats and a duty of 0.65 the body always has three feet on the ground.
+    case 'quad': for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+      const f = sx > 0 ? (sz > 0 ? 0.25 : 0) : (sz > 0 ? 0.75 : 0.5);
+      out.push({ z: sz * len * 0.3, dir: [sx, 0], phase: footPhase(f) });
+    } break;
+    // an insect keeps the alternating tripod: the front and the rear of one side with the middle of the other
     case 'hexapod': { let i = 0; for (const sz of [0.32, 0, -0.32]) for (const sx of [-1, 1]) out.push({ z: sz * len, dir: [sx, 0], phase: (i++ % 2) * Math.PI + (sz === 0 ? Math.PI : 0) }); break; }
   }
   return out;
@@ -265,10 +286,14 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   // while the foot is in the air. The hip is inside the belly, so the thigh never leaves the body.
   const legs = legPlan(G, len);
   const th = clamp(0.02 + R * 0.1, 0.02, 0.07) * (G.loco === 'quad' ? 1.6 : 1) * (G.loco === 'monopod' ? 2.4 : 1);
-  const stride = { biped: 0.5, quad: 0.4, tripod: 0.45, hexapod: 0.35, monopod: 0 }[G.loco] || 0;
+  const stride = LEG_SWING[G.loco] || 0;
   const knees = G.jointed && G.loco !== 'monopod';
   const bend = G.loco === 'monopod' ? 0 : knees ? 1.0 : 0.55; // knee fold in radians at the top of the swing
   const insect = G.loco === 'hexapod';
+  // The gait clock needs the height the hips really sit at, and the builder is the only place that
+  // knows it: it starts from the leg length and then lifts the hip into the hull. The mean of them
+  // goes on the geometry, and makeGait() reads it. See "the gait clock".
+  let hipSum = 0, hipN = 0;
   for (const L of legs) {
     const h = G.legLen, [dx, dz] = L.dir;
     let hy = yc + B.bot * 0.55;
@@ -278,6 +303,7 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     const hb = probe.bot(hx, L.z), ht = probe.top(hx, L.z);
     if (hb !== null && hb > hy) hy = hb + (ht - hb) * 0.35; // the hull is thin here: lift the hip into it
     const hip = [hx, hy, L.z];
+    hipSum += hy; hipN++;
     const splay = { hexapod: 1.0, tripod: 0.7, quad: 0.25, biped: 0.2, monopod: 0 }[G.loco];
     const foot = [hip[0] + dx * h * splay, 0, hip[2] + dz * h * splay + h * 0.05];
     let knee;
@@ -499,28 +525,63 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       }
     }
   }
-  return mergeGeos(parts);
+  const geo = mergeGeos(parts);
+  if (hipN) geo.userData.hipY = hipSum / hipN;
+  return geo;
 }
 
 // ---------------------------------------------------------------- the rig shader
 // Part modes move a part relative to its pivot; the carriage then moves the whole body.
 const RIG_GLSL = `
   float mode = aRig.x, ph = aRig.y + aPhase * 7.0, amp = aRig.z, w = aRig.w;
-  float g = uTime * GAIT + ph, f = uTime * FLAP + ph, s = uTime * SLOW + ph;
+  // The gait clock. LOCK species read aGait, which the steering advances by the ground the animal
+  // covers, so a foot on the ground cannot slide. Everything else runs off a fixed rate.
+  #if LOCK
+    float gc = aGait;
+  #else
+    float gc = uTime * GAIT;
+  #endif
+  float g = gc + ph, f = uTime * FLAP + ph, s = uTime * SLOW + ph;
   // body-wide clocks (no part phase), so the carriage moves every part of one animal together
-  float gb = uTime * GAIT + aPhase * 7.0, fb = uTime * FLAP + aPhase * 7.0, sb = uTime * SLOW + aPhase * 7.0;
+  float gb = gc + aPhase * 7.0, fb = uTime * FLAP + aPhase * 7.0, sb = uTime * SLOW + aPhase * 7.0;
   float mv = aMove;
   float gl = max(GLIDE, smoothstep(-0.25, 0.25, sin(sb * 0.33 + 1.0))); // 1 = wings beat, 0 = wings held out
   vec3 d = transformed - aPivot;
   float c, sn, th;
-  if (mode == 1.0) {            // LEG: fold the shin about the knee while the foot is in the air, then swing about the hip
-    float sw = max(-cos(g), 0.0);
+  if (mode == 1.0) {            // LEG: a stance with the foot planted, then a swing that lifts it and carries it forward
+    // One cycle is a stance of DUTY and a swing of the rest. Through the stance the leg sweeps back
+    // at a constant rate, and the gait clock runs at the rate that makes that sweep match the
+    // ground the body covers, so the foot holds its place. Through the swing the foot leaves the
+    // ground and a cubic carries it forward again, with the same speed at both ends as the stance,
+    // so the leg never kinks. The sine this replaced moved the foot forward for half of every
+    // cycle while it was still on the ground, which is what read as a skid.
+    float p = fract(g * 0.15915494);
+    float a, lift;
+    if (p < DUTY) {
+      a = -1.0 + 2.0 * (p / DUTY);            // -1 foot forward at touchdown, +1 foot back at lift-off
+      lift = 0.0;
+    } else {
+      float q = (p - DUTY) / (1.0 - DUTY), m = 2.0 * (1.0 - DUTY) / DUTY;
+      a = 4.0 * q * q * q - 6.0 * q * q + 1.0 + m * (2.0 * q * q * q - 3.0 * q * q + q);
+      lift = sin(3.1416 * q);
+    }
+    // Through a turn the inside of the body covers less ground than the outside, so the inside legs
+    // take the shorter stride. aPivot.x is the side of the animal the hip sits on.
+    float side = aPivot.x > 0.0 ? 1.0 : (aPivot.x < 0.0 ? -1.0 : 0.0);
+    float sk = 1.0 - aTurn * side * SKEW;
+    float hipY = max(aPivot.y, 0.001);
     vec3 d2 = transformed - aPivot2;
-    th = sw * sw * w * mv; c = cos(th); sn = sin(th);
+    th = lift * w * mv; c = cos(th); sn = sin(th);       // the shin folds about the knee, only in the air
     d2.yz = vec2(d2.y * c - d2.z * sn, d2.y * sn + d2.z * c);
     d = aPivot2 + d2 - aPivot;
-    th = sin(g) * amp * mv; c = cos(th); sn = sin(th);
+    float u = clamp(-d.y / hipY, 0.0, 1.0);              // 0 at the hip, 1 at the foot
+    float dy0 = d.y, dz0 = d.z;
+    th = a * amp * mv * sk; c = cos(th); sn = sin(th);
     d.yz = vec2(d.y * c - d.z * sn, d.y * sn + d.z * c);
+    // A pitch about the hip carries the foot up an arc, so the foot would rise at both ends of the
+    // stance and the animal would walk on tiptoe. The leg extends by the height the arc lost, so
+    // the foot holds one height through the whole stance.
+    d.y -= (dy0 * (c - 1.0) - dz0 * sn) * u;
     transformed = aPivot + d;
   } else if (mode == 2.0) {     // WING: roll about the root; the tip trails the root and bends further
     float span = abs(w), side = w < 0.0 ? -1.0 : 1.0;
@@ -530,14 +591,20 @@ const RIG_GLSL = `
     d.xy = vec2(d.x * c - d.y * sn, d.x * sn + d.y * c);
     transformed = aPivot + d;
   } else if (mode == 3.0) {     // SWAY: drift that grows with distance from the root
+    // A walker's tail swings with the stride and lags behind the root, so it reads as one body with
+    // the legs. A tail on its own slow rhythm looked pinned on.
     float L = length(d) * w;
-    transformed.x += sin(s * 1.6 + L * 3.0) * amp * L;
+    transformed.x += mix(sin(s * 1.6 + L * 3.0), sin(gb - L * 2.5) * (0.35 + 0.65 * mv), SWAYG) * amp * L;
     transformed.z += cos(s * 1.2 + L * 2.0) * amp * 0.6 * L;
   } else if (mode == 4.0) {     // PULSE: breathe about the pivot
     transformed = aPivot + d * (1.0 + amp * pow(0.5 + 0.5 * sin(s * 1.5), 3.0));
-  } else if (mode == 5.0) {     // NOD: slow pitch about the neck
+  } else if (mode == 5.0) {     // NOD: slow pitch about the neck, and the head leads a turn
     th = sin(s * 0.7) * amp; c = cos(th); sn = sin(th);
     d.yz = vec2(d.y * c - d.z * sn, d.y * sn + d.z * c);
+    // An animal looks where it turns before its body follows. A positive aTurn turns to the left,
+    // and +x is the left of the animal, so the head yaws with the sign of aTurn.
+    th = aTurn * HEADYAW; c = cos(th); sn = sin(th);
+    d.xz = vec2(d.x * c + d.z * sn, d.z * c - d.x * sn);
     transformed = aPivot + d;
   } else if (mode == 6.0) {     // SPIN: wheel about the pivot, each shard bobs and beats
     float a = uTime * amp + aPhase; c = cos(a); sn = sin(a);
@@ -551,7 +618,15 @@ const RIG_GLSL = `
   }
   if (mode != 7.0) {
   #if CARRY == 0
-    if (mode != 1.0) transformed.y += BOB * abs(sin(gb)) * mv + 0.01 * sin(sb);
+    // The body rises over each supporting leg and rocks from side to side once a stride, and it
+    // leans into a turn about the hip line. The legs take none of it: their feet are on the ground.
+    if (mode != 1.0) {
+      transformed.y += BOB * (0.5 - 0.5 * cos(gb * BOBN)) * mv + 0.01 * sin(sb);
+      transformed.x += ROCK * sin(gb) * mv;
+      th = -aTurn * LEAN; c = cos(th); sn = sin(th);
+      vec2 r = vec2(transformed.x, transformed.y - ROLLY);
+      transformed.xy = vec2(r.x * c - r.y * sn, r.x * sn + r.y * c + ROLLY);
+    }
   #elif CARRY == 1
     // a hop: a crouch on the ground (HOPG of the cycle), then a parabola of height HOPH set by the gravity.
     // The spring leg follows the body up to EXT, then the foot leaves the ground.
@@ -573,6 +648,10 @@ const RIG_GLSL = `
   #elif CARRY == 3
     transformed.y += BOB * sin(sb * 0.8) + HEAVE * sin(fb - 1.0) * gl;
     transformed.x += WAVE * sin(fb - transformed.z * WAVEK) * clamp(-transformed.z, 0.0, 2.0);
+    // a flyer banks into its turn: the whole body rolls, wings and all
+    th = -aTurn * LEAN; c = cos(th); sn = sin(th);
+    vec2 rb = vec2(transformed.x, transformed.y - ROLLY);
+    transformed.xy = vec2(rb.x * c - rb.y * sn, rb.x * sn + rb.y * c + ROLLY);
   #elif CARRY == 4
     transformed.y *= 0.85 + 0.15 * sin(sb);
     transformed.x += 0.05 * sin(sb * 0.6) * clamp(transformed.y, 0.0, 1.0);
@@ -587,10 +666,24 @@ export const hopGait = (G) => G.gait * clamp(Math.sqrt(G.gravity || 1), 0.6, 1.6
 // speed factor for a hopper at real time t: it covers ground in the air and not on the ground. The mean is 1.
 export function hopBurst(gait, t, phase) {
   const hp = ((t * gait + phase * 7) / (2 * Math.PI)) % 1;
-  const air = clamp((hp - HOP_GROUND) / 0.04, 0, 1) * clamp((1 - hp) / 0.04, 0, 1);
-  return 0.25 + air * 1.25;
+  const air = clamp((hp - HOP_GROUND) / HOP_RAMP, 0, 1) * clamp((1 - hp) / HOP_RAMP, 0, 1);
+  // The foot is on the ground for HOP_GROUND of the cycle and has to hold its place, so the animal
+  // covers all of its ground in the air. The two ramps each give half of their width, so the mean
+  // of `air` over one cycle is the width of the air window less one ramp. Dividing by it keeps the
+  // mean of the burst at 1, and the cruise speed of the species holds.
+  return air / (1 - HOP_GROUND - HOP_RAMP);
 }
-const HOP_GROUND = 0.4;
+const HOP_GROUND = 0.4;   // the part of the hop cycle the foot spends on the ground
+const HOP_RAMP = 0.06;    // how quickly the foot loads and unloads at the two ends of the flight
+
+// How many times the body rises in one gait cycle: once over every footfall. A quad in the lateral
+// sequence takes four steps a cycle, a biped two, an insect two, because its tripods alternate.
+const BOB_BEATS = { biped: 2, tripod: 3, quad: 4, hexapod: 2 };
+// The side-to-side rock of the body, once a cycle, as a part of the body radius. A biped rolls its
+// hips over the standing leg; an insect on six legs hardly rocks at all.
+const ROCK_K = { biped: 0.15, tripod: 0.08, quad: 0.09, hexapod: 0.03 };
+// How far the body leans into its tightest turn, in radians. A flyer banks; a walker leans a little.
+const LEAN_K = { wings: 0.55, fins: 0.35, sac: 0.15 };
 
 function rigConstants(G) {
   const carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? CARRY.WALK;
@@ -605,10 +698,19 @@ function rigConstants(G) {
   const sink = G.loco === 'plough' ? -0.97 : -0.3; // the plough dives only now and then; the periscope hides half the time
   const heave = G.loco === 'wings' ? 0.03 : 0; // body lift on each wing beat
   const glide = G.loco === 'wings' ? 0 : 1; // only true wings hold still and glide now and then
+  const legged = (LEG_SWING[G.loco] || 0) > 0;
+  const duty = LEG_DUTY[G.loco] || 0.6;
+  // the roll axis: the hip line of a walker, the body centre of a flyer
+  const rolly = G.cls === 'air' ? 0.5 : G.legLen;
   const fx = (v) => Number(v).toFixed(4);
-  return [['CARRY', carry], ['GAIT', gait], ['FLAP', G.flap], ['SLOW', G.slow], ['BOB', bob], ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
+  const ints = new Set(['CARRY', 'LOCK']);
+  return [['CARRY', carry], ['LOCK', gaitLocked(G) ? 1 : 0], ['GAIT', gait], ['FLAP', G.flap], ['SLOW', G.slow],
+    ['BOB', bob], ['BOBN', BOB_BEATS[G.loco] || 2], ['ROCK', (ROCK_K[G.loco] || 0) * G.bodyR], ['DUTY', duty],
+    ['SKEW', legged ? 0.35 : 0], ['LEAN', LEAN_K[G.loco] ?? (legged ? 0.1 : 0)], ['ROLLY', rolly],
+    ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
+    ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
     ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['HOPG', HOP_GROUND], ['CROUCH', crouch], ['EXT', ext]]
-    .map(([k, v]) => `#define ${k} ${k === 'CARRY' ? v : fx(v)}\n`).join('');
+    .map(([k, v]) => `#define ${k} ${ints.has(k) ? v : fx(v)}\n`).join('');
 }
 
 export function faunaMaterial(G) {
@@ -621,7 +723,7 @@ export function faunaMaterial(G) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\n${consts}uniform float uTime; attribute float aPhase; attribute float aMove; attribute float glow; attribute vec4 aRig; attribute vec3 aPivot; attribute vec3 aPivot2; varying float vGlow;`)
+      .replace('#include <common>', `#include <common>\n${consts}uniform float uTime; attribute float aPhase; attribute float aMove; attribute float aGait; attribute float aTurn; attribute float glow; attribute vec4 aRig; attribute vec3 aPivot; attribute vec3 aPivot2; varying float vGlow;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n vGlow = glow;\n{${RIG_GLSL}}`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vGlow;')
@@ -638,19 +740,88 @@ export function cardHover(G) {
   return G.loco === 'sac' ? 0.75 : G.loco === 'fins' ? 1.1 : G.plan === 'swarm' ? 0.45 : 0.55;
 }
 
+// ---------------------------------------------------------------- the gait clock
+// A leg that swings at a fixed rate while the body slides over the ground skids, and that is what
+// the fixed GAIT rate did: the leg cycle and the speed of the animal had nothing to do with each
+// other. The clock now runs off the ground the animal covers.
+//
+// A foot holds the ground for DUTY of one cycle and sweeps back by `sweep` while it does. To hold
+// its place the sweep must equal the ground the body covers in that time, so one cycle carries the
+// body sweep / DUTY. That length is the stride, strideUnits() returns it, and the rate is
+//   rate = speed / stride      cycles per second.
+// The amplitude of the swing follows the speed too, through aMove, so the sweep shrinks with the
+// speed and the rate holds through it.
+const TAU = Math.PI * 2;
+const smoothstep01 = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+// The ground one gait cycle covers, in creature units, at full amplitude. A leg sweeps twice the
+// sine of its swing about the hip. A serpent has no legs: its wave carries it about half a body
+// length a cycle, so the same clock keeps its body from sliding sideways over the ground.
+export function strideUnits(G, hipY = 0) {
+  const swing = LEG_SWING[G.loco] || 0;
+  if (swing > 0) {
+    // The hip sits above the leg length, because the builder puts it inside the belly. Without the
+    // real height the sweep of the foot comes out a third short and the feet slide backwards.
+    const h = hipY > 0 ? hipY : G.legLen - 0.45 * bodySections(G).bot;
+    return h > 0 ? (2 * h * Math.sin(swing)) / (LEG_DUTY[G.loco] || 0.6) : 0;
+  }
+  if (G.loco === 'serpent') { const B = bodySections(G); return (B.front - B.back) * 0.55; }
+  return 0;
+}
+// A species whose cycle the steering drives, instead of the clock.
+export function gaitLocked(G) { return strideUnits(G) > 1e-4; }
+
+// The clock of one animal. `scale` turns creature units into world units, `top` is its top speed
+// in the same units per second, and `hipY` is the hip height the builder put on the geometry. The
+// rate is capped, because a nearly still animal has a nearly still amplitude and the rate that
+// would hold its feet grows without bound.
+export function makeGait(G, scale, top, hipY = 0) {
+  const stride = strideUnits(G, hipY) * scale;
+  return { phase: 0, stride, rate: 0, max: stride > 0 ? (TAU * 2.5 * top) / stride : 0 };
+}
+// Advance the clock by the ground the animal covered. `act` is the amplitude of the swing, 0 to 1.
+export function stepGait(gt, spd, act, dt) {
+  if (!gt || gt.stride <= 0) return 0;
+  const s = gt.stride * act;
+  gt.rate = s > 1e-4 ? Math.min((TAU * spd) / s, gt.max) : 0;
+  gt.phase = (gt.phase + gt.rate * dt) % TAU;
+  return gt.phase;
+}
+
 // ---------------------------------------------------------------- steering
 // A creature roams on its tangent plane: (u, v) is its offset from home, `heading` its direction.
 // Turning is driven by two slow oscillators with per-creature random frequencies, a leash pulls it
 // back toward home, and grazers stop and start on a third oscillator. No two creatures share a rhythm.
+// mv.turnR is the tightest circle the animal can walk, in the same units as the leash. It caps the
+// turn rate by the speed, so an animal cannot pivot on the spot while it slides sideways.
 export function makeMover(rng, mv) {
+  // The wander rates were set before a turn had a radius, and most of them ask a body to spin on
+  // the spot. The wander takes part of the tightest turn the animal can hold at its cruise, so the
+  // animal keeps a little of its turn in hand and the way home is what uses the whole of it.
+  const wander = mv.turnR > 0 && mv.speed > 0 ? Math.min(mv.turn, (WANDER_TURN * mv.speed) / mv.turnR) : mv.turn;
   return {
-    u: 0, v: 0, heading: rng() * Math.PI * 2, spd: 0, rate: 0,
+    u: 0, v: 0, heading: rng() * Math.PI * 2, spd: 0, rate: 0, turnN: 0,
     f1: 0.15 + rng() * 0.25, p1: rng() * 6.28, f2: 0.25 + rng() * 0.3, p2: rng() * 6.28, f3: 0.08 + rng() * 0.12, p3: rng() * 6.28,
     fp: 0.05 + rng() * 0.08, pp: rng() * 6.28,
-    leash: mv.leash * (0.7 + rng() * 0.6), speed: mv.speed * (0.75 + rng() * 0.5), turn: mv.turn, pause: mv.pause, flies: mv.flies,
+    leash: mv.leash * (0.7 + rng() * 0.6), speed: mv.speed * (0.75 + rng() * 0.5), turn: wander, pause: mv.pause, flies: mv.flies,
+    turnR: mv.turnR || 0,
   };
 }
+const WANDER_TURN = 0.55;   // the part of its tightest turn an animal spends on wandering
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+// The tightest turn the animal can hold at its current speed, in radians per second. A standing
+// animal keeps a little of it, because an animal can shuffle round on the spot, slowly.
+export function turnCap(spd, top, turnR) {
+  if (!(turnR > 0)) return Infinity;
+  return (spd + 0.12 * top) / turnR;
+}
+// How hard the animal is turning, from -1 (its right) to 1 (its left). The shader leans the body,
+// yaws the head, and shortens the stride of the inside legs by it. `rate` is in radians per second
+// and its sign follows the heading, which rises to the right, so the sign flips here.
+export function turnLean(spd, rate, top, turnR) {
+  if (!(turnR > 0) || !(top > 0)) return 0;
+  return -clamp((spd * rate) / ((top * top) / turnR), -1, 1);
+}
 export function stepMover(st, t, dt, burst = 1) {
   // burst: speed factor for this step (a hopper moves in the air, not on the ground)
   if (st.leash <= 0) return false;
@@ -670,6 +841,15 @@ export function stepMover(st, t, dt, burst = 1) {
   }
   // the turn rate eases toward its target, so the heading has no kinks
   st.rate += (turn - st.rate) * Math.min(1, dt * 2.0);
+  // a turn is a circle the feet have to carry the body round, so the speed caps how tight it is
+  const cap = turnCap(st.spd, st.speed, st.turnR);
+  if (st.rate > cap) st.rate = cap; else if (st.rate < -cap) st.rate = -cap;
+  // turnN is what the shader reads: 1 is the hardest turn to the animal's left, -1 to its right.
+  // A rising heading turns the animal to its right, because the local +x axis is its left. The
+  // measure is the sideways pull of the turn, the speed times the turn rate, against the pull at
+  // the cruise speed on the tightest circle. A slow animal therefore leans little, and one at its
+  // limit leans all the way. See turnLean().
+  st.turnN = turnLean(st.spd, st.rate, st.speed, st.turnR);
   st.heading += st.rate * dt;
   // speed: breathes slowly; grazers stop for a while when the pause oscillator dips
   let target = st.speed * (0.65 + 0.35 * Math.sin(t * st.f3 + st.p3));
@@ -679,8 +859,12 @@ export function stepMover(st, t, dt, burst = 1) {
   st.v += Math.sin(st.heading) * st.spd * burst * dt;
   return st.spd > st.speed * 0.05;
 }
-// 0..1 activity for the rig: legs swing only while the animal actually moves
-export const moverActivity = (st) => (st.speed > 0 ? clamp(st.spd / st.speed, 0, 1) : 1);
+// 0..1 activity for the rig: the amplitude of the leg swing. It holds at zero until the animal
+// really moves and reaches full swing at a third of the top speed, so a nearly still animal stands
+// on straight legs instead of shuffling. Below that the gait clock caps its own rate; see stepGait.
+export const moverActivity = (st) => (st.speed > 0 ? smoothstep01(st.spd / st.speed, 0.05, 0.3) : 1);
+// The same measure for one animal of a group, which moves at its own speed inside the formation.
+export const speedActivity = (spd, top) => (top > 0 ? smoothstep01(spd / top, 0.05, 0.3) : 1);
 
 // ---------------------------------------------------------------- inspector card
 export class Inspector {
@@ -727,6 +911,8 @@ export class Inspector {
     const geo = buildCreature(G, palette, palette.flora);
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
     geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array([1]), 1));
+    geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
+    geo.setAttribute('aTurn', new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
     this.mesh = new THREE.InstancedMesh(geo, faunaMaterial(G), 1);
     this.mesh.castShadow = true; this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
@@ -745,6 +931,12 @@ export class Inspector {
     this.pathScale = G.move.leash > 0 ? this.walkR / G.move.leash : 0;
     // time factor: every species crosses the card at about 1.2 units per second, whatever its planet speed
     this.timeK = G.move.speed > 0 ? clamp(1.2 / (G.move.speed * this.pathScale), 0.5, 2.5) : 1;
+    // The tightest circle it walks, in the units the mover runs in: a body and a half of the card,
+    // divided back through the path scale. The card is where the reader watches the walk closest,
+    // so the same rule holds here as on the ground.
+    this.mover.turnR = this.pathScale > 0 ? (this.fit * 1.5) / this.pathScale : 0;
+    // the gait clock, in card units: the card scales the creature by `fit` and its own time factor
+    this.gait = gaitLocked(G) && this.pathScale > 0 ? makeGait(G, this.fit / this.pathScale, this.mover.speed, geo.userData.hipY) : null;
     this.hop = G.loco === 'monopod' ? hopGait(G) : 0; // the hop clock runs on real time, like the shader
     this.trailPts = [];
     this.trail.geometry.attributes.position.array.fill(0);
@@ -792,8 +984,11 @@ export class Inspector {
       arr.set(this.trailPts);
       for (let i = this.trailPts.length; i < arr.length; i += 3) { arr[i] = x; arr[i + 1] = 0.01; arr[i + 2] = z; }
       this.trail.geometry.attributes.position.needsUpdate = true;
-      const am = this.mesh.geometry.attributes.aMove;
-      am.setX(0, moverActivity(mv)); am.needsUpdate = true;
+      const at = this.mesh.geometry.attributes;
+      const act = moverActivity(mv);
+      at.aMove.setX(0, act); at.aMove.needsUpdate = true;
+      if (this.gait) { at.aGait.setX(0, stepGait(this.gait, mv.spd, act, dt * this.timeK)); at.aGait.needsUpdate = true; }
+      at.aTurn.setX(0, mv.turnN); at.aTurn.needsUpdate = true;
     }
     this._q.setFromAxisAngle(_up, yaw);
     this._m.compose(this._p.set(x, this.hover, z), this._q, this._s.setScalar(this.fit));
