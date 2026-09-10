@@ -254,7 +254,12 @@ const TYPE_LABEL = {
   terran: 'Temperate Terran', ocean: 'Ocean World', desert: 'Arid Desert', ice: 'Frozen Ice World',
   lava: 'Volcanic Hellscape', gas: 'Gas Giant', exotic: 'Exotic Alien World',
 };
-const FLORA = { TREE: 0, PINE: 1, CACTUS: 2, CRYSTAL: 3, MUSHROOM: 4, BOULDER: 5, PALM: 6 };
+// The kind codes must match FLORA in flora-geometry.js. The globe grows the first seven. The
+// ground patch grows all of them; see patchFlora() and docs/issues/21-alien-flora.md.
+const FLORA = {
+  TREE: 0, PINE: 1, CACTUS: 2, CRYSTAL: 3, MUSHROOM: 4, BOULDER: 5, PALM: 6,
+  TOWER: 7, SPINDLE: 8, PUFF: 9, SHARD: 10, GRASS: 11, COLOSSUS: 12, FAN: 13, POD: 14, STACK: 15,
+};
 // fauna: each world rolls its own species set (species.js); a creature's kind is its species index
 
 function chooseType(rng) {
@@ -1209,22 +1214,188 @@ const FLORA_FLOOR = 0.02;    // the chance of a plant where the mask is at its l
 // a rectangle from the air, so the chance of a plant falls to zero over the last FLORA_EDGE units
 // of the box. See "the rectangle" in ground.js. Issue 20.
 const FLORA_EDGE = 300;      // units, the band the plants thin out over at the edge of the box
-// metres, the size of one plant: tree, pine, cactus, crystal, mushroom, boulder, palm
-const FLORA_M = [[6, 14], [8, 18], [2, 5], [1.5, 6], [1, 3], [1, 4], [7, 12]];
 // the four cells the scan writes before the current one: west, north-west, north, north-east
 const GAP_DI = [-1, -1, 0, 1], GAP_DJ = [0, -1, -1, -1];
 
-// The plants of one patch. One cell of FLORA_CELL metres holds at most one plant, the plant
-// jitters inside its cell, and a plant closer than FLORA_GAP to a neighbour is dropped. The
-// stride sampling at the end is the one packFauna uses.
+// Issue 21. The patch used to grow two kinds, both at one size range, over an even carpet. Four
+// more fields break that carpet up.
+const COMM_WAVE = 330;       // units: the wavelength of one plant community
+const GROVE_WAVE = 46;       // units: the wavelength of a thicket inside a community
+const BARE_WAVE = 195;       // units: the wavelength of the open ground between the communities
+const VIGOUR_WAVE = 165;     // units: the wavelength of the field that says how big a plant grows
+const GIANT_CHANCE = 0.035;  // the chance that one plant grows far past the range of its kind
+const SIZE_CURVE = 1.9;      // over 1 the sizes bunch at the small end, so a big plant stands out
+const MARK_MARGIN = 220;     // units: an arrangement stays this far inside the edge of the box
+const BIG_GAP = 340;         // units: the least distance between two colossus bodies
+
+// units, the size of one plant, by kind. A tower mushroom is over the tallest pine of the same
+// patch, and the colossus stands over everything.
+const FLORA_M = [
+  [5, 16],     // 0 tree
+  [7, 22],     // 1 pine
+  [2, 6],      // 2 cactus
+  [1.5, 8],    // 3 crystal
+  [1, 4],      // 4 mushroom
+  [0.8, 5],    // 5 boulder
+  [6, 14],     // 6 palm
+  [19, 42],    // 7 tower mushroom
+  [4, 26],     // 8 spindle
+  [1.5, 7],    // 9 puff
+  [2, 12],     // 10 shard
+  [0.6, 1.8],  // 11 grass, grown by the ground and not by the cap
+  [70, 150],   // 12 colossus
+  [3, 10],     // 13 fan
+  [2, 9],      // 14 pod
+  [3, 15],     // 15 stack
+];
+
+// The plants one world type may grow. `core` holds the kinds the reader knows from orbit, and
+// `odd` holds the alien kinds. A patch picks a few communities from both lists, so one patch can
+// show a wood, a field of spindles, and a stand of towers instead of one kind everywhere.
+const FLORA_POOL = {
+  terran: { core: [FLORA.TREE, FLORA.PINE, FLORA.PALM], odd: [FLORA.TOWER, FLORA.PUFF, FLORA.SPINDLE, FLORA.FAN, FLORA.POD, FLORA.MUSHROOM, FLORA.STACK] },
+  ocean: { core: [FLORA.PALM, FLORA.TREE], odd: [FLORA.FAN, FLORA.POD, FLORA.PUFF, FLORA.SPINDLE, FLORA.TOWER] },
+  desert: { core: [FLORA.CACTUS, FLORA.BOULDER], odd: [FLORA.SPINDLE, FLORA.STACK, FLORA.SHARD, FLORA.POD, FLORA.FAN] },
+  ice: { core: [FLORA.CRYSTAL, FLORA.PINE], odd: [FLORA.SHARD, FLORA.SPINDLE, FLORA.PUFF, FLORA.STACK, FLORA.TOWER] },
+  lava: { core: [FLORA.CRYSTAL, FLORA.BOULDER], odd: [FLORA.SHARD, FLORA.SPINDLE, FLORA.STACK, FLORA.PUFF] },
+  exotic: { core: [FLORA.MUSHROOM, FLORA.TREE, FLORA.CRYSTAL], odd: [FLORA.TOWER, FLORA.PUFF, FLORA.SPINDLE, FLORA.SHARD, FLORA.FAN, FLORA.POD, FLORA.STACK] },
+};
+// a kind that may stand on a slope steeper than FLORA_SLOPE
+const FLORA_ROCK = new Set([FLORA.BOULDER, FLORA.CRYSTAL, FLORA.SHARD, FLORA.STACK]);
+
+// The ground cover. Grass is not one of the plants: a patch holds far more tufts than the plant
+// cap allows, so the worker only says where a tuft may grow and ground-flora.js grows them around
+// the camera. GRASS_BASE is how much cover a world type carries at its wettest.
+const GRASS_BASE = { terran: 1, ocean: 0.95, exotic: 0.9, desert: 0.3, ice: 0.22, lava: 0.14 };
+const GRASS_SLOPE = 1.3;     // rise over run: a steeper node carries no cover
+const GRASS_WAVE = 52;       // units: the wavelength of the bald spots inside a field of cover
+
+// The communities of one patch. Each one takes a band of the community field, so it holds a part
+// of the box, and it carries a lead kind, a companion, and a density of its own.
+function floraCommunities(type, rng) {
+  const pool = FLORA_POOL[type] || FLORA_POOL.terran;
+  // how much of the patch the alien kinds take. An exotic world is strange nearly everywhere.
+  const strange = type === 'exotic' ? rrange(rng, 0.55, 0.92) : rrange(rng, 0.3, 0.7);
+  const count = 4 + Math.floor(rng() * 4);
+  // Each community leads with a kind of its own. A pool that draws with replacement gave one kind
+  // over half the plants of a patch, which is the carpet this issue set out to break.
+  const used = new Set();
+  const draw = (list) => {
+    for (let t = 0; t < 8; t++) {
+      const k = list[Math.floor(rng() * list.length)];
+      if (!used.has(k)) { used.add(k); return k; }
+    }
+    return list[Math.floor(rng() * list.length)];
+  };
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const lead = draw(rng() < strange ? pool.odd : pool.core);
+    const mates = rng() < 0.55 ? pool.odd : pool.core;
+    out.push({
+      lead,
+      mate: mates[Math.floor(rng() * mates.length)],
+      mix: rrange(rng, 0.14, 0.45),        // the share of the community the companion takes
+      density: rrange(rng, 0.45, 1.5),     // how full the community stands
+      vigour: rrange(rng, 0.85, 1.2),      // how big it grows its plants
+    });
+  }
+  return out;
+}
+
+// The size of one plant. The curve bunches the sizes at the small end, so most plants are small
+// and the few large ones read as landmarks. The vigour field of the patch scales the whole range,
+// so one part of the box grows stunted and another grows tall.
+//
+// The ceiling matters. The vigour of the field, the vigour of the community, and the giant roll
+// all multiply, and the first build grew a tower mushroom of 114 units against a colossus of 105.
+// Nothing but the colossus may reach the size of a colossus, so a plant stops at 1.9 of the top of
+// its own range.
+function floraSize(rng, kind, vigour) {
+  const mm = FLORA_M[kind] || FLORA_M[0];
+  let s = mm[0] + (mm[1] - mm[0]) * Math.pow(rng(), SIZE_CURVE);
+  if (rng() < GIANT_CHANCE) s *= rrange(rng, 1.4, 2.2);
+  return clamp(s * vigour, mm[0] * 0.5, mm[1] * 1.9);
+}
+
+// The plants of one patch. One cell of FLORA_CELL units holds at most one plant, the plant jitters
+// inside its cell, and a plant closer than FLORA_GAP to a neighbour is dropped. The stride
+// sampling at the end is the one packFauna uses.
+//
+// Issue 21 put four more fields over that scan. The community field says which plants live where,
+// the grove field knots them into thickets, the bare field opens ground that holds nothing, and
+// the vigour field says how big they grow. Two passes then run after the scan. The arrangements
+// stand plants in a ring, an arc, a row, or a spiral. The colossus pass drops one to three bodies
+// that stand over the fog, each with a court of smaller plants. Both passes keep their plants past
+// the cap, because the cap must not drop a landmark.
+//
+// The function also returns the ground cover mask: one byte per node of a grid at twice the
+// terrain step, which says where ground-flora.js may grow a tuft of grass. The tufts themselves
+// grow on the main thread around the camera, because a patch holds far more of them than the cap.
 function patchFlora(ctx, s) {
   const { heights, vary, n, grid, half, size, hPerM, hPerU, cellT, cellM, cellF, noise, rng } = s;
   const maxFlora = s.maxFlora | 0;
-  if (maxFlora <= 0 || !ctx.P.flora || ctx.P.flora.length === 0) return new Float32Array(0);
+  const none = { flora: new Float32Array(0), grass: new Uint8Array(0), grassN: 0, grassStep: 1 };
+  if (maxFlora <= 0 || !ctx.P.flora || ctx.P.flora.length === 0) return none;
 
   const type = ctx.type, density = ctx.floraDensity;
+  const beachH = BEACH_M * hPerM;
   const cells = Math.max(1, Math.floor(size / FLORA_CELL)), cw = size / cells;
   const oc0 = rng() * 90, oc1 = rng() * 90, fq = 1 / CLUMP_WAVE;
+  const om0 = rng() * 90, om1 = rng() * 90;     // the community field
+  const og0 = rng() * 90, og1 = rng() * 90;     // the grove field
+  const ob0 = rng() * 90, ob1 = rng() * 90;     // the bare field
+  const ov0 = rng() * 90, ov1 = rng() * 90;     // the vigour field
+  const oq0 = rng() * 90, oq1 = rng() * 90;     // the ground cover field
+  const comms = floraCommunities(type, rng);
+  const bareShare = rrange(rng, 0.12, 0.5);     // how much open ground this patch holds
+
+  // The ground under one point: the grid vertex, the height, the slope, the normal, and whether a
+  // plant may stand there at all. The beach band must be the metre-scale one of issue 05.
+  const probe = { h: 0, slope: 0, nx: 0, ny: 1, nz: 0, t: 0, m: 0, fm: 0, land: false };
+  function ground(x, z) {
+    const gi = clamp(Math.round((x + half) / grid), 1, n - 2);
+    const gj = clamp(Math.round((z + half) / grid), 1, n - 2);
+    const gk = gj * n + gi, h = heights[gk];
+    const dhx = (heights[gk + 1] - heights[gk - 1]) / (2 * grid);
+    const dhz = (heights[gk + n] - heights[gk - n]) / (2 * grid);
+    const inv = 1 / Math.hypot(dhx, 1, dhz);
+    probe.h = h;
+    probe.slope = Math.hypot(dhx, dhz);
+    probe.nx = -dhx * inv; probe.ny = inv; probe.nz = -dhz * inv;
+    probe.t = cellT[gk];
+    probe.m = cellM[gk] - vary[gk] * 0.1 + Math.max(cellF[gk], 0) * 0.06;
+    probe.fm = cellF[gk];
+    probe.land = h >= 0 && biomeIndex(ctx, h * hPerU, probe.t, probe.m, beachH) > 2;
+    return probe;
+  }
+
+  // The share of the open ground at one point. 1 is bare: no plant and no grass grows there.
+  const bareAt = (x, z) => {
+    const b = noise.n3(x / BARE_WAVE + ob0, z / BARE_WAVE + ob1, 7.5) * 0.5 + 0.5;
+    return smoothstep(1 - bareShare - 0.16, 1 - bareShare + 0.06, b);
+  };
+  const vigourAt = (x, z) => 0.7 + 0.6 * (noise.n3(x / VIGOUR_WAVE + ov0, z / VIGOUR_WAVE + ov1, 13.5) * 0.5 + 0.5);
+  const groveAt = (x, z) => noise.n3(x / GROVE_WAVE + og0, z / GROVE_WAVE + og1, 19.5);
+  // Two fields, not one. Simplex noise bunches around the middle of its range, so one field cut
+  // into bands gave the middle community most of the box. Two fields at two wavelengths make a
+  // patchwork of nine zones, and a community may hold more than one of them.
+  const commAt = (x, z) => {
+    const a = noise.n3(x / COMM_WAVE + om0, z / COMM_WAVE + om1, 3.5) * 0.5 + 0.5;
+    const b = noise.n3(x / (COMM_WAVE * 0.55) + om1, z / (COMM_WAVE * 0.55) + om0, 9.5) * 0.5 + 0.5;
+    const i = clamp(Math.floor(a * 3), 0, 2), j = clamp(Math.floor(b * 3), 0, 2);
+    return comms[(i * 3 + j) % comms.length];
+  };
+
+  // The kind of one cell. The temperature gate is the one the globe applies.
+  function kindAt(comm, grove, slope, t) {
+    if ((type === 'terran' || type === 'ocean') && t < 0.12) return -1;
+    if (type === 'exotic' && t < 0.1) return -1;
+    const kind = (grove * 0.5 + 0.5) < comm.mix ? comm.mate : comm.lead;
+    if (slope > FLORA_SLOPE && !FLORA_ROCK.has(kind)) return -1;
+    return kind;
+  }
+
+  // ---------------------------------------------------------------- the scatter
   const gap2 = FLORA_GAP * FLORA_GAP, N = cells * cells;
   const cX = new Float32Array(N), cY = new Float32Array(N), cZ = new Float32Array(N);
   const nX = new Float32Array(N), nY = new Float32Array(N), nZ = new Float32Array(N);
@@ -1234,57 +1405,30 @@ function patchFlora(ctx, s) {
   for (let j = 0; j < cells; j++) {
     for (let i = 0; i < cells; i++) {
       const x = -half + (i + rng()) * cw, z = -half + (j + rng()) * cw;
-      // the grid vertex under the plant, and the height and the slope there
-      const gi = clamp(Math.round((x + half) / grid), 1, n - 2);
-      const gj = clamp(Math.round((z + half) / grid), 1, n - 2);
-      const gk = gj * n + gi, h = heights[gk];
-      if (h < 0) continue;                       // the sea holds no plants
-      const dhx = (heights[gk + 1] - heights[gk - 1]) / (2 * grid);
-      const dhz = (heights[gk + n] - heights[gk - n]) / (2 * grid);
+      const g = ground(x, z);
+      if (!g.land) continue;
 
-      const hg = h * hPerU;
-      const t = cellT[gk];
-      const m = cellM[gk] - vary[gk] * 0.1 + Math.max(cellF[gk], 0) * 0.06;
-      // The beach band must be the metre-scale one of issue 05. The default is the band of the
-      // globe, which is a fraction of a planet radius: it calls every patch under a few hundred
-      // metres a beach, and then no plant grows anywhere near a coast.
-      if (biomeIndex(ctx, hg, t, m, BEACH_M * hPerM) <= 2) continue;   // sea, shallows, and beach
-
-      const clump = noise.n3(x * fq + oc0, z * fq + oc1, 31.5) * CLUMP_AMP;
-      const mc = m + clump * 0.5, mask = cellF[gk] + clump + mc * 0.5;
-
-      // The kind. The globe separates its kinds by a field it reads at continent scale, so that
-      // field holds one value over 1,500 m and it cannot separate anything inside a patch. The
-      // clump field can, so it picks between the flora kinds of the world, and the moisture only
-      // moves the split: a wetter desert then grows more cactus and fewer boulders.
-      // The temperature still gates flora away from a cold world, as it does on the globe.
-      const wet = clamp(mc, -0.25, 0.25);
-      let kind = -1;
-      switch (type) {
-        case 'terran': case 'ocean':
-          if (t < 0.12) break;
-          kind = t < 0.45 ? FLORA.PINE : (type === 'ocean' && hg < 0.12 && t > 0.6 ? FLORA.PALM : FLORA.TREE);
-          break;
-        case 'desert': kind = clump > -wet ? FLORA.CACTUS : FLORA.BOULDER; break;
-        case 'ice': kind = clump > 0 ? FLORA.CRYSTAL : FLORA.PINE; break;
-        case 'lava': kind = clump > 0 ? FLORA.CRYSTAL : FLORA.BOULDER; break;
-        case 'exotic':
-          if (t < 0.1) break;
-          kind = clump > 0.12 ? FLORA.CRYSTAL : (clump < -0.12 ? FLORA.MUSHROOM : FLORA.TREE);
-          break;
-      }
+      const comm = commAt(x, z);
+      const grove = groveAt(x, z);
+      const kind = kindAt(comm, grove, g.slope, g.t);
       if (kind < 0) continue;
-      // only rock stands on a steep cell
-      if (Math.hypot(dhx, dhz) > FLORA_SLOPE && kind !== FLORA.BOULDER && kind !== FLORA.CRYSTAL) continue;
 
-      // The density factor of the world type says how full a lush cell is. The floor keeps a dry
-      // world from going empty, so a desert site still shows its sparse cactus and boulders.
+      // The clump field of issue 07 still runs, because the globe reads its moisture and its
+      // forest mask at continent scale and both hold one value over the whole box. The grove field
+      // rides on top of it, so a community shows thickets and glades inside its own ground.
+      const clump = noise.n3(x * fq + oc0, z * fq + oc1, 31.5) * CLUMP_AMP;
+      const mask = g.fm + clump + (g.m + clump * 0.5) * 0.5 + grove * 0.3;
+
+      // The rim outside the box holds no plants, so the chance falls to zero over the last
+      // FLORA_EDGE units. See "the rectangle" in ground.js. Issue 20.
       const ed = Math.min(half - Math.abs(x), half - Math.abs(z));
       const edge = ed >= FLORA_EDGE ? 1 : smoothstep(0, FLORA_EDGE, ed);
-      if (rng() >= (FLORA_FLOOR + (density - FLORA_FLOOR) * smoothstep(-0.35, 0.35, mask)) * edge) continue;
+      const open = 1 - bareAt(x, z);
+      const lush = density * comm.density;
+      if (rng() >= (FLORA_FLOOR + (lush - FLORA_FLOOR) * smoothstep(-0.35, 0.35, mask)) * edge * open) continue;
 
       // The gap test reads the four neighbours the scan already wrote, so it reads every pair
-      // once. A cell two steps away is at least 6 metres off, which is over the gap already.
+      // once. A cell two steps away is at least 6 units off, which is over the gap already.
       let close = false;
       for (let d = 0; d < 4 && !close; d++) {
         const ni = i + GAP_DI[d], nj = j + GAP_DJ[d];
@@ -1296,28 +1440,159 @@ function patchFlora(ctx, s) {
       }
       if (close) continue;
 
-      const ci = j * cells + i, inv = 1 / Math.hypot(dhx, 1, dhz), mm = FLORA_M[kind];
-      cX[ci] = x; cY[ci] = h; cZ[ci] = z;
-      nX[ci] = -dhx * inv; nY[ci] = inv; nZ[ci] = -dhz * inv;
-      cS[ci] = rrange(rng, mm[0], mm[1]);
+      const ci = j * cells + i;
+      cX[ci] = x; cY[ci] = g.h; cZ[ci] = z;
+      nX[ci] = g.nx; nY[ci] = g.ny; nZ[ci] = g.nz;
+      cS[ci] = floraSize(rng, kind, vigourAt(x, z) * comm.vigour);
       cK[ci] = kind;
       found++;
     }
   }
 
-  const keep = Math.min(found, maxFlora);
+  // ---------------------------------------------------------------- the arrangements
+  // A ring, an arc, a row, and a spiral read as made things, so the reader asks who made them.
+  // These plants stand outside the cell grid and past the cap.
+  const fixed = [];               // x y z, nx ny nz, size, kind — the layout of the flora array
+  const place = (x, z, kind, sz) => {
+    if (Math.abs(x) > half - 8 || Math.abs(z) > half - 8) return;
+    const g = ground(x, z);
+    if (!g.land) return;
+    if (g.slope > FLORA_SLOPE && !FLORA_ROCK.has(kind)) return;
+    fixed.push(x, g.h, z, g.nx, g.ny, g.nz, sz, kind);
+  };
+
+  const markCount = 2 + Math.floor(rng() * 5);
+  for (let mi = 0; mi < markCount; mi++) {
+    let cx = 0, cz = 0, seat = false;
+    for (let tries = 0; tries < 20 && !seat; tries++) {
+      cx = rrange(rng, -half + MARK_MARGIN, half - MARK_MARGIN);
+      cz = rrange(rng, -half + MARK_MARGIN, half - MARK_MARGIN);
+      const g = ground(cx, cz);
+      seat = g.land && g.slope < 0.55;
+    }
+    if (!seat) continue;
+    const comm = commAt(cx, cz);
+    const kind = rng() < 0.5 ? comm.lead : comm.mate;
+    const base = floraSize(rng, kind, rrange(rng, 0.85, 1.45));
+    const count = 7 + Math.floor(rng() * 13);
+    const turn0 = rng() * Math.PI * 2;
+    const form = rng();
+    if (form < 0.42) {                                   // a ring
+      const rad = rrange(rng, 8, 34);
+      for (let k = 0; k < count; k++) {
+        const a = turn0 + (k / count) * Math.PI * 2 + rrange(rng, -0.05, 0.05);
+        const rd = rad * rrange(rng, 0.94, 1.06);
+        place(cx + Math.cos(a) * rd, cz + Math.sin(a) * rd, kind, base * rrange(rng, 0.85, 1.15));
+      }
+    } else if (form < 0.72) {                            // an arc
+      const rad = rrange(rng, 14, 48), span = rrange(rng, 1.2, 3.4);
+      for (let k = 0; k < count; k++) {
+        const a = turn0 + (k / Math.max(count - 1, 1) - 0.5) * span;
+        place(cx + Math.cos(a) * rad, cz + Math.sin(a) * rad, kind, base * rrange(rng, 0.8, 1.2));
+      }
+    } else if (form < 0.9) {                             // a row
+      const step = rrange(rng, 6, 18), dx = Math.cos(turn0), dz = Math.sin(turn0);
+      for (let k = 0; k < count; k++) {
+        const d = (k - (count - 1) / 2) * step;
+        place(cx + dx * d + rrange(rng, -1.5, 1.5), cz + dz * d + rrange(rng, -1.5, 1.5),
+          kind, base * rrange(rng, 0.85, 1.15));
+      }
+    } else {                                             // a spiral that grows outward
+      const grow = rrange(rng, 1.6, 2.6);
+      for (let k = 0; k < count + 8; k++) {
+        const a = turn0 + k * 0.9, rd = 3 + k * grow;
+        place(cx + Math.cos(a) * rd, cz + Math.sin(a) * rd, kind, base * (0.55 + k * 0.05));
+      }
+    }
+    // one body of the other kind in the middle, so an arrangement is not one plant repeated
+    if (rng() < 0.5) {
+      const inner = kind === comm.lead ? comm.mate : comm.lead;
+      place(cx, cz, inner, floraSize(rng, inner, 1.5));
+    }
+  }
+
+  // ---------------------------------------------------------------- the colossus
+  // One to three bodies per patch. Nothing else on the ground comes near its size, so it gives the
+  // reader the scale of everything around it.
+  const bigCount = 1 + (rng() < 0.35 ? 1 : 0) + (rng() < 0.12 ? 1 : 0);
+  const bigAt = [];
+  for (let b = 0; b < bigCount; b++) {
+    for (let tries = 0; tries < 40; tries++) {
+      const x = rrange(rng, -half + MARK_MARGIN, half - MARK_MARGIN);
+      const z = rrange(rng, -half + MARK_MARGIN, half - MARK_MARGIN);
+      const g = ground(x, z);
+      if (!g.land || g.slope > 0.4) continue;
+      let far = true;
+      for (let q = 0; q < bigAt.length; q += 2) {
+        if (Math.hypot(x - bigAt[q], z - bigAt[q + 1]) < BIG_GAP) far = false;
+      }
+      if (!far) continue;
+      bigAt.push(x, z);
+      fixed.push(x, g.h, z, g.nx, g.ny, g.nz,
+        floraSize(rng, FLORA.COLOSSUS, rrange(rng, 0.85, 1.3)), FLORA.COLOSSUS);
+      // a court of smaller plants under it, so the body does not stand on empty ground
+      const court = commAt(x, z);
+      const cn = 10 + Math.floor(rng() * 14);
+      for (let k = 0; k < cn; k++) {
+        const a = rng() * Math.PI * 2, rd = rrange(rng, 12, 70);
+        place(x + Math.cos(a) * rd, z + Math.sin(a) * rd, court.mate, floraSize(rng, court.mate, 1.1));
+      }
+      break;
+    }
+  }
+
+  // ---------------------------------------------------------------- the output
+  const fixedCount = fixed.length / 8;
+  const budget = Math.max(0, maxFlora - fixedCount);
+  const keep = Math.min(found, budget);
   const stride = found / Math.max(keep, 1);
   const idx = new Int32Array(found);
   let f = 0;
   for (let ci = 0; ci < N; ci++) if (cK[ci] >= 0) idx[f++] = ci;
-  const flora = new Float32Array(keep * 8);   // x y z, nx ny nz, scale, kind
+  const flora = new Float32Array((keep + fixedCount) * 8);   // x y z, nx ny nz, scale, kind
   for (let i = 0; i < keep; i++) {
     const ci = idx[Math.floor(i * stride)], o = i * 8;
     flora[o] = cX[ci]; flora[o + 1] = cY[ci]; flora[o + 2] = cZ[ci];
     flora[o + 3] = nX[ci]; flora[o + 4] = nY[ci]; flora[o + 5] = nZ[ci];
     flora[o + 6] = cS[ci]; flora[o + 7] = cK[ci];
   }
-  return flora;
+  flora.set(fixed, keep * 8);
+
+  // ---------------------------------------------------------------- the ground cover mask
+  // The mask runs on a grid at twice the terrain step. A grid at the terrain step costs four times
+  // as much and the reader cannot see the difference, because one tuft is about one unit wide.
+  const gStep = grid * 2, gN = Math.ceil((n - 1) / 2) + 1;
+  const grass = new Uint8Array(gN * gN);
+  const gBase = GRASS_BASE[type] !== undefined ? GRASS_BASE[type] : 0.6;
+  if (gBase > 0) {
+    for (let j = 0; j < gN; j++) {
+      const zm = -half + j * gStep;
+      const gj = clamp(Math.round((zm + half) / grid), 1, n - 2);
+      for (let i = 0; i < gN; i++) {
+        const xm = -half + i * gStep;
+        const gi = clamp(Math.round((xm + half) / grid), 1, n - 2);
+        const gk = gj * n + gi, h = heights[gk];
+        if (h < 0) continue;
+        const t = cellT[gk];
+        const m = cellM[gk] - vary[gk] * 0.1 + Math.max(cellF[gk], 0) * 0.06;
+        if (biomeIndex(ctx, h * hPerU, t, m, beachH) <= 2) continue;
+        const dhx = (heights[gk + 1] - heights[gk - 1]) / (2 * grid);
+        const dhz = (heights[gk + n] - heights[gk - n]) / (2 * grid);
+        const flat = 1 - smoothstep(GRASS_SLOPE * 0.55, GRASS_SLOPE, Math.hypot(dhx, dhz));
+        if (flat <= 0) continue;
+        // The temperature gate must clear a desert. `cellT` carries the temperature bias of the
+        // world, and a desert sits well over 1, so a gate that closed at 1.05 left every hot patch
+        // with no cover at all. It now closes where nothing can live.
+        const warm = smoothstep(0.02, 0.16, t) * (1 - smoothstep(1.25, 1.7, t));
+        const wet = 0.3 + 0.7 * smoothstep(-0.2, 0.45, m);
+        const patchy = 0.4 + 0.6 * (noise.n3(xm / GRASS_WAVE + oq0, zm / GRASS_WAVE + oq1, 41.5) * 0.5 + 0.5);
+        const v = gBase * flat * warm * wet * patchy * (1 - bareAt(xm, zm) * 0.85);
+        grass[j * gN + i] = clamp(Math.round(v * 255), 0, 255);
+      }
+    }
+  }
+
+  return { flora, grass, grassN: gN, grassStep: gStep, marks: markCount, fixed: fixedCount, big: bigAt.length / 2 };
 }
 
 // ---------------------------------------------------------------- the fauna of a patch
@@ -1741,10 +2016,11 @@ function patch(seed, lat, lon, opts) {
   }
 
   post(94, 'Growing the plants');
-  const flora = patchFlora(ctx, {
+  const grown = patchFlora(ctx, {
     heights, vary, n, grid, half, size, hPerM: H_PER_M, hPerU,
     cellT, cellM, cellF, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000,
   });
+  const flora = grown.flora, grass = grown.grass;
 
   post(96, 'Calling the animals');
   const { groups, members } = patchFauna(ctx, opts, {
@@ -1757,15 +2033,19 @@ function patch(seed, lat, lon, opts) {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
       span, metresAcross: K, metresUp: V,
       rim: { out: rimOut, step: rimStep, n: rimN, hasSea: rimSea },
+      // the ground cover mask of issue 21, on its own grid at twice the terrain step
+      cover: { n: grown.grassN, step: grown.grassStep },
+      // what the two passes after the scan put on the patch, for the load log
+      marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big },
       biome: BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM, BEACH_M * H_PER_M)],
       palette: ctx.world.palette,
       elevation, radiusKm: ctx.radiusKm,
       seaLevel: 0, hasSea, shore: hasSea && hasLand,
     },
-    heights, colors, flora, groups, members, rimHeights, rimColors,
+    heights, colors, flora, grass, groups, members, rimHeights, rimColors,
   };
   self.postMessage({ type: 'patch-done', result },
-    [heights.buffer, colors.buffer, flora.buffer, groups.buffer, members.buffer,
+    [heights.buffer, colors.buffer, flora.buffer, grass.buffer, groups.buffer, members.buffer,
       rimHeights.buffer, rimColors.buffer]);
 }
 
