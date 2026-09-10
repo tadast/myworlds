@@ -63,6 +63,7 @@ const toggleBtn = $('#toggle');
 const panel = $('#panel');
 const shareBtn = $('#share');
 const probeBtn = $('#probe');
+const probeIconBtn = $('#probe-icon');
 const aimEl = $('#aim');
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
@@ -827,6 +828,14 @@ function updateProbeBtn() {
   probeBtn.hidden = !show;
   probeBtn.textContent = label;
   probeLabel = label;
+  // The header carries the same probe as an icon. It shows and says the same thing, and it stays
+  // on screen while the sidebar is folded away, where the text button cannot go.
+  if (probeIconBtn) {
+    probeIconBtn.hidden = !show;
+    probeIconBtn.setAttribute('aria-label', label);
+    probeIconBtn.title = label;
+    probeIconBtn.setAttribute('aria-pressed', String(down || aiming));
+  }
   // The button only moves into view when it appears or when it changes what it says. A call on
   // every frame of the dive would fight the scroll of the reader.
   if (show && changed) showProbeBtn();
@@ -1192,11 +1201,13 @@ shareBtn.addEventListener('click', async () => {
   catch { shareBtn.textContent = url; }
   setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
 });
-probeBtn.addEventListener('click', () => {
+function onProbeClick() {
   if (mode === 'ground') ascend();
   else if (aiming) stopAim();
   else startAim();
-});
+}
+probeBtn.addEventListener('click', onProbeClick);
+if (probeIconBtn) probeIconBtn.addEventListener('click', onProbeClick);
 // ---------------------------------------------------------------- music
 const music = new Music();
 function renderMusic() {
