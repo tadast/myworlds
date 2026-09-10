@@ -242,7 +242,8 @@ function buildWorld(res) {
     const baseScale = 0.0066; // 40% smaller than the first pass, so a forest reads as a forest
     const rng = mulberry32(7);
     for (const [kind, list] of kinds) {
-      const geo = floraGeometry(kind, world.palette.flora);
+      // the flora signature of the world, so the globe grows the plants the ground will show
+      const geo = floraGeometry(kind, world.palette.flora, world.floraVariant || 0);
       const mat = new THREE.MeshStandardMaterial({
         vertexColors: true, flatShading: true, roughness: kind === 3 ? 0.35 : 0.9, metalness: 0,
         emissive: kind === 3 ? world.palette.flora.canopy : '#000000', emissiveIntensity: kind === 3 ? 0.35 : 0,

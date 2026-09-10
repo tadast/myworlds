@@ -17,6 +17,9 @@ import * as THREE from 'three';
 import { floraGeometry, FLORA, FLORA_STYLE } from './flora-geometry.js';
 
 const HYSTERESIS = 0.05;     // ±5% around the LOD distance: a band of 10%, so a plant cannot flicker
+// the band as squared factors, because the walk compares squared distances
+const IN_BAND = (1 - HYSTERESIS) * (1 - HYSTERESIS);
+const OUT_BAND = (1 + HYSTERESIS) * (1 + HYSTERESIS);
 const CARD_ALPHA = 0.4;      // the alpha test of the card. No blending, so the card writes depth.
 const SUN_FACE = 0.6;        // the mean of the sun on the lit half of a plant, a rough ball
 const TINT_HUE = 0.16;       // how far one plant may lean from the colour of its kind
@@ -28,6 +31,7 @@ const GRASS_FADE = 22;       // units: the band the tufts shrink to nothing over
 const GRASS_CEIL = 110;      // units: over this height above the ground the field is gone
 const GRASS_STEP = 7;        // units: the camera moves this far before the lattice is rebuilt
 
+const _size = new THREE.Vector2();   // scratch for the view size the card floor reads
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smoothstep = (a, b, x) => { const t = clamp01((x - a) / (b - a || 1e-6)); return t * t * (3 - 2 * t); };
 
@@ -167,7 +171,7 @@ function bakeLight(sky, groundColor) {
 export class Flora {
   // flora: the worker's Float32Array of x y z, nx ny nz, size in units, kind.
   // sky: the Sky of the ground, for the sun colour and the sun direction the card bakes with.
-  constructor({ renderer, flora, palette, tier, sky, lod, cut, groundColor }) {
+  constructor({ renderer, flora, palette, tier, sky, lod, cut, groundColor, variant = 0 }) {
     this.renderer = renderer;
     this.lod = lod;
     this.cut = cut || 900;             // units: past this a plant is deep inside the fog
@@ -196,7 +200,7 @@ export class Flora {
     const axis = new THREE.Vector3(), scale = new THREE.Vector3();
     const mat4 = new THREE.Matrix4();
     for (const [kind, list] of buckets) {
-      const geo = floraGeometry(kind, palette.flora);
+      const geo = floraGeometry(kind, palette.flora, variant);
       if (!geo) continue;
       const style = FLORA_STYLE[kind] || FLORA_STYLE[0];
       geo.computeBoundingBox();
@@ -248,6 +252,7 @@ export class Flora {
       const at = new Float32Array(n * 3);       // the position of every plant, for the distance walk
       const cards = new Float32Array(n * 2);    // the scale of the card and the height of its base
       const tints = new Float32Array(n * 3);    // the tint of every plant, for both meshes
+      const sz2 = new Float32Array(n);          // the square of the height, for the card-size floor
       const rock = kind === FLORA.BOULDER;
       for (let j = 0; j < n; j++) {
         const o = list[j] * 8;
@@ -277,6 +282,7 @@ export class Flora {
         // vertex shader can read it there. The card sits a little into the ground, so a plant on
         // a slope does not float.
         cards[j * 2] = s; cards[j * 2 + 1] = pos.y - units * 0.02;
+        sz2[j] = units * units;
         // The tint. One plant leans warm and the next leans cool, and both lean light or dark, so
         // a hillside of one kind reads as many plants and not as one plant copied.
         const lit = 1 + (h1 - 0.5) * 2 * TINT_LIT;
@@ -287,7 +293,7 @@ export class Flora {
       }
 
       this.kinds.push({
-        kind, style, count: n, near, far, nearM, at, cards, tints, state: new Uint8Array(n),
+        kind, style, count: n, near, far, nearM, at, cards, tints, sz2, state: new Uint8Array(n),
       });
       this.group.add(near);
       this.group.add(far);
@@ -355,13 +361,22 @@ export class Flora {
     const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
     let nearTotal = 0, cardTotal = 0;
 
+    // The focal length of the view in pixels: a plant `size` units tall and `d` units away covers
+    // `size * focal / d` pixels of the screen. The card of its kind holds `style.card` pixels, so
+    // past `size * focal / style.card` the picture is no longer magnified and the swap is
+    // invisible. Nearer than that a card is a blown-up picture, and the reader sees a flat plant.
+    // Issue 22: the LOD knob alone did that. On a 30 Hz display the knob fell to its floor of 40 m
+    // and 8,018 of 8,126 plants stood as cards, some of them ten metres away.
+    this.renderer.getSize(_size);
+    const focal = _size.y / (2 * Math.tan(camera.fov * Math.PI / 360));
+
     for (let b = 0; b < this.kinds.length; b++) {
       const k = this.kinds[b];
       const d = this.lod.distance * k.style.lod;
-      const inner = d * (1 - HYSTERESIS), outer = d * (1 + HYSTERESIS);
-      const in2 = inner * inner, out2 = outer * outer;
+      const knob2 = d * d;
+      const cardK = focal / k.style.card, card2 = cardK * cardK;
       const cutK = this.cut * k.style.cut, cut2 = cutK * cutK;
-      const src = k.nearM, at = k.at, cards = k.cards, tints = k.tints, state = k.state, n = k.count;
+      const src = k.nearM, at = k.at, cards = k.cards, tints = k.tints, sz2 = k.sz2, state = k.state, n = k.count;
       const nearArr = k.near.instanceMatrix.array, cardArr = k.far.instanceMatrix.array;
       const nearCol = k.near.instanceColor.array, cardCol = k.far.instanceColor.array;
       let a = 0, c = 0;
@@ -371,6 +386,11 @@ export class Flora {
         const dx = px - cx, dy = py - cy, dz = pz - cz;
         const dd = dx * dx + dy * dy + dz * dz;
         if (dd > cut2) { state[i] = 2; continue; }
+        // the swap distance of this one plant: the knob of its kind, or the reach of its card if
+        // that stands further out
+        const floor2 = sz2[i] * card2;
+        const lim2 = knob2 > floor2 ? knob2 : floor2;
+        const in2 = lim2 * IN_BAND, out2 = lim2 * OUT_BAND;
         let s = state[i];
         if (s === 0) { if (dd > out2) s = 1; } else s = dd < in2 ? 0 : 1;
         state[i] = s;
@@ -435,7 +455,7 @@ export class Flora {
 // The cover mask of the worker says where a tuft may grow. The colour of the terrain under the
 // tuft tints it, so the grass and the ground it stands on hold one hue.
 export class GrassField {
-  constructor({ palette, tier, sampler }) {
+  constructor({ palette, tier, sampler, variant = 0 }) {
     this.sampler = sampler;
     this.radius = tier.shadows ? 78 : 50;
     this.cell = tier.shadows ? 1.7 : 2.3;
@@ -446,7 +466,7 @@ export class GrassField {
     this.atZ = Infinity;
     this.group = new THREE.Group();
 
-    const geo = floraGeometry(FLORA.GRASS, palette.flora);
+    const geo = floraGeometry(FLORA.GRASS, palette.flora, variant);
     geo.computeBoundingBox();
     this.height = Math.max(geo.boundingBox.max.y, 0.001);
     const style = FLORA_STYLE[FLORA.GRASS];
