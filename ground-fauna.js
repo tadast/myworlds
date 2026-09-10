@@ -420,26 +420,48 @@ export class GroundFauna {
 
   // The creature under a screen point, with the world point to glide to, or null. The walk keeps
   // the base point and the scale of every animal, so the test reads the same numbers whether the
-  // animal draws as a near mesh or as a far one.
+  // animal draws as a near mesh or as a far one. The hit carries the distance from the camera and
+  // the size of the animal, so the caller can drop an animal that stands behind a hill.
+  //
+  // Two animals often cover one point on the screen. The test runs in two tiers. An animal whose
+  // body holds the point is a hit, and of the hits the nearest to the camera wins, because that is
+  // the animal the reader sees there. If no body holds the point, the animal with the smallest gap
+  // wins, and the gap counts against the width of that animal on the screen. A far animal of four
+  // pixels can therefore no longer take a tap that grazed a near one.
   pickHit(px, py, tolerance = PICK_TOL) {
     const cam = this.camera;
     if (!cam || !this.members.length) return null;
     const el = this.canvas, w = el ? el.clientWidth : 1, h = el ? el.clientHeight : 1;
-    let best = null, bestD = tolerance;
+    let best = null, bestHit = false, bestKey = Infinity;
     this.group.updateWorldMatrix(true, false);
     const root = this.group.matrixWorld;
     for (const m of this.members) {
       _pv.set(m.px, m.py, m.pz).applyMatrix4(root);
       _pt.set(m.px, m.py + m.scale * 1.1, m.pz).applyMatrix4(root);
       _pw.copy(_pv);                       // the world point, before project() overwrites it
+      const dist = _pw.distanceTo(cam.position);
       _pv.project(cam); _pt.project(cam);
-      if (_pv.z > 1) continue;
+      // Both ends of the body must sit between the near plane and the far plane. A test on the far
+      // end alone let through an animal level with the camera and off to the side: its depth runs
+      // to nothing, project() blows its two points thousands of pixels apart, and the huge body it
+      // draws on the screen then took every tap and carried the reader away to it.
+      if (_pv.z > 1 || _pv.z < -1 || _pt.z > 1 || _pt.z < -1) continue;
       const ax = (_pv.x + 1) / 2 * w, ay = (1 - _pv.y) / 2 * h;
       const bx = (_pt.x + 1) / 2 * w, by = (1 - _pt.y) / 2 * h;
       const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1;
       const u = clamp(((px - ax) * lx + (py - ay) * ly) / ll, 0, 1);
-      const d = Math.hypot(ax + lx * u - px, ay + ly * u - py) - Math.sqrt(ll) * 0.25;
-      if (d < bestD) { bestD = d; best = { kind: m.e.kind, point: _pb.copy(_pw).clone() }; }
+      const gap = Math.hypot(ax + lx * u - px, ay + ly * u - py);
+      const half = Math.sqrt(ll) * 0.35;   // pixels: the body stands about this far out from its axis
+      const reach = Math.max(tolerance, half);
+      if (gap > reach) continue;
+      const hit = gap <= half;             // the point is on the body, not beside it
+      const key = hit ? dist : gap / reach;
+      if (best) {
+        if (bestHit && !hit) continue;                    // a body under the point beats a graze
+        if (bestHit === hit && key >= bestKey) continue;
+      }
+      bestHit = hit; bestKey = key;
+      best = { kind: m.e.kind, scale: m.scale, dist, point: _pb.copy(_pw).clone() };
     }
     return best;
   }

@@ -78,6 +78,8 @@ const GLIDE_S = 0.8;        // seconds, the glide to a tapped point
 const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a glide
 const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
 const TAP_SLOP = 6;         // px, a pointer that moves more than this is a drag, not a tap
+const DBL_MS = 450;         // ms, the window for the second tap that opens the card of an animal
+const DBL_SLOP = 40;        // px, how far the second tap may land from the first
 const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
@@ -213,10 +215,11 @@ export class Ground {
     this._tap = null;
     this._pointers = 0;
     // The seam for issue 09. It sets pickCreature to a function that returns the creature under
-    // the pointer, { point, kind } or null. A tap on a creature glides to it, and the app then
-    // opens the inspector through onCreatureTap. A tap on the ground needs neither of them.
-    this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind } | null
-    this.onCreatureTap = null;   // (hit) => void, called when the glide ends
+    // the pointer, { point, kind, scale, dist } or null. One tap on a creature glides to it, and a
+    // second tap opens the inspector through onCreatureTap. A tap on the ground needs neither.
+    this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind, scale, dist } | null
+    this.onCreatureTap = null;   // (hit) => void, called on the second tap on one animal
+    this._lastTap = null;        // { t, x, y, hit }, the tap on an animal a second tap can follow
     this._bound = {
       down: (e) => this._onDown(e),
       move: (e) => this._onMove(e),
@@ -901,12 +904,31 @@ export class Ground {
     const r = this.canvas.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
     const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
-    const creature = this.pickCreature ? this.pickCreature(nx, ny, e) : null;   // the seam of issue 09
-    if (creature && creature.point) {
-      this.glideTo(creature.point, () => { if (this.onCreatureTap) this.onCreatureTap(creature); });
+    // One tap on an animal glides to it, so every tap moves the view and the reader keeps walking.
+    // A second tap in the same place opens the card of that animal, because a card that opens on
+    // the first tap covers the screen the reader is trying to cross. The second tap does not have
+    // to find the animal again: the first tap set the view gliding and the animal walks, so by now
+    // it stands somewhere else on the screen. The card comes from the animal the first tap found.
+    const now = performance.now();
+    const last = this._lastTap;
+    if (last && now - last.t < DBL_MS && Math.hypot(e.clientX - last.x, e.clientY - last.y) < DBL_SLOP) {
+      this._lastTap = null;
+      if (this.onCreatureTap) this.onCreatureTap(last.hit);
       return;
     }
+    this._lastTap = null;
+
     const hit = this.groundAtPointer(nx, ny);
+    let creature = this.pickCreature ? this.pickCreature(nx, ny, e) : null;   // the seam of issue 09
+    // The ray meets the ground at hit. An animal farther away than that stands behind the hill the
+    // reader tapped, so it is not the animal under the pointer, however near its body came to it.
+    // The margin holds an animal that stands on the skyline, where the ground behind it is nearer.
+    if (creature && hit && creature.dist > this.camera.position.distanceTo(hit) + Math.max(4, (creature.scale || 1) * 3)) creature = null;
+    if (creature && creature.point) {
+      this._lastTap = { t: now, x: e.clientX, y: e.clientY, hit: creature };
+      this.glideTo(creature.point);
+      return;
+    }
     if (hit) this.glideTo(hit);
   }
 
