@@ -389,6 +389,10 @@ function worldContext(seed) {
 
   const world = {
     seed, type, typeLabel: TYPE_LABEL[type],
+    // The flora signature of this world. flora-geometry.js turns it into the proportions and the
+    // hues of every plant, so two planets never build the same body from one kind. It takes its
+    // own hash and not a draw from `rng`, because the draw order of the seed stream must not move.
+    floraVariant: cyrb128(seed + '|flora-shape')[0] >>> 0,
     designation: designation(frng, seed),
     tilt: rrange(rng, -0.45, 0.45),
     spin: (type === 'gas' ? 0.12 : 0.05) * rrange(rng, 0.7, 1.4),
@@ -1262,6 +1266,11 @@ const FLORA_POOL = {
 };
 // a kind that may stand on a slope steeper than FLORA_SLOPE
 const FLORA_ROCK = new Set([FLORA.BOULDER, FLORA.CRYSTAL, FLORA.SHARD, FLORA.STACK]);
+// every alien kind a world may borrow, whatever its type. See floraCommunities().
+const FLORA_ALIEN = [
+  FLORA.TOWER, FLORA.SPINDLE, FLORA.PUFF, FLORA.SHARD, FLORA.FAN, FLORA.POD, FLORA.STACK,
+  FLORA.MUSHROOM, FLORA.CRYSTAL,
+];
 
 // The ground cover. Grass is not one of the plants: a patch holds far more tufts than the plant
 // cap allows, so the worker only says where a tuft may grow and ground-flora.js grows them around
@@ -1272,8 +1281,19 @@ const GRASS_WAVE = 52;       // units: the wavelength of the bald spots inside a
 
 // The communities of one patch. Each one takes a band of the community field, so it holds a part
 // of the box, and it carries a lead kind, a companion, and a density of its own.
-function floraCommunities(type, rng) {
-  const pool = FLORA_POOL[type] || FLORA_POOL.terran;
+function floraCommunities(type, rng, wrng) {
+  const base = FLORA_POOL[type] || FLORA_POOL.terran;
+  // The flora of the world, not of the patch. Every planet borrows one to three kinds from the
+  // whole alien set and drops up to two the type usually grows, so two terran worlds do not hold
+  // the same list. `wrng` runs off the seed of the world, so every patch of one planet agrees.
+  // Issue 22: without this a reader who moved between planets saw the same plants.
+  const guests = [];
+  const gn = 1 + Math.floor(wrng() * 3);
+  for (let i = 0; i < gn; i++) guests.push(FLORA_ALIEN[Math.floor(wrng() * FLORA_ALIEN.length)]);
+  let odd = base.odd.concat(guests);
+  const drop = Math.floor(wrng() * 3);
+  for (let i = 0; i < drop && odd.length > 3; i++) odd.splice(Math.floor(wrng() * odd.length), 1);
+  const pool = { core: base.core, odd };
   // how much of the patch the alien kinds take. An exotic world is strange nearly everywhere.
   const strange = type === 'exotic' ? rrange(rng, 0.55, 0.92) : rrange(rng, 0.3, 0.7);
   const count = 4 + Math.floor(rng() * 4);
@@ -1346,7 +1366,7 @@ function patchFlora(ctx, s) {
   const ob0 = rng() * 90, ob1 = rng() * 90;     // the bare field
   const ov0 = rng() * 90, ov1 = rng() * 90;     // the vigour field
   const oq0 = rng() * 90, oq1 = rng() * 90;     // the ground cover field
-  const comms = floraCommunities(type, rng);
+  const comms = floraCommunities(type, rng, makeRng(ctx.world.seed + '|flora-kinds'));
   const bareShare = rrange(rng, 0.12, 0.5);     // how much open ground this patch holds
 
   // The ground under one point: the grid vertex, the height, the slope, the normal, and whether a
@@ -2032,6 +2052,7 @@ function patch(seed, lat, lon, opts) {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
       span, metresAcross: K, metresUp: V,
+      floraVariant: ctx.world.floraVariant,
       rim: { out: rimOut, step: rimStep, n: rimN, hasSea: rimSea },
       // the ground cover mask of issue 21, on its own grid at twice the terrain step
       cover: { n: grown.grassN, step: grown.grassStep },

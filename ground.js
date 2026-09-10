@@ -366,7 +366,7 @@ export class Ground {
     this.flora = new Flora({
       renderer: this.renderer, flora: result.flora, palette: result.patch.palette,
       tier: this.tier, sky: this.sky, lod: this.lod, cut: FOG_FAR * 1.2,
-      groundColor: this.groundColor,
+      groundColor: this.groundColor, variant: result.patch.floraVariant || 0,
     });
     this.content.add(this.flora.group);
     const m = result.patch.marks;
@@ -379,7 +379,7 @@ export class Ground {
   _buildGrass(result) {
     if (!this.cover) return;
     this.grass = new GrassField({
-      palette: result.patch.palette, tier: this.tier,
+      palette: result.patch.palette, tier: this.tier, variant: result.patch.floraVariant || 0,
       sampler: {
         heightAt: (x, z) => this.heightAt(x, z),
         coverAt: (x, z) => this.coverAt(x, z),
