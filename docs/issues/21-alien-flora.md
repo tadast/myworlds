@@ -1,6 +1,6 @@
 # 21 Alien flora and ground cover
 
-Status: CLOSED, 2026-09-10, merged as PENDING.
+Status: CLOSED, 2026-09-10, merged as 0ba4007.
 
 Type: interactive. Phase 2. Blocked by: 07, 11. Read `docs/issues/README.md` first, in particular
 "The patch protocol" and "LOD".
