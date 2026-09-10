@@ -1,6 +1,6 @@
 # 22 The flora signature of a world, and the card floor
 
-Status: CLOSED, 2026-09-10, merged as PENDING.
+Status: CLOSED, 2026-09-10, merged as a151100.
 
 Type: HITL. Phase 2. Blocked by: 21. Read `docs/issues/README.md` first.
 
