@@ -58,11 +58,17 @@ body {
 .hworld::before { content: '· '; }
 #panel.collapsed .hworld { display: block; }
 .hbtns { display: flex; gap: 6px; margin-left: auto; }
-#toggle, #mute {
+#toggle, #mute, .probe-icon {
   background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
   width: 34px; height: 34px; border-radius: 10px; cursor: pointer; font-size: 16px;
 }
 #mute[aria-pressed="true"] { color: var(--muted); }
+/* The probe in the header. It says the same thing as the text button in the card, and it stays
+   in reach while the sidebar is folded away. */
+.probe-icon { line-height: 1; }
+.probe-icon[hidden] { display: none; }
+.probe-icon:hover { border-color: var(--accent); }
+.probe-icon[aria-pressed="true"] { border-color: var(--accent); background: rgba(124, 196, 255, 0.2); }
 
 #panel .body { flex: 1; min-height: 0; overflow: auto; padding: 0 14px; overscroll-behavior: contain; }
 .sec { padding: 4px 0 14px; }
