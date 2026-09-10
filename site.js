@@ -153,23 +153,71 @@ export function faunaHomes(fauna, count) {
 }
 
 // ---------------------------------------------------------------- the URL
-// #Seed for orbit. #Seed@lat,lon for a site. The seed is URL-encoded, the site is plain.
+// The hash carries the whole view, so a shared link opens the same ground from the same camera.
+// Four forms:
+//
+//   #Seed                          orbit, the camera where a new world puts it
+//   #Seed/lat,lon,dist             orbit, the camera over that point of the globe, dist radii out
+//   #Seed@lat,lon                  the probe is down on that site, the camera where the dive puts it
+//   #Seed@lat,lon/x,z,dist,az,pol  the probe is down, and the ground camera stands at that offset
+//
+// The site is a lat and a lon in degrees. The orbit camera is the point of the globe under it, in
+// the same frame as a site, and its distance in globe radii. The ground camera is the target x and
+// z metres from the site, then the distance in metres, the azimuth, and the polar angle of the
+// camera from that target, both angles in degrees. The seed is URL-encoded, so a seed holds no
+// bare @ and no bare /, and every number is plain. The view object keeps the two angles in
+// radians, because the ground camera works in radians.
 export function parseUrl(hash) {
   const h = (hash || '').replace(/^#/, '');
-  if (!h) return { seed: '', site: null };
-  const i = h.lastIndexOf('@');
-  if (i < 1) return { seed: decodeURIComponent(h), site: null };
-  const parts = h.slice(i + 1).split(',');
-  const lat = parseFloat(parts[0]), lon = parseFloat(parts[1]);
-  const good = parts.length === 2 && Number.isFinite(lat) && Number.isFinite(lon)
-    && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
-  if (!good) return { seed: decodeURIComponent(h), site: null };
-  return { seed: decodeURIComponent(h.slice(0, i)), site: { lat: round2(lat), lon: round2(lon), kind: -1 } };
+  if (!h) return { seed: '', site: null, view: null };
+  const s = h.indexOf('/');
+  const head = s < 0 ? h : h.slice(0, s);
+  const cam = s < 0 ? '' : h.slice(s + 1);
+  const i = head.lastIndexOf('@');
+  const site = i < 1 ? null : parseSite(head.slice(i + 1));
+  if (!site) return { seed: decodeURIComponent(head), site: null, view: parseOrbitView(cam) };
+  return { seed: decodeURIComponent(head.slice(0, i)), site, view: parseGroundView(cam) };
 }
 
-export function siteToUrl(seed, site) {
+export function viewToUrl(seed, site, view) {
   const base = '#' + encodeURIComponent(seed);
-  return site ? `${base}@${site.lat.toFixed(2)},${site.lon.toFixed(2)}` : base;
+  if (!site) {
+    if (!view || view.kind !== 'orbit') return base;
+    return `${base}/${view.lat.toFixed(2)},${view.lon.toFixed(2)},${view.dist.toFixed(3)}`;
+  }
+  const at = `${base}@${site.lat.toFixed(2)},${site.lon.toFixed(2)}`;
+  if (!view || view.kind !== 'ground') return at;
+  const deg = (r) => THREE.MathUtils.radToDeg(r).toFixed(2);
+  return `${at}/${view.x.toFixed(1)},${view.z.toFixed(1)},${view.dist.toFixed(1)},${deg(view.az)},${deg(view.pol)}`;
+}
+
+// The numbers of one field, or null when the field does not hold exactly n of them.
+function parseNums(text, n) {
+  const parts = (text || '').split(',');
+  if (parts.length !== n) return null;
+  const out = parts.map(Number);
+  return out.every((v) => Number.isFinite(v)) ? out : null;
+}
+
+function parseSite(text) {
+  const v = parseNums(text, 2);
+  if (!v || v[0] < -90 || v[0] > 90 || v[1] < -180 || v[1] > 180) return null;
+  return { lat: round2(v[0]), lon: round2(v[1]), kind: -1 };
+}
+
+function parseOrbitView(text) {
+  const v = parseNums(text, 3);
+  if (!v || v[0] < -90 || v[0] > 90 || v[1] < -180 || v[1] > 180 || !(v[2] > 0)) return null;
+  return { kind: 'orbit', lat: round2(v[0]), lon: round2(v[1]), dist: v[2] };
+}
+
+function parseGroundView(text) {
+  const v = parseNums(text, 5);
+  if (!v || !(v[2] > 0) || v[4] < 0 || v[4] > 180) return null;
+  return {
+    kind: 'ground', x: v[0], z: v[1], dist: v[2],
+    az: THREE.MathUtils.degToRad(v[3]), pol: THREE.MathUtils.degToRad(v[4]),
+  };
 }
 
 // ---------------------------------------------------------------- the marker

@@ -755,6 +755,48 @@ export class Ground {
     return p.y - this._groundAt(p.x, p.z);
   }
 
+  // ---------------------------------------------------------------- the view in the URL
+  // The camera in the frame of the patch: the target on the ground, and the offset of the camera
+  // from it as a distance and two angles. The site is the origin of that frame and the patch comes
+  // from the seed and the site, so the numbers hold for every reader who opens the link.
+  get view() {
+    const tg = this.controls.target;
+    _off.copy(this.camera.position).sub(tg);
+    const dist = _off.length() || 1;
+    return {
+      kind: 'ground',
+      x: tg.x, z: tg.z, dist,
+      az: Math.atan2(_off.x, _off.z),
+      pol: Math.acos(THREE.MathUtils.clamp(_off.y / dist, -1, 1)),
+    };
+  }
+
+  // Put the camera where a link asks, in place of the reveal position of load(). The clamps of
+  // update() run over it on the next frame, so a number from an old link cannot push the view
+  // under the ground or over the ceiling.
+  setView(v) {
+    if (!v || v.kind !== 'ground') return false;
+    const r = Math.hypot(v.x, v.z);
+    const k = r > FOG_NEAR ? FOG_NEAR / r : 1;
+    const x = v.x * k, z = v.z * k;
+    // The offset can be longer than controls.maxDistance: the clamps of update() move the camera
+    // after the controls aimed it, and over a deep sea the target sits on the bed far below. So the
+    // guard here is the sky dome, the widest the ground scene ever is.
+    const dist = THREE.MathUtils.clamp(v.dist, 1, SKY_RADIUS);
+    const pol = THREE.MathUtils.clamp(v.pol, 0.05, Math.PI * 0.499);
+    this.glide = null;
+    this.controls.target.set(x, this._groundAt(x, z) + TARGET_LIFT, z);
+    this.camera.up.set(0, 1, 0);
+    const tg = this.controls.target, s = Math.sin(pol);
+    this.camera.position.set(
+      tg.x + dist * s * Math.sin(v.az),
+      tg.y + dist * Math.cos(pol),
+      tg.z + dist * s * Math.cos(v.az),
+    );
+    this.controls.update();
+    return true;
+  }
+
   // ---------------------------------------------------------------- the feel of the controls
   // The height of the camera sets the speeds and the tilt. Near the ground a wheel step moves a
   // metre or two and the view looks out at the horizon. At the ceiling a step moves about a
