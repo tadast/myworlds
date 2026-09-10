@@ -504,9 +504,10 @@ function perfRows() {
     ['target', `${perf.target.toFixed(2)} ms   ${perf.hz} Hz${perf.hzDone ? '' : ' (estimating)'}`],
   ];
   if (mode === 'ground' && ground) {
-    const f = ground.flora, a = ground.fauna;
+    const f = ground.flora, a = ground.fauna, g = ground.grass;
     rows.push(['lod', `${ground.lod.distance.toFixed(0)} m   [${ground.lod.min}, ${ground.lod.max}]`]);
     rows.push(['flora', f ? `${f.nearCount} near / ${f.cardCount} cards` : 'none']);
+    rows.push(['grass', g ? `${g.count} tufts   ${g.buildMs.toFixed(2)} ms build` : 'none']);
     rows.push(['fauna', a ? `${a.nearCount} near / ${a.farCount} coarse` : 'none']);
     rows.push(['shadow', ground.sun && ground.sun.castShadow ? 'on' : 'off']);
     rows.push(['height', `${ground.cameraHeight.toFixed(0)} m over the ground`]);

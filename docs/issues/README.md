@@ -46,10 +46,13 @@ says. A patch built with no `span` keeps one unit to one metre. Since issue 18 t
 
 Budgets:
 
-| Tier | Grid step | Ground flora | Ground fauna | Shadows |
-|---|---|---|---|---|
-| HIGH | 2 m | 20,000 | 300 | yes |
-| LOW | 4 m | 6,000 | 100 | no |
+| Tier | Grid step | Ground flora | Ground grass | Ground fauna | Shadows |
+|---|---|---|---|---|---|
+| HIGH | 2 m | 20,000 | ~8,800 over 78 units | 300 | yes |
+| LOW | 4 m | 6,000 | ~2,000 over 50 units | 100 | no |
+
+The grass of issue 21 is not part of the flora cap. It is a lattice that the camera carries; see
+`GrassField` in `ground-flora.js`.
 
 `LOW` is already defined in `app.js` from pointer type, screen size, and core count. Since issue 13 the whole row lives in one object, `Q.ground` in `app.js`, which also holds `lodMax`.
 
@@ -226,3 +229,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | CLOSED 603aa99 |
 | 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED f2daf0d |
 | 20 | The reader aims the probe, and the ground view holds no rectangle | AFK | 02, 06, 18, 19 | CLOSED ecf59db |
+| 21 | Alien flora and ground cover | HITL | 07, 11 | PENDING |
