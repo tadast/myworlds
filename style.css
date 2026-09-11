@@ -176,6 +176,25 @@ button.probe[hidden] { display: none; }
 }
 #aim[hidden] { display: none; }
 
+/* ---------- the floating probe button
+   It shows at the two ends of the zoom, where the zoom has nothing left to give and the reader
+   who keeps pulling is asking to travel. It sits low and half lit, so it offers the journey
+   without covering the world. visibility carries the fade out and takes the button out of the
+   tab order with it. */
+.floatbtn {
+  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(6px); z-index: 9;
+  margin: 0; padding: 10px 20px; border-radius: 999px; cursor: pointer;
+  background: rgba(7, 10, 22, 0.5); border: 1px solid var(--line); color: #fff;
+  font: inherit; font-size: 13px; letter-spacing: 0.02em;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.28s, visibility 0.28s, transform 0.28s, background 0.15s;
+}
+.floatbtn.show { opacity: 0.72; visibility: visible; transform: translateX(-50%) translateY(0); }
+.floatbtn.show:hover, .floatbtn.show:focus-visible { opacity: 1; background: rgba(7, 10, 22, 0.75); }
+@media (prefers-reduced-motion: reduce) { .floatbtn { transition: opacity 0.28s, visibility 0.28s; } }
+
 /* ---------- overlay */
 #overlay {
   position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
