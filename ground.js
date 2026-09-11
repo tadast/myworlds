@@ -73,6 +73,17 @@ const POLAR_HIGH = 1.10;    // rad, the polar angle at the ceiling: the view loo
 const POLAR_LOW = 1.40;     // rad, the polar angle at TILT_FREE: the view looks out
 const POLAR_BAND = 0.06;    // rad, the play the reader keeps at the ceiling
 const POLAR_WIDE = 0.25;    // rad, the play the reader keeps at TILT_FREE
+// Issue 17: how far over the horizon the view may turn. The frame sets the limit. The view rises
+// until the horizon reaches the bottom edge and no further, so the reader always keeps the ground
+// in sight and cannot get lost in an empty sky. That is half the field of view over the horizon,
+// which is 30 deg on this camera, and a polar angle of 2.09 rad. A flyer that hovers 35 m up and
+// 35 m out stands 45 deg over the eye; it then sits high in the frame, but inside it.
+//
+// The floor of the camera is not the cap on this angle. OrbitControls puts the eye under the
+// target to point the view up, so a cap that keeps the eye over the terrain also keeps the view
+// under the horizon. The two jobs split here: the position clamp in update() holds the eye, and
+// this holds the angle.
+const polarUp = (camera) => Math.PI / 2 + THREE.MathUtils.degToRad(camera.fov) / 2;
 const SPEED_SPAN = 400;     // metres, the height where a wheel step reaches its full size
 const GLIDE_S = 0.8;        // seconds, the glide to a tapped point
 const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a glide
@@ -102,6 +113,7 @@ const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 
 // scratch vectors for the camera work, so no frame allocates
 const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
+const _sph = new THREE.Spherical();
 const _tint = [0, 0, 0];   // scratch colour for the rim rows
 
 // The settled LOD distance per tier. A tier is its own entry, because a low tier holds a
@@ -302,6 +314,8 @@ export class Ground {
     this.fauna = new GroundFauna({
       result, world: this.world, tier: this.tier, camera: this.camera, canvas: this.canvas,
       heightAt: (x, z) => this.heightAt(x, z), onInspect: this.onInspect, lod: this.lod,
+      // Issue 17: the shadow of a flyer falls opposite the sun, and it goes out after sundown.
+      sunDir: this.sunDir, night: this.sky.night,
     });
     this.content.add(this.fauna.group);
 
@@ -646,22 +660,29 @@ export class Ground {
       p.x += dx; p.z += dz;
     }
 
-    // The target rides the terrain, so it never sinks under a hill. The camera takes the same
-    // step, which holds the view direction and the distance while the reader pans over relief.
-    const lift = this._groundAt(tg.x, tg.z) + TARGET_LIFT - tg.y;
-    if (Math.abs(lift) > 1e-4) { tg.y += lift; p.y += lift; }
+    // The height of the pair. Two rules meet here. The target rides the terrain, so it never
+    // sinks under a hill. The eye keeps FLOOR metres over the ground under it, and over the water
+    // on a sea. Both move the pair by one step, which holds the view direction and the distance
+    // while the reader pans over relief.
+    //
+    // Issue 17 reads the two rules in one pass, because an up-view needs them read together.
+    // OrbitControls puts the eye under the target to point the view over the horizon, so the eye
+    // would go under the ground. The eye stops at the floor and the step carries the target up
+    // instead: the pivot of an up-view stands in the sky, and the view keeps turning. A view that
+    // points down or level keeps the behaviour of issue 06, because the eye there sits over the
+    // target and the floor does not bind.
+    const off = p.y - tg.y;        // negative while the view points over the horizon
+    const under = this._groundAt(p.x, p.z);
+    const floor = (this.sea ? Math.max(under, this.sea.level) : under) + FLOOR;
+    const eye = Math.max(this._groundAt(tg.x, tg.z) + TARGET_LIFT + off, floor);
+    const step = eye - p.y;
+    if (Math.abs(step) > 1e-4) { p.y += step; tg.y += step; }
 
     // the ceiling: shorten the offset from the target, so the view direction holds
     const ceiling = this.base + CEILING;
-    const dy = p.y - tg.y, room = ceiling - tg.y;
-    if (dy > room && room > 0) p.sub(tg).multiplyScalar(room / dy).add(tg);
+    const room = ceiling - tg.y;
+    if (off > room && room > 0) p.sub(tg).multiplyScalar(room / off).add(tg);
     this.atCeiling = p.y >= ceiling - 1;
-
-    // the floor: the camera stays FLOOR metres above the terrain, and above the sea over water.
-    // Issue 06 ends the clamp block with one lookAt, so no controls.update() runs here.
-    const under = this._groundAt(p.x, p.z);
-    const floor = (this.sea ? Math.max(under, this.sea.level) : under) + FLOOR;
-    if (p.y < floor) p.y = floor;
 
     // The clamps move the camera after controls.update() aimed it, so it must aim again. One
     // lookAt costs far less than a second controls.update(), and a second update would apply
@@ -786,7 +807,9 @@ export class Ground {
     // after the controls aimed it, and over a deep sea the target sits on the bed far below. So the
     // guard here is the sky dome, the widest the ground scene ever is.
     const dist = THREE.MathUtils.clamp(v.dist, 1, SKY_RADIUS);
-    const pol = THREE.MathUtils.clamp(v.pol, 0.05, Math.PI * 0.499);
+    // Issue 17 opened the angle over the horizon, so a link may hold an up-view. The clamps of
+    // update() put the eye back over the terrain on the next frame, and the target goes up.
+    const pol = THREE.MathUtils.clamp(v.pol, 0.05, polarUp(this.camera));
     this.glide = null;
     this.controls.target.set(x, this._groundAt(x, z) + TARGET_LIFT, z);
     this.camera.up.set(0, 1, 0);
@@ -796,6 +819,12 @@ export class Ground {
       tg.y + dist * Math.cos(pol),
       tg.z + dist * s * Math.cos(v.az),
     );
+    // The band the controls hold is the band of the camera this call replaces, so it belongs to a
+    // height the link does not use. It would cut the angle of the link, and an up-view would come
+    // back at the horizon. Open the band for this one update; _drive() sets it from the new height
+    // on the next frame, and it pulls the view back if the link asks for more than that height gives.
+    this.controls.minPolarAngle = Math.min(this.controls.minPolarAngle, pol);
+    this.controls.maxPolarAngle = Math.max(this.controls.maxPolarAngle, pol);
     this.controls.update();
     return true;
   }
@@ -805,7 +834,7 @@ export class Ground {
   // metre or two and the view looks out at the horizon. At the ceiling a step moves about a
   // hundred metres and the view looks down on the patch, as the globe does with its pitch.
   _drive() {
-    const p = this.camera.position, tg = this.controls.target;
+    const p = this.camera.position;
     const h = Math.max(0, p.y - this._groundAt(p.x, p.z));
     const near = THREE.MathUtils.clamp(h / SPEED_SPAN, 0.06, 1);
     this.controls.rotateSpeed = 0.35 + 0.35 * near;
@@ -820,12 +849,12 @@ export class Ground {
     const free = 1 - THREE.MathUtils.smoothstep(h, TILT_FREE, TILT_FREE * 2);
     const want = THREE.MathUtils.lerp(POLAR_LOW, POLAR_HIGH, k);
     const band = THREE.MathUtils.lerp(THREE.MathUtils.lerp(POLAR_WIDE, POLAR_BAND, k), Math.PI, free);
-    // At this distance the camera meets the floor at this polar angle, and it cannot pass it.
-    const d = Math.max(1e-3, p.distanceTo(tg));
-    const cap = Math.acos(THREE.MathUtils.clamp((this._groundAt(p.x, p.z) + FLOOR - tg.y) / d, -0.32, 1));
+    // The band ends where the horizon leaves the frame. See polarUp(). Over TILT_FREE the band is
+    // narrow and want + band stays well under that, so the descent still turns the view from the
+    // patch below to the horizon. Only the free band near the ground opens upward.
     const min = Math.max(0.05, want - band);
     this.controls.minPolarAngle = min;
-    this.controls.maxPolarAngle = Math.max(min + 0.01, Math.min(cap, want + band));
+    this.controls.maxPolarAngle = Math.max(min + 0.01, Math.min(polarUp(this.camera), want + band));
   }
 
   // ---------------------------------------------------------------- the glide
@@ -844,14 +873,40 @@ export class Ground {
     return this.glide;
   }
 
+  // Issue 17: the turn to a flyer. A flyer hovers tens of metres over the ground and the target
+  // rides the ground, so no glide of the target can reach it. The view turns instead: the offset
+  // from the target to the eye swings until the view points at the flyer, and the clamps of
+  // update() then carry the target up into the sky and hold the eye over the terrain. The eye
+  // keeps its place, so the reader turns the head and does not walk.
+  //
+  // The turn ends inside maxPolarAngle, the reach the reader's own drag has at this height. A turn
+  // past it would hold for the glide and then snap back, because the controls clamp the angle on
+  // every frame.
+  turnTo(point, done) {
+    const p = this.camera.position, tg = this.controls.target;
+    const d = Math.max(this.controls.minDistance, p.distanceTo(tg));
+    const to = _dir.copy(p).sub(point).setLength(d);
+    _sph.setFromVector3(to);
+    _sph.phi = Math.min(_sph.phi, this.controls.maxPolarAngle);
+    _sph.makeSafe();
+    this.glide = { k: 0, turn: true, from: _off.copy(p).sub(tg).clone(), to: to.setFromSpherical(_sph).clone(), done: done || null };
+    return this.glide;
+  }
+
   _stepGlide(dt) {
     const g = this.glide;
     g.k = Math.min(1, g.k + dt / GLIDE_S);
     const e = 1 - Math.pow(1 - g.k, 3);
     const p = this.camera.position, tg = this.controls.target;
-    const off = _off.copy(p).sub(tg);
-    tg.lerpVectors(g.from, g.to, e);
-    p.copy(tg).add(off.setLength(THREE.MathUtils.lerp(g.d0, g.d1, e)));
+    if (g.turn) {
+      // The offset turns and its length holds. A lerp of two offsets of one length, set back to
+      // that length, walks the same arc a slerp walks over the angle a turn of the view covers.
+      p.copy(tg).add(_off.copy(g.from).lerp(g.to, e).setLength(g.to.length()));
+    } else {
+      const off = _off.copy(p).sub(tg);
+      tg.lerpVectors(g.from, g.to, e);
+      p.copy(tg).add(off.setLength(THREE.MathUtils.lerp(g.d0, g.d1, e)));
+    }
     if (g.k >= 1) { this.glide = null; if (g.done) g.done(); }
   }
 
@@ -923,10 +978,16 @@ export class Ground {
     // The ray meets the ground at hit. An animal farther away than that stands behind the hill the
     // reader tapped, so it is not the animal under the pointer, however near its body came to it.
     // The margin holds an animal that stands on the skyline, where the ground behind it is nearer.
-    if (creature && hit && creature.dist > this.camera.position.distanceTo(hit) + Math.max(4, (creature.scale || 1) * 3)) creature = null;
+    // Issue 17: a flyer takes no such test. It hovers over the ground, so the ray that passes
+    // under it meets the ground nearer than the flyer stands, and the test would drop every flyer
+    // the reader can see.
+    if (creature && !creature.air && hit && creature.dist > this.camera.position.distanceTo(hit) + Math.max(4, (creature.scale || 1) * 3)) creature = null;
     if (creature && creature.point) {
       this._lastTap = { t: now, x: e.clientX, y: e.clientY, hit: creature };
-      this.glideTo(creature.point);
+      // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
+      // it would point the view at the ground under it instead.
+      if (creature.air && creature.point.y > this.camera.position.y + 1) this.turnTo(creature.point);
+      else this.glideTo(creature.point);
       return;
     }
     if (hit) this.glideTo(hit);

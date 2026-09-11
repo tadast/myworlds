@@ -361,6 +361,40 @@ card compiles one program and one `uTime` drives both. The far mesh casts no sha
 real shape, and the sun casts only while the camera is under the LOD distance, where every animal
 near the reader is a near mesh anyway.
 
+### The flyer
+
+A flyer needs four rules of its own. It hangs in an empty sky with no ground, no plant, and no herd
+beside it, so nothing there tells the reader how large it is or how far away it stands. Added with
+issue 17.
+
+- **It keeps its full mesh 2.5 LOD distances out** (`AIR_LOD`). The coarse body drops the head
+  parts and folds the legs to one bone each, which reads as a fault on the one animal the reader
+  looks at up there. An air group holds one or two animals, so the triangles cost nothing.
+- **It never draws narrower than 11 px** (`AIR_MIN_PX`). The walk measures the width of the body in
+  pixels, and under that width it grows the animal until it reaches it, by 3 times at the most
+  (`AIR_GROW`). The growth is smooth in the distance, so nothing pops, and it falls to 1 near by,
+  where the ground and the plants are there to measure the animal against. A drifter of 1.9 m
+  covers 9 px at 150 m on a 800 px frame; it covers 2.5 px at 500 m, and it draws at 7.6 px.
+- **It breathes.** The height over the ground rises and falls 1.4 m on a clock of 0.06 turns per
+  second, with a phase per group and per animal. A body that holds one height reads as a sprite
+  pinned to the sky.
+- **It lays a shadow on the ground.** See below.
+
+**The shadow is the cue.** A reader who never looks up never finds a flyer, and the issue asks for
+no new part of the interface. So the animal writes its own hint on the ground the reader is already
+watching: a soft disc slides over the grass, and the head goes up. The shadow map cannot do this
+work. It draws only while the camera is under the LOD distance, and a flyer at that range is a far
+mesh that casts nothing.
+
+The disc is one instanced mesh, one instance per air animal, and a fan of 4 rings in the xz plane.
+The alpha of the vertex falls off over the rings, which is a soft edge for the price of 140
+triangles. One float per instance carries the strength of the disc, so a flyer high up throws a
+weak shadow and one over the treetops throws a hard one. It falls opposite the sun and reaches 2.6
+heights of the flyer at the most, so a low sun cannot throw it out of sight. It reads the terrain
+where it lands and not where the flyer flies, so it lies on the slope it falls on. It takes the
+ground colour of the palette at a quarter of its lightness, because a black disc reads as a sticker
+on any ground but grey rock, and it goes out with the sun: a night world shows none.
+
 ### Steering
 
 `ground-fauna.js` gives each anchor one mover from `makeMover()`, in metres:
