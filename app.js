@@ -40,8 +40,6 @@ const PICK_RANGE = CAM_MIN + 0.1;   // the globe holds still inside this camera 
 // page builds no element and does no work for it.
 const PERF = new URLSearchParams(location.search).has('perf');
 const HUD_MS = 500;       // ms, the overlay reads twice a second
-const ZOOM_HOLD = 500;    // ms, a zoom out must continue this long to recall the probe
-const ZOOM_GAP = 250;     // ms, a longer gap between zoom steps ends the gesture
 const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
 const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
 const FADE_MS = 600;      // ms, the fade out of the overlay after the switch
@@ -64,6 +62,7 @@ const panel = $('#panel');
 const shareBtn = $('#share');
 const probeBtn = $('#probe');
 const probeIconBtn = $('#probe-icon');
+const probeFloat = $('#probe-float');
 const aimEl = $('#aim');
 const helpEl = $('#help');
 // The two lines of help, one per place the reader stands. The globe turns under the pointer and the
@@ -446,6 +445,7 @@ function frame() {
   perf.frame(now, !!dive || busy);
   if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
   step(now);
+  updateProbeFloat();
   perf.work(performance.now() - now);
 }
 
@@ -453,7 +453,6 @@ function step(now) {
   const dt = Math.min(clock.getDelta(), 0.1);
   const t = clock.elapsedTime;
   if (dive) stepDive(now);
-  checkZoomHold(now);
   if (mode === 'ground') {          // the globe stays in memory, but none of its work runs
     ground.update(t, dt);
     ground.render();
@@ -857,37 +856,32 @@ function updateProbeBtn() {
   if (show && changed) showProbeBtn();
 }
 
-// ---------------------------------------------------------------- the zoom hold
-// The camera cannot pass the ground ceiling, so a continued zoom is read from the wheel and the
-// pinch, not from the camera distance. Half a second of zoom out at the ceiling recalls the
-// probe. A zoom in sends no probe: the reader sends it with the button and a tap.
-let zoomDir = 0, zoomSince = 0, zoomLast = 0;
-function noteZoom(dir) {
-  const now = performance.now();
-  if (dir !== zoomDir || now - zoomLast > ZOOM_GAP) { zoomDir = dir; zoomSince = now; }
-  zoomLast = now;
+// ---------------------------------------------------------------- the floating probe button
+// The zoom used to carry the reader between the two places: half a second of zoom out at the
+// ceiling of the ground recalled the probe. That reads as a fault. A reader who pulls back to see
+// more of the patch is thrown off the world, and the gesture that framed the view also ended it.
+//
+// The zoom now stops at the limit and does nothing else, and the limit offers the journey instead.
+// At the ceiling of the ground the button recalls the probe. At the closest zoom of the globe it
+// sends one. It only shows at the limit, where the zoom has nothing left to give and the reader who
+// keeps pulling is asking to travel, so it never covers a view the reader is still moving.
+const FLOAT_NEAR = CAM_MIN + 0.005;   // globe radii: the camera counts as fully zoomed in here
+let floatLabel = '';
+function updateProbeFloat() {
+  if (!probeFloat) return;
+  let label = '';
+  if (!dive && !busy && !aiming) {
+    if (mode === 'ground' && ground && ground.atCeiling) label = 'Recall the probe';
+    else if (mode === 'orbit' && canDescend() && camera.position.length() <= FLOAT_NEAR) label = 'Send a probe to the surface';
+  }
+  if (label === floatLabel) return;
+  floatLabel = label;
+  // The text holds through the fade out, so the reader never reads a label change on a button
+  // that is going away.
+  if (label) probeFloat.textContent = label;
+  probeFloat.classList.toggle('show', !!label);
 }
-function checkZoomHold(now) {
-  if (!zoomDir || now - zoomLast > ZOOM_GAP || now - zoomSince < ZOOM_HOLD) return;
-  if (zoomDir > 0 && mode === 'ground' && !dive && ground.atCeiling) { zoomDir = 0; ascend(); }
-}
-canvas.addEventListener('wheel', (e) => { if (e.deltaY) noteZoom(e.deltaY < 0 ? -1 : 1); }, { passive: true });
-
-const pinch = new Map();
-canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') pinch.set(e.pointerId, [e.clientX, e.clientY]); });
-canvas.addEventListener('pointermove', (e) => {
-  if (e.pointerType !== 'touch' || !pinch.has(e.pointerId)) return;
-  const prev = [...pinch.values()];
-  pinch.set(e.pointerId, [e.clientX, e.clientY]);
-  if (prev.length !== 2) return;
-  const cur = [...pinch.values()];
-  const d0 = Math.hypot(prev[0][0] - prev[1][0], prev[0][1] - prev[1][1]);
-  const d1 = Math.hypot(cur[0][0] - cur[1][0], cur[0][1] - cur[1][1]);
-  if (Math.abs(d1 - d0) > 0.5) noteZoom(d1 > d0 ? -1 : 1);
-});
-const dropPinch = (e) => pinch.delete(e.pointerId);
-canvas.addEventListener('pointerup', dropPinch);
-canvas.addEventListener('pointercancel', dropPinch);
+if (probeFloat) probeFloat.addEventListener('click', onProbeClick);
 
 // creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
 const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _m = new THREE.Matrix4();

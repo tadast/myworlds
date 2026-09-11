@@ -113,6 +113,22 @@ and it still read at 800 m; at the new ceiling, panned to each of the four limit
 foot of the band, nothing reads. The cost is the top-down view of the whole patch, which is the
 view the rectangle was in.
 
+**The zoom stops at the limit, and the limit offers the journey.** Added after issue 23, from use.
+Issue 03 gave the zoom a second job: half a second of zoom out at the ceiling of the ground recalled
+the probe. It reads as a fault. A reader who pulls back to see more of the patch is thrown off the
+world, and the gesture that framed the view also ended it. There is no way to sit at the ceiling and
+look.
+
+The zoom now stops at the ceiling and does nothing else. A button fades in at the foot of the screen
+instead, half lit, and it says "Recall the probe". The globe takes the mirror of it: at the closest
+zoom, where the reader is already down among the creatures, the button says "Send a probe to the
+surface". Both call the one handler the sidebar button calls.
+
+The button only shows at the limit. That is the moment the zoom has nothing left to give and the
+reader who keeps pulling is asking for something the zoom cannot do, so the offer arrives exactly
+when it answers a question the reader is already asking, and it covers no view that the reader is
+still moving. It hides while the reader aims, because the aim banner already holds the screen.
+
 **The reader walks, and moving takes the first gesture.** Added with issue 23. Issue 06 gave the
 ground the gesture map of the globe: one finger and the left button turned the view, and the pan sat
 on the right button and on two fingers. On the globe that is right, because the reader turns a thing
