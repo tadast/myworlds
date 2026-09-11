@@ -42,7 +42,7 @@ a cell of the globe 0.01 units of arc wide, about 74 km on a 7,352 km planet, an
 draws into that box. `patch.metresAcross` and `patch.metresUp` give the two scales, and
 `patch.span` gives the width of the cell in metres. A plant and a creature keep their lore size
 in units, so they read as normal against the ground and they are no longer the metres the lore
-says. A patch built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 3,150 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the reveal and from the ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Since issue 20 the camera ceiling is 500 m and the reveal is 450 m up and 884 m south, so the detail of the patch never reads as a rectangle. Camera floor 2 m above the terrain.
+says. A patch built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 3,150 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the reveal and from the ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Since issue 20 the camera ceiling is 500 m and the reveal is 450 m up and 884 m south, so the detail of the patch never reads as a rectangle. Camera floor 2 m above the terrain. Since issue 17 the polar angle runs to 2.09 rad near the ground, which is 30 deg over the horizon, and the floor is a clamp on the position of the camera and no longer a cap on that angle. An up-view lifts the target into the sky and holds the eye on the floor.
 
 Budgets:
 
@@ -225,7 +225,7 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 14 | Ground-scale phenomena | HITL | 04, design | open |
 | 15 | Sea species | HITL | 05, 09, design | open |
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
-| 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | open |
+| 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | PENDING |
 | 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | CLOSED 603aa99 |
 | 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED f2daf0d |
 | 20 | The reader aims the probe, and the ground view holds no rectangle | AFK | 02, 06, 18, 19 | CLOSED ecf59db |

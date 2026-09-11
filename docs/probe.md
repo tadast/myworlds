@@ -65,7 +65,32 @@ Added with issue 06. These notes record the decisions the issue text did not fix
 
 **The fog opens with the height.** The reveal puts the camera 450 m up and the ceiling is 500 m, but the fog is solid at 750 m. A fixed fog therefore paints one flat colour over the whole patch from both heights, and the reader sees nothing to zoom into. So the far distance of the fog grows with the height of the camera over the site, 1.15 m per metre, and it stops at 2,100 m. The near distance keeps the ratio of 0.6, so the depth of the fade holds. Since the ceiling of issue 20 the fog opens to 1,325 m at most, so the stop at 2,100 m no longer binds. At the ceiling the patch reads in full and the rim runs on to 3,150 units, well past the fog, so the ground never shows a cut. See "The rim carries the ground past the fog" below. `FOG_NEAR` and `FOG_FAR` keep their values and still set the pan limit and the fog at the ground.
 
-**The tilt is a band, not a lock.** The height sets the polar angle the view wants, from 1.10 rad at the ceiling to 1.40 rad at 60 m, and a band around that angle holds the play the reader keeps. The band is 0.06 rad at the ceiling and 0.25 rad at 60 m, so a zoom in turns the view from the patch below to the horizon on its own. Under 60 m the band opens to a half turn and the reader owns the angle. A hard lock was rejected: it takes the turn of the view away from the reader for the whole upper half of the range. A second limit caps the polar angle where the camera would meet the floor, so the controls do not fight the floor clamp and shake.
+**The tilt is a band, not a lock.** The height sets the polar angle the view wants, from 1.10 rad at the ceiling to 1.40 rad at 60 m, and a band around that angle holds the play the reader keeps. The band is 0.06 rad at the ceiling and 0.25 rad at 60 m, so a zoom in turns the view from the patch below to the horizon on its own. Under 60 m the band opens to a half turn and the reader owns the angle. A hard lock was rejected: it takes the turn of the view away from the reader for the whole upper half of the range.
+
+**The view turns over the horizon.** Added with issue 17. Until then the band ended 5 deg under the
+horizon, so the reader could never look up, and an air species that hovers 12 to 40 m over the
+ground was never seen. The cap was the floor of the camera: it held the eye 2 m over the terrain,
+and it read as a limit on the polar angle, because OrbitControls puts the eye under the target to
+point the view up. One number did two jobs, and the job it did well hid a whole class of animal.
+
+The two jobs now split. The angle runs to 2.09 rad and the position clamp in `update()` holds the
+eye. The clamp reads both rules in one pass. The target rides the terrain and the eye keeps its
+floor, and either rule moves the pair of them by the same step, so the view direction and the
+distance both hold. While the view points up the eye stops at the floor and the step carries the
+target up instead: the pivot of an up-view stands in the sky, tens of metres over the reader. The
+reader therefore turns the head and does not walk, and a pan over relief cannot tilt the view. A
+view that points down or level keeps the behaviour of issue 06, because the eye sits over the
+target there and the floor does not bind.
+
+The frame sets the 2.09 rad. The view rises until the horizon reaches the bottom edge and no
+further, which is half the field of view over the horizon, or 30 deg on the 60 deg camera. A wider
+angle was rejected: it fills the frame with empty sky and the reader loses the ground. A flyer that
+hovers 35 m up and 35 m out stands 45 deg over the eye, and it then sits high in the frame but
+inside it.
+
+A link carries an up-view as a polar angle over 90 deg, and `setView()` opens the band of the
+controls for its one update. Without that the controls cut the angle of the link against the band
+of the camera the link replaces, and every up-view came back at the horizon.
 
 **The ground view must not read as a rectangle.** Added with issue 20. The patch holds a 2 m grid
 with knolls and rock, and it holds every plant. The rim outside it holds a 50 m grid with neither,
@@ -124,6 +149,20 @@ draw time.
 **The tap marches the height field.** A tap needs the point of the ground under the pointer. A triangle test against the terrain runs over a million faces. A march along the ray over the height grid costs about 450 steps and a bisection, it reads the rim as well as the patch, and it does not care which meshes issues 05, 07, and 09 add later.
 
 **The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)` and `ground.onCreatureTap(hit)`. A tap asks `pickCreature` first. A hit glides to `hit.point` and calls `onCreatureTap` when the glide ends, so the inspector opens after the glide. Without issue 09 both are null and every tap is a ground tap.
+
+**A tap on a flyer turns the view, it does not walk it.** Added with issue 17. The glide of issue 06
+moves the target, and the target rides the ground, so a glide to a flyer aims the view at the ground
+under it and the animal leaves the top of the frame. `turnTo()` swings the offset from the target to
+the eye instead, until the view points at the flyer. The eye keeps its place, the clamp carries the
+target up into the sky, and the reader looks up at the animal. A flyer under the eye takes the
+ordinary glide, because the reader there stands over it and has to come down to it. The turn ends
+inside `maxPolarAngle`, the reach the drag of the reader has at that height, or the controls would
+pull the view back at the end of the glide.
+
+A flyer also takes no occlusion test. The tap drops an animal that stands farther away than the
+ground the ray meets, because that animal is behind the hill the reader tapped. A flyer hovers over
+the ground, so the ray that passes under it always meets the ground nearer than the flyer stands,
+and the test would drop every flyer the reader can see.
 
 ### What the flora costs
 

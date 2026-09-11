@@ -13,6 +13,11 @@
 // no animal skids. Each animal also keeps its own turn, so it leans into a curve, shortens the
 // stride of its inside legs, and never turns tighter than the circle its body can walk.
 //
+// A flyer is a special case, because nothing in the sky gives it a size. Issue 17 keeps its full
+// mesh AIR_LOD times farther out than a walker, holds it at AIR_MIN_PX pixels across so it reads as
+// a body and not as a speck, and lays a soft shadow of it on the ground. The shadow is the cue: the
+// reader watches the grass, a patch of shade slides over it, and the head goes up.
+//
 // A species draws at two levels of detail, as the flora does in ground-flora.js. An animal closer
 // to the camera than ground.lod.distance goes to the near mesh, which is the full creature. An
 // animal past it goes to the far mesh, which is the coarse creature of under 80 triangles. One
@@ -39,6 +44,26 @@ const TURN_RADIUS = 1.3;     // the tightest circle an animal can walk, in body 
 const TRAIL_LEN = 64;        // samples of the anchor path, for the species that follow it with a lag
 const TRAIL_STEP = 0.1;      // seconds between two samples of the path
 const WATER_MARGIN = 0.5;    // metres above sea level a walker keeps
+// ---------------------------------------------------------------- the flyer, issue 17
+// A walker has the ground, a plant, and its own herd beside it, so the reader reads its size from
+// them. A flyer hangs in an empty sky 100 m away and it is the one thing up there the reader looks
+// at, so a coarse body of 80 triangles reads as a fault and a body of two pixels reads as dust.
+// An air group holds one animal, so both rules cost almost nothing.
+const AIR_LOD = 2.5;         // a flyer keeps its full mesh this many LOD distances out
+const AIR_MIN_PX = 11;       // pixels: the narrowest a flyer may draw across its body
+const AIR_GROW = 3;          // the most a flyer may grow to reach that width
+const AIR_BOB = 1.4;         // metres: the rise and fall of a flyer on its own slow breath
+const AIR_BOB_HZ = 0.06;     // turns per second of that breath
+// The shadow of a flyer: one soft disc on the ground under it, at the slant of the sun. It spreads
+// and it fades as the flyer climbs, as a real shadow does.
+const SHADE_LIFT = 0.3;      // metres: the disc floats this far over the terrain, to clear it
+const SHADE_SPREAD = 1.9;    // how wide the disc grows over the body, at the top of AIR_HOVER
+const SHADE_CAST = 2.6;      // the longest the sun may throw the disc, in heights of the flyer
+const SHADE_MIN = 1.3;       // metres: the smallest radius a disc takes, so a small flyer marks too
+const SHADE_DARK = 0.55;     // the alpha of the disc at the bottom of AIR_HOVER
+const SHADE_FADE = 0.45;     // the part of that alpha the disc keeps at the top of AIR_HOVER
+const SHADE_RINGS = 4;       // rings of the disc: more rings make a softer edge
+const SHADE_SEG = 20;        // segments around the disc
 const PICK_TOL = 34;         // pixels: how near a tap must come to a creature
 const HYSTERESIS = 0.05;     // ±5% around the LOD distance: a band of 10%, as ground-flora.js uses
 const DEFAULT_LOD = { distance: 150 };   // the fallback when no owner passes its lod knob
@@ -105,7 +130,9 @@ export function turnRadius(G) {
 export class GroundFauna {
   // heightAt(x, z) gives the elevation in metres. onInspect(kind) opens the inspector card.
   // lod is the shared LOD knob of the ground: { distance, min, max } in metres.
-  constructor({ result, world, tier, heightAt, camera, canvas, onInspect, lod }) {
+  // sunDir is the direction of the sun in the ground frame, and night is 0 by day and 1 at night.
+  // The shadow of a flyer reads both: it falls opposite the sun, and it fades out after sundown.
+  constructor({ result, world, tier, heightAt, camera, canvas, onInspect, lod, sunDir, night }) {
     this.world = world;
     this.tier = tier;
     this.heightAt = heightAt;
@@ -122,6 +149,12 @@ export class GroundFauna {
     this.farCount = 0;      // animals drawn as coarse meshes this frame
     this.stepMs = 0;
     this._down = null;
+    // the shadow of a flyer: one instanced disc, one instance per air animal. See _buildShade().
+    this.shade = null;
+    this.shadeCount = 0;
+    this._sun = (sunDir ? sunDir.clone() : new THREE.Vector3(1, 0.55, 0.8)).normalize();
+    this._night = night || 0;
+    this._pxPerM = 0;
 
     const patch = result && result.patch;
     const gs = result && result.groups, ms = result && result.members;
@@ -176,8 +209,12 @@ export class GroundFauna {
       // A far mesh never casts. It holds no real shape, and the sun only casts at all while the
       // camera is under the LOD distance, where every animal near the reader is a near mesh.
       const far = this._mesh(coarse, mat, n, false);
+      // The width of the body in metres. The screen test of a flyer and the disc of its shadow both
+      // read it. metreScale() left the bounding box on the geometry, so this costs nothing.
+      const b = full.boundingBox;
+      const widthM = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) * scale;
       const entry = {
-        G, kind: k, near, far, mat, scale,
+        G, kind: k, near, far, mat, scale, widthM,
         nearN: 0, farN: 0, phaseDirty: true,
         // the gait clock of this species, and the tightest circle it walks
         locked: gaitLocked(G), turnR: turnRadius(G), hipY: full.userData.hipY || 0,
@@ -208,6 +245,7 @@ export class GroundFauna {
         x0: gs[o], z0: gs[o + 1], x: gs[o], z: gs[o + 1],
         spread: gs[o + 4], heading: st.heading, act: flies ? 1 : 0,
         hover: flies ? AIR_HOVER[0] + rng() * (AIR_HOVER[1] - AIR_HOVER[0]) : 0,
+        bob: flies ? rng() * 6.28 : 0,      // the phase of its breath, so no two flyers rise together
         // a serpent and a plough read as a chain only when the body behind follows the way in front
         lag: G.loco === 'serpent' || G.loco === 'plough',
         trail: new Float32Array(TRAIL_LEN * 3), ti: 0, tAcc: 0, n: 0,
@@ -239,11 +277,79 @@ export class GroundFauna {
         spd: 0, turn: 0, gait: e.locked ? makeGait(g.G, e.scale, top * MEMBER_RUSH, e.hipY) : null,
         // the level of detail: 0 near, 1 far. The slot in that mesh is set by the walk.
         far: 1, mesh: null, slot: -1, px: 0, py: 0, pz: 0,
+        // Issue 17: the scale the walk drew it at, which a far flyer grows, and its slot in the
+        // shade mesh. The pick reads the drawn scale, so a grown flyer is as easy to tap as it
+        // looks. A walker keeps its own scale and takes no shadow disc.
+        drawScale: e.scale, shade: g.flies ? this.shadeCount++ : -1,
       };
       this.members.push(m);
       this.count++;
     }
+    if (this.shadeCount) this._buildShade();
     this.update(0, 0);      // put every animal on the ground before the first frame is drawn
+  }
+
+  // ---------------------------------------------------------------- the shadow of a flyer
+  // A soft disc on the ground under each flyer, at the slant of the sun. It is a cue, not a
+  // simulation: a reader who watches the grass sees a patch of shade cross it, and looks up. The
+  // real shadow map cannot do this work. It only draws while the camera is under the LOD distance,
+  // and a flyer at that range is a far mesh that casts nothing.
+  //
+  // The disc is a fan of rings in the xz plane, so the instance basis lays it on the terrain. The
+  // alpha falls off over the rings, which is a soft edge for the price of 140 triangles.
+  _buildShade() {
+    const seg = SHADE_SEG, rings = SHADE_RINGS;
+    const pos = [], col = [], idx = [];
+    const push = (x, z, a) => { pos.push(x, 0, z); col.push(1, 1, 1, a); };
+    push(0, 0, 1);
+    for (let r = 1; r <= rings; r++) {
+      const rad = r / rings;
+      const a = Math.pow(1 - rad, 1.6);
+      for (let i = 0; i < seg; i++) {
+        const th = (i / seg) * Math.PI * 2;
+        push(Math.cos(th) * rad, Math.sin(th) * rad, a);
+      }
+    }
+    for (let i = 0; i < seg; i++) idx.push(0, 1 + i, 1 + ((i + 1) % seg));
+    for (let r = 1; r < rings; r++) {
+      const a0 = 1 + (r - 1) * seg, b0 = 1 + r * seg;
+      for (let i = 0; i < seg; i++) {
+        const j = (i + 1) % seg;
+        idx.push(a0 + i, b0 + i, b0 + j, a0 + i, b0 + j, a0 + j);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    // four components, so three.js reads the fourth as the alpha of the vertex
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+    geo.setIndex(idx);
+    // The disc darkens the ground it lies on, so it takes the ground colour of the palette at a
+    // quarter of its lightness. A black disc reads as a sticker on any ground but grey rock.
+    const pal = this.world.palette || {};
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(pal.ground || '#6f8a52').multiplyScalar(0.26),
+      vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true,
+    });
+    // One float per disc for its strength, so a flyer high up throws a weak shadow and one near
+    // the treetops throws a hard one. The alpha of the vertex gives the soft edge, and this gives
+    // the depth of the shade, so the two multiply.
+    mat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aShade; varying float vShade;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n vShade = aShade;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vShade;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.a *= vShade;');
+    };
+    geo.setAttribute('aShade', new THREE.InstancedBufferAttribute(new Float32Array(this.shadeCount), 1).setUsage(THREE.DynamicDrawUsage));
+    const inst = new THREE.InstancedMesh(geo, mat, this.shadeCount);
+    inst.frustumCulled = false;     // the discs move every frame, so the bounding sphere is stale
+    inst.renderOrder = 1;           // after the ground and the grass, so it lies on both
+    inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    inst.count = this.shadeCount;
+    this.shade = inst;
+    this.shadeMat = mat;
+    this.group.add(inst);
   }
 
   // ---------------------------------------------------------------- the step
@@ -257,6 +363,13 @@ export class GroundFauna {
     const d = this.lod.distance;
     this._in2 = (d * (1 - HYSTERESIS)) ** 2;
     this._out2 = (d * (1 + HYSTERESIS)) ** 2;
+    // A flyer holds its full mesh AIR_LOD times farther out than a walker. See AIR_LOD.
+    this._airIn2 = this._in2 * AIR_LOD * AIR_LOD;
+    this._airOut2 = this._out2 * AIR_LOD * AIR_LOD;
+    // Pixels per metre at one metre of distance: the height of the frame over the height the
+    // frustum covers there. The width of a body at distance r is then widthM * this / r.
+    const el = this.canvas, hPx = el ? el.clientHeight : 0;
+    this._pxPerM = hPx && this.camera ? hPx / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) : 0;
     for (const e of this.kinds) { e.nearN = 0; e.farN = 0; }
     for (const g of this.groups) if (g) this._stepGroup(g, t, dt);
     for (const m of this.members) this._stepMember(m, t, dt);
@@ -279,6 +392,10 @@ export class GroundFauna {
         e.phaseDirty = false;
       }
       if (e.mat.userData.shader) e.mat.userData.shader.uniforms.uTime.value = t;
+    }
+    if (this.shade) {
+      this.shade.instanceMatrix.needsUpdate = true;
+      this.shade.geometry.attributes.aShade.needsUpdate = true;
     }
     this.nearCount = near;
     this.farCount = far;
@@ -369,8 +486,11 @@ export class GroundFauna {
     if (m.gait) stepGait(m.gait, m.spd, act, dt);
 
     const gh = this.heightAt(nx, nz);
-    // a flyer holds its height above the ground under it, so it clears a hill
-    const y = g.flies ? Math.max(gh, 0) + g.hover : gh;
+    // A flyer holds its height above the ground under it, so it clears a hill, and it breathes:
+    // it rises and falls AIR_BOB metres on its own slow clock. Nothing else moves up there, and a
+    // body that holds one height reads as a sprite pinned to the sky.
+    const lift = g.flies ? g.hover + Math.sin(t * AIR_BOB_HZ * 6.2832 + g.bob + m.p1) * AIR_BOB : 0;
+    const y = g.flies ? Math.max(gh, 0) + lift : gh;
     if (g.flies) _up.set(0, 1, 0);
     else {
       // it stands on the slope: the up vector is the normal of the terrain under its feet
@@ -381,16 +501,27 @@ export class GroundFauna {
     _fwd.set(Math.cos(m.heading), 0, Math.sin(m.heading));
     _fwd.addScaledVector(_up, -_fwd.dot(_up)).normalize();
     _rgt.crossVectors(_up, _fwd).normalize();
-    const s = m.scale;
+    const ex = nx - this._cx, ey = y - this._cy, ez = nz - this._cz;
+    const dd = ex * ex + ey * ey + ez * ez;
+    // Issue 17: a flyer never draws narrower than AIR_MIN_PX pixels. At 150 m a 2 m body covers
+    // about 8 px and the sky around it gives the reader nothing to read that width against, so it
+    // reads as dust on the screen. It grows until it reads as a body, and no more than AIR_GROW.
+    // The growth is smooth in the distance, so nothing pops, and it holds the lore size near by,
+    // where the ground and the plants are there to measure it against.
+    let s = m.scale;
+    if (g.flies && this._pxPerM && m.e.widthM > 0) {
+      const px = (m.e.widthM * this._pxPerM) / Math.max(1, Math.sqrt(dd));
+      if (px < AIR_MIN_PX) s *= Math.min(AIR_GROW, AIR_MIN_PX / px);
+    }
+    m.drawScale = s;
     _mat.makeBasis(_rgt.multiplyScalar(s), _up.multiplyScalar(s), _fwd.multiplyScalar(s));
     _mat.setPosition(_pos.set(nx, y, nz));
     m.px = nx; m.py = y; m.pz = nz;      // the pick reads these, so it needs no matrix read back
 
     // The level of detail. The band around the LOD distance holds an animal on the side it is on
     // until it is clearly past the other side, so an animal at the boundary cannot flicker.
-    const ex = nx - this._cx, ey = y - this._cy, ez = nz - this._cz;
-    const dd = ex * ex + ey * ey + ez * ez;
-    m.far = m.far === 0 ? (dd > this._out2 ? 1 : 0) : (dd < this._in2 ? 0 : 1);
+    const in2 = g.flies ? this._airIn2 : this._in2, out2 = g.flies ? this._airOut2 : this._out2;
+    m.far = m.far === 0 ? (dd > out2 ? 1 : 0) : (dd < in2 ? 0 : 1);
     const e = m.e;
     const inst = m.far ? e.far : e.near;
     const slot = m.far ? e.farN++ : e.nearN++;
@@ -404,6 +535,37 @@ export class GroundFauna {
     at.aMove.setX(slot, act);
     at.aGait.setX(slot, m.gait ? m.gait.phase : 0);
     at.aTurn.setX(slot, m.turn);
+    // The shadow of a flyer comes last. It writes the same basis and the same matrix this step
+    // used, so it must run after the animal takes its own copy of them.
+    if (m.shade >= 0 && this.shade) this._stepShade(m, nx, nz, lift);
+  }
+
+  // One shadow disc. The flyer is `lift` metres over the ground at (nx, nz), and the sun stands at
+  // this._sun, so the shadow falls that far the other way. A low sun throws it a long way out, and
+  // the cap holds it near enough that the reader can still tie the two together.
+  //
+  // The disc reads the terrain where it lands, not where the flyer flies: it takes the height and
+  // the normal there, so it lies on the slope it falls on and not in the air over a valley.
+  _stepShade(m, nx, nz, lift) {
+    const h = Math.max(0, lift);
+    const sun = this._sun;
+    const f = Math.min(h / Math.max(0.18, sun.y), h * SHADE_CAST);
+    const sx = nx - sun.x * f, sz = nz - sun.z * f;
+    const e = 2;
+    _up.set(this.heightAt(sx - e, sz) - this.heightAt(sx + e, sz), 2 * e,
+      this.heightAt(sx, sz - e) - this.heightAt(sx, sz + e)).normalize();
+    _fwd.set(0, 0, 1);
+    _fwd.addScaledVector(_up, -_fwd.dot(_up)).normalize();
+    _rgt.crossVectors(_up, _fwd).normalize();
+    // it spreads as the flyer climbs, as a real shadow does, and never under a size the reader sees
+    const k = clamp((h - AIR_HOVER[0]) / (AIR_HOVER[1] - AIR_HOVER[0]), 0, 1);
+    const r = Math.max(SHADE_MIN, m.e.widthM * 0.5 * (1 + k * (SHADE_SPREAD - 1)));
+    _mat.makeBasis(_rgt.multiplyScalar(r), _up.multiplyScalar(r), _fwd.multiplyScalar(r));
+    _mat.setPosition(_pos.set(sx, Math.max(this.heightAt(sx, sz), 0) + SHADE_LIFT, sz));
+    this.shade.setMatrixAt(m.shade, _mat);
+    // It fades as it spreads, and it goes out with the sun. A night world shows no shadow at all.
+    this.shade.geometry.attributes.aShade.setX(m.shade,
+      SHADE_DARK * (1 - k * (1 - SHADE_FADE)) * (1 - this._night));
   }
 
   // ---------------------------------------------------------------- the inspector click
@@ -437,7 +599,7 @@ export class GroundFauna {
     const root = this.group.matrixWorld;
     for (const m of this.members) {
       _pv.set(m.px, m.py, m.pz).applyMatrix4(root);
-      _pt.set(m.px, m.py + m.scale * 1.1, m.pz).applyMatrix4(root);
+      _pt.set(m.px, m.py + m.drawScale * 1.1, m.pz).applyMatrix4(root);
       _pw.copy(_pv);                       // the world point, before project() overwrites it
       const dist = _pw.distanceTo(cam.position);
       _pv.project(cam); _pt.project(cam);
@@ -461,12 +623,13 @@ export class GroundFauna {
         if (bestHit === hit && key >= bestKey) continue;
       }
       bestHit = hit; bestKey = key;
-      best = { kind: m.e.kind, scale: m.scale, dist, point: _pb.copy(_pw).clone() };
+      best = { kind: m.e.kind, scale: m.drawScale, air: m.g.flies, dist, point: _pb.copy(_pw).clone() };
     }
     return best;
   }
 
   dispose() {
+    if (this.shade) { this.shade.geometry.dispose(); this.shadeMat.dispose(); }
     for (const e of this.kinds) { e.near.geometry.dispose(); e.far.geometry.dispose(); e.mat.dispose(); }
     this.group.clear();
     this.kinds = []; this.groups = []; this.members = []; this.count = 0;
