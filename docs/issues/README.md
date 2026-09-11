@@ -240,10 +240,10 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 14 | Ground-scale phenomena | HITL | 04, design | open |
 | 15 | Sea species | HITL | 05, 09, design | open |
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
-| 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | PENDING |
+| 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | CLOSED 65a87bc |
 | 18 | The rim smears the patch edge into streaks | AFK | 04, 05 | CLOSED 603aa99 |
 | 19 | The patch cell and the square marker | AFK | 02, 04, 05 | CLOSED f2daf0d |
 | 20 | The reader aims the probe, and the ground view holds no rectangle | AFK | 02, 06, 18, 19 | CLOSED ecf59db |
 | 21 | Alien flora and ground cover | HITL | 07, 11 | CLOSED 0ba4007 |
 | 22 | The flora signature of a world, and the card floor | HITL | 21 | CLOSED a151100 |
-| 23 | The reader cannot move on the ground | AFK | 06 | PENDING |
+| 23 | The reader cannot move on the ground | AFK | 06 | CLOSED fc43719 |
