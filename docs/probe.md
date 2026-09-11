@@ -113,6 +113,39 @@ and it still read at 800 m; at the new ceiling, panned to each of the four limit
 foot of the band, nothing reads. The cost is the top-down view of the whole patch, which is the
 view the rectangle was in.
 
+**The reader walks, and moving takes the first gesture.** Added with issue 23. Issue 06 gave the
+ground the gesture map of the globe: one finger and the left button turned the view, and the pan sat
+on the right button and on two fingers. On the globe that is right, because the reader turns a thing
+and looks at it from outside. On the ground the reader stands inside the thing and wants to travel,
+and every reader tries one finger first. They found the spin, they found the zoom, and they never
+found the move. The tap of issue 06 was the only travel they could reach, and it only carries the
+reader to a point that is already on the screen.
+
+So the two gestures swap. One finger and the left button grab the ground and pull the reader over
+it, as a map does. Two fingers and the right button turn the view, and a pinch still zooms, because
+two fingers do both. The globe keeps its own map: the two places now read as two places, which is
+what they are.
+
+A drag carries the short distances and it needs a new one for every screen. Two things carry the
+long ones. A press that **holds still** past 300 ms becomes a walk in the direction the pointer
+points, and the reader steers with the thumb until the finger lifts. A press that moves is a drag,
+and the walk never arms, so the two cannot be confused: the rule is already there, because a press
+that moves more than `TAP_SLOP` stops being a tap. The window of the double tap arms no walk either,
+or a reader who holds the second tap on an animal would walk away from it instead of opening its
+card.
+
+The **keys** carry the rest. `W A S D` and the arrow keys walk, `Shift` runs, `Q` and `E` turn,
+`R` and `F` tilt, and `+` and `-` zoom. The look keys turn the target about the eye, and not the eye
+about the target: the reader turns the head, and a camera swung about a target 15 m away would walk
+a 15 m circle instead. The walk moves the pair, so the view direction and the distance both hold and
+only the place changes. The speed follows the height, as the speed of a wheel step does: 11 units a
+second at eye height and 150 at the ceiling, and `Shift` multiplies by 2.6. An editable element
+takes every key first, so a reader who types a seed does not walk.
+
+The walk meets the same 450 m limit the pan meets, and it slows over the last 80 m instead of
+stopping dead. Only the outward part of the step slows, so a reader at the edge still walks along it
+and back in at full speed.
+
 **The pan limit stops the camera too.** The target cannot leave the fog start at 450 m. The first build clamped the target alone, so a pan that reached the limit slid the camera on over a target that could not follow, and the camera sank toward the ground. The clamp now moves the camera by the same step, so the whole view stops.
 
 **The rim carries the ground past the fog.** The patch is one cell of the globe drawn into a box

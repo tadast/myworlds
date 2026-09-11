@@ -85,6 +85,27 @@ const POLAR_WIDE = 0.25;    // rad, the play the reader keeps at TILT_FREE
 // this holds the angle.
 const polarUp = (camera) => Math.PI / 2 + THREE.MathUtils.degToRad(camera.fov) / 2;
 const SPEED_SPAN = 400;     // metres, the height where a wheel step reaches its full size
+// ---------------------------------------------------------------- the walk, issue 23
+// The reader stands on a world 900 units wide and has to be able to cross it. A drag of the ground
+// carries the short distances and the keys carry the long ones. Both move the pair, the camera and
+// its target, so the view direction and the distance hold and only the place changes.
+const WALK_SLOW = 11;       // units per second at eye height
+const WALK_FAST = 150;      // units per second at the ceiling
+const WALK_RUN = 2.6;       // what a held Shift multiplies the speed by
+const WALK_EASE = 6;        // 1/s: how fast the walk reaches its speed, and how fast it stops
+const WALK_HOLD = 300;      // ms a press must hold still before it becomes a walk
+const WALK_EDGE = 80;       // units: the walk slows to nothing over this band at the limit of the pan
+const KEY_YAW = 1.2;        // rad/s, the turn of Q and E
+const KEY_TILT = 0.9;       // rad/s, the tilt of R and F
+const KEY_ZOOM = 1.8;       // the part of the distance + and - take each second
+// One name per job, so the reader may press either of two keys for it. A key with one letter comes
+// in lower case; a named key comes as the browser writes it.
+const KEY_JOB = {
+  w: 'fwd', arrowup: 'fwd', s: 'back', arrowdown: 'back',
+  a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right',
+  q: 'yawl', e: 'yawr', r: 'tiltu', f: 'tiltd',
+  '+': 'in', '=': 'in', '-': 'out', _: 'out', shift: 'run',
+};
 const GLIDE_S = 0.8;        // seconds, the glide to a tapped point
 const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a glide
 const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
@@ -114,6 +135,8 @@ const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 // scratch vectors for the camera work, so no frame allocates
 const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
 const _sph = new THREE.Spherical();
+const _fw = new THREE.Vector3(), _rt = new THREE.Vector3();   // the walk basis of the frame
+const _UP = new THREE.Vector3(0, 1, 0);
 const _tint = [0, 0, 0];   // scratch colour for the rim rows
 
 // The settled LOD distance per tier. A tier is its own entry, because a low tier holds a
@@ -214,18 +237,27 @@ export class Ground {
     this.controls.maxDistance = SKY_RADIUS * 0.5;   // the ceiling clamp stops the camera, not this
     this.controls.maxPolarAngle = Math.PI * 0.495;  // the start value; _drive() sets it per frame
     this.controls.enabled = false;                  // the app turns the controls on after the dive
-    // The pan slides the target over the ground, not over the screen, so a drag walks the reader
-    // across the patch. The right button and two fingers pan. One finger turns the view, and a
-    // pinch zooms. _drive() sets the three speeds from the height every frame.
+    // The pan slides the target over the ground, not over the screen, so a drag carries the reader
+    // across the patch. Issue 23 gives the pan the first gesture, because on the ground the reader
+    // wants to travel and the first thing every reader tries is one finger. One finger and the left
+    // button therefore grab the ground, and two fingers and the right button turn the view. A pinch
+    // still zooms, because two fingers do both. The globe keeps its own map, where one finger spins
+    // the planet: there the reader turns a thing, and here the reader stands in a place.
+    // _drive() sets the three speeds from the height every frame.
     this.controls.enablePan = true;
     this.controls.screenSpacePanning = false;
-    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-    this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
     // the glide of a tap, and the pointer state that tells a tap from a drag
     this.glide = null;
     this._tap = null;
     this._pointers = 0;
+    // Issue 23: the keys the reader holds, by job, and the walk velocity of the pair in units per
+    // second. The velocity eases in and out, so no step starts or stops on one frame.
+    this.keys = new Set();
+    this._vx = 0;
+    this._vz = 0;
     // The seam for issue 09. It sets pickCreature to a function that returns the creature under
     // the pointer, { point, kind, scale, dist } or null. One tap on a creature glides to it, and a
     // second tap opens the inspector through onCreatureTap. A tap on the ground needs neither.
@@ -237,12 +269,22 @@ export class Ground {
       move: (e) => this._onMove(e),
       up: (e) => this._onUp(e),
       wheel: () => { this.glide = null; },   // a wheel step takes the camera back from the glide
+      keydown: (e) => this._onKey(e, true),
+      keyup: (e) => this._onKey(e, false),
+      // A key held while the tab goes away never sends its keyup, so the reader would come back to
+      // a camera that walks on its own.
+      blur: () => this.keys.clear(),
     };
     canvas.addEventListener('pointerdown', this._bound.down, { passive: true });
     canvas.addEventListener('pointermove', this._bound.move, { passive: true });
     canvas.addEventListener('pointerup', this._bound.up, { passive: true });
     canvas.addEventListener('pointercancel', this._bound.up, { passive: true });
     canvas.addEventListener('wheel', this._bound.wheel, { passive: true });
+    // The keys go on the window, not on the canvas: the canvas takes no focus, and the reader who
+    // just pressed a button in the sidebar must still be able to walk.
+    addEventListener('keydown', this._bound.keydown);
+    addEventListener('keyup', this._bound.keyup);
+    addEventListener('blur', this._bound.blur);
 
     this.content = new THREE.Group();
     this.scene.add(this.content);
@@ -647,6 +689,12 @@ export class Ground {
     this._drive();               // the speeds and the tilt, both from the height of the camera
     this.controls.update();
     if (this.glide) this._stepGlide(dt);
+    // Issue 23: a press that holds still, and does not move, becomes a walk. The window of the
+    // double tap takes none of them: a reader who holds the second tap on an animal asks for the
+    // card of that animal, and not for a walk.
+    const tap = this._tap;
+    if (tap && !tap.walk && !this._lastTap && performance.now() - tap.t > WALK_HOLD) tap.walk = true;
+    this._stepMove(dt);
     const p = this.camera.position, tg = this.controls.target;
 
     // The target stays inside the fog, so the view always holds ground the reader can see. The
@@ -839,7 +887,9 @@ export class Ground {
     const near = THREE.MathUtils.clamp(h / SPEED_SPAN, 0.06, 1);
     this.controls.rotateSpeed = 0.35 + 0.35 * near;
     this.controls.zoomSpeed = 0.9 + 1.6 * near;
-    this.controls.panSpeed = 0.5 + 0.5 * near;
+    // The pan carries the first gesture since issue 23, so a drag has to move the ground by about
+    // the distance the pointer moves over it. Under 1 the ground slips under the finger.
+    this.controls.panSpeed = 1 + 0.4 * near;
 
     // The tilt runs from the ceiling down to TILT_FREE. The height sets the polar angle the view
     // wants, and a band around it holds the play the reader keeps. The band is narrow high up, so
@@ -855,6 +905,118 @@ export class Ground {
     const min = Math.max(0.05, want - band);
     this.controls.minPolarAngle = min;
     this.controls.maxPolarAngle = Math.max(min + 0.01, Math.min(polarUp(this.camera), want + band));
+  }
+
+  // ---------------------------------------------------------------- the walk, issue 23
+  // A key goes in by its job, so W and the up arrow are one thing. The reader who types a seed in
+  // the sidebar must not walk, so an editable element takes every key. A keyup always comes off,
+  // even while the controls are off, or a key held through the dive would stay down for ever.
+  _onKey(e, down) {
+    const job = KEY_JOB[e.key.toLowerCase()];
+    if (!job) return;
+    if (!down) { this.keys.delete(job); return; }
+    if (!this.controls.enabled || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    const el = document.activeElement;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    this.keys.add(job);
+    if (e.cancelable) e.preventDefault();   // an arrow key scrolls the page, and a space would too
+  }
+
+  // The way the view faces, flat on the ground. A view that points straight down has no such way,
+  // so it takes the way the top of the screen faces instead.
+  _forward(out) {
+    out.copy(this.controls.target).sub(this.camera.position);
+    out.y = 0;
+    if (out.lengthSq() > 1e-8) return out.normalize();
+    out.copy(_UP).applyQuaternion(this.camera.quaternion);
+    out.y = 0;
+    return out.lengthSq() > 1e-8 ? out.normalize() : null;
+  }
+
+  // The way a held pointer points, flat on the ground. The reader steers with the thumb: a press
+  // in the middle of the frame walks straight on, and a press near an edge walks that way.
+  _pointerWay(out) {
+    const t = this._tap;
+    if (!t) return null;
+    const r = this.canvas.getBoundingClientRect();
+    const nx = ((t.x - r.left) / r.width) * 2 - 1;
+    const ny = -((t.y - r.top) / r.height) * 2 + 1;
+    out.set(nx, ny, 0.5).unproject(this.camera).sub(this.camera.position);
+    out.y = 0;
+    return out.lengthSq() > 1e-8 ? out.normalize() : this._forward(out);
+  }
+
+  // One step of the walk and of the look keys. It runs after the controls and before every clamp,
+  // so the fog limit, the floor, and the ceiling all hold over it.
+  //
+  // The look keys turn the target about the eye, and not the eye about the target. The reader
+  // turns the head: a camera swung about a target 15 m away would walk a 15 m circle instead.
+  _stepMove(dt) {
+    if (dt <= 0 || !this.controls.enabled) return;
+    const p = this.camera.position, tg = this.controls.target, K = this.keys;
+    const yaw = (K.has('yawl') ? 1 : 0) - (K.has('yawr') ? 1 : 0);
+    const tilt = (K.has('tiltu') ? 1 : 0) - (K.has('tiltd') ? 1 : 0);
+    if (yaw || tilt) {
+      _dir.copy(tg).sub(p);
+      if (yaw) _dir.applyAxisAngle(_UP, yaw * KEY_YAW * dt);
+      if (tilt) {
+        _rt.crossVectors(_dir, _UP);
+        if (_rt.lengthSq() > 1e-8) _dir.applyAxisAngle(_rt.normalize(), tilt * KEY_TILT * dt);
+      }
+      tg.copy(p).add(_dir);
+      this.glide = null;
+    }
+    // The zoom keys take the reader up over the trees and back down, so a reader with no wheel and
+    // no pinch still owns the height. The clamps of update() hold the floor and the ceiling.
+    const zoom = (K.has('in') ? 1 : 0) - (K.has('out') ? 1 : 0);
+    if (zoom) {
+      const d0 = p.distanceTo(tg);
+      const d1 = THREE.MathUtils.clamp(d0 * Math.pow(KEY_ZOOM, -zoom * dt),
+        this.controls.minDistance, this.controls.maxDistance);
+      if (d0 > 1e-4) p.sub(tg).setLength(d1).add(tg);
+      this.glide = null;
+    }
+
+    // The direction the reader asks for. The keys come first; a press that holds still steers with
+    // the pointer instead. A press that moves is a drag of the ground, and the controls own it.
+    let wx = 0, wz = 0;
+    const fwd = this._forward(_fw);
+    if (fwd) {
+      const f = (K.has('fwd') ? 1 : 0) - (K.has('back') ? 1 : 0);
+      const r = (K.has('right') ? 1 : 0) - (K.has('left') ? 1 : 0);
+      if (f || r) {
+        _rt.crossVectors(fwd, _UP);
+        wx = fwd.x * f + _rt.x * r; wz = fwd.z * f + _rt.z * r;
+      } else if (this._tap && this._tap.walk) {
+        const way = this._pointerWay(_rt);
+        if (way) { wx = way.x; wz = way.z; }
+      }
+    }
+    const len = Math.hypot(wx, wz);
+    if (len > 1e-6) {
+      wx /= len; wz /= len;
+      this.glide = null;
+      // The pan of the reader stops at the fog and so does the walk. It slows over the last
+      // WALK_EDGE units instead of meeting a wall, and only the part of the step that goes outward
+      // slows, so the reader still walks along the edge and back in at full speed.
+      const tr = Math.hypot(tg.x, tg.z);
+      const out = tr > 1e-6 ? (wx * tg.x + wz * tg.z) / tr : 0;
+      if (out > 0 && tr > FOG_NEAR - WALK_EDGE) {
+        const cut = THREE.MathUtils.smoothstep(tr, FOG_NEAR - WALK_EDGE, FOG_NEAR) * out;
+        wx -= (tg.x / tr) * cut; wz -= (tg.z / tr) * cut;
+      }
+    } else { wx = 0; wz = 0; }
+
+    // The height sets the speed, as it sets the speed of a wheel step: a walk near the ground is a
+    // walk, and at the ceiling one second carries the reader over a third of the patch.
+    const h = Math.max(0, p.y - this._groundAt(p.x, p.z));
+    const speed = THREE.MathUtils.lerp(WALK_SLOW, WALK_FAST, THREE.MathUtils.clamp(h / SPEED_SPAN, 0, 1))
+      * (K.has('run') ? WALK_RUN : 1);
+    const k = 1 - Math.exp(-WALK_EASE * dt);
+    this._vx += (wx * speed - this._vx) * k;
+    this._vz += (wz * speed - this._vz) * k;
+    const dx = this._vx * dt, dz = this._vz * dt;
+    if (dx * dx + dz * dz > 1e-10) { p.x += dx; p.z += dz; tg.x += dx; tg.z += dz; }
   }
 
   // ---------------------------------------------------------------- the glide
@@ -941,7 +1103,8 @@ export class Ground {
     this._pointers++;
     if (this._pointers > 1) { this._tap = null; return; }   // two fingers pan or pinch
     const mouse = e.pointerType === 'mouse';
-    this._tap = (!mouse || e.button === 0) ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+    this._tap = (!mouse || e.button === 0)
+      ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), walk: false } : null;
   }
 
   _onMove(e) {
@@ -956,6 +1119,7 @@ export class Ground {
     this._tap = null;
     if (!tap || tap.id !== e.pointerId || e.type === 'pointercancel' || !this.controls.enabled) return;
     if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) return;
+    if (tap.walk) return;        // the press walked the reader, so it asks for no glide as well
     const r = this.canvas.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
     const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
@@ -1034,6 +1198,10 @@ export class Ground {
     this.canvas.removeEventListener('pointerup', this._bound.up);
     this.canvas.removeEventListener('pointercancel', this._bound.up);
     this.canvas.removeEventListener('wheel', this._bound.wheel);
+    removeEventListener('keydown', this._bound.keydown);
+    removeEventListener('keyup', this._bound.keyup);
+    removeEventListener('blur', this._bound.blur);
+    this.keys.clear();
     this.glide = null;
     this.controls.dispose();
     this._clear();

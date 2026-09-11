@@ -65,6 +65,12 @@ const shareBtn = $('#share');
 const probeBtn = $('#probe');
 const probeIconBtn = $('#probe-icon');
 const aimEl = $('#aim');
+const helpEl = $('#help');
+// The two lines of help, one per place the reader stands. The globe turns under the pointer and the
+// ground carries the reader over it, so the first gesture does a different thing in each, and the
+// line has to say which. See updateHelp().
+const HELP_ORBIT = 'Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife';
+const HELP_GROUND = 'Drag or hold to move · WASD and arrows walk, Shift runs · two fingers or right-drag to look · Q E R F turn and tilt';
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
 const muteBtn = $('#mute');
@@ -820,8 +826,17 @@ function abortProbe() {
 }
 
 let probeLabel = '';
+// The help line follows the reader. The ground gets its own gestures since issue 23, and a line
+// that still said "drag to spin" would send the reader looking for a control that is not there.
+function updateHelp() {
+  if (!helpEl) return;
+  const text = mode === 'ground' ? HELP_GROUND : HELP_ORBIT;
+  if (helpEl.textContent !== text) helpEl.textContent = text;
+}
+
 function updateProbeBtn() {
   if (!probeBtn) return;
+  updateHelp();
   const down = mode === 'ground';
   const show = !dive && !busy && (down || canDescend());
   const label = down ? 'Recall the probe' : aiming ? 'Cancel the probe' : 'Send a probe to the surface';

@@ -100,6 +100,21 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
 - Patch message options: `{ grid, size, span, rim, maxFlora, maxFauna, pulledKind }`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `ground.js` exports the value as `RIM`.
 
+### The gestures of the ground
+
+Since issue 23 the ground and the globe hold two maps, because the reader turns a planet in one and
+stands on a world in the other:
+
+| | Globe | Ground |
+|---|---|---|
+| One finger, left button | spin the planet | grab the ground and move; hold still to walk |
+| Two fingers, right button | pan | turn the view |
+| Pinch, wheel | zoom | zoom |
+| Keys | none | `W A S D` and arrows walk, `Shift` runs, `Q E` turn, `R F` tilt, `+ -` zoom |
+
+The walk and the pan both move the pair, the camera and its target, so the view direction and the
+distance hold. Both stop at `FOG_NEAR`, and the walk tapers into that limit over its last 80 units.
+
 ### App mode
 
 `app.js` holds one state: `mode` in `'orbit' | 'descending' | 'ground' | 'ascending'`. Orbit is today's behaviour. Issue 20 adds one flag inside orbit, `aiming`: the reader has pressed the button and the next tap on the planet sends the probe. The globe scene and `current` stay in memory in every mode. In `ground` mode the globe is not rendered and its `frame()` work is skipped.
@@ -231,3 +246,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 20 | The reader aims the probe, and the ground view holds no rectangle | AFK | 02, 06, 18, 19 | CLOSED ecf59db |
 | 21 | Alien flora and ground cover | HITL | 07, 11 | CLOSED 0ba4007 |
 | 22 | The flora signature of a world, and the card floor | HITL | 21 | CLOSED a151100 |
+| 23 | The reader cannot move on the ground | AFK | 06 | PENDING |
