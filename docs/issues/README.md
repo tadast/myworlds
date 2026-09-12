@@ -119,7 +119,7 @@ stands on a world in the other:
 | One finger, left button | spin the planet | grab the ground and move; hold still to walk |
 | Two fingers, right button | pan | turn the view |
 | Pinch, wheel | zoom | zoom |
-| Keys | none | `W A S D` and arrows walk, `Shift` runs, `Q E` turn, `R F` tilt, `+ -` zoom |
+| Keys | none | arrows and `W S` fly the way the view points, `A D` step aside, `Space` up, `Ctrl` down, `Shift` runs, side arrows and `Q E` turn, `R F` tilt, `+ -` zoom |
 
 The walk and the pan both move the pair, the camera and its target, so the view direction and the
 distance hold. Both stop at `FOG_NEAR`, and the walk tapers into that limit over its last 80 units.

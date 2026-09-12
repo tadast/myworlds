@@ -105,7 +105,7 @@ const LOD_MAX = 400;
 
 export const CAM_START = 450;        // metres, the height the camera starts at over the site
 // The rim: the ground outside the patch. It must reach past the fog, or its outer edge shows.
-// At the ceiling the camera stands at most the reach + CEILING * tan(POLAR_HIGH + POLAR_BAND),
+// At the ceiling the camera stands at most the reach + CEILING * tan(1.16),
 // and the fog is solid at FOG_FAR + FOG_LIFT * CEILING. A ray from the ceiling meets the ground
 // sqrt(fog^2 - CEILING^2) further out, and the sum is the reach the ground needs:
 //
@@ -130,18 +130,18 @@ export const RIM = 4000;             // units, how far the rim reaches from the 
 //
 //     tan(polar angle) < FOG_LIFT
 //
-// A camera that looks straight down therefore always shows the box, at any height. POLAR_HIGH
-// holds the tilt over that limit at the ceiling: tan(1.10) is 1.97, and tan(1.10 - POLAR_BAND)
-// is 1.74. Measured on Auralis at -38.00,18.00, a flat inland cell: the square reads at 1,200 m,
-// it still reads at 800 m, and nothing reads at 500 m.
+// A camera that looks straight down therefore always shows the box, at any height. Issue 20 held
+// the tilt over that limit with a band that followed the height, and the flight keys replaced it:
+// a camera that flies in a straight line must not have its view turned under it. The reveal still
+// arrives at POLAR_HIGH, where tan(1.10) is 1.97 and the box stays hidden, and the ceiling still
+// holds the camera at 500 m. A reader who climbs to the ceiling and then looks out at the horizon
+// can see the edge. Measured on Auralis at -38.00,18.00, a flat inland cell: the square reads at
+// 1,200 m, it still reads at 800 m, and nothing reads at 500 m.
 
 // ---------------------------------------------------------------- the camera, issue 06
 const TARGET_LIFT = 1;      // metres, the target floats this far over the terrain
-const TILT_FREE = 60;       // metres, under this height the reader owns the polar angle
-const POLAR_HIGH = 1.10;    // rad, the polar angle at the ceiling: the view looks out and down
-const POLAR_LOW = 1.40;     // rad, the polar angle at TILT_FREE: the view looks out
-const POLAR_BAND = 0.06;    // rad, the play the reader keeps at the ceiling
-const POLAR_WIDE = 0.25;    // rad, the play the reader keeps at TILT_FREE
+const POLAR_DOWN = 0.05;    // rad, the steepest view down: a hair off straight down
+const POLAR_HIGH = 1.10;    // rad, the tilt of the reveal, which looks out and down over the patch
 // Issue 17: how far over the horizon the view may turn. The frame sets the limit. The view rises
 // until the horizon reaches the bottom edge and no further, so the reader always keeps the ground
 // in sight and cannot get lost in an empty sky. That is half the field of view over the horizon,
@@ -160,24 +160,36 @@ const SPEED_SPAN = 400;     // metres, the height where a wheel step reaches its
 // its target, so the view direction and the distance hold and only the place changes.
 const WALK_SLOW = 11;       // units per second at eye height
 const WALK_FAST = 150;      // units per second at the ceiling
-const WALK_RUN = 2.6;       // what a held Shift multiplies the speed by
+const WALK_RUN = 5;         // what a held Shift multiplies the speed by
 const WALK_EASE = 6;        // 1/s: how fast the walk reaches its speed, and how fast it stops
 const WALK_HOLD = 300;      // ms a press must hold still before it becomes a walk
 const WALK_EDGE = 80;       // units: the walk slows to nothing over this band at the limit of the pan
-const KEY_YAW = 1.2;        // rad/s, the turn of Q and E
+const KEY_YAW = 1.2;        // rad/s, the turn of the side arrows, Q, and E
 const KEY_TILT = 0.9;       // rad/s, the tilt of R and F
 const KEY_ZOOM = 1.8;       // the part of the distance + and - take each second
 // One name per job, so the reader may press either of two keys for it. A key with one letter comes
 // in lower case; a named key comes as the browser writes it.
+//
+// The arrows fly the camera, because the arrows are the keys every reader finds first. Up and down
+// go the way the view points, so a view that looks down flies down. The side arrows turn the view
+// instead of stepping sideways, so one hand on the arrows owns the whole ground; A and D keep the
+// step sideways for the reader who walks with the left hand. Space lifts the camera, Ctrl drops
+// it, and Shift runs.
 const KEY_JOB = {
   w: 'fwd', arrowup: 'fwd', s: 'back', arrowdown: 'back',
-  a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right',
-  q: 'yawl', e: 'yawr', r: 'tiltu', f: 'tiltd',
+  a: 'left', d: 'right',
+  q: 'yawl', arrowleft: 'yawl', e: 'yawr', arrowright: 'yawr',
+  r: 'tiltu', f: 'tiltd',
+  ' ': 'up', control: 'down',
   '+': 'in', '=': 'in', '-': 'out', _: 'out', shift: 'run',
 };
+const SEAT_STEPS = 64;      // how many samples the pivot walks down the view ray. See _seatTarget()
 const GLIDE_S = 0.8;        // seconds, the glide to a tapped point
 const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a glide
 const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
+// units, the band a glide to a thing ends in. See glideTo().
+const GLIDE_NEAR = 12;
+const GLIDE_FAR = 120;
 const TAP_SLOP = 6;         // px, a pointer that moves more than this is a drag, not a tap
 const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
 // units: how far behind a plant an animal may stand and still take the tap. A reader who taps an
@@ -295,6 +307,7 @@ export class Ground {
     this.n = 0; this.grid = 0; this.half = PATCH_SIZE / 2;
     this.reach = reachOf(this.half, -1);
     this.base = 0;
+    this.ceiling = CEILING;
 
     const pal = world.palette || {};
     this.skyColor = new THREE.Color(pal.atmo || '#8fb7ff');
@@ -337,6 +350,7 @@ export class Ground {
     // second. The velocity eases in and out, so no step starts or stops on one frame.
     this.keys = new Set();
     this._vx = 0;
+    this._vy = 0;
     this._vz = 0;
     // The seam for issue 09. It sets pickCreature to a function that returns the creature under
     // the pointer, { point, kind, scale, dist, member } or null. One tap on a creature marks it
@@ -417,6 +431,10 @@ export class Ground {
       this.content.add(this.sea.group);
       this.sea.tintFog(this.scene);
     }
+    // The ceiling stands CEILING over the site, and over the water when the site lies under a sea.
+    // The seabed of an ocean cell is kilometres down, and a ceiling measured from it would sit
+    // under the waves and hold the reader on the surface.
+    this.ceiling = Math.max(this.base, this.sea ? this.sea.level : -Infinity) + CEILING;
 
     if (p) {
       this._buildTerrain();
@@ -807,29 +825,23 @@ export class Ground {
       p.x += dx; p.z += dz;
     }
 
-    // The height of the pair. Two rules meet here. The target rides the terrain, so it never
-    // sinks under a hill. The eye keeps FLOOR metres over the ground under it, and over the water
-    // on a sea. Both move the pair by one step, which holds the view direction and the distance
-    // while the reader pans over relief.
-    //
-    // Issue 17 reads the two rules in one pass, because an up-view needs them read together.
-    // OrbitControls puts the eye under the target to point the view over the horizon, so the eye
-    // would go under the ground. The eye stops at the floor and the step carries the target up
-    // instead: the pivot of an up-view stands in the sky, and the view keeps turning. A view that
-    // points down or level keeps the behaviour of issue 06, because the eye there sits over the
-    // target and the floor does not bind.
-    const off = p.y - tg.y;        // negative while the view points over the horizon
-    const under = this._groundAt(p.x, p.z);
-    const floor = (this.sea ? Math.max(under, this.sea.level) : under) + FLOOR;
-    const eye = Math.max(this._groundAt(tg.x, tg.z) + TARGET_LIFT + off, floor);
-    const step = eye - p.y;
-    if (Math.abs(step) > 1e-4) { p.y += step; tg.y += step; }
-
-    // the ceiling: shorten the offset from the target, so the view direction holds
-    const ceiling = this.base + CEILING;
-    const room = ceiling - tg.y;
-    if (off > room && room > 0) p.sub(tg).multiplyScalar(room / off).add(tg);
+    // The height of the pair. The reader owns it. The camera used to ride the terrain: the target
+    // sat one metre over the ground under it and the eye kept its offset from the target, so the
+    // whole view rose and fell with every hill the target crossed. That reads as a bounce under a
+    // flight in a straight line, and over a slope it fights the key that asks for height. The rule
+    // is now two limits and nothing else, the floor over the terrain or the water and the ceiling
+    // over the site. Each moves the camera and the target by one step, so the view direction and
+    // the distance hold and only the height changes.
+    const floor = this._floorAt(p.x, p.z);
+    const ceiling = this.ceiling;
+    const step = THREE.MathUtils.clamp(p.y, floor, Math.max(floor, ceiling)) - p.y;
+    if (step !== 0) { p.y += step; tg.y += step; }
     this.atCeiling = p.y >= ceiling - 1;
+
+    // The pivot follows the view to the ground, once the camera is where the frame leaves it. A
+    // drag turns the camera about the pivot, so a pivot that moved under a held pointer would
+    // move the camera with it; the seat therefore waits until the reader lets go.
+    if (!this.glide && !this._pointers) this._seatTarget();
 
     // The clamps move the camera after controls.update() aimed it, so it must aim again. One
     // lookAt costs far less than a second controls.update(), and a second update would apply
@@ -1004,12 +1016,11 @@ export class Ground {
   }
 
   // ---------------------------------------------------------------- the feel of the controls
-  // The height of the camera sets the speeds and the tilt. Near the ground a wheel step moves a
-  // metre or two and the view looks out at the horizon. At the ceiling a step moves about a
-  // hundred metres and the view looks down on the patch, as the globe does with its pitch.
+  // The height of the camera sets the speeds. Near the ground a wheel step moves a metre or two;
+  // at the ceiling a step moves about a hundred metres. The tilt is no longer one of them.
   _drive() {
     const p = this.camera.position;
-    const h = Math.max(0, p.y - this._groundAt(p.x, p.z));
+    const h = Math.max(0, p.y - this._floorAt(p.x, p.z));
     const near = THREE.MathUtils.clamp(h / SPEED_SPAN, 0.06, 1);
     this.controls.rotateSpeed = 0.35 + 0.35 * near;
     this.controls.zoomSpeed = 0.9 + 1.6 * near;
@@ -1017,20 +1028,13 @@ export class Ground {
     // the distance the pointer moves over it. Under 1 the ground slips under the finger.
     this.controls.panSpeed = 1 + 0.4 * near;
 
-    // The tilt runs from the ceiling down to TILT_FREE. The height sets the polar angle the view
-    // wants, and a band around it holds the play the reader keeps. The band is narrow high up, so
-    // the view turns from the patch below to the horizon as the reader comes down. Under
-    // TILT_FREE the band opens to a half turn and the reader owns the polar angle.
-    const k = THREE.MathUtils.smoothstep(h, TILT_FREE, CEILING);
-    const free = 1 - THREE.MathUtils.smoothstep(h, TILT_FREE, TILT_FREE * 2);
-    const want = THREE.MathUtils.lerp(POLAR_LOW, POLAR_HIGH, k);
-    const band = THREE.MathUtils.lerp(THREE.MathUtils.lerp(POLAR_WIDE, POLAR_BAND, k), Math.PI, free);
-    // The band ends where the horizon leaves the frame. See polarUp(). Over TILT_FREE the band is
-    // narrow and want + band stays well under that, so the descent still turns the view from the
-    // patch below to the horizon. Only the free band near the ground opens upward.
-    const min = Math.max(0.05, want - band);
-    this.controls.minPolarAngle = min;
-    this.controls.maxPolarAngle = Math.max(min + 0.01, Math.min(polarUp(this.camera), want + band));
+    // The tilt is the reader's at every height. It runs from a hair off straight down to the
+    // angle that keeps the horizon on the bottom edge of the frame, so the reader can look up at
+    // the canopy and the sky and still never lose the ground. The height used to steer the tilt,
+    // and it no longer does: a camera that flies in a straight line must not have its view turned
+    // under it. See "the rectangle" above for what that costs.
+    this.controls.minPolarAngle = POLAR_DOWN;
+    this.controls.maxPolarAngle = polarUp(this.camera);
   }
 
   // ---------------------------------------------------------------- the walk, issue 23
@@ -1041,11 +1045,72 @@ export class Ground {
     const job = KEY_JOB[e.key.toLowerCase()];
     if (!job) return;
     if (!down) { this.keys.delete(job); return; }
-    if (!this.controls.enabled || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    // Ctrl drops the camera, so a held Ctrl now rides on every other key of the flight and the
+    // guard can no longer read it as a shortcut. Cmd and Alt still take their keys away.
+    if (!this.controls.enabled || e.metaKey || e.altKey || e.repeat) return;
     const el = document.activeElement;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    // Space presses the button that holds the focus, and the reader who just clicked the probe
+    // button would find the lift key dead. So the ground takes the space key and the button gives
+    // up the focus. Enter still presses a button, so the keyboard reader keeps every control.
+    if (job === 'up' && el && el.matches && el.matches('button, a, select, summary')) el.blur();
     this.keys.add(job);
     if (e.cancelable) e.preventDefault();   // an arrow key scrolls the page, and a space would too
+  }
+
+  // The lowest the eye may go over a point, which is the terrain or the water, whichever is
+  // higher. The clamp of update() holds the eye here, and the drop key stops here, so the two read
+  // one rule. Over a sea the seabed lies far under the water and only the water counts.
+  _floorAt(x, z) {
+    return this._surfaceAt(x, z) + FLOOR;
+  }
+
+  // The top of the world at a point: the terrain, or the water over it on a sea. The seabed of an
+  // ocean cell is kilometres down and the reader stands on the waves, so only the water counts.
+  _surfaceAt(x, z) {
+    const under = this._groundAt(x, z);
+    return this.sea ? Math.max(under, this.sea.level) : under;
+  }
+
+  // The pivot walks in to the ground the view points at.
+  //
+  // The camera always looks at its target, and the distance between the two sets three things:
+  // what a drag swings the camera about, what one wheel step is worth, and how far from an animal
+  // a glide leaves the reader. The old rig tied that distance to the height, because the reader
+  // came down by zooming in. The flight keys carry the target along instead and never change the
+  // distance, so after a flight to the ground the pivot still sat where the probe landed, 990
+  // units out. A focus on an animal then read the stale number and parked the reader 660 units
+  // from it, the shadow box followed a target far outside the frame, and one wheel step moved a
+  // hundred metres at eye height.
+  //
+  // So the pivot follows the view down to the ground. It only ever comes in: the wheel and the
+  // zoom keys own the way out, because a reader who wants to stand back asks for it. The target
+  // holds the same ray, so the camera does not move and the reader sees nothing happen.
+  _seatTarget() {
+    const p = this.camera.position, tg = this.controls.target;
+    _dir.copy(tg).sub(p);
+    const d0 = _dir.length();
+    if (d0 < 1e-4) return;
+    _dir.divideScalar(d0);
+    if (_dir.y >= 0) return;            // a view over the horizon meets no ground
+    const step = Math.max(1, d0 / SEAT_STEPS);
+    for (let t = step; t <= d0; t += step) {
+      const y = p.y + _dir.y * t;
+      if (y <= this._surfaceAt(p.x + _dir.x * t, p.z + _dir.z * t)) {
+        const d = Math.max(this.controls.minDistance, t);
+        if (d < d0) tg.copy(p).addScaledVector(_dir, d);
+        return;
+      }
+    }
+  }
+
+  // The way the view points, in three dimensions. The forward keys follow this, so a view that
+  // looks down flies down and a view that looks up climbs. The target travels with the camera, so
+  // the direction holds over the whole flight: a straight line stays a straight line.
+  _look(out) {
+    out.copy(this.controls.target).sub(this.camera.position);
+    if (out.lengthSq() > 1e-8) return out.normalize();
+    return this._forward(out);
   }
 
   // The way the view faces, flat on the ground. A view that points straight down has no such way,
@@ -1103,24 +1168,34 @@ export class Ground {
       this.glide = null;
     }
 
-    // The direction the reader asks for. The keys come first; a press that holds still steers with
-    // the pointer instead. A press that moves is a drag of the ground, and the controls own it.
-    let wx = 0, wz = 0;
-    const fwd = this._forward(_fw);
-    if (fwd) {
-      const f = (K.has('fwd') ? 1 : 0) - (K.has('back') ? 1 : 0);
-      const r = (K.has('right') ? 1 : 0) - (K.has('left') ? 1 : 0);
-      if (f || r) {
-        _rt.crossVectors(fwd, _UP);
-        wx = fwd.x * f + _rt.x * r; wz = fwd.z * f + _rt.z * r;
-      } else if (this._tap && this._tap.walk) {
-        const way = this._pointerWay(_rt);
-        if (way) { wx = way.x; wz = way.z; }
+    // The direction the reader asks for, in three dimensions. The keys come first; a press that
+    // holds still steers with the pointer instead. A press that moves is a drag of the ground, and
+    // the controls own it.
+    let wx = 0, wy = 0, wz = 0;
+    const f = (K.has('fwd') ? 1 : 0) - (K.has('back') ? 1 : 0);
+    const r = (K.has('right') ? 1 : 0) - (K.has('left') ? 1 : 0);
+    const lift = (K.has('up') ? 1 : 0) - (K.has('down') ? 1 : 0);
+    const look = this._look(_fw);
+    if (look && (f || r)) {
+      wx = look.x * f; wy = look.y * f; wz = look.z * f;
+      if (r) {
+        // The step sideways stays flat: a reader who steps aside means the ground, not the sky.
+        _rt.crossVectors(look, _UP);
+        if (_rt.lengthSq() > 1e-8) { _rt.normalize(); wx += _rt.x * r; wz += _rt.z * r; }
       }
+    } else if (!f && !r && !lift && this._tap && this._tap.walk) {
+      const way = this._pointerWay(_rt);
+      if (way) { wx = way.x; wz = way.z; }
     }
-    const len = Math.hypot(wx, wz);
+    wy += lift;
+    // The floor and the ceiling take the vertical part before the ease reads it, so a key held
+    // against a limit winds up no speed that the clamp of update() then throws away.
+    const h = Math.max(0, p.y - this._floorAt(p.x, p.z));
+    if (wy < 0 && h <= 0.05) wy = 0;
+    if (wy > 0 && p.y >= this.ceiling - 0.05) wy = 0;
+    const len = Math.hypot(wx, wy, wz);
     if (len > 1e-6) {
-      wx /= len; wz /= len;
+      wx /= len; wy /= len; wz /= len;
       this.glide = null;
       // The pan of the reader stops at the fog and so does the walk. It slows over the last
       // WALK_EDGE units instead of meeting a wall, and only the part of the step that goes outward
@@ -1131,18 +1206,23 @@ export class Ground {
         const cut = THREE.MathUtils.smoothstep(tr, this.reach - WALK_EDGE, this.reach) * out;
         wx -= (tg.x / tr) * cut; wz -= (tg.z / tr) * cut;
       }
-    } else { wx = 0; wz = 0; }
+    } else { wx = 0; wy = 0; wz = 0; }
 
     // The height sets the speed, as it sets the speed of a wheel step: a walk near the ground is a
     // walk, and at the ceiling one second carries the reader over a third of the patch.
-    const h = Math.max(0, p.y - this._groundAt(p.x, p.z));
     const speed = THREE.MathUtils.lerp(WALK_SLOW, WALK_FAST, THREE.MathUtils.clamp(h / SPEED_SPAN, 0, 1))
       * (K.has('run') ? WALK_RUN : 1);
     const k = 1 - Math.exp(-WALK_EASE * dt);
     this._vx += (wx * speed - this._vx) * k;
+    this._vy += (wy * speed - this._vy) * k;
     this._vz += (wz * speed - this._vz) * k;
-    const dx = this._vx * dt, dz = this._vz * dt;
-    if (dx * dx + dz * dz > 1e-10) { p.x += dx; p.z += dz; tg.x += dx; tg.z += dz; }
+    // The camera and the target take one step on all three axes, so the view direction and the
+    // distance hold and only the place changes.
+    const dx = this._vx * dt, dy = this._vy * dt, dz = this._vz * dt;
+    if (dx * dx + dy * dy + dz * dz > 1e-10) {
+      p.x += dx; p.y += dy; p.z += dz;
+      tg.x += dx; tg.y += dy; tg.z += dz;
+    }
   }
 
   // ---------------------------------------------------------------- the glide
@@ -1150,13 +1230,24 @@ export class Ground {
   // A camera over GLIDE_HIGH metres from its target also comes a third of the way in, so a tap
   // from high up both aims and closes. The reader keeps the view direction: only the offset
   // length changes, so a turn during the glide still works.
-  glideTo(point, done) {
+  //
+  // `frame` marks a destination the reader means to look at, an animal or a plant, and it ends the
+  // glide inside the band that shows one. The distance the reader kept is the distance to the
+  // ground the view points at, which says nothing about how far away the animal is: a reader who
+  // stands on the patch holds a few units and would land inside the animal, and a reader who has
+  // just arrived holds nine hundred and would watch it from the next hill. A tap on bare ground
+  // takes no band and travels, because there the distance is the whole point of the gesture.
+  glideTo(point, done, frame) {
     const to = point.clone();
     const r = Math.hypot(to.x, to.z);
     if (r > this.reach) { const k = this.reach / r; to.x *= k; to.z *= k; }
     to.y = this._groundAt(to.x, to.z) + TARGET_LIFT;
     const d0 = this.camera.position.distanceTo(this.controls.target);
-    const d1 = d0 > GLIDE_HIGH ? d0 * (1 - GLIDE_PULL) : d0;
+    let d1 = d0 > GLIDE_HIGH ? d0 * (1 - GLIDE_PULL) : d0;
+    if (frame) d1 = THREE.MathUtils.clamp(d1, GLIDE_NEAR, GLIDE_FAR);
+    // A glide only ever closes. The band would otherwise push a reader who already stands beside
+    // a plant back out to GLIDE_NEAR, and a tap that walks the reader backwards reads as a fault.
+    d1 = Math.max(this.controls.minDistance, Math.min(d1, this.camera.position.distanceTo(to)));
     this.glide = { k: 0, from: this.controls.target.clone(), to, d0, d1, done: done || null };
     return this.glide;
   }
@@ -1196,7 +1287,7 @@ export class Ground {
     this.fauna.group.updateWorldMatrix(true, false);
     const point = new THREE.Vector3(m.px, m.py, m.pz).applyMatrix4(this.fauna.group.matrixWorld);
     if (m.g.flies && point.y > this.camera.position.y + 1) this.turnTo(point);
-    else this.glideTo(point);
+    else this.glideTo(point, null, true);
     return true;
   }
 
@@ -1210,7 +1301,7 @@ export class Ground {
     const hit = this.flora.nearest(kind, tg.x, tg.z);
     if (!hit) { this.flora.unmark(); return false; }
     this.flora.mark(hit);
-    this.glideTo(hit.point);
+    this.glideTo(hit.point, null, true);
     return true;
   }
 
@@ -1307,7 +1398,7 @@ export class Ground {
     if (plant) {
       this.flora.mark(plant);
       if (this.fauna) this.fauna.unmark();
-      this.glideTo(plant.point);
+      this.glideTo(plant.point, null, true);
       if (this.onSelectPlant) this.onSelectPlant(plant.kind);
       return;
     }
@@ -1317,7 +1408,7 @@ export class Ground {
       // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
       // it would point the view at the ground under it instead.
       if (creature.air && creature.point.y > this.camera.position.y + 1) this.turnTo(creature.point);
-      else this.glideTo(creature.point);
+      else this.glideTo(creature.point, null, true);
       if (this.onSelect) this.onSelect(creature.kind);
       return;
     }

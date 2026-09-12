@@ -55,6 +55,7 @@ const _frustum = new THREE.Frustum();
 const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pw = new THREE.Vector3();
 const _up2 = new THREE.Vector3(), _fwd2 = new THREE.Vector3(), _rgt2 = new THREE.Vector3();
 const _pos2 = new THREE.Vector3(), _mat2 = new THREE.Matrix4();
+const _camF = new THREE.Vector3();   // scratch for the way the camera points, which the pick reads
 const HALF_PI = Math.PI / 2;
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smoothstep = (a, b, x) => { const t = clamp01((x - a) / (b - a || 1e-6)); return t * t * (3 - 2 * t); };
@@ -545,10 +546,29 @@ export class Flora {
   // distance, so the loop skips those and never projects a plant the reader cannot see. There is
   // no second, nearer limit: a colossus 900 units out is a landmark the reader looks at from the
   // moment the probe lands, and a tap on it has to find it.
+  //
+  // A plant the reader cannot see must take no tap. Two rules hold that, and both answer the same
+  // failure: a plant beside the camera, out of the frame, whose base and top project to two wild
+  // points far off the screen. Measured on `Pumpkin-215@41.25,99.84`, a plant 18 units to the side
+  // and 6 units deep put its base at 2731,2364 and its top at 8730,3406 on a screen 1280 wide. The
+  // segment between them ran 6,089 px, the body width read off that length came to 2,908 px, and
+  // that circle covered the whole frame. The plant was the nearest body under every tap, so it won
+  // every tap, and a reader who tapped the plant in front of them was carried off to one behind.
+  //
+  // So the body takes its width from its own size and its depth, `size * focal / depth`, which is
+  // the rule the walk uses for the cards; and a body whose whole axis lies outside one edge of the
+  // frame takes no tap at all.
   pickHit(px, py, tolerance = PICK_TOL) {
     const cam = this.camera;
     if (!cam || !this.count) return null;
     const el = this.canvas, w = el ? el.clientWidth : 1, h = el ? el.clientHeight : 1;
+    // The focal length of the view in pixels, as update() reads it, and the way the camera points,
+    // which turns a world point into a depth.
+    const focal = h / (2 * Math.tan(cam.fov * Math.PI / 360));
+    cam.getWorldDirection(_camF);
+    const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
+    // the frame in normalised coordinates, with the tolerance of the tap on every edge
+    const mx = 1 + 2 * tolerance / w, my = 1 + 2 * tolerance / h;
     this.group.updateWorldMatrix(true, false);
     const root = this.group.matrixWorld;
     let best = null, bestHit = false, bestKey = Infinity;
@@ -560,18 +580,27 @@ export class Flora {
         _pv.set(at[p], at[p + 1], at[p + 2]).applyMatrix4(root);
         _pw.copy(_pv);                          // the world point, before project() overwrites it
         const dist2 = _pw.distanceToSquared(cam.position);
+        // How far down the view the plant stands. A plant level with the camera or behind it has
+        // no width on the screen, so it goes before anything is projected.
+        const depth = (_pw.x - cx) * _camF.x + (_pw.y - cy) * _camF.y + (_pw.z - cz) * _camF.z;
+        if (depth <= cam.near) continue;
         // the top of the body: the up column of the instance matrix carries the lean and the
         // scale, so one multiply by the geometry height puts the point where the plant really ends
         _pt.set(at[p] + m[o + 4] * k.height, at[p + 1] + m[o + 5] * k.height, at[p + 2] + m[o + 6] * k.height)
           .applyMatrix4(root);
         _pv.project(cam); _pt.project(cam);
         if (_pv.z > 1 || _pv.z < -1 || _pt.z > 1 || _pt.z < -1) continue;
+        if ((_pv.x < -mx && _pt.x < -mx) || (_pv.x > mx && _pt.x > mx)) continue;
+        if ((_pv.y < -my && _pt.y < -my) || (_pv.y > my && _pt.y > my)) continue;
         const ax = (_pv.x + 1) / 2 * w, ay = (1 - _pv.y) / 2 * h;
         const bx = (_pt.x + 1) / 2 * w, by = (1 - _pt.y) / 2 * h;
         const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1;
         const u = clamp01(((px - ax) * lx + (py - ay) * ly) / ll);
         const gap = Math.hypot(ax + lx * u - px, ay + ly * u - py);
-        const half = Math.sqrt(ll) * k.wRatio;  // pixels: the body stands about this far off its axis
+        // pixels: the body stands about this far off its axis. The height of this plant times the
+        // width the kind holds per unit of height is its half width in units, which is the number
+        // the mark sizes its ring from.
+        const half = Math.sqrt(k.sz2[i]) * k.wRatio * focal / depth;
         const reach = Math.max(tolerance, half);
         if (gap > reach) continue;
         const hit = gap <= half;                // the point is on the body, not beside it

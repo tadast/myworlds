@@ -687,6 +687,14 @@ export class GroundFauna {
       // to nothing, project() blows its two points thousands of pixels apart, and the huge body it
       // draws on the screen then took every tap and carried the reader away to it.
       if (_pv.z > 1 || _pv.z < -1 || _pt.z > 1 || _pt.z < -1) continue;
+      // The depth test above catches an animal level with the camera. It does not catch one that
+      // stands in front of the camera but far off to the side, out of the frame: that body also
+      // projects its two ends to wild points, and the segment between them sweeps over the
+      // pointer. A body whose whole axis lies outside one edge of the frame takes no tap. The
+      // edges carry the tolerance of the tap, so an animal just off the frame is still reachable.
+      const mx = 1 + 2 * tolerance / w, my = 1 + 2 * tolerance / h;
+      if ((_pv.x < -mx && _pt.x < -mx) || (_pv.x > mx && _pt.x > mx)) continue;
+      if ((_pv.y < -my && _pt.y < -my) || (_pv.y > my && _pt.y > my)) continue;
       const ax = (_pv.x + 1) / 2 * w, ay = (1 - _pv.y) / 2 * h;
       const bx = (_pt.x + 1) / 2 * w, by = (1 - _pt.y) / 2 * h;
       const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1;

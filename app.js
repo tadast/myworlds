@@ -101,7 +101,7 @@ const helpEl = $('#help');
 // ground carries the reader over it, so the first gesture does a different thing in each, and the
 // line has to say which. See updateHelp().
 const HELP_ORBIT = 'Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife';
-const HELP_GROUND = 'Drag or hold to move · WASD and arrows walk, Shift runs · two fingers or right-drag to look · Q E R F turn and tilt';
+const HELP_GROUND = 'Drag or hold to move · Arrows and WASD fly, Space up, Ctrl down, Shift runs · two fingers or right-drag to look · Q E R F turn and tilt';
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
 const muteBtn = $('#mute');

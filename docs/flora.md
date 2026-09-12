@@ -169,6 +169,18 @@ The plants use the controls the animals use, and only on the ground:
   body the point only grazes. `ground.js` owns the tap: an animal and a plant can both lie under one
   point, and the animal wins unless it stands clearly further back, because a reader who taps an
   animal beside a tree means the animal.
+- **A plant the reader cannot see takes no tap.** The body used to read its width on the screen off
+  the length of its own projected axis. That holds while the plant stands in the frame and breaks
+  outside it: a plant beside the camera projects its base and its top to two wild points far off the
+  screen, and the segment between them sweeps over the pointer. Measured on
+  `Pumpkin-215@41.25,99.84`, a plant 18 units to the side and 6 units deep put its base at 2731,2364
+  and its top at 8730,3406 on a screen 1280 wide. The width read off that 6,089 px segment came to
+  2,908 px, a circle over the whole frame, so that one plant was the nearest body under every tap
+  and the reader who tapped the plant in front of them was carried off to one behind. The body now
+  takes its width from its own size and its depth, `size * focal / depth`, which is the rule the
+  walk uses for the cards, and a body whose whole axis lies outside one edge of the frame is dropped
+  before the gap is measured. `ground-fauna.js` carries the same guard: its depth test already
+  caught an animal level with the camera, and the edge test now catches one out to the side.
 - **A ring lies on the ground around it**, in the accent colour the animal ring and the site square
   both take. A plant does not move, so the ring is placed once and never stepped.
 - **The floating button offers the card**: "Study the ‹name›". Only one thing is marked at a time,

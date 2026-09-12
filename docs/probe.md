@@ -65,7 +65,9 @@ Added with issue 06. These notes record the decisions the issue text did not fix
 
 **The fog opens with the height.** The reveal puts the camera 450 m up and the ceiling is 500 m, but the fog is solid at 750 m. A fixed fog therefore paints one flat colour over the whole patch from both heights, and the reader sees nothing to zoom into. So the far distance of the fog grows with the height of the camera over the site, 1.15 m per metre, and it stops at 2,100 m. The near distance keeps the ratio of 0.6, so the depth of the fade holds. Since the ceiling of issue 20 the fog opens to 1,325 m at most, so the stop at 2,100 m no longer binds. At the ceiling the patch reads in full and the rim runs on to 3,150 units, well past the fog, so the ground never shows a cut. See "The rim carries the ground past the fog" below. `FOG_NEAR` and `FOG_FAR` keep their values and still set the pan limit and the fog at the ground.
 
-**The tilt is a band, not a lock.** The height sets the polar angle the view wants, from 1.10 rad at the ceiling to 1.40 rad at 60 m, and a band around that angle holds the play the reader keeps. The band is 0.06 rad at the ceiling and 0.25 rad at 60 m, so a zoom in turns the view from the patch below to the horizon on its own. Under 60 m the band opens to a half turn and the reader owns the angle. A hard lock was rejected: it takes the turn of the view away from the reader for the whole upper half of the range.
+**The tilt was a band, and it is now the reader's.** Issue 06 gave the height a say in the polar angle: the view wanted 1.10 rad at the ceiling and 1.40 rad at 60 m, and a band of 0.06 to 0.25 rad around that angle held the play the reader kept. The band turned the view from the patch below to the horizon as the reader came down, and it cost little while the keys only walked.
+
+The flight keys retired it. A camera that flies up a straight line has its view turned under it by a band that follows the height, and the turn moves the eye as well, because the controls hold the angle by swinging the eye about the target. The reader reads that as a camera that fights the key. So the band is gone. The angle now runs from 0.05 rad, a hair off straight down, to the angle that keeps the horizon on the bottom edge of the frame, and the height sets only the speeds. The reveal still arrives at 1.10 rad, so the first frame reads as issue 20 asks. See "The ground view must not read as a rectangle" for what the retirement costs.
 
 **The view turns over the horizon.** Added with issue 17. Until then the band ended 5 deg under the
 horizon, so the reader could never look up, and an air species that hovers 12 to 40 m over the
@@ -74,13 +76,10 @@ and it read as a limit on the polar angle, because OrbitControls puts the eye un
 point the view up. One number did two jobs, and the job it did well hid a whole class of animal.
 
 The two jobs now split. The angle runs to 2.09 rad and the position clamp in `update()` holds the
-eye. The clamp reads both rules in one pass. The target rides the terrain and the eye keeps its
-floor, and either rule moves the pair of them by the same step, so the view direction and the
-distance both hold. While the view points up the eye stops at the floor and the step carries the
-target up instead: the pivot of an up-view stands in the sky, tens of metres over the reader. The
-reader therefore turns the head and does not walk, and a pan over relief cannot tilt the view. A
-view that points down or level keeps the behaviour of issue 06, because the eye sits over the
-target there and the floor does not bind.
+eye. The clamp moves the camera and the target by one step, so the view direction and the distance
+both hold. While the view points up the eye stops at the floor and the step carries the target up
+instead: the pivot of an up-view stands in the sky, tens of metres over the reader. The reader
+therefore turns the head and does not walk, and a climb over relief cannot tilt the view.
 
 The frame sets the 2.09 rad. The view rises until the horizon reaches the bottom edge and no
 further, which is half the field of view over the horizon, or 30 deg on the 60 deg camera. A wider
@@ -91,6 +90,20 @@ inside it.
 A link carries an up-view as a polar angle over 90 deg, and `setView()` opens the band of the
 controls for its one update. Without that the controls cut the angle of the link against the band
 of the camera the link replaces, and every up-view came back at the horizon.
+
+**The camera holds its own height.** Issue 06 pinned the target one metre over the ground under it
+and let the eye keep its offset from the target, so the pair rode the terrain and a pan over relief
+carried the whole view up and down with the hills. The flight keys made that read as a bounce, and
+on a slope it fought the key that asked for height: the reader pressed `Space`, the climb opened
+the offset between the eye and the target, and the ground under the target pulled the pair back.
+
+The rule is now two limits and nothing else. The floor holds the eye 2 m over the terrain, or over
+the water on a sea. The ceiling holds it 500 m over the site, or over the water when the site lies
+under a sea, because the seabed of an ocean cell is kilometres down and a ceiling measured from it
+would hold the reader on the surface. Each limit moves the camera and the target by one step, so
+the view direction and the distance hold. Between the two the reader owns the height, and a
+straight line stays a straight line. The camera follows the terrain only while it lies against the
+floor, which is the one case where it must.
 
 **The ground view must not read as a rectangle.** Added with issue 20. The patch holds a 2 m grid
 with knolls and rock, and it holds every plant. The rim outside it holds a 50 m grid with neither,
@@ -112,6 +125,12 @@ stopping. Measured on `Auralis@-38.00,18.00`, a flat inland cell: the square was
 and it still read at 800 m; at the new ceiling, panned to each of the four limits and tilted to the
 foot of the band, nothing reads. The cost is the top-down view of the whole patch, which is the
 view the rectangle was in.
+
+The flight keys took the band away, and the ceiling now carries the rule alone. A reader who climbs
+to 500 m and turns the view out at the horizon can find the edge again. That is the price of a
+camera that flies where the reader points it, and it is a view the reader has to build on purpose:
+the reveal, the dive, and every glide arrive tilted down on the patch, where the fog still hides
+the line.
 
 **The zoom stops at the limit, and the limit offers the journey.** Added after issue 23, from use.
 Issue 03 gave the zoom a second job: half a second of zoom out at the ceiling of the ground recalled
@@ -158,13 +177,24 @@ points, and the reader steers with the thumb until the finger lifts. A press tha
 and the walk never arms, so the two cannot be confused: the rule is already there, because a press
 that moves more than `TAP_SLOP` stops being a tap.
 
-The **keys** carry the rest. `W A S D` and the arrow keys walk, `Shift` runs, `Q` and `E` turn,
-`R` and `F` tilt, and `+` and `-` zoom. The look keys turn the target about the eye, and not the eye
-about the target: the reader turns the head, and a camera swung about a target 15 m away would walk
-a 15 m circle instead. The walk moves the pair, so the view direction and the distance both hold and
-only the place changes. The speed follows the height, as the speed of a wheel step does: 11 units a
-second at eye height and 150 at the ceiling, and `Shift` multiplies by 2.6. An editable element
-takes every key first, so a reader who types a seed does not walk.
+The **keys** carry the rest. The up and down arrows, and `W` and `S`, fly the camera the way the
+view points: a view that looks down flies down, and a view that looks up climbs. The side arrows
+turn the view, and so do `Q` and `E`. `A` and `D` step sideways, flat on the ground. `Space` lifts
+the camera, `Ctrl` drops it, `Shift` runs, `R` and `F` tilt, and `+` and `-` zoom.
+
+The look keys turn the target about the eye, and not the eye about the target: the reader turns the
+head, and a camera swung about a target 15 m away would walk a 15 m circle instead. The walk moves
+the pair, so the view direction and the distance both hold and only the place changes. The speed
+follows the height, as the speed of a wheel step does: 11 units a second at eye height and 150 at
+the ceiling, and `Shift` multiplies by 5. An editable element takes every key first, so a reader
+who types a seed does not walk.
+
+Every key moves the camera and the target by one step, on all three axes, so the view direction and
+the distance hold and only the place changes. The drop stops at the floor, 2 m over the terrain or
+over the water, and the lift stops at the ceiling. Both gates take the vertical part before the
+ease reads it, so a key held against a limit winds up no speed that the clamp of `update()` then
+throws away. `Space` also takes the focus off a button, because the browser presses a focused
+button with the space key. `Enter` still presses it.
 
 The walk meets the same 450 m limit the pan meets, and it slows over the last 80 m instead of
 stopping dead. Only the outward part of the step slows, so a reader at the edge still walks along it
@@ -204,6 +234,27 @@ water. The whole rim is one mesh with the material of the terrain, and it costs 
 draw time.
 
 **The tap marches the height field.** A tap needs the point of the ground under the pointer. A triangle test against the terrain runs over a million faces. A march along the ray over the height grid costs about 450 steps and a bisection, it reads the rim as well as the patch, and it does not care which meshes issues 05, 07, and 09 add later.
+
+**The pivot follows the view to the ground, and a glide to a thing takes a band.** Added with the
+flight keys. The camera always looks at its target, and the distance between the two sets what a
+drag swings the camera about, what one wheel step is worth, and where a glide leaves the reader.
+The old rig tied that distance to the height, because the reader came down by zooming in. The
+flight keys carry the target along and never change the distance, so a reader who flew to the
+ground still held the distance the probe landed with, 990 units, and a focus on an animal parked
+them 660 units from it. The shadow box followed a target outside the frame for the same reason.
+
+So `_seatTarget()` walks the pivot down the view ray to the ground the view points at, once the
+camera is where the frame leaves it. It only ever comes in; the wheel and the zoom keys own the way
+out, because a reader who wants to stand back asks for it. The target holds the same ray, so the
+camera does not move and the reader sees nothing happen. The seat waits while a pointer is down: a
+drag turns the camera about the pivot, and a pivot that moved under a held pointer would carry the
+camera with it.
+
+The pivot is now honest about what the reader looks at, and that is still the wrong number for a
+glide to an animal: a reader standing on the patch holds a few units and would land inside it. So a
+glide to a thing, an animal or a plant, ends between `GLIDE_NEAR` and `GLIDE_FAR`, 12 and 120
+units. A tap on bare ground keeps the old rule and travels, because there the distance is the whole
+point of the gesture.
 
 **The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)`. A tap asks `pickCreature` first. A hit marks the animal with a ring, glides to `hit.point`, and reports the species through `onSelect`; the app then offers the card on the floating button. A tap on the ground takes the mark off through `onDeselect`. Without issue 09 `pickCreature` is null and every tap is a ground tap.
 
