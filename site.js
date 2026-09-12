@@ -118,14 +118,44 @@ export function pickSite(camera, current, ndc) {
   return hit ? dirToSite(hit.local) : null;
 }
 
+// The kinds of phenomenon the ground draws. The first slice of issue 14 builds the volcano and
+// the geyser. The fissure, the aurora, and the storm wait for a later slice, so the pull and the
+// patch do not know them yet.
+export const GROUND_ACTIVITY = ['volcano', 'geyser'];
+
+// The direction of the phenomenon of a world, or null. A world with no phenomenon, a kind the
+// ground cannot draw yet, and a kind that stands in the sky and not on the ground all give null.
+export function activityDir(world) {
+  const act = world && world.activity;
+  if (!act || !act.dir || !GROUND_ACTIVITY.includes(act.kind)) return null;
+  return act.dir;
+}
+
+// The cell that holds that phenomenon, or null. app.js compares the landing cell against this
+// cell: the patch shows the phenomenon when the two are the same, so a landing that reaches the
+// cell without the pull shows it too, and one phenomenon can never stand in two patches. Issue 14.
+export function activitySite(world) {
+  const dir = activityDir(world);
+  return dir ? snapSite(dirToSite({ x: dir[0], y: dir[1], z: dir[2] })) : null;
+}
+
 // The pull to life. A creature home inside the cell under the pick takes the site. The nearest
 // home wins. The site keeps the species id it was pulled to, or -1. The pull runs before the
 // snap, so a home anywhere in the cell puts its species on the patch, and the snap then returns
 // the site to the grid.
+//
+// The phenomenon of the world pulls too, and it wins over a home: the world holds many homes and
+// at most one phenomenon, and the cell the pull lands on can still hold homes. Issue 14.
 export function pullSite(site, current) {
-  if (!site || !current || !current.homes || !current.homes.length) return site;
+  if (!site || !current) return site;
   const limit = CELL * PULL_REACH;                              // globe units, the radius is 1
   const dir = siteDir(site.lat, site.lon, _local);
+  const act = activityDir(current.world);
+  if (act) {
+    const dx = act[0] - dir.x, dy = act[1] - dir.y, dz = act[2] - dir.z;
+    if (Math.sqrt(dx * dx + dy * dy + dz * dz) < limit) return dirToSite(_dir.set(act[0], act[1], act[2]));
+  }
+  if (!current.homes || !current.homes.length) return site;
   const homes = current.homes;
   let best = -1, bestD = limit;
   for (let i = 0; i < homes.length; i += 4) {

@@ -5,7 +5,7 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, makeGait, stepGait, gaitLocked, hopGait, hopBurst, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, activitySite } from './site.js';
 import { PlantInspector } from './flora-card.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
@@ -712,8 +712,19 @@ function requestPatch(target) {
     opts: {
       grid: Q.ground.grid, size: 1500, span: cellSpan(current.world), rim: RIM,
       maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1,
+      activity: activityHere(target),
     },
   });
+}
+
+// The phenomenon this landing brings, or null. The rule is the cell and not the pull: a landing
+// that reaches the cell of the phenomenon without the pull shows it too, and one phenomenon can
+// never stand in two patches. The worker builds the patch as before when this gives null. Issue 14.
+function activityHere(target) {
+  const cell = activitySite(current.world);
+  if (!cell) return null;
+  const here = snapSite(target);
+  return here.lat === cell.lat && here.lon === cell.lon ? { kind: current.world.activity.kind } : null;
 }
 
 // The point over the site in world space, at the ground radius plus an extra height.

@@ -1425,6 +1425,7 @@ function floraSize(rng, kind, vigour) {
 // grow on the main thread around the camera, because a patch holds far more of them than the cap.
 function patchFlora(ctx, s) {
   const { heights, vary, n, grid, half, size, hPerM, hPerU, cellT, cellM, cellF, noise, rng } = s;
+  const blocked = s.blocked || null;      // the footprint of the phenomenon takes no plant
   const maxFlora = s.maxFlora | 0;
   const none = { flora: new Float32Array(0), grass: new Uint8Array(0), grassN: 0, grassStep: 1 };
   if (maxFlora <= 0 || !ctx.P.flora || ctx.P.flora.length === 0) return none;
@@ -1457,7 +1458,8 @@ function patchFlora(ctx, s) {
     probe.t = cellT[gk];
     probe.m = cellM[gk] - vary[gk] * 0.1 + Math.max(cellF[gk], 0) * 0.06;
     probe.fm = cellF[gk];
-    probe.land = h >= 0 && biomeIndex(ctx, h * hPerU, probe.t, probe.m, beachH) > 2;
+    probe.land = h >= 0 && biomeIndex(ctx, h * hPerU, probe.t, probe.m, beachH) > 2
+      && !(blocked && blocked(x, z));
     return probe;
   }
 
@@ -1665,6 +1667,7 @@ function patchFlora(ctx, s) {
         const gi = clamp(Math.round((xm + half) / grid), 1, n - 2);
         const gk = gj * n + gi, h = heights[gk];
         if (h < 0) continue;
+        if (blocked && blocked(xm, zm)) continue;
         const t = cellT[gk];
         const m = cellM[gk] - vary[gk] * 0.1 + Math.max(cellF[gk], 0) * 0.06;
         if (biomeIndex(ctx, h * hPerU, t, m, beachH) <= 2) continue;
@@ -1829,6 +1832,7 @@ function patchFauna(ctx, opts, g) {
       const ang = rng() * Math.PI * 2, r = Math.sqrt(rng()) * reach;
       x = Math.cos(ang) * r; z = Math.sin(ang) * r;
       if (G.cls !== 'air' && hAt(x, z) <= 0) continue;   // a walker and a burrower stand on land
+      if (g.blocked && g.blocked(x, z)) continue;        // and none of them stands in the crater
       let clear = true;
       for (const p of anchors) {
         const need = Math.max(spread, p.spread) * 2;     // groups sit at least spread * 2 apart
@@ -1857,6 +1861,92 @@ function patchFauna(ctx, opts, g) {
   const members = new Float32Array(rows.length * 4);
   rows.forEach((r, i) => members.set(r, i * 4));
   return { groups, members };
+}
+
+// ---------------------------------------------------------------- the phenomenon of a patch
+// A world holds at most one phenomenon. app.js says whether this landing cell is the cell that
+// holds it, and it names the kind in opts.activity. The worker then raises the shape at the origin
+// of the patch, paints it, and keeps the plants and the animals off it. ground-phenomena.js draws
+// the moving parts. The patch path never runs makeActivity: that function works on the globe mesh,
+// and the patch has no globe mesh. Issue 14.
+//
+// The ground shows a set piece and not the true scale. A cone at true scale is tens of kilometres
+// wide, so one flank would fill the whole cell and the reader would never see a volcano. The cone
+// therefore keeps a size the reader can walk to and see whole, the way a creature keeps its
+// readable size. See "Scale facts" in docs/issues/README.md.
+const CONE_R = 250;          // units, the foot of the cone
+const CONE_PEAK = 110;       // units, the peak over the ground at the site
+const CRATER_R = 50;         // units, the crater at the top
+const CRATER_DROP = 1 / 3;   // the part of the peak the crater floor drops
+const POOL_R = 10;           // units, the pool of the geyser
+const RING_R = 35;           // units, the mineral ring around the pool
+const MOUND_H = 2.5;         // units, the sinter mound the ring stands on
+const POOL_DROP = 1.2;       // units, how far the pool sits under the rim of the mound
+
+// The shape and the paint of the phenomenon at the origin of the patch. It rewrites the heights in
+// place and gives back the paint pass, the mask the plants read, and the numbers the main thread
+// needs. A kind the ground cannot draw yet gives null, and the patch then builds as before.
+function patchActivity(ctx, kind, s) {
+  if (kind !== 'volcano' && kind !== 'geyser') return null;
+  const { heights, n, grid, half } = s;
+  const P = ctx.P, type = ctx.type;
+  const reach = kind === 'volcano' ? CONE_R : RING_R;
+  // the ground at the site, before the shape. The cone and the mound stand on it, so the flank
+  // does not carry the knolls of the patch up with it.
+  const ci = clamp(Math.round(half / grid), 0, n - 1);
+  const hs = heights[ci * n + ci];
+  const i0 = Math.max(0, Math.floor((half - reach) / grid));
+  const i1 = Math.min(n - 1, Math.ceil((half + reach) / grid));
+  const craterD = CRATER_R / CONE_R, poolD = POOL_R / RING_R;
+  for (let j = i0; j <= i1; j++) {
+    const zm = -half + j * grid;
+    for (let i = i0; i <= i1; i++) {
+      const xm = -half + i * grid;
+      const d = Math.hypot(xm, zm) / reach;
+      if (d >= 1) continue;
+      const k = j * n + i, h = heights[k];
+      const w = smoothstep(1, 0.5, d);     // the shape owns the middle and lets the patch back in
+      if (kind === 'volcano') {
+        const cone = CONE_PEAK * Math.pow(1 - d, 1.3);
+        const crater = smoothstep(craterD, craterD * 0.3, d) * CONE_PEAK * CRATER_DROP;
+        heights[k] = h + cone * (1 - w) + (hs + cone - crater - h) * w;
+      } else {
+        const mound = MOUND_H * smoothstep(1, 0.3, d);
+        const bowl = POOL_DROP * smoothstep(poolD * 1.3, poolD * 0.4, d);
+        heights[k] = h + (hs + mound - bowl - h) * w;
+      }
+    }
+  }
+
+  // The colours of the globe, at the scale of the ground. The rock of the cone darkens toward the
+  // vent, and the vent itself glows. The ring of the geyser takes the mineral colour and the pool
+  // takes the water colour, or the glow colour on an exotic world.
+  const dark = scale(P.rock2 || P.rock || P.deep, 0.45);
+  const vent = type === 'ice' ? mix(P.shallow, [1, 1, 1], 0.3) : [1.0, 0.42, 0.08];
+  const mineral = type === 'ice' ? mix(P.shallow, [1, 1, 1], 0.4)
+    : type === 'exotic' ? mix(P.beach, P.faunaColor.glow, 0.5) : mix(P.beach, [0.95, 0.9, 0.8], 0.5);
+  const pool = type === 'exotic' ? P.faunaColor.glow : P.shallow;
+  const paint = (xm, zm, out, o) => {
+    const d = Math.hypot(xm, zm) / reach;
+    if (d >= 1) return;
+    let c;
+    if (kind === 'volcano') {
+      c = mix(dark, [out[o], out[o + 1], out[o + 2]], smoothstep(0.25, 1.0, d));
+      if (d < 0.16) c = mix(vent, c, smoothstep(0.09, 0.16, d));
+    } else {
+      c = mix(mineral, [out[o], out[o + 1], out[o + 2]], smoothstep(0.5, 1.0, d));
+      if (d < 0.35) c = mix(pool, c, smoothstep(0.2, 0.35, d));
+    }
+    out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2];
+  };
+
+  const info = kind === 'volcano'
+    ? { kind, radius: CONE_R, peak: CONE_PEAK, crater: CRATER_R }
+    : { kind, radius: RING_R, pool: POOL_R };
+  return {
+    info, paint, i0, i1,
+    blocked: (x, z) => x * x + z * z < reach * reach,
+  };
 }
 
 // A ground patch at one site: a square height grid and a colour per vertex, both in the frame
@@ -2014,6 +2104,11 @@ function patch(seed, lat, lon, opts) {
     if ((j & 31) === 0) post(20 + (j / n) * 45, 'Raising the ground');
   }
 
+  // The phenomenon stands at the origin, after the field and the noise and before the colours, so
+  // the slope of the cone earns its rock and the paint of the vent goes over it. Issue 14.
+  const act = opts.activity && opts.activity.kind
+    ? patchActivity(ctx, opts.activity.kind, { heights, n, grid, half }) : null;
+
   post(66, 'Painting the ground');
   const colors = new Float32Array(n * n * 3);
   const tint = [0, 0, 0];
@@ -2056,6 +2151,16 @@ function patch(seed, lat, lon, opts) {
       }
     }
     if ((j & 31) === 0) post(66 + (j / n) * 30, 'Painting the ground');
+  }
+
+  // The phenomenon paints over the biome, on its own window of the grid. It runs as a second pass
+  // and not as a test inside the loop above, because the window covers a small part of the patch
+  // and the loop above runs over every vertex of it.
+  if (act) {
+    for (let j = act.i0; j <= act.i1; j++) {
+      const zm = -half + j * grid, jn = j * n;
+      for (let i = act.i0; i <= act.i1; i++) act.paint(-half + i * grid, zm, colors, (jn + i) * 3);
+    }
   }
 
   // ---------------------------------------------------------------- the rim, issue 18
@@ -2166,12 +2271,14 @@ function patch(seed, lat, lon, opts) {
   const grown = patchFlora(ctx, {
     heights, vary, n, grid, half, size, hPerM: H_PER_M, hPerU,
     cellT, cellM, cellF, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000,
+    blocked: act ? act.blocked : null,
   });
   const flora = grown.flora, grass = grown.grass;
 
   post(96, 'Calling the animals');
   const { groups, members } = patchFauna(ctx, opts, {
     pseed, heights, vary, n, grid, half, hPerU, cellT, cellM, cellF,
+    blocked: act ? act.blocked : null,
   });
 
   post(98, 'Almost there');
@@ -2187,6 +2294,7 @@ function patch(seed, lat, lon, opts) {
       cover: { n: grown.grassN, step: grown.grassStep },
       // what the two passes after the scan put on the patch, for the load log
       marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big },
+      activity: act ? act.info : null,
       biome,
       // The lore of every plant kind this patch grows, tallest first. See describePatchFlora().
       plants,
