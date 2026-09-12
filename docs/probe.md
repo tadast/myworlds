@@ -129,6 +129,16 @@ reader who keeps pulling is asking for something the zoom cannot do, so the offe
 when it answers a question the reader is already asking, and it covers no view that the reader is
 still moving. It hides while the reader aims, because the aim banner already holds the screen.
 
+**The tap marks, and the button opens the card.** The card used to open on a second tap on the
+same animal within 0.45 s, and the gesture was hard to find. One tap now marks the animal: a ring
+in the accent of the palette lies on the ground under it and follows it, and a floating button at
+the foot of the screen offers the card — "Study the ‹name›". The button takes the spot of the
+recall button while a mark is on, because the two share one place and the mark is the fresher ask.
+The arrows of the card walk the species list, and on the ground they also point the view at the
+nearest animal of the next species, with the same glide or turn the tap uses. A species the patch
+does not host leaves the camera in place and takes the mark off. A tap on the ground, Escape, or
+the recall of the probe takes the mark off too.
+
 **The reader walks, and moving takes the first gesture.** Added with issue 23. Issue 06 gave the
 ground the gesture map of the globe: one finger and the left button turned the view, and the pan sat
 on the right button and on two fingers. On the globe that is right, because the reader turns a thing
@@ -146,9 +156,7 @@ A drag carries the short distances and it needs a new one for every screen. Two 
 long ones. A press that **holds still** past 300 ms becomes a walk in the direction the pointer
 points, and the reader steers with the thumb until the finger lifts. A press that moves is a drag,
 and the walk never arms, so the two cannot be confused: the rule is already there, because a press
-that moves more than `TAP_SLOP` stops being a tap. The window of the double tap arms no walk either,
-or a reader who holds the second tap on an animal would walk away from it instead of opening its
-card.
+that moves more than `TAP_SLOP` stops being a tap.
 
 The **keys** carry the rest. `W A S D` and the arrow keys walk, `Shift` runs, `Q` and `E` turn,
 `R` and `F` tilt, and `+` and `-` zoom. The look keys turn the target about the eye, and not the eye
@@ -197,7 +205,7 @@ draw time.
 
 **The tap marches the height field.** A tap needs the point of the ground under the pointer. A triangle test against the terrain runs over a million faces. A march along the ray over the height grid costs about 450 steps and a bisection, it reads the rim as well as the patch, and it does not care which meshes issues 05, 07, and 09 add later.
 
-**The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)` and `ground.onCreatureTap(hit)`. A tap asks `pickCreature` first. A hit glides to `hit.point` and calls `onCreatureTap` when the glide ends, so the inspector opens after the glide. Without issue 09 both are null and every tap is a ground tap.
+**The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)`. A tap asks `pickCreature` first. A hit marks the animal with a ring, glides to `hit.point`, and reports the species through `onSelect`; the app then offers the card on the floating button. A tap on the ground takes the mark off through `onDeselect`. Without issue 09 `pickCreature` is null and every tap is a ground tap.
 
 **A tap on a flyer turns the view, it does not walk it.** Added with issue 17. The glide of issue 06
 moves the target, and the target rides the ground, so a glide to a flyer aims the view at the ground

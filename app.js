@@ -63,6 +63,7 @@ const shareBtn = $('#share');
 const probeBtn = $('#probe');
 const probeIconBtn = $('#probe-icon');
 const probeFloat = $('#probe-float');
+const creatureFloat = $('#creature-float');
 const aimEl = $('#aim');
 const helpEl = $('#help');
 // The two lines of help, one per place the reader stands. The globe turns under the pointer and the
@@ -445,7 +446,8 @@ function frame() {
   perf.frame(now, !!dive || busy);
   if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
   step(now);
-  updateProbeFloat();
+  updateCreatureFloat();
+  updateProbeFloat();   // after the creature button, because the marked animal takes the spot
   perf.work(performance.now() - now);
 }
 
@@ -782,7 +784,11 @@ function stepDive(now) {
 // The switch into the ground scene, under an opaque overlay.
 function enterGround() {
   mode = 'ground';
-  ground = new Ground({ renderer, canvas, world: current.world, site: lockedSite, tier: Q.ground, onInspect: inspect });
+  ground = new Ground({
+    renderer, canvas, world: current.world, site: lockedSite, tier: Q.ground,
+    onSelect: (kind) => { markedKind = kind; },
+    onDeselect: () => { markedKind = null; },
+  });
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
   const view = skyView(current, lockedSite, sunDir);
@@ -800,6 +806,7 @@ function enterGround() {
 // The switch back to the globe, under an opaque overlay. Also the straight cut for a new world.
 function leaveGround() {
   if (ground) { ground.dispose(); ground = null; }
+  markedKind = null;  // the mark belongs to the patch, and the patch is gone
   perf.reset();       // the ground frames say nothing about the globe
   if (mode === 'ground') mode = 'ascending';
   if (lockedSite) placeCameraOverSite(lockedSite);
@@ -811,6 +818,7 @@ function abortProbe() {
   stopAim();
   if (mode === 'orbit' && !dive) return;
   if (ground) { ground.dispose(); ground = null; }
+  markedKind = null;
   perf.reset();
   dive = null;
   lockedSite = null;
@@ -871,7 +879,8 @@ function updateProbeFloat() {
   if (!probeFloat) return;
   let label = '';
   if (!dive && !busy && !aiming) {
-    if (mode === 'ground' && ground && ground.atCeiling) label = 'Recall the probe';
+    // the marked animal holds the spot: the two floating buttons share one place on the screen
+    if (mode === 'ground' && ground && ground.atCeiling && !creatureLabel) label = 'Recall the probe';
     else if (mode === 'orbit' && canDescend() && camera.position.length() <= FLOAT_NEAR) label = 'Send a probe to the surface';
   }
   if (label === floatLabel) return;
@@ -882,6 +891,28 @@ function updateProbeFloat() {
   probeFloat.classList.toggle('show', !!label);
 }
 if (probeFloat) probeFloat.addEventListener('click', onProbeClick);
+
+// ---------------------------------------------------------------- the marked animal button
+// One tap on an animal marks it: a ring lies on the ground under it, and this button offers its
+// card, the way the floating probe button offers the journey. The card then opens from the
+// button, so no tap ever covers the view the reader is crossing with a card. The button hides
+// while the card is open, and it comes back when the card closes, so the reader can reopen it.
+// A tap on the ground, the Escape key, or the recall of the probe takes the mark off.
+let markedKind = null;    // the species of the marked animal, or null while nothing is marked
+let creatureLabel = '';
+function updateCreatureFloat() {
+  if (!creatureFloat) return;
+  let label = '';
+  if (mode === 'ground' && !dive && !busy && markedKind !== null && creatureCard.hidden) {
+    const G = current && current.world.species[markedKind];
+    if (G) label = `Study the ${G.lore.name}`;
+  }
+  if (label === creatureLabel) return;
+  creatureLabel = label;
+  if (label) creatureFloat.textContent = label;
+  creatureFloat.classList.toggle('show', !!label);
+}
+if (creatureFloat) creatureFloat.addEventListener('click', () => { if (markedKind !== null) inspect(markedKind); });
 
 // creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
 const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _m = new THREE.Matrix4();
@@ -1111,10 +1142,19 @@ creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) i
 creatureCard.querySelector('.cprev').addEventListener('click', () => cycleInspect(-1));
 creatureCard.querySelector('.cnext').addEventListener('click', () => cycleInspect(1));
 function cycleInspect(dir) {
-  const kinds = current?.world.faunaKinds || [];
+  // On the ground the list also carries the species of the patch: the pull and the niches can
+  // put an animal on the ground that the globe sample never drew, and the arrows must reach it.
+  const kinds = (current?.world.faunaKinds || []).slice();
+  if (mode === 'ground' && ground && ground.fauna) {
+    for (const e of ground.fauna.kinds) if (!kinds.includes(e.kind)) kinds.push(e.kind);
+  }
   if (!kinds.length) return;
   const i = kinds.indexOf(+creatureCard.dataset.kind);
-  inspect(kinds[(i + dir + kinds.length) % kinds.length]);
+  const kind = kinds[(i + dir + kinds.length) % kinds.length];
+  inspect(kind);
+  // The arrows also point the camera at the nearest animal of the species, behind the card. A
+  // species the patch does not host leaves the camera where it is, and takes the mark off.
+  if (mode === 'ground' && ground) markedKind = ground.focusKind(kind) ? kind : null;
 }
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && inspector.open) inspector.hide(); });
 addEventListener('resize', () => {
@@ -1245,6 +1285,7 @@ addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
   if (e.key !== 'Escape') return;
   if (!creatureCard.hidden) inspector.hide();
+  else if (markedKind !== null) { if (ground && ground.fauna) ground.fauna.unmark(); markedKind = null; }
   else stopAim();
 });
 if (COMPACT) setCollapsed(true);

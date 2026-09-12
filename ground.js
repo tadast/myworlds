@@ -110,8 +110,6 @@ const GLIDE_S = 0.8;        // seconds, the glide to a tapped point
 const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a glide
 const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
 const TAP_SLOP = 6;         // px, a pointer that moves more than this is a drag, not a tap
-const DBL_MS = 450;         // ms, the window for the second tap that opens the card of an animal
-const DBL_SLOP = 40;        // px, how far the second tap may land from the first
 const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
@@ -180,9 +178,10 @@ function makeGeometry(pos, col, idx) {
 
 export class Ground {
   // tier: { grid, maxFlora, maxFauna, shadows }
-  constructor({ renderer, canvas, world, site, tier, onInspect }) {
+  constructor({ renderer, canvas, world, site, tier, onSelect, onDeselect }) {
     this.renderer = renderer;
-    this.onInspect = onInspect || null;   // the app opens the inspector card for a tapped creature
+    this.onSelect = onSelect || null;       // (kind) => void, a tap marked an animal of this species
+    this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took the mark off
     this.canvas = canvas;
     this.world = world;
     this.site = site;
@@ -259,11 +258,10 @@ export class Ground {
     this._vx = 0;
     this._vz = 0;
     // The seam for issue 09. It sets pickCreature to a function that returns the creature under
-    // the pointer, { point, kind, scale, dist } or null. One tap on a creature glides to it, and a
-    // second tap opens the inspector through onCreatureTap. A tap on the ground needs neither.
-    this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind, scale, dist } | null
-    this.onCreatureTap = null;   // (hit) => void, called on the second tap on one animal
-    this._lastTap = null;        // { t, x, y, hit }, the tap on an animal a second tap can follow
+    // the pointer, { point, kind, scale, dist, member } or null. One tap on a creature marks it
+    // and glides to it; the app then offers the card of the marked animal on the floating button.
+    // A tap on the ground takes the mark off and glides there.
+    this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind, scale, dist, member } | null
     this._bound = {
       down: (e) => this._onDown(e),
       move: (e) => this._onMove(e),
@@ -355,19 +353,19 @@ export class Ground {
     // knob the plants take: a near mesh under lod.distance, a coarse mesh past it.
     this.fauna = new GroundFauna({
       result, world: this.world, tier: this.tier, camera: this.camera, canvas: this.canvas,
-      heightAt: (x, z) => this.heightAt(x, z), onInspect: this.onInspect, lod: this.lod,
+      heightAt: (x, z) => this.heightAt(x, z), lod: this.lod,
       // Issue 17: the shadow of a flyer falls opposite the sun, and it goes out after sundown.
       sunDir: this.sunDir, night: this.sky.night,
     });
     this.content.add(this.fauna.group);
 
-    // Fill the seam of issue 06: a tap on an animal glides to it first, then opens its card.
+    // Fill the seam of issue 06: a tap on an animal marks it and glides to it. The app hears of
+    // the mark through onSelect and offers the card of that animal on the floating button.
     this.pickCreature = (nx, ny, e) => {
       const r = this.canvas.getBoundingClientRect();
       const px = (nx + 1) / 2 * r.width, py = (1 - ny) / 2 * r.height;
       return this.fauna.pickHit(px, py, e && e.pointerType === 'touch' ? 52 : 34);
     };
-    this.onCreatureTap = (hit) => { if (this.onInspect) this.onInspect(hit.kind); };
 
     // A directional light takes its direction from the position and the target, not the distance,
     // so the height of the site must not move it. The colour and the strength come from the sky.
@@ -689,11 +687,9 @@ export class Ground {
     this._drive();               // the speeds and the tilt, both from the height of the camera
     this.controls.update();
     if (this.glide) this._stepGlide(dt);
-    // Issue 23: a press that holds still, and does not move, becomes a walk. The window of the
-    // double tap takes none of them: a reader who holds the second tap on an animal asks for the
-    // card of that animal, and not for a walk.
+    // Issue 23: a press that holds still, and does not move, becomes a walk.
     const tap = this._tap;
-    if (tap && !tap.walk && !this._lastTap && performance.now() - tap.t > WALK_HOLD) tap.walk = true;
+    if (tap && !tap.walk && performance.now() - tap.t > WALK_HOLD) tap.walk = true;
     this._stepMove(dt);
     const p = this.camera.position, tg = this.controls.target;
 
@@ -1055,6 +1051,24 @@ export class Ground {
     return this.glide;
   }
 
+  // The arrows of the card ask for the next species. When the patch holds an animal of it, this
+  // marks the nearest one and points the view at it, with the same choice the tap makes: a flyer
+  // over the eye takes a turn, every other animal takes a glide. When the patch holds none, the
+  // view stays where it is and the mark comes off, so the ring cannot sit under one species while
+  // the card shows another. Returns true when an animal took the mark.
+  focusKind(kind) {
+    if (!this.fauna) return false;
+    const tg = this.controls.target;
+    const m = this.fauna.nearestMember(kind, tg.x, tg.z);
+    if (!m) { this.fauna.unmark(); return false; }
+    this.fauna.markMember(m);
+    this.fauna.group.updateWorldMatrix(true, false);
+    const point = new THREE.Vector3(m.px, m.py, m.pz).applyMatrix4(this.fauna.group.matrixWorld);
+    if (m.g.flies && point.y > this.camera.position.y + 1) this.turnTo(point);
+    else this.glideTo(point);
+    return true;
+  }
+
   _stepGlide(dt) {
     const g = this.glide;
     g.k = Math.min(1, g.k + dt / GLIDE_S);
@@ -1123,20 +1137,11 @@ export class Ground {
     const r = this.canvas.getBoundingClientRect();
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
     const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
-    // One tap on an animal glides to it, so every tap moves the view and the reader keeps walking.
-    // A second tap in the same place opens the card of that animal, because a card that opens on
-    // the first tap covers the screen the reader is trying to cross. The second tap does not have
-    // to find the animal again: the first tap set the view gliding and the animal walks, so by now
-    // it stands somewhere else on the screen. The card comes from the animal the first tap found.
-    const now = performance.now();
-    const last = this._lastTap;
-    if (last && now - last.t < DBL_MS && Math.hypot(e.clientX - last.x, e.clientY - last.y) < DBL_SLOP) {
-      this._lastTap = null;
-      if (this.onCreatureTap) this.onCreatureTap(last.hit);
-      return;
-    }
-    this._lastTap = null;
-
+    // One tap on an animal marks it and glides to it, so every tap moves the view and the reader
+    // keeps walking. The card does not open here: a card that opens on a tap covers the screen
+    // the reader is trying to cross. The app offers it on the floating button instead, and the
+    // ring under the animal says which animal the button means. A tap on the ground takes the
+    // mark off.
     const hit = this.groundAtPointer(nx, ny);
     let creature = this.pickCreature ? this.pickCreature(nx, ny, e) : null;   // the seam of issue 09
     // The ray meets the ground at hit. An animal farther away than that stands behind the hill the
@@ -1147,12 +1152,17 @@ export class Ground {
     // the reader can see.
     if (creature && !creature.air && hit && creature.dist > this.camera.position.distanceTo(hit) + Math.max(4, (creature.scale || 1) * 3)) creature = null;
     if (creature && creature.point) {
-      this._lastTap = { t: now, x: e.clientX, y: e.clientY, hit: creature };
+      if (this.fauna && creature.member) this.fauna.markMember(creature.member);
       // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
       // it would point the view at the ground under it instead.
       if (creature.air && creature.point.y > this.camera.position.y + 1) this.turnTo(creature.point);
       else this.glideTo(creature.point);
+      if (this.onSelect) this.onSelect(creature.kind);
       return;
+    }
+    if (this.fauna && this.fauna.marked) {
+      this.fauna.unmark();
+      if (this.onDeselect) this.onDeselect();
     }
     if (hit) this.glideTo(hit);
   }

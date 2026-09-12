@@ -65,6 +65,15 @@ const SHADE_FADE = 0.45;     // the part of that alpha the disc keeps at the top
 const SHADE_RINGS = 4;       // rings of the disc: more rings make a softer edge
 const SHADE_SEG = 20;        // segments around the disc
 const PICK_TOL = 34;         // pixels: how near a tap must come to a creature
+// The mark: one ring on the ground under the animal the reader tapped. The tap no longer opens
+// the card. It marks the animal, the app offers the card on the floating button, and the ring
+// says which animal the button means. The ring follows the animal, so a herd that walks on
+// cannot carry the mark away from the reader unseen. Under a flyer it lies on the ground, beside
+// the shadow disc, so it floats a little higher than SHADE_LIFT and draws after it.
+const RING_LIFT = 0.4;       // metres: the ring floats this far over the terrain
+const RING_MIN = 1.4;        // metres: the smallest radius the ring takes, so a small animal marks too
+const RING_BAND = 0.16;      // the part of the radius the band of the ring covers
+const RING_SIZE = 0.75;      // the radius of the ring, in body widths of the animal
 const HYSTERESIS = 0.05;     // ±5% around the LOD distance: a band of 10%, as ground-flora.js uses
 const DEFAULT_LOD = { distance: 150 };   // the fallback when no owner passes its lod knob
 
@@ -128,17 +137,16 @@ export function turnRadius(G) {
 }
 
 export class GroundFauna {
-  // heightAt(x, z) gives the elevation in metres. onInspect(kind) opens the inspector card.
+  // heightAt(x, z) gives the elevation in metres.
   // lod is the shared LOD knob of the ground: { distance, min, max } in metres.
   // sunDir is the direction of the sun in the ground frame, and night is 0 by day and 1 at night.
   // The shadow of a flyer reads both: it falls opposite the sun, and it fades out after sundown.
-  constructor({ result, world, tier, heightAt, camera, canvas, onInspect, lod, sunDir, night }) {
+  constructor({ result, world, tier, heightAt, camera, canvas, lod, sunDir, night }) {
     this.world = world;
     this.tier = tier;
     this.heightAt = heightAt;
     this.camera = camera;
     this.canvas = canvas;
-    this.onInspect = onInspect || null;
     this.lod = lod || DEFAULT_LOD;
     this.group = new THREE.Group();
     this.kinds = [];        // one entry per species drawn: { G, kind, near, far, mat, scale }
@@ -149,6 +157,9 @@ export class GroundFauna {
     this.farCount = 0;      // animals drawn as coarse meshes this frame
     this.stepMs = 0;
     this._down = null;
+    // the mark: the member under the ring, or null, and the ring mesh once one animal was marked
+    this.marked = null;
+    this.ring = null;
     // the shadow of a flyer: one instanced disc, one instance per air animal. See _buildShade().
     this.shade = null;
     this.shadeCount = 0;
@@ -373,6 +384,7 @@ export class GroundFauna {
     for (const e of this.kinds) { e.nearN = 0; e.farN = 0; }
     for (const g of this.groups) if (g) this._stepGroup(g, t, dt);
     for (const m of this.members) this._stepMember(m, t, dt);
+    if (this.marked) this._stepRing();   // the ring follows the animal it marks
     let near = 0, far = 0;
     for (const e of this.kinds) {
       e.near.count = e.nearN; e.far.count = e.farN;
@@ -568,9 +580,76 @@ export class GroundFauna {
       SHADE_DARK * (1 - k * (1 - SHADE_FADE)) * (1 - this._night));
   }
 
+  // ---------------------------------------------------------------- the mark
+  // A tap marks one animal. The ring lies on the ground under it and follows it, and the app
+  // offers the card of that animal on the floating button. See ground.js for the tap itself.
+  markMember(m) {
+    if (!m) return;
+    this.marked = m;
+    if (!this.ring) this._buildRing();
+    this.ring.visible = true;
+    this._stepRing();
+  }
+
+  unmark() {
+    this.marked = null;
+    if (this.ring) this.ring.visible = false;
+  }
+
+  // The member of a species nearest a point on the ground, or null. The arrows of the card read
+  // it, so the camera goes to the animal of that species the reader can reach first.
+  nearestMember(kind, x, z) {
+    let best = null, bd = Infinity;
+    for (const m of this.members) {
+      if (m.e.kind !== kind) continue;
+      const d = (m.x - x) * (m.x - x) + (m.z - z) * (m.z - z);
+      if (d < bd) { bd = d; best = m; }
+    }
+    return best;
+  }
+
+  // The band of the mark, flat in the xz plane as the shadow disc is, so the instance basis can
+  // lay it on the slope. It takes the accent of the fauna palette, the colour the site marker
+  // uses, so the mark and the square read as one voice.
+  _buildRing() {
+    const geo = new THREE.RingGeometry(1 - RING_BAND, 1, 48);
+    geo.rotateX(-HALF_PI);
+    const pal = this.world.palette || {};
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(pal.fauna?.accent || '#ffffff'),
+      transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, fog: true,
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.renderOrder = 2;           // after the shadow disc, so the mark lies on it and not under
+    ring.frustumCulled = false;
+    ring.matrixAutoUpdate = false;  // the step writes the matrix, as it writes every instance
+    this.ring = ring;
+    this.ringMat = mat;
+    this.group.add(ring);
+  }
+
+  // Place the ring on the terrain under the marked animal, tilted to the slope, at the size the
+  // animal draws at. A far flyer grows on the screen, and the ring grows with it.
+  _stepRing() {
+    const m = this.marked;
+    if (!m || !this.ring) return;
+    const e = 2;
+    _up.set(this.heightAt(m.x - e, m.z) - this.heightAt(m.x + e, m.z), 2 * e,
+      this.heightAt(m.x, m.z - e) - this.heightAt(m.x, m.z + e)).normalize();
+    _fwd.set(0, 0, 1);
+    _fwd.addScaledVector(_up, -_fwd.dot(_up)).normalize();
+    _rgt.crossVectors(_up, _fwd).normalize();
+    const grow = m.scale > 1e-6 ? m.drawScale / m.scale : 1;
+    const r = Math.max(RING_MIN, m.e.widthM * RING_SIZE * grow);
+    _mat.makeBasis(_rgt.multiplyScalar(r), _up.multiplyScalar(r), _fwd.multiplyScalar(r));
+    _mat.setPosition(_pos.set(m.x, Math.max(this.heightAt(m.x, m.z), 0) + RING_LIFT, m.z));
+    this.ring.matrix.copy(_mat);
+    this.ring.matrixWorldNeedsUpdate = true;
+  }
+
   // ---------------------------------------------------------------- the inspector click
-  // Issue 06 owns the ground click. ground.js calls pickHit() through its seam, glides to the
-  // animal, and then opens the card. This file binds no listener of its own.
+  // Issue 06 owns the ground click. ground.js calls pickHit() through its seam, marks the
+  // animal, and glides to it. This file binds no listener of its own.
 
   // The species under a screen point, or null. The same measure creatureAt() uses on the globe:
   // project the base and a point one body up, then take the distance to that segment. The globe
@@ -623,13 +702,14 @@ export class GroundFauna {
         if (bestHit === hit && key >= bestKey) continue;
       }
       bestHit = hit; bestKey = key;
-      best = { kind: m.e.kind, scale: m.drawScale, air: m.g.flies, dist, point: _pb.copy(_pw).clone() };
+      best = { kind: m.e.kind, scale: m.drawScale, air: m.g.flies, dist, point: _pb.copy(_pw).clone(), member: m };
     }
     return best;
   }
 
   dispose() {
     if (this.shade) { this.shade.geometry.dispose(); this.shadeMat.dispose(); }
+    if (this.ring) { this.ring.geometry.dispose(); this.ringMat.dispose(); this.ring = null; this.marked = null; }
     for (const e of this.kinds) { e.near.geometry.dispose(); e.far.geometry.dispose(); e.mat.dispose(); }
     this.group.clear();
     this.kinds = []; this.groups = []; this.members = []; this.count = 0;

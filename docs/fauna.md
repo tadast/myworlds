@@ -450,7 +450,11 @@ and about 1 ms off the graphics card. `window.__mw.ground.fauna` holds the live 
 `GroundFauna.pickAt()` uses the measure `creatureAt()` uses on the globe: project the base of the
 animal and a point one body up, then take the distance from the tap to that segment. The globe test
 also drops an animal on the far side of the planet; on the ground the frustum does that. A tap
-opens the card of the species through the `onInspect` callback of `Ground`.
+marks the animal: `pickHit()` returns the member, `markMember()` lays a ring on the ground under
+it, and the app offers the card of the species on a floating button through the `onSelect`
+callback of `Ground`. The arrows of the card call `Ground.focusKind()`, which marks the nearest
+member of the next species and points the view at it, or leaves the view still when the patch
+holds none of it.
 
 ## Checklist for changes
 
