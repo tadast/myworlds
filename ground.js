@@ -12,6 +12,7 @@ import { Sky } from './ground-sky.js';
 import { Flora, GrassField } from './ground-flora.js';
 import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
+import { Phenomena } from './ground-phenomena.js';
 import { perf } from './perf.js';
 
 export const PATCH_SIZE = 1500;      // metres, the side of the patch
@@ -192,6 +193,7 @@ export class Ground {
     this.grass = null;
     this.fauna = null;
     this.sea = null;
+    this.phenomena = null;
     this.atCeiling = false;
     // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
     // it. _driveLod() moves it from the frame time; the last settled value comes from the store,
@@ -337,6 +339,14 @@ export class Ground {
       this._buildTerrain();
       this._buildFlora(result);
       this._buildGrass(result);
+      // The phenomenon of the world, when this cell is the cell that holds it. The worker raised
+      // the cone or the pool at the origin; this adds the smoke, the embers, and the jet. It comes
+      // after the terrain, because it reads the drawn height at the origin. See ground-phenomena.js.
+      this.phenomena = Phenomena.create({
+        world: this.world, patch: p, tier: this.tier, sky: this.sky,
+        heightAt: (x, z) => this.heightAt(x, z), renderer: this.renderer,
+      });
+      if (this.phenomena) this.content.add(this.phenomena.group);
     } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
       const plane = new THREE.Mesh(
@@ -747,6 +757,8 @@ export class Ground {
     if (this.fauna) this.fauna.update(t, dt);
     // the sky follows the camera, so it must move after every clamp
     if (this.sky) this.sky.update(t, dt, this.camera);
+    // the phenomenon reads the field of view of the camera for its point sizes
+    if (this.phenomena) this.phenomena.update(t, dt, this.camera);
     // the sea follows the target, so it must move after the target clamp
     if (this.sea) this.sea.update(t, tg);
 
@@ -1225,6 +1237,7 @@ export class Ground {
   }
 
   _clear() {
+    if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
     if (this.flora) { this.flora.dispose(); this.flora = null; }
     if (this.grass) { this.grass.dispose(); this.grass = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }

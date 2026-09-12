@@ -71,6 +71,12 @@ Independent agents must agree on these. Do not change them inside an issue. If a
   the patch message.
 - The pull to life runs before the snap and reaches half a cell, so a creature that lives in the
   cell claims the patch and the snap then puts the site back on the grid.
+- Since issue 14 the phenomenon of the world pulls over the same reach, and it wins over a creature
+  home: the world holds many homes and at most one phenomenon, and the pulled cell can still hold
+  homes. The patch shows the phenomenon by the cell and not by the pull, so a landing that reaches
+  the cell without the pull shows it too, and one phenomenon can never stand in two patches.
+  `activitySite(world)` in `site.js` gives that cell, or null for a world with no phenomenon and for
+  a kind the ground cannot draw yet.
 - The marker is the square of the cell, not a symbol: what the square holds is what the ground
   shows. It is therefore only a few pixels wide from far out, and the reader zooms in to see it.
 - Since issue 20 the marker shows only while the reader aims, and it follows the pointer.
@@ -98,7 +104,8 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - A site is a lat and lon in degrees in the planet's local frame, the frame of the worker's `pos` arrays before `planet.rotation.y` is applied. Lat is `asin(y)`. Lon is `atan2(z, x)`. Both in degrees, two decimals. Lat in [-90, 90], lon in [-180, 180].
 - URL format: `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Without `@` the URL means orbit. The seed part is URL-encoded as today; the site part is plain.
 - Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
-- Patch message options: `{ grid, size, span, rim, maxFlora, maxFauna, pulledKind }`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `ground.js` exports the value as `RIM`.
+- Patch message options: `{ grid, size, span, rim, maxFlora, maxFauna, pulledKind, activity }`.
+  `activity` is `{ kind }` when the landing cell holds the phenomenon of the world, else null. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `ground.js` exports the value as `RIM`.
 
 ### The gestures of the ground
 
@@ -138,7 +145,7 @@ Ground frame: x east, y up, z south. Origin at the site at sea level, so `height
 
 ### The patch protocol
 
-Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, span, rim, maxFlora, maxFauna, pulledKind } })`. `pulledKind` is the species id the site was pulled to, or `-1`.
+Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, span, rim, maxFlora, maxFauna, pulledKind, activity } })`. `pulledKind` is the species id the site was pulled to, or `-1`. `activity` is `{ kind }` on the one cell that holds the phenomenon of the world, else null; the worker then raises the shape at the origin of the patch. Issue 14.
 
 Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or `{ type: 'error', message }`. Transfer the buffers.
 
@@ -153,6 +160,8 @@ Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or 
     elevation,                                    // globe elevation at the site in metres above sea level
     seaLevel: 0, hasSea, shore,                   // hasSea: any grid vertex below 0; shore: true when hasSea and any vertex above 0
     rim: { out, step, n, hasSea },                // issue 18: the coarse grid outside the box. out and step in units
+    activity,                                     // issue 14: the phenomenon at the origin, or null.
+                                                  // volcano: { kind, radius, peak, crater }. geyser: { kind, radius, pool }. units
   },
   heights: Float32Array(n * n),                   // row-major, row = z from north (-) to south (+), col = x from west to east
   colors:  Float32Array(n * n * 3),               // per vertex, linear RGB 0..1
