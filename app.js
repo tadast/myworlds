@@ -6,6 +6,7 @@ import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, makeGait, stepGait, gaitLocked, hopGait, hopBurst, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan } from './site.js';
+import { PlantInspector } from './flora-card.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
 import { perf, Hud } from './perf.js';
@@ -786,9 +787,15 @@ function enterGround() {
   mode = 'ground';
   ground = new Ground({
     renderer, canvas, world: current.world, site: lockedSite, tier: Q.ground,
-    onSelect: (kind) => { markedKind = kind; },
-    onDeselect: () => { markedKind = null; },
+    onSelect: (kind) => { markedKind = kind; markedPlant = null; },
+    onSelectPlant: (kind) => { markedPlant = kind; markedKind = null; },
+    onDeselect: () => { markedKind = null; markedPlant = null; },
   });
+  // The plant lore of this patch. It arrives with the patch, because it reads the biome of the
+  // site, and it goes away with the patch. See describePatchFlora() in worker.js.
+  groundPlants = (patchState.result && patchState.result.patch.plants) || [];
+  groundVariant = (patchState.result && patchState.result.patch.floraVariant) || 0;
+  renderInfo(current.world);   // the sidebar gains its flora row
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
   const view = skyView(current, lockedSite, sunDir);
@@ -805,9 +812,12 @@ function enterGround() {
 
 // The switch back to the globe, under an opaque overlay. Also the straight cut for a new world.
 function leaveGround() {
+  if (plantInspector.open) closeCard();   // the plant of a patch cannot be studied from orbit
   if (ground) { ground.dispose(); ground = null; }
-  markedKind = null;  // the mark belongs to the patch, and the patch is gone
+  markedKind = null; markedPlant = null;  // the marks belong to the patch, and the patch is gone
   perf.reset();       // the ground frames say nothing about the globe
+  groundPlants = []; groundVariant = 0;   // the plant lore belongs to the patch too
+  if (current) renderInfo(current.world);  // the sidebar loses its flora row
   if (mode === 'ground') mode = 'ascending';
   if (lockedSite) placeCameraOverSite(lockedSite);
   writeHash();
@@ -817,8 +827,10 @@ function leaveGround() {
 function abortProbe() {
   stopAim();
   if (mode === 'orbit' && !dive) return;
+  if (plantInspector.open) closeCard();
   if (ground) { ground.dispose(); ground = null; }
-  markedKind = null;
+  markedKind = null; markedPlant = null;
+  groundPlants = []; groundVariant = 0;
   perf.reset();
   dive = null;
   lockedSite = null;
@@ -898,21 +910,42 @@ if (probeFloat) probeFloat.addEventListener('click', onProbeClick);
 // button, so no tap ever covers the view the reader is crossing with a card. The button hides
 // while the card is open, and it comes back when the card closes, so the reader can reopen it.
 // A tap on the ground, the Escape key, or the recall of the probe takes the mark off.
+//
+// Issue 24 gives the plants the same button. A tap on a plant marks it the same way and this
+// button offers its card, so the reader learns one gesture and it works on everything that grows
+// or walks. Only one thing is marked at a time, so the button always names what the ring is under.
 let markedKind = null;    // the species of the marked animal, or null while nothing is marked
+let markedPlant = null;   // the kind of the marked plant, or null while nothing is marked
 let creatureLabel = '';
+// The plants of the patch the probe is standing on, tallest first, and the flora signature the
+// card builds a preview with. Both are empty in orbit, because a plant belongs to a patch.
+let groundPlants = [];
+let groundVariant = 0;
+const plantOf = (kind) => groundPlants.find((p) => p.kind === kind) || null;
+
 function updateCreatureFloat() {
   if (!creatureFloat) return;
   let label = '';
-  if (mode === 'ground' && !dive && !busy && markedKind !== null && creatureCard.hidden) {
-    const G = current && current.world.species[markedKind];
-    if (G) label = `Study the ${G.lore.name}`;
+  if (mode === 'ground' && !dive && !busy && creatureCard.hidden) {
+    if (markedKind !== null) {
+      const G = current && current.world.species[markedKind];
+      if (G) label = `Study the ${G.lore.name}`;
+    } else if (markedPlant !== null) {
+      const p = plantOf(markedPlant);
+      if (p) label = `Study the ${p.lore.name}`;   // the same form the animal takes, so one button reads one way
+    }
   }
   if (label === creatureLabel) return;
   creatureLabel = label;
   if (label) creatureFloat.textContent = label;
   creatureFloat.classList.toggle('show', !!label);
 }
-if (creatureFloat) creatureFloat.addEventListener('click', () => { if (markedKind !== null) inspect(markedKind); });
+if (creatureFloat) {
+  creatureFloat.addEventListener('click', () => {
+    if (markedKind !== null) inspect(markedKind);
+    else if (markedPlant !== null) inspectPlant(markedPlant);
+  });
+}
 
 // creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
 const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _m = new THREE.Matrix4();
@@ -1121,27 +1154,72 @@ function renderInfo(w) {
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
+      ${groundPlants.length ? `<dt>Flora</dt><dd class="chips">${groundPlants.map((p) => `<button type="button" class="chip" data-plant="${p.kind}">${escapeHtml(p.lore.name)}</button>`).join('')}</dd>` : ''}
     </dl>`;
-  infoBody.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
+  // The flora row only exists while the probe is down, because the plants belong to the patch.
+  infoBody.querySelectorAll('.chip[data-kind]').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
+  infoBody.querySelectorAll('.chip[data-plant]').forEach((b) => b.addEventListener('click', () => {
+    const kind = +b.dataset.plant;
+    inspectPlant(kind);
+    if (mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
+  }));
   infoEl.hidden = false;
   hworld.textContent = `${w.seed} · ${w.typeLabel}`;
 }
 
-// ---------------------------------------------------------------- creature inspector
+// ---------------------------------------------------------------- the study card
+// One card element carries two subjects. An animal is a subject of the world, so its card opens
+// from orbit and from the ground. A plant is a subject of a patch: the lore of a plant reads the
+// biome it stands on, and the patch is the only place that biome is known, so the plant card only
+// opens while the probe is down. See docs/flora.md.
+//
+// Each inspector owns its own canvas, because a WebGLRenderer owns the canvas it draws to. The
+// card shows one of the two and hides the other.
 const creatureCard = $('#creature');
-const inspector = new Inspector({ card: creatureCard, canvas: $('#ccv') });
+const creatureCanvas = $('#ccv'), plantCanvas = $('#pcv');
+const inspector = new Inspector({ card: creatureCard, canvas: creatureCanvas });
+const plantInspector = new PlantInspector({ card: creatureCard, canvas: plantCanvas });
+// What the card shows: 'animal' or 'plant'. The arrows and the close read it.
+const cardOpen = () => inspector.open || plantInspector.open;
+function closeCard() { inspector.hide(); plantInspector.hide(); }
+function discColor() {
+  const pal = current.world.palette;
+  return current.world.type === 'gas' ? pal.atmo : (pal.ground || '#7fa860');
+}
+// Opening one subject takes the mark off the other, so the ring on the ground always names the
+// card the reader is looking at. The mark of the subject being opened is set by the caller, which
+// is the only one that knows whether the patch really holds it.
 function inspect(kind) {
   if (!current) return;
-  const pal = current.world.palette;
-  const ground = current.world.type === 'gas' ? pal.atmo : (pal.ground || '#7fa860');
-  inspector.show(current.world.species[kind], pal, ground, 3 + kind);
+  markedPlant = null;
+  if (ground && ground.flora) ground.flora.unmark();
+  plantInspector.hide();
+  creatureCard.classList.add('show');    // the two share the card, so a swap must not fade it out
+  creatureCard.hidden = false;
+  plantCanvas.hidden = true; creatureCanvas.hidden = false;
+  inspector.show(current.world.species[kind], current.world.palette, discColor(), 3 + kind);
   creatureCard.dataset.kind = kind;
+  creatureCard.dataset.subject = 'animal';
 }
-creatureCard.querySelector('.cclose').addEventListener('click', () => inspector.hide());
-creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) inspector.hide(); });
+function inspectPlant(kind) {
+  const p = plantOf(kind);
+  if (!current || !p) return;
+  markedKind = null;
+  if (ground && ground.fauna) ground.fauna.unmark();
+  inspector.hide();
+  creatureCard.classList.add('show');
+  creatureCard.hidden = false;
+  creatureCanvas.hidden = true; plantCanvas.hidden = false;
+  plantInspector.show(p, current.world.palette, discColor(), groundVariant);
+  creatureCard.dataset.kind = kind;
+  creatureCard.dataset.subject = 'plant';
+}
+creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
+creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) closeCard(); });
 creatureCard.querySelector('.cprev').addEventListener('click', () => cycleInspect(-1));
 creatureCard.querySelector('.cnext').addEventListener('click', () => cycleInspect(1));
 function cycleInspect(dir) {
+  if (creatureCard.dataset.subject === 'plant') return cyclePlant(dir);
   // On the ground the list also carries the species of the patch: the pull and the niches can
   // put an animal on the ground that the globe sample never drew, and the arrows must reach it.
   const kinds = (current?.world.faunaKinds || []).slice();
@@ -1156,13 +1234,22 @@ function cycleInspect(dir) {
   // species the patch does not host leaves the camera where it is, and takes the mark off.
   if (mode === 'ground' && ground) markedKind = ground.focusKind(kind) ? kind : null;
 }
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && inspector.open) inspector.hide(); });
+// The arrows walk the plants of this patch, in the order the worker wrote them: tallest first.
+function cyclePlant(dir) {
+  if (!groundPlants.length) return;
+  const i = groundPlants.findIndex((p) => p.kind === +creatureCard.dataset.kind);
+  const kind = groundPlants[(i + dir + groundPlants.length) % groundPlants.length].kind;
+  inspectPlant(kind);
+  if (mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
+}
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && cardOpen()) closeCard(); });
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   if (ground) ground.resize(innerWidth, innerHeight);
   if (inspector.open) inspector.resize();
+  if (plantInspector.open) plantInspector.resize();
 });
 
 // pick a creature under a screen point: nearest projected instance on the visible hemisphere
@@ -1292,8 +1379,9 @@ addEventListener('hashchange', () => {
 addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
   if (e.key !== 'Escape') return;
-  if (!creatureCard.hidden) inspector.hide();
+  if (!creatureCard.hidden) closeCard();
   else if (markedKind !== null) { if (ground && ground.fauna) ground.fauna.unmark(); markedKind = null; }
+  else if (markedPlant !== null) { if (ground && ground.flora) ground.flora.unmark(); markedPlant = null; }
   else stopAim();
 });
 if (COMPACT) setCollapsed(true);
@@ -1312,8 +1400,11 @@ renderWorlds();
 // debug handle (harmless in production)
 window.__mw = {
   scene, camera, controls, renderer, generate, inspect, inspector, music, descend, ascend, perf,
+  inspectPlant, plantInspector,
   get current() { return current; },
   get site() { return site; },
   get mode() { return mode; },
   get ground() { return ground; },
+  get plants() { return groundPlants; },
+  get marked() { return { animal: markedKind, plant: markedPlant }; },
 };

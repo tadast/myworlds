@@ -1,6 +1,6 @@
 # Surface probe: issue set
 
-This directory holds the work items for the surface probe. Read this file first. Then read `docs/probe.md` for the decisions and `docs/fauna.md` for the fauna pipeline. Each issue file is self-contained enough for one agent to take it without the others.
+This directory holds the work items for the surface probe. Read this file first. Then read `docs/probe.md` for the decisions, `docs/fauna.md` for the fauna pipeline, and `docs/flora.md` for the flora lore. Each issue file is self-contained enough for one agent to take it without the others.
 
 ## The project in one page
 
@@ -19,7 +19,9 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `worker.js` | Web Worker. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map. Loads `species.js` with `importScripts`. Protocol: `postMessage({type:'generate', seed, opts})`, replies `progress` then `done` or `error`. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `species.js` | Classic script. Rolls two to four genomes per world with lore. No three.js. |
+| `flora-lore.js` | Classic script. The plant vocabulary. Writes the lore of every plant kind of a patch. No three.js. See `docs/flora.md`. |
 | `fauna.js` | Creature geometry from a genome, rig shader, `makeMover`/`stepMover` steering, the inspector card. |
+| `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
 | `music.js` | Chip-tune per world. Not touched by this issue set. |
 | `index.html`, `style.css` | The page and the sidebar. |
@@ -248,3 +250,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 21 | Alien flora and ground cover | HITL | 07, 11 | CLOSED 0ba4007 |
 | 22 | The flora signature of a world, and the card floor | HITL | 21 | CLOSED a151100 |
 | 23 | The reader cannot move on the ground | AFK | 06 | CLOSED fc43719 |
+| 24 | The lore of the plants | HITL | 07, 21, 22 | CLOSED |

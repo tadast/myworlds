@@ -111,6 +111,9 @@ const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a gl
 const GLIDE_PULL = 1 / 3;   // the part of the distance the glide takes off
 const TAP_SLOP = 6;         // px, a pointer that moves more than this is a drag, not a tap
 const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
+// units: how far behind a plant an animal may stand and still take the tap. A reader who taps an
+// animal beside a tree means the animal, so the animal wins unless it is clearly further back.
+const PICK_GRACE = 2;
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM. The
@@ -178,10 +181,11 @@ function makeGeometry(pos, col, idx) {
 
 export class Ground {
   // tier: { grid, maxFlora, maxFauna, shadows }
-  constructor({ renderer, canvas, world, site, tier, onSelect, onDeselect }) {
+  constructor({ renderer, canvas, world, site, tier, onSelect, onSelectPlant, onDeselect }) {
     this.renderer = renderer;
     this.onSelect = onSelect || null;       // (kind) => void, a tap marked an animal of this species
-    this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took the mark off
+    this.onSelectPlant = onSelectPlant || null; // (kind) => void, a tap marked a plant of this kind
+    this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took both marks off
     this.canvas = canvas;
     this.world = world;
     this.site = site;
@@ -262,6 +266,8 @@ export class Ground {
     // and glides to it; the app then offers the card of the marked animal on the floating button.
     // A tap on the ground takes the mark off and glides there.
     this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind, scale, dist, member } | null
+    // The same seam for the plants, issue 24. It is set in load(), beside the flora.
+    this.pickPlant = null;       // (ndcX, ndcY, event) => { point, kind, index, dist } | null
     this._bound = {
       down: (e) => this._onDown(e),
       move: (e) => this._onMove(e),
@@ -366,6 +372,13 @@ export class Ground {
       const px = (nx + 1) / 2 * r.width, py = (1 - ny) / 2 * r.height;
       return this.fauna.pickHit(px, py, e && e.pointerType === 'touch' ? 52 : 34);
     };
+    // The same seam for the plants. A plant does not move, so it needs no member and no scale.
+    this.pickPlant = (nx, ny, e) => {
+      if (!this.flora) return null;
+      const r = this.canvas.getBoundingClientRect();
+      const px = (nx + 1) / 2 * r.width, py = (1 - ny) / 2 * r.height;
+      return this.flora.pickHit(px, py, e && e.pointerType === 'touch' ? 52 : 34);
+    };
 
     // A directional light takes its direction from the position and the target, not the distance,
     // so the height of the site must not move it. The colour and the strength come from the sky.
@@ -424,6 +437,8 @@ export class Ground {
       renderer: this.renderer, flora: result.flora, palette: result.patch.palette,
       tier: this.tier, sky: this.sky, lod: this.lod, cut: FOG_FAR * 1.2,
       groundColor: this.groundColor, variant: result.patch.floraVariant || 0,
+      // Issue 24: the pick projects with the ground camera and measures in the pixels of this view.
+      camera: this.camera, canvas: this.canvas,
     });
     this.content.add(this.flora.group);
     const m = result.patch.marks;
@@ -1060,12 +1075,27 @@ export class Ground {
     if (!this.fauna) return false;
     const tg = this.controls.target;
     const m = this.fauna.nearestMember(kind, tg.x, tg.z);
+    if (this.flora) this.flora.unmark();   // one mark at a time: the ring must name the open card
     if (!m) { this.fauna.unmark(); return false; }
     this.fauna.markMember(m);
     this.fauna.group.updateWorldMatrix(true, false);
     const point = new THREE.Vector3(m.px, m.py, m.pz).applyMatrix4(this.fauna.group.matrixWorld);
     if (m.g.flies && point.y > this.camera.position.y + 1) this.turnTo(point);
     else this.glideTo(point);
+    return true;
+  }
+
+  // The same for the arrows of a plant card: mark the nearest plant of the kind and point the view
+  // at it. A plant stands on the ground, so it always takes a glide and never a turn. Returns true
+  // when a plant took the mark; a kind this patch does not grow leaves the view where it is.
+  focusPlant(kind) {
+    if (!this.flora) return false;
+    if (this.fauna) this.fauna.unmark();
+    const tg = this.controls.target;
+    const hit = this.flora.nearest(kind, tg.x, tg.z);
+    if (!hit) { this.flora.unmark(); return false; }
+    this.flora.mark(hit);
+    this.glideTo(hit.point);
     return true;
   }
 
@@ -1151,7 +1181,23 @@ export class Ground {
     // under it meets the ground nearer than the flyer stands, and the test would drop every flyer
     // the reader can see.
     if (creature && !creature.air && hit && creature.dist > this.camera.position.distanceTo(hit) + Math.max(4, (creature.scale || 1) * 3)) creature = null;
+    // Issue 24: a tap on a plant marks it the same way, and the app offers its card on the same
+    // button. An animal and a plant can both lie under one point. The animal wins unless it stands
+    // clearly further back, because a reader who taps an animal beside a tree means the animal.
+    let plant = this.pickPlant ? this.pickPlant(nx, ny, e) : null;
+    if (plant && creature) {
+      if (creature.dist <= plant.dist + PICK_GRACE) plant = null;
+      else creature = null;
+    }
+    if (plant) {
+      this.flora.mark(plant);
+      if (this.fauna) this.fauna.unmark();
+      this.glideTo(plant.point);
+      if (this.onSelectPlant) this.onSelectPlant(plant.kind);
+      return;
+    }
     if (creature && creature.point) {
+      if (this.flora) this.flora.unmark();
       if (this.fauna && creature.member) this.fauna.markMember(creature.member);
       // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
       // it would point the view at the ground under it instead.
@@ -1160,8 +1206,9 @@ export class Ground {
       if (this.onSelect) this.onSelect(creature.kind);
       return;
     }
-    if (this.fauna && this.fauna.marked) {
-      this.fauna.unmark();
+    if ((this.fauna && this.fauna.marked) || (this.flora && this.flora.marked)) {
+      if (this.fauna) this.fauna.unmark();
+      if (this.flora) this.flora.unmark();
       if (this.onDeselect) this.onDeselect();
     }
     if (hit) this.glideTo(hit);

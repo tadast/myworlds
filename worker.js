@@ -3,8 +3,9 @@
 // The same seed string always produces the same world.
 
 'use strict';
-importScripts('./lore.js');    // the lore engine, shared with the flora (self.Lore)
-importScripts('./species.js'); // species genomes and lore (self.Species)
+importScripts('./lore.js');       // the lore engine, shared with the flora (self.Lore)
+importScripts('./species.js');    // species genomes and lore (self.Species)
+importScripts('./flora-lore.js'); // the plant vocabulary, written per patch (self.FloraLore)
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -1686,6 +1687,61 @@ function patchFlora(ctx, s) {
   return { flora, grass, grassN: gN, grassStep: gStep, marks: markCount, fixed: fixedCount, big: bigAt.length / 2 };
 }
 
+// ---------------------------------------------------------------- the lore of the plants
+// The temperature at the site, in degrees Celsius. The stats card states the mean of the planet,
+// and a patch is not the mean: `siteT` is the temperature field of fieldFrom(), which falls with
+// the latitude and with the height of the ground. A flora story that read the mean put a 58 °C
+// line under a snow field, so the flora lore reads the site instead.
+//
+// T_REF is the mean of that field over a sphere: the latitude term averages 0.42, and the height
+// term is small enough to drop. T_SPAN turns one unit of the field into degrees; it is set so the
+// equator of an Earth-like world stands about 25 °C over its poles.
+//
+// The biome then caps it. biomeIndex() paints snow above the snow line whatever the temperature
+// field says, so a very high site on a hot world comes back as a snow field at 34 °C. Ice on the
+// ground is the stronger fact, so a snow site is at or below freezing and a tundra site is cool.
+const T_SPAN = 55, T_LAT_MEAN = 0.42;
+const BIOME_TEMP_CAP = { snow: 0, tundra: 8 };
+function siteTempC(ctx, siteT, biome) {
+  const mean = ctx.world.env.tempC;
+  if (mean == null) return mean;
+  const t = Math.round(mean + (siteT - (1 - T_LAT_MEAN + ctx.tempBias)) * T_SPAN);
+  const capC = BIOME_TEMP_CAP[biome];
+  return capC == null ? t : Math.min(t, capC);
+}
+
+// The fauna lore is written once per world, because an animal belongs to a planet. The flora lore
+// is written once per patch, because a plant belongs to the ground it stands on: the patch decides
+// which kinds grow here, how many of each, and how tall they stand, and the biome under them is a
+// fact of the site. flora-lore.js holds the words; this function only counts what the patch placed
+// and hands the numbers over. See docs/flora.md.
+//
+// It draws from a stream of its own, so a change to the text can never move a plant.
+function describePatchFlora(ctx, flora, biome, siteT, pseed) {
+  if (!self.FloraLore || !flora || !flora.length) return [];
+  const stats = new Map();
+  for (let i = 0; i < flora.length; i += 8) {
+    const k = flora[i + 7];
+    let s = stats.get(k);
+    if (!s) { s = []; stats.set(k, s); }
+    s.push(flora[i + 6]);
+  }
+  const kinds = [];
+  for (const [kind, sizes] of stats) {
+    sizes.sort((a, b) => a - b);
+    kinds.push({
+      kind, count: sizes.length,
+      median: sizes[sizes.length >> 1],
+      tallest: sizes[sizes.length - 1],
+    });
+  }
+  const facts = { ...(ctx.world.env || { type: ctx.type }), tempC: siteTempC(ctx, siteT, biome) };
+  return self.FloraLore.describePatch({
+    world: ctx.world, env: Lore.makeEnv(facts),
+    biome, kinds, rng: makeRng(pseed + '|flora-lore'),
+  });
+}
+
 // ---------------------------------------------------------------- the fauna of a patch
 // The globe scatters single animals over a whole world. The ground shows a few animals close up,
 // so it places them as groups: one anchor per group, and the members of the group around it. The
@@ -2119,6 +2175,8 @@ function patch(seed, lat, lon, opts) {
   });
 
   post(98, 'Almost there');
+  const biome = BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM, BEACH_M * H_PER_M)];
+  const plants = describePatchFlora(ctx, flora, biome, siteT, pseed);
   const result = {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
@@ -2129,7 +2187,9 @@ function patch(seed, lat, lon, opts) {
       cover: { n: grown.grassN, step: grown.grassStep },
       // what the two passes after the scan put on the patch, for the load log
       marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big },
-      biome: BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM, BEACH_M * H_PER_M)],
+      biome,
+      // The lore of every plant kind this patch grows, tallest first. See describePatchFlora().
+      plants,
       palette: ctx.world.palette,
       elevation, radiusKm: ctx.radiusKm,
       seaLevel: 0, hasSea, shore: hasSea && hasLand,

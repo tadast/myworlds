@@ -31,7 +31,19 @@ const GRASS_FADE = 22;       // units: the band the tufts shrink to nothing over
 const GRASS_CEIL = 110;      // units: over this height above the ground the field is gone
 const GRASS_STEP = 7;        // units: the camera moves this far before the lattice is rebuilt
 
+// The mark. A tap on a plant lays a ring on the ground around it, the way a tap on an animal lays
+// one under the animal. Issue 24. The numbers match ground-fauna.js, so the two marks read alike.
+const PICK_TOL = 34;         // pixels: how far off the body a tap may land and still find it
+const RING_BAND = 0.14;      // the width of the band, as a share of its radius
+const RING_SIZE = 1.5;       // the radius of the ring against the width of the plant
+const RING_MIN = 0.6;        // units: a ring never falls under this, so a tuft still shows one
+const RING_LIFT = 0.05;      // units: the ring sits this far over the ground, clear of z-fighting
+
 const _size = new THREE.Vector2();   // scratch for the view size the card floor reads
+const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pw = new THREE.Vector3();
+const _up2 = new THREE.Vector3(), _fwd2 = new THREE.Vector3(), _rgt2 = new THREE.Vector3();
+const _pos2 = new THREE.Vector3(), _mat2 = new THREE.Matrix4();
+const HALF_PI = Math.PI / 2;
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smoothstep = (a, b, x) => { const t = clamp01((x - a) / (b - a || 1e-6)); return t * t * (3 - 2 * t); };
 
@@ -113,6 +125,14 @@ function animate(material, style) {
   return material;
 }
 
+// The near material of one kind, built for a caller outside this file. flora-card.js gives the
+// preview of a plant the same material the ground gives it, so the plant sways and breathes on the
+// card exactly as it does on the patch. The shader only runs under USE_INSTANCING, so the caller
+// has to draw with an InstancedMesh, as the ground does.
+export function nearFloraMaterial(style) {
+  return animate(floraMaterial(), style);
+}
+
 // The card turns toward the camera around the y axis only, so a plant never leans back. The
 // billboard runs in the vertex shader: the walk on the main thread only copies matrices.
 // The instance matrix of a card carries a position and one scale, and no rotation, so the scale
@@ -171,8 +191,13 @@ function bakeLight(sky, groundColor) {
 export class Flora {
   // flora: the worker's Float32Array of x y z, nx ny nz, size in units, kind.
   // sky: the Sky of the ground, for the sun colour and the sun direction the card bakes with.
-  constructor({ renderer, flora, palette, tier, sky, lod, cut, groundColor, variant = 0 }) {
+  constructor({ renderer, flora, palette, tier, sky, lod, cut, groundColor, variant = 0, camera, canvas }) {
     this.renderer = renderer;
+    this.camera = camera || null;      // the pick projects with it; the walk takes its own camera
+    this.canvas = canvas || null;      // the pick measures in the CSS pixels of this view
+    this.palette = palette;
+    this.marked = null;                // { kind, index } while a plant carries the ring
+    this.ring = null;
     this.lod = lod;
     this.cut = cut || 900;             // units: past this a plant is deep inside the fog
     this.count = flora ? flora.length / 8 : 0;
@@ -294,6 +319,9 @@ export class Flora {
 
       this.kinds.push({
         kind, style, count: n, near, far, nearM, at, cards, tints, sz2, state: new Uint8Array(n),
+        // the geometry of one plant of this kind, at one unit of instance scale. The pick puts the
+        // top of a body from it, and the mark sizes its ring from it.
+        height, wRatio: width / height,
       });
       this.group.add(near);
       this.group.add(far);
@@ -425,6 +453,127 @@ export class Flora {
     this.walkMs = performance.now() - t0;
   }
 
+  // ---------------------------------------------------------------- the pick and the mark
+  // Issue 24. A tap on a plant marks it and the app offers its card, exactly as a tap on an animal
+  // does. ground.js owns the tap and calls in through a seam; this file binds no listener.
+
+  // The plant under a screen point, or null. The measure is the one ground-fauna.js uses: project
+  // the base and the top of the body, then take the distance from the point to that segment. A
+  // body that holds the point beats a body the point only grazes, and of two bodies that hold it
+  // the nearer one wins.
+  //
+  // The reach of the pick is the reach of the draw. The walk marks every plant past the draw
+  // distance, so the loop skips those and never projects a plant the reader cannot see. There is
+  // no second, nearer limit: a colossus 900 units out is a landmark the reader looks at from the
+  // moment the probe lands, and a tap on it has to find it.
+  pickHit(px, py, tolerance = PICK_TOL) {
+    const cam = this.camera;
+    if (!cam || !this.count) return null;
+    const el = this.canvas, w = el ? el.clientWidth : 1, h = el ? el.clientHeight : 1;
+    this.group.updateWorldMatrix(true, false);
+    const root = this.group.matrixWorld;
+    let best = null, bestHit = false, bestKey = Infinity;
+    for (const k of this.kinds) {
+      const at = k.at, m = k.nearM, state = k.state;
+      for (let i = 0; i < k.count; i++) {
+        if (state[i] === 2) continue;           // culled by the walk: it is deep inside the fog
+        const p = i * 3, o = i * 16;
+        _pv.set(at[p], at[p + 1], at[p + 2]).applyMatrix4(root);
+        _pw.copy(_pv);                          // the world point, before project() overwrites it
+        const dist2 = _pw.distanceToSquared(cam.position);
+        // the top of the body: the up column of the instance matrix carries the lean and the
+        // scale, so one multiply by the geometry height puts the point where the plant really ends
+        _pt.set(at[p] + m[o + 4] * k.height, at[p + 1] + m[o + 5] * k.height, at[p + 2] + m[o + 6] * k.height)
+          .applyMatrix4(root);
+        _pv.project(cam); _pt.project(cam);
+        if (_pv.z > 1 || _pv.z < -1 || _pt.z > 1 || _pt.z < -1) continue;
+        const ax = (_pv.x + 1) / 2 * w, ay = (1 - _pv.y) / 2 * h;
+        const bx = (_pt.x + 1) / 2 * w, by = (1 - _pt.y) / 2 * h;
+        const lx = bx - ax, ly = by - ay, ll = lx * lx + ly * ly || 1;
+        const u = clamp01(((px - ax) * lx + (py - ay) * ly) / ll);
+        const gap = Math.hypot(ax + lx * u - px, ay + ly * u - py);
+        const half = Math.sqrt(ll) * k.wRatio;  // pixels: the body stands about this far off its axis
+        const reach = Math.max(tolerance, half);
+        if (gap > reach) continue;
+        const hit = gap <= half;                // the point is on the body, not beside it
+        const key = hit ? dist2 : gap / reach;
+        if (best) {
+          if (bestHit && !hit) continue;
+          if (bestHit === hit && key >= bestKey) continue;
+        }
+        bestHit = hit; bestKey = key;
+        best = { kind: k.kind, index: i, dist: Math.sqrt(dist2), point: _pw.clone() };
+      }
+    }
+    return best;
+  }
+
+  // The plant of a kind nearest a point on the ground, or null. The card arrows read it, so the
+  // camera goes to the plant of that kind the reader can reach first.
+  nearest(kind, x, z) {
+    const k = this.kinds.find((e) => e.kind === kind);
+    if (!k) return null;
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < k.count; i++) {
+      const p = i * 3, dx = k.at[p] - x, dz = k.at[p + 2] - z;
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) return null;
+    this.group.updateWorldMatrix(true, false);
+    const p = best * 3;
+    const point = new THREE.Vector3(k.at[p], k.at[p + 1], k.at[p + 2]).applyMatrix4(this.group.matrixWorld);
+    return { kind, index: best, dist: 0, point };
+  }
+
+  // Lay the ring around one plant. A plant does not move, so the ring is placed once and never
+  // stepped, which is the one way this mark differs from the mark on an animal.
+  mark(hit) {
+    if (!hit) return;
+    const k = this.kinds.find((e) => e.kind === hit.kind);
+    if (!k) return;
+    this.marked = { kind: hit.kind, index: hit.index };
+    if (!this.ring) this._buildRing();
+    const i = hit.index, p = i * 3, o = i * 16;
+    // the axis of the plant, from the up column of its instance matrix, so the ring lies on the
+    // slope the plant stands on
+    _up2.set(k.nearM[o + 4], k.nearM[o + 5], k.nearM[o + 6]).normalize();
+    _fwd2.set(0, 0, 1);
+    _fwd2.addScaledVector(_up2, -_fwd2.dot(_up2)).normalize();
+    _rgt2.crossVectors(_up2, _fwd2).normalize();
+    const r = Math.max(RING_MIN, Math.sqrt(k.sz2[i]) * k.wRatio * RING_SIZE);
+    _mat2.makeBasis(_rgt2.multiplyScalar(r), _up2.multiplyScalar(r), _fwd2.multiplyScalar(r));
+    _mat2.setPosition(_pos2.set(k.at[p], k.at[p + 1] + RING_LIFT, k.at[p + 2]));
+    this.ring.matrix.copy(_mat2);
+    this.ring.matrixWorldNeedsUpdate = true;
+    this.ring.visible = true;
+  }
+
+  unmark() {
+    this.marked = null;
+    if (this.ring) this.ring.visible = false;
+  }
+
+  // The band of the mark, flat in the xz plane, so the instance basis can lay it on the slope. It
+  // takes the accent of the fauna palette, which is the colour the animal ring and the site square
+  // both take, so every mark in this app reads as one voice.
+  _buildRing() {
+    const geo = new THREE.RingGeometry(1 - RING_BAND, 1, 48);
+    geo.rotateX(-HALF_PI);
+    const pal = this.palette || {};
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color((pal.fauna && pal.fauna.accent) || '#ffffff'),
+      transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, fog: true,
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.renderOrder = 2;
+    ring.frustumCulled = false;
+    ring.matrixAutoUpdate = false;
+    this.ring = ring;
+    this.ringMat = mat;
+    this.group.add(ring);
+  }
+
   dispose() {
     for (const k of this.kinds) {
       k.near.geometry.dispose();
@@ -432,6 +581,7 @@ export class Flora {
       k.far.geometry.dispose();
       k.far.material.dispose();
     }
+    if (this.ring) { this.ring.geometry.dispose(); this.ringMat.dispose(); this.ring = null; this.marked = null; }
     for (const t of this.targets) t.dispose();
     this.kinds.length = 0;
     this.targets.length = 0;

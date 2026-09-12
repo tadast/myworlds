@@ -32,13 +32,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 globalThis.self = globalThis;
 require(path.join(root, 'lore.js'));
 require(path.join(root, 'species.js'));
+require(path.join(root, 'flora-lore.js'));
 // worker.js is a classic worker script, not a module. It is evaluated here in this scope so the
 // sweep can read PLANET_RANGES and FLORA_LORE, and so --seeds can call generate(). Nothing runs
 // until it is called; the file is definitions down to the onmessage handler at the end.
 globalThis.importScripts = () => {};
 globalThis.postMessage = () => {};
 new Function('self', readFileSync(path.join(root, 'worker.js'), 'utf8') + '\n;self.__generate = generate;')(globalThis);
-const { Lore, Species, PLANET_RANGES, FLORA_LORE } = globalThis;
+const { Lore, Species, FloraLore, PLANET_RANGES, FLORA_LORE } = globalThis;
 
 const arg = (name, dflt) => {
   const i = process.argv.indexOf('--' + name);
@@ -89,12 +90,16 @@ const LEXICON = [
   [/\bmoons?\b/i, 'moonlit'],
   [/\bring light\b|\bthe ring throws\b|\bthe ring cuts\b/i, 'ringed'],
   [/\btrees?\b|\bbark\b|\bbranch(es)?\b|\bleaf\b|\bthe leaves\b|\bforest\b|\bwood\b/i, 'woody'],
-  [/\bgrass\b/i, 'woody|fungal|cactus'],
+  // `turf` is the flora tag of the tuft kind, which is the ground cover of a patch. Issue 24.
+  [/\bgrass\b/i, 'woody|fungal|cactus|turf'],
   [/\bspores?\b/i, 'flora'],
   [/\bcrystals?\b|\bspires?\b/i, 'crystalflora'],
   [/\bcactus\b|\bcacti\b/i, 'cactus'],
   [/\bcaps?\b|\bmushrooms?\b/i, 'fungal'],
-  [/\bsnow\b|\bfrost\b|\bthaw\b|\bthe ice\b|\bfrozen crust\b/i, 'frozen|cold'],
+  // `coldground` is the flora tag of a snow or tundra biome. It is the claim that the ground at
+  // this site freezes, which is what a thaw needs, so it stands beside the two world tags. A warm
+  // planet can hold a frozen site; the site is the fact the plant lives with. Issue 24.
+  [/\bsnow\b|\bfrost\b|\bthaw\b|\bthe ice\b|\bfrozen crust\b/i, 'frozen|cold|coldground'],
   // Water the world supplies, not water the animal is made of. A simile ("like poured water") and
   // an animal's own wet tissue are true anywhere; a drink, a fog, and a shallows are not.
   [/\bdrinks?\b|\bthe shallows\b|\bfog\b|\bground water\b|\bopen water\b|\bstanding water\b|\bsteams\b|\bthe wet\b/i, 'waterliquid'],
@@ -321,13 +326,211 @@ function auditRelations(envs) {
 
 let n = 0;
 const tagsSeen = new Set();
+// One entry per distinct sky the FLORA can tell apart. The flora sweep is already the sky times
+// sixteen kinds times ten biomes, so it cannot run over all 11,616 worlds. It does not have to:
+// two worlds that agree on every tag a flora gate or a lexicon rule names are the same world to
+// this pass. FLORA_SKY_TAGS below is that list, taken from the pools themselves, so a new gate on
+// a new tag widens the sweep on its own.
+const FLORA_SKY_TAGS = floraSkyTags();
+const skies = new Map();
 for (const f of worlds()) {
   const env = Lore.makeEnv(f);
   for (const t of env.tags) tagsSeen.add(t);
   auditPools(env, f);
   auditLines(env, f);
+  const key = f.type + '|' + [...env.tags].filter((t) => FLORA_SKY_TAGS.has(t)).sort().join(',');
+  if (!skies.has(key)) skies.set(key, { env, f });
   n++;
 }
+
+// ---------------------------------------------------------------- pass 6: the flora
+// The same five checks, over the flora pools. A plant reads three tag sources at once — the world,
+// the kind, and the biome of the patch — so the sweep is the product of the three. See
+// describePatch() in flora-lore.js and docs/flora.md.
+const FP = FloraLore.POOLS;
+const KIND_COUNT = FloraLore.KIND.length;
+const BIOMES = Object.keys(FloraLore.BIOME);
+// The tags Lore.makeEnv() takes from the flora of the WORLD. describePatch() strips them, because
+// a gate on a card has to say what this plant is and not what the planet grows somewhere.
+const WORLD_KIND_TAGS = ['woody', 'cactus', 'crystalflora', 'fungal', 'stoneflora'];
+const FLORA_TOKENS = ['ground', 'world', 'day', 'night', 'temp', 'grav', 'moon', 'moons', 'n', 'tall'];
+let floraChecked = 0;
+const floraReach = new Set(), floraLines = new Map();
+// line -> the lexicon contexts it has already been read in
+const seenFlora = new Map();
+// the tags the lexicon rules name, in a fixed order, so one context gives one key
+const LEX_TAGS = lexiconTags();
+function lexiconTags() {
+  const out = new Set();
+  for (const [, gate] of LEXICON) {
+    const g = Lore.parseGate(gate);
+    for (const any of g.need) for (const t of any) out.add(t);
+    for (const t of g.ban) out.add(t);
+  }
+  return [...out].sort();
+}
+
+// Every tag a flora gate names, plus every tag a lexicon rule names. A world outside this list is
+// the same world to the flora, whatever else it carries.
+function floraSkyTags() {
+  const out = new Set();
+  const eat = (list) => {
+    for (const e of list) {
+      if (!e.tags) continue;
+      const g = Lore.parseGate(e.tags);
+      for (const any of g.need) for (const t of any) out.add(t);
+      for (const t of g.ban) out.add(t);
+    }
+  };
+  for (const list of Object.values(FloraLore.POOLS.FORM)) eat(list);
+  for (const list of Object.values(FloraLore.POOLS.FEATURE)) eat(list);
+  for (const list of Object.values(FloraLore.POOLS.CLOSE)) eat(list);
+  for (const k of ['PLAIN_FEATURE', 'HABIT', 'CLIMATE', 'SKY', 'FOOD', 'SPREAD',
+    'STAND_ONE', 'STAND_FEW', 'STAND_MANY', 'WORLD_ADJ', 'WORLD_EPITHET']) eat(FloraLore.POOLS[k]);
+  for (const [, gate] of LEXICON) {
+    const g = Lore.parseGate(gate);
+    for (const any of g.need) for (const t of any) out.add(t);
+    for (const t of g.ban) out.add(t);
+  }
+  return out;
+}
+
+function plantTags(env, kind, biome) {
+  const tags = new Set(env.tags);
+  for (const t of WORLD_KIND_TAGS) tags.delete(t);
+  for (const t of FloraLore.kindTags(kind)) tags.add(t);
+  for (const t of FloraLore.BIOME[biome].tags.split(' ')) tags.add(t);
+  tags.add('flora');
+  return tags;
+}
+
+function auditFlora(env, f, kind, biome, skyKey) {
+  const K = FloraLore.KIND[kind];
+  const tags = plantTags(env, kind, biome);
+  const ctx = { env, tags, world: fakeWorld(f), p: { count: 40, tagList: FloraLore.kindTags(kind) } };
+  const label = `${K.word}/${biome}`;
+  // The lexicon reads a small part of the tag set: the tags its own rules name. Two contexts that
+  // agree on those give one line the same verdict, so one line is only read once per such context.
+  // Without this the sweep held tens of millions of keys and ran out of Set.
+  let lexKey = '';
+  for (const t of LEX_TAGS) if (tags.has(t)) lexKey += t + ',';
+  const need = (list, what) => {
+    floraChecked++;
+    const c = Lore.candidates(list, ctx);
+    if (!c.length) holes.push(`FLORA ${what} — ${label} ${f.type} [${[...tags].join(' ')}]`);
+    return c;
+  };
+  need(FP.FORM[kind], 'FORM');
+  need(FP.HABIT, 'HABIT');
+  need(FP.PLAIN_FEATURE, 'PLAIN_FEATURE');
+  need(FP.STAND_ONE, 'STAND_ONE'); need(FP.STAND_FEW, 'STAND_FEW'); need(FP.STAND_MANY, 'STAND_MANY');
+  need(FP.CLOSE[f.type] || FP.CLOSE.terran, 'CLOSE.' + f.type);
+  need(FP.SPREAD, 'SPREAD');
+  for (const part of K.parts) if (FP.FEATURE[part]) need(FP.FEATURE[part], 'FEATURE.' + part);
+  // One plant, one source of food. Two sources in the candidate set means a weighted roll could
+  // tell the reader that a fungus lives on light.
+  const food = need(FP.FOOD, 'FOOD');
+  const srcs = [...new Set(food.map((e) => e.src))];
+  if (srcs.length > 1) holes.push(`FLORA FOOD ${label} offers ${srcs.join(' and ')} — ${f.type}`);
+
+  // every line of every flora pool against this tag set
+  const all = [];
+  const add = (list, name) => { for (const e of list) all.push([e, name]); };
+  add(FP.FORM[kind], 'FORM.' + K.word);
+  add(FP.HABIT, 'HABIT'); add(FP.CLIMATE, 'CLIMATE'); add(FP.SKY, 'SKY');
+  add(FP.PLAIN_FEATURE, 'PLAIN_FEATURE'); add(FP.FOOD, 'FOOD'); add(FP.SPREAD, 'SPREAD');
+  add(FP.STAND_ONE, 'STAND_ONE'); add(FP.STAND_FEW, 'STAND_FEW'); add(FP.STAND_MANY, 'STAND_MANY');
+  add(FP.WORLD_ADJ, 'WORLD_ADJ'); add(FP.WORLD_EPITHET, 'WORLD_EPITHET');
+  add(FP.CLOSE[f.type] || FP.CLOSE.terran, 'CLOSE.' + f.type);
+  for (const part of K.parts) if (FP.FEATURE[part]) add(FP.FEATURE[part], 'FEATURE.' + part);
+  for (const [e, name] of all) {
+    if (!floraLines.has(e)) floraLines.set(e, name);
+    if (e.tags && !Lore.matchTags(Lore.gateOf(e), tags)) continue;
+    floraReach.add(e);
+    let seen = seenFlora.get(e);
+    if (!seen) { seen = new Set(); seenFlora.set(e, seen); }
+    if (seen.has(lexKey)) continue;
+    seen.add(lexKey);
+    for (const bad of lexCheck(e.t, tags)) {
+      lexHits.push(`FLORA ${name}: /${bad.word}/ needs "${bad.gate}" — ${label} [${[...tags].join(' ')}]\n    ${e.t}`);
+    }
+  }
+}
+
+// Every flora pool must also cover every kind the FEATURE table is asked for, and every relation
+// must fit the pair of kinds it accepts. RELATION_CONTRACT names what each side must be.
+function auditFloraRelations() {
+  const out = [];
+  const shapes = [];
+  for (let k = 0; k < KIND_COUNT; k++) {
+    for (const count of [2, 100]) shapes.push({ kind: k, count, tagList: FloraLore.kindTags(k) });
+  }
+  for (const r of FloraLore.RELATIONS) {
+    for (const t of [r.t, r.mirror].filter(Boolean)) {
+      for (const tok of Lore.tokensIn(t)) {
+        if (!FLORA_TOKENS.includes(tok) && !['other', 'Other', 'others', 'Others'].includes(tok)) {
+          out.push(`FLORA ${r.key}: line uses {${tok}}, which relations do not fill:\n    ${t}`);
+        }
+      }
+    }
+    const contract = FloraLore.RELATION_CONTRACT[r.key];
+    if (!contract) { out.push(`FLORA ${r.key}: no row in RELATION_CONTRACT`); continue; }
+    if (r.mirror && !contract.b) out.push(`FLORA ${r.key}: has a mirror line but its contract row has no b`);
+    let fired = 0;
+    for (const a of shapes) {
+      for (const b of shapes) {
+        if (a === b || a.kind === b.kind) continue;
+        let ok;
+        try { ok = r.when({ a, b }); } catch (e) { out.push(`FLORA ${r.key}: when() threw — ${e.message}`); return out; }
+        if (!ok) continue;
+        fired++;
+        for (const [side, p] of [['a', a], ['b', b]]) {
+          for (const nd of contract[side] || []) {
+            if (!p.tagList.includes(nd)) {
+              out.push(`FLORA ${r.key}: accepts ${side}=${FloraLore.KIND[p.kind].word}, which is not "${nd}"`);
+            }
+          }
+        }
+      }
+    }
+    const pairs = shapes.length * (shapes.length - 2);
+    if (!fired) out.push(`FLORA ${r.key}: no pair of kinds can reach it`);
+    else if (fired / pairs > 0.3) out.push(`FLORA ${r.key}: fits ${(fired / pairs * 100).toFixed(0)}% of all pairs, which will crowd the rarer rules out`);
+  }
+  // the line that names an animal: it may only use the tokens the flora fills
+  for (const r of FloraLore.FAUNA_LINKS) {
+    for (const tok of Lore.tokensIn(r.t)) {
+      if (!FLORA_TOKENS.includes(tok) && !['other', 'Other', 'others', 'Others'].includes(tok)) {
+        out.push(`FLORA LINK ${r.key}: uses {${tok}}, which the link does not fill:\n    ${r.t}`);
+      }
+    }
+  }
+  return [...new Set(out)];
+}
+
+// The tokens a line uses do not depend on the world, so every flora line is read for them once.
+function auditFloraTokens() {
+  const each = (list, name) => {
+    for (const e of list) {
+      for (const tok of Lore.tokensIn(e.t)) {
+        if (!FLORA_TOKENS.includes(tok)) tokenHits.push(`FLORA ${name}: uses {${tok}}, which the flora does not fill\n    ${e.t}`);
+      }
+    }
+  };
+  for (const [k, list] of Object.entries(FP.FORM)) each(list, 'FORM.' + FloraLore.KIND[k].word);
+  for (const [k, list] of Object.entries(FP.FEATURE)) each(list, 'FEATURE.' + k);
+  for (const [k, list] of Object.entries(FP.CLOSE)) each(list, 'CLOSE.' + k);
+  for (const k of ['PLAIN_FEATURE', 'HABIT', 'CLIMATE', 'SKY', 'FOOD', 'SPREAD',
+    'STAND_ONE', 'STAND_FEW', 'STAND_MANY', 'WORLD_ADJ', 'WORLD_EPITHET']) each(FP[k], k);
+}
+auditFloraTokens();
+for (const [skyKey, { env, f }] of skies) {
+  if (f.type === 'gas') continue;      // a gas giant grows no plant
+  for (let kind = 0; kind < KIND_COUNT; kind++) {
+    for (const biome of BIOMES) auditFlora(env, f, kind, biome, skyKey);
+  }
+}
+const floraRelIssues = auditFloraRelations();
 
 // ---------------------------------------------------------------- pass 4: real worlds through the worker
 let storyStats = null;
@@ -376,6 +579,7 @@ const sky = (moons) => Lore.makeEnv({ type: 'terran', tempC: 12, gravity: 1, day
 const relIssues = auditRelations([sky(0), sky(4)]);
 console.log(`worlds tested        ${n}`);
 console.log(`pool lookups         ${checked}`);
+console.log(`flora lookups        ${floraChecked} over ${skies.size} skies x ${KIND_COUNT} kinds x ${BIOMES.length} biomes`);
 console.log(`distinct world tags  ${[...tagsSeen].sort().join(' ')}`);
 console.log('');
 const report = (title, map) => {
@@ -383,13 +587,18 @@ const report = (title, map) => {
   for (const [, v] of map) console.log('  - ' + v.example + `\n      (${v.n} worlds)`);
 };
 const dead = [...allLines].filter(([e]) => !reachable.has(e));
+const floraDead = [...floraLines].filter(([e]) => !floraReach.has(e));
 report('empty pools', holeMap);
 console.log(`unreachable lines: ${dead.length}`);
 for (const [e, label] of dead) console.log(`  - ${label} [${e.tags || ''}]\n    ${e.t}`);
+console.log(`unreachable flora lines: ${floraDead.length}`);
+for (const [e, label] of floraDead) console.log(`  - ${label} [${e.tags || ''}]\n    ${e.t}`);
 report('lexicon conflicts', lexMap);
 report('unfilled tokens', tokenMap);
 console.log(`relation issues: ${relIssues.length}`);
 for (const x of relIssues) console.log('  - ' + x);
+console.log(`flora relation issues: ${floraRelIssues.length}`);
+for (const x of floraRelIssues) console.log('  - ' + x);
 if (storyStats) console.log(`\nstory length (characters): min ${storyStats.min}, median ${storyStats.median}, max ${storyStats.max}, over ${storyStats.n} species`);
 
 for (const { seed, world, G } of sampleStories) {
@@ -399,5 +608,6 @@ for (const { seed, world, G } of sampleStories) {
   console.log(`${l.habitat} · ${l.size} · ${l.diet} · ${l.temperament}`);
   console.log(l.story);
 }
-const fail = holeMap.size + lexMap.size + tokenMap.size + relIssues.length + dead.length;
+const fail = holeMap.size + lexMap.size + tokenMap.size + relIssues.length + dead.length
+  + floraRelIssues.length + floraDead.length;
 process.exit(fail ? 1 : 0);

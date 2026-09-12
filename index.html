@@ -78,7 +78,9 @@
   <section id="creature" hidden aria-live="polite">
     <div class="ccard">
       <button type="button" class="cclose" aria-label="Close">×</button>
-      <div class="cview"><canvas id="ccv"></canvas></div>
+      <!-- One card, two subjects. A WebGLRenderer owns the canvas it draws to, so the animal
+           preview and the plant preview keep one canvas each and the card shows one of them. -->
+      <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas></div>
       <div class="ctext">
         <div class="cname"></div>
         <div class="clatin"></div>
@@ -105,7 +107,9 @@
   <!-- The worker loads lore.js and species.js too. The page needs them for Species.bodyMetres(),
        because the ground scales a creature to the size its lore states. species.js reads
        window.Lore, so lore.js goes first. A classic script runs before a module, so both are
-       there when app.js starts. -->
+       there when app.js starts.
+       The page does not load flora-lore.js. The plant lore is written in the worker, at patch
+       time, and it crosses to the page as plain data on the patch result. -->
   <script src="./lore.js"></script>
   <script src="./species.js"></script>
   <script type="module" src="./app.js"></script>

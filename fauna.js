@@ -955,7 +955,11 @@ export class Inspector {
     if (!this.open) return;
     this.open = false;
     this.card.classList.remove('show');
-    setTimeout(() => { if (!this.open) this.card.hidden = true; }, 250);
+    // The card element is shared with the plant inspector, so a swap of subject hides this one and
+    // shows the other in the same tick. The `show` class says whether anybody wants the card on
+    // screen, and only a card nobody wants is really hidden. Without the test this timer would
+    // hide the card 250 ms after the reader opened the other subject.
+    setTimeout(() => { if (!this.open && !this.card.classList.contains('show')) this.card.hidden = true; }, 250);
     if (this.onClose) this.onClose();
   }
   resize() {
