@@ -102,9 +102,11 @@
     </div>
   </div>
 
-  <!-- The worker loads species.js too. The page needs it for Species.bodyMetres(), because the
-       ground scales a creature to the size its lore states. A classic script runs before a module,
-       so window.Species is there when app.js starts. -->
+  <!-- The worker loads lore.js and species.js too. The page needs them for Species.bodyMetres(),
+       because the ground scales a creature to the size its lore states. species.js reads
+       window.Lore, so lore.js goes first. A classic script runs before a module, so both are
+       there when app.js starts. -->
+  <script src="./lore.js"></script>
   <script src="./species.js"></script>
   <script type="module" src="./app.js"></script>
 </body>

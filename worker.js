@@ -3,6 +3,7 @@
 // The same seed string always produces the same world.
 
 'use strict';
+importScripts('./lore.js');    // the lore engine, shared with the flora (self.Lore)
 importScripts('./species.js'); // species genomes and lore (self.Species)
 
 // ---------------------------------------------------------------- hashing / rng
@@ -260,6 +261,20 @@ const FLORA = {
   TREE: 0, PINE: 1, CACTUS: 2, CRYSTAL: 3, MUSHROOM: 4, BOULDER: 5, PALM: 6,
   TOWER: 7, SPINDLE: 8, PUFF: 9, SHARD: 10, GRASS: 11, COLOSSUS: 12, FAN: 13, POD: 14, STACK: 15,
 };
+// What each plant kind means to the text. The lore engine takes resolved tags, not kind codes, so
+// this is the only table that knows both, and the flora file will read the same one.
+// The word field names one plant of the kind; the lore uses it where a sentence points at a standing plant.
+const FLORA_LORE = {
+  [FLORA.TREE]: { tag: 'woody', word: 'tree' },
+  [FLORA.PINE]: { tag: 'woody', word: 'pine' },
+  [FLORA.CACTUS]: { tag: 'cactus', word: 'cactus' },
+  [FLORA.CRYSTAL]: { tag: 'crystalflora', word: 'crystal' },
+  [FLORA.MUSHROOM]: { tag: 'fungal', word: 'mushroom' },
+  [FLORA.BOULDER]: { tag: 'stoneflora', word: 'stone' },
+  [FLORA.PALM]: { tag: 'woody', word: 'palm' },
+};
+const floraLore = (kinds) => (kinds || []).map((k) => FLORA_LORE[k]).filter(Boolean);
+self.FLORA_LORE = FLORA_LORE;
 // fauna: each world rolls its own species set (species.js); a creature's kind is its species index
 
 function chooseType(rng) {
@@ -269,6 +284,13 @@ function chooseType(rng) {
   return 'terran';
 }
 
+// The plant kinds each type grows. makePalette() assigns the same lists; they are named here so
+// the lore audit can sweep them without running a palette.
+const FLORA_BY_TYPE = {
+  terran: [FLORA.TREE, FLORA.PINE], ocean: [FLORA.PALM, FLORA.TREE], desert: [FLORA.CACTUS, FLORA.BOULDER],
+  ice: [FLORA.CRYSTAL, FLORA.PINE], lava: [FLORA.BOULDER, FLORA.CRYSTAL],
+  exotic: [FLORA.MUSHROOM, FLORA.CRYSTAL, FLORA.TREE], gas: [],
+};
 function makePalette(type, rng) {
   const P = {};
   P.jitter = 0.05;
@@ -282,7 +304,7 @@ function makePalette(type, rng) {
       P.rock = hex('#8d8378'); P.rock2 = hex('#6e655d'); P.snow = hex('#f5f8fc'); P.tundra = hex('#a3aa8c');
       P.ocean = hex(pick(rng, ['#2f7be0', '#2a6fd6', '#2b86e8', '#3a8fd9']));
       P.oceanOpacity = 0.84; P.atmo = hex('#6fb4ff'); P.cloud = hex('#ffffff');
-      P.flora = type === 'ocean' ? [FLORA.PALM, FLORA.TREE] : [FLORA.TREE, FLORA.PINE];
+      P.flora = FLORA_BY_TYPE[type].slice();
       P.floraColor = { canopy: mix(hex('#4f9f42'), hex('#2e7d32'), lush), canopy2: hex('#7fbf4a'), trunk: hex('#6b4a2e') };
       P.faunaColor = { body: hex(pick(rng, ['#b9a58a', '#8f9aa6', '#a48c7a'])), body2: hex('#5a4a3e'), accent: hex(pick(rng, ['#ff7b5c', '#ffc857', '#7ee0d0'])), glow: hex('#ffe9a8') };
       break;
@@ -292,7 +314,7 @@ function makePalette(type, rng) {
       P.grass = hex('#e3c07c'); P.grass2 = hex('#d8ab5e'); P.forest = hex('#b5c66a'); P.dry = hex('#d3a75a');
       P.desert = hex('#e7c98a'); P.rock = hex('#a86a43'); P.rock2 = hex('#7f4d35'); P.snow = hex('#f1e6cf'); P.tundra = hex('#c8b389');
       P.ocean = hex('#2f8fbf'); P.oceanOpacity = 0.85; P.atmo = hex('#ffb066'); P.cloud = hex('#fff2e0');
-      P.flora = [FLORA.CACTUS, FLORA.BOULDER];
+      P.flora = FLORA_BY_TYPE.desert.slice();
       P.floraColor = { canopy: hex('#4f8a4a'), canopy2: hex('#8b6d55'), trunk: hex('#4f8a4a') };
       P.faunaColor = { body: hex('#c9a46a'), body2: hex('#6e4a32'), accent: hex(pick(rng, ['#e0503a', '#3fb8c4'])), glow: hex('#ffd9a0') };
       break;
@@ -302,7 +324,7 @@ function makePalette(type, rng) {
       P.grass = hex('#eef4fa'); P.grass2 = hex('#dfeaf5'); P.forest = hex('#cfe0f0'); P.dry = hex('#e6eef7');
       P.desert = hex('#d6e3ef'); P.rock = hex('#6a7686'); P.rock2 = hex('#46505c'); P.snow = hex('#ffffff'); P.tundra = hex('#c2d2e2');
       P.ocean = hex('#bcd6ee'); P.oceanOpacity = 1; P.oceanIce = true; P.atmo = hex('#a9d4ff'); P.cloud = hex('#ffffff');
-      P.flora = [FLORA.CRYSTAL, FLORA.PINE];
+      P.flora = FLORA_BY_TYPE.ice.slice();
       P.floraColor = { canopy: hex('#8fe0ff'), canopy2: hex('#3e6b5a'), trunk: hex('#3f4c58') };
       P.faunaColor = { body: hex('#8fa3b8'), body2: hex('#3e4a58'), accent: hex('#6fd6ff'), glow: hex('#bff3ff') };
       break;
@@ -312,7 +334,7 @@ function makePalette(type, rng) {
       P.grass = hex('#3a3231'); P.grass2 = hex('#4a3f3c'); P.forest = hex('#2d2726'); P.dry = hex('#5a4a44');
       P.desert = hex('#6a5148'); P.rock = hex('#4b423e'); P.rock2 = hex('#2f2a28'); P.snow = hex('#8b8078'); P.tundra = hex('#5b514c');
       P.ocean = hex('#ff5a1f'); P.oceanOpacity = 1; P.oceanLava = true; P.atmo = hex('#ff6a3a'); P.cloud = hex('#5b5257');
-      P.flora = [FLORA.BOULDER, FLORA.CRYSTAL];
+      P.flora = FLORA_BY_TYPE.lava.slice();
       P.floraColor = { canopy: hex('#ff8c3a'), canopy2: hex('#3a3331'), trunk: hex('#2a2422') };
       P.faunaColor = { body: hex('#3b3432'), body2: hex('#211c1a'), accent: hex('#ff6a2a'), glow: hex('#ffb347') };
       break;
@@ -323,7 +345,7 @@ function makePalette(type, rng) {
       P.grass = hsl(H, 0.55, 0.55); P.grass2 = hsl(H + 15, 0.6, 0.62); P.forest = hsl(H - 10, 0.55, 0.38); P.dry = hsl(H + 30, 0.45, 0.6);
       P.desert = hsl(H + 40, 0.45, 0.7); P.rock = hsl(H + 200, 0.2, 0.45); P.rock2 = hsl(H + 200, 0.2, 0.3); P.snow = hsl(H, 0.3, 0.92); P.tundra = hsl(H + 20, 0.3, 0.6);
       P.ocean = hsl(H + 180, 0.75, 0.5); P.oceanOpacity = 0.85; P.atmo = hsl(H + 200, 0.85, 0.65); P.cloud = hsl(H + 60, 0.5, 0.9);
-      P.flora = [FLORA.MUSHROOM, FLORA.CRYSTAL, FLORA.TREE];
+      P.flora = FLORA_BY_TYPE.exotic.slice();
       P.floraColor = { canopy: hsl(H + 120, 0.7, 0.55), canopy2: hsl(H + 300, 0.7, 0.65), trunk: hsl(H + 20, 0.3, 0.85) };
       P.faunaColor = { body: hsl(H + 240, 0.35, 0.6), body2: hsl(H + 260, 0.4, 0.3), accent: hsl(H + 60, 0.9, 0.6), glow: hsl(H + 90, 0.9, 0.75) };
       break;
@@ -340,7 +362,7 @@ function makePalette(type, rng) {
       P.bands = pick(rng, schemes).map(hex);
       P.storm = mix(P.bands[2], hex('#ffffff'), 0.15);
       P.atmo = mix(P.bands[0], hex('#ffffff'), 0.3); P.cloud = hex('#ffffff');
-      P.flora = []; P.jitter = 0.035;
+      P.flora = FLORA_BY_TYPE.gas.slice(); P.jitter = 0.035;
       P.faunaColor = { body: mix(P.bands[3], hex('#ffffff'), 0.25), body2: mix(P.bands[2], hex('#000000'), 0.2), accent: mix(P.bands[1], hex('#ffffff'), 0.2), glow: hex('#fff2c8') };
       break;
     }
@@ -363,13 +385,24 @@ function moonName(rng) {
   return s[0].toUpperCase() + s.slice(1);
 }
 
-// The planet radius in kilometres. The ground needs it to turn globe units into metres, and it
-// needs it before the globe is built. makeStats() draws the radius as the first value of the
-// flavour stream after the designation, so a replay of that stream gives the same number.
-function radiusKmOf(seed, type) {
-  const f = makeRng(seed + '|flavour');
-  designation(f, seed);
-  return type === 'gas' ? Math.round(rrange(f, 24000, 75000)) : Math.round(rrange(f, 3200, 9800));
+// The numbers that describe the planet itself. They are drawn from the flavour stream, straight
+// after the designation, because three readers need them before the globe exists: the ground turns
+// globe units into metres with the radius, the creature rig uses the gravity, and the lore reads
+// all four. makeStats() formats the same values later and draws nothing more except the life text.
+const TEMP_BY_TYPE = { terran: [-5, 28], ocean: [5, 32], desert: [30, 75], ice: [-120, -40], lava: [420, 900], gas: [-190, -90], exotic: [-30, 60] };
+// Every value a world of each type can reach, for the lore audit. It must list the ends of the
+// range the switch in worldContext() rolls, plus any single value the roll can jump to: a desert
+// is 0.75 to 0.92 land, or 1 outright. tools/lore-audit reads this rather than restating it, so a
+// change to the rolls cannot leave the sweep testing a world the generator never builds.
+const LAND_BY_TYPE = { terran: [0.22, 0.42], ocean: [0.03, 0.12], desert: [0.75, 0.92, 1], ice: [0.3, 0.55], lava: [0.35, 0.6], exotic: [0.2, 0.6], gas: [null] };
+const FLORA_DENSITY_BY_TYPE = { terran: 2.0, ocean: 1.6, desert: 0.22, ice: 0.18, lava: 0.15, exotic: 1.4, gas: 0 };
+self.PLANET_RANGES = { TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE };
+function rollPlanet(frng, type) {
+  const radiusKm = type === 'gas' ? Math.round(rrange(frng, 24000, 75000)) : Math.round(rrange(frng, 3200, 9800));
+  const gravity = type === 'gas' ? rrange(frng, 0.9, 2.6) : (radiusKm / 6371) * rrange(frng, 0.8, 1.2);
+  const dayHours = type === 'gas' ? rrange(frng, 8, 16) : rrange(frng, 14, 60);
+  const [tLo, tHi] = TEMP_BY_TYPE[type];
+  return { type, radiusKm, gravity, dayHours, tempC: Math.round(rrange(frng, tLo, tHi)) };
 }
 
 // ---------------------------------------------------------------- the world context
@@ -407,12 +440,24 @@ function worldContext(seed) {
     hasAtmosphere: true, atmoStrength: 1, seaLevel: 0, hasOcean: false, amp: 0,
     rings: null, moons: [], stats: {},
   };
-  world.species = Species.makeSpeciesSet(makeRng(seed + '|species'), type, world, P);
+  // The planet numbers, and the facts the lore reads. `env` fills up as the world is built: the
+  // moons, the rings, and the activity are added in generate(), which then writes the lore again.
+  // See "The environment" in docs/fauna.md.
+  const planet = rollPlanet(frng, type);
+  world.gravity = planet.gravity;
+  world.env = {
+    type, tempC: planet.tempC, gravity: planet.gravity, dayHours: planet.dayHours,
+    radiusKm: planet.radiusKm, land: type === 'gas' ? null : 1,
+    floraTags: floraLore(P.flora).map((f) => f.tag),
+    plantWord: (floraLore(P.flora)[0] || {}).word || null,
+    floraDensity: 0,
+    moons: null, moonNames: [], rings: false, activity: null,
+  };
 
   // seaLevel stays at -2 until the globe build, or until patch() samples it. A world with no
   // ocean keeps -2, because no vertex ever reaches it.
-  const ctx = { seed, type, rng, noise, P, frng, world, radiusKm: radiusKmOf(seed, type), seaLevel: -2 };
-  if (type === 'gas') return ctx;
+  const ctx = { seed, type, rng, noise, P, frng, world, radiusKm: planet.radiusKm, seaLevel: -2 };
+  if (type === 'gas') { initLife(ctx); return ctx; }
 
   // ---- terrain parameters per type
   // land: the fraction of the surface above the sea. Earth is 0.29.
@@ -420,12 +465,12 @@ function worldContext(seed) {
   // islands: the weight of the volcanic arcs that make small islands in the open sea.
   let land, amp, mountain, contFreq, islands, tempBias, snowLine, beachW, floraDensity, cloudCount;
   switch (type) {
-    case 'terran': land = rrange(rng, 0.22, 0.42); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.55, 0.85); islands = 0.2; tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = 2.0; cloudCount = Math.round(rrange(rng, 40, 70)); break;
-    case 'ocean': land = rrange(rng, 0.03, 0.12); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 0.8, 1.3); islands = 0.6; tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = 1.6; cloudCount = Math.round(rrange(rng, 55, 85)); break;
-    case 'desert': land = rng() < 0.6 ? rrange(rng, 0.75, 0.92) : 1; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.5, 0.8); islands = 0.1; tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = 0.22; cloudCount = Math.round(rrange(rng, 6, 18)); break;
-    case 'ice': land = rrange(rng, 0.3, 0.55); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.55, 0.9); islands = 0.15; tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = 0.18; cloudCount = Math.round(rrange(rng, 15, 30)); break;
-    case 'lava': land = rrange(rng, 0.35, 0.6); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 0.6, 1.0); islands = 0.3; tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = 0.15; cloudCount = Math.round(rrange(rng, 12, 28)); break;
-    case 'exotic': land = rrange(rng, 0.2, 0.6); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.5, 1.0); islands = 0.25; tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = 1.4; cloudCount = Math.round(rrange(rng, 25, 60)); break;
+    case 'terran': land = rrange(rng, 0.22, 0.42); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.55, 0.85); islands = 0.2; tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = FLORA_DENSITY_BY_TYPE.terran; cloudCount = Math.round(rrange(rng, 40, 70)); break;
+    case 'ocean': land = rrange(rng, 0.03, 0.12); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 0.8, 1.3); islands = 0.6; tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = FLORA_DENSITY_BY_TYPE.ocean; cloudCount = Math.round(rrange(rng, 55, 85)); break;
+    case 'desert': land = rng() < 0.6 ? rrange(rng, 0.75, 0.92) : 1; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.5, 0.8); islands = 0.1; tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.desert; cloudCount = Math.round(rrange(rng, 6, 18)); break;
+    case 'ice': land = rrange(rng, 0.3, 0.55); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.55, 0.9); islands = 0.15; tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.ice; cloudCount = Math.round(rrange(rng, 15, 30)); break;
+    case 'lava': land = rrange(rng, 0.35, 0.6); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 0.6, 1.0); islands = 0.3; tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.lava; cloudCount = Math.round(rrange(rng, 12, 28)); break;
+    case 'exotic': land = rrange(rng, 0.2, 0.6); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.5, 1.0); islands = 0.25; tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = FLORA_DENSITY_BY_TYPE.exotic; cloudCount = Math.round(rrange(rng, 25, 60)); break;
   }
   world.amp = amp; world.land = land;
   world.hasOcean = land < 1;
@@ -441,7 +486,32 @@ function worldContext(seed) {
     land, amp, mountain, contFreq, islands, tempBias, snowLine, beachW, floraDensity, cloudCount,
     o1, o2, o3, o4, o5, o6, mFreq, warp,
   });
+  world.env.land = land;
+  world.env.floraDensity = floraDensity;
+  initLife(ctx);
   return ctx;
+}
+
+// Rolls the species of a world and writes a first draft of their lore. The bodies come from the
+// species stream, so they do not move when the text changes. The text comes from its own stream,
+// and generate() writes it again once the moons, the rings, and the activity are known. A patch
+// that runs without a globe build therefore still finds a name on every animal.
+function initLife(ctx) {
+  const { seed, type, world, P } = ctx;
+  world.species = Species.makeSpeciesSet(makeRng(seed + '|species'), type, world, P);
+  for (const s of world.species) s.gravity = world.gravity; // the hop of a monopod depends on it
+  describeLife(ctx);
+}
+
+// Copies what the world now knows into world.env and writes the lore from it. Safe to call more
+// than once: it draws from its own stream and it replaces the text it wrote before.
+function describeLife(ctx) {
+  const { seed, world } = ctx;
+  world.env.moons = world.moons ? world.moons.length : null;
+  world.env.moonNames = (world.moons || []).map((m) => m.name);
+  world.env.rings = !!world.rings;
+  world.env.activity = world.activity ? world.activity.kind : null;
+  Species.describe(world, makeRng(seed + '|lore'));
 }
 
 // ---------------------------------------------------------------- the terrain field
@@ -661,6 +731,9 @@ function generate(seed, opts) {
   post(94, 'Catching moons');
   world.rings = rng() < (type === 'ice' ? 0.2 : 0.08) ? makeRings(rng, P.rock ? mix(P.rock, [1, 1, 1], 0.4) : [0.8, 0.8, 0.8], 1.5) : null;
   world.moons = makeMoons(rng, type, !!world.rings);
+  // The sky is the last thing the world learns about itself, so the lore is written again here,
+  // with the moons, the rings, and the activity in hand. Same stream, same seed, same text.
+  describeLife(ctx);
   world.stats = makeStats(frng, type, world, fc);
 
   post(98, 'Almost there');
@@ -799,14 +872,11 @@ function makeGasFauna(rng, maxFauna, world) {
   return packed.fauna;
 }
 
+// The four planet numbers were drawn in worldContext(), by rollPlanet(), so the lore could read
+// them. makeStats() formats them and draws only the life text, which keeps the flavour stream in
+// the order it has always had: designation, radius, gravity, day, temperature, life.
 function makeStats(rng, type, world, floraCount) {
-  const km = type === 'gas' ? Math.round(rrange(rng, 24000, 75000)) : Math.round(rrange(rng, 3200, 9800));
-  const g = type === 'gas' ? rrange(rng, 0.9, 2.6) : (km / 6371) * rrange(rng, 0.8, 1.2);
-  world.gravity = g; for (const s of world.species) s.gravity = g; // the hop of a monopod depends on it
-  const day = type === 'gas' ? rrange(rng, 8, 16) : rrange(rng, 14, 60);
-  const tempByType = { terran: [-5, 28], ocean: [5, 32], desert: [30, 75], ice: [-120, -40], lava: [420, 900], gas: [-190, -90], exotic: [-30, 60] };
-  const [tLo, tHi] = tempByType[type];
-  const temp = Math.round(rrange(rng, tLo, tHi));
+  const { radiusKm: km, gravity: g, dayHours: day, tempC: temp } = world.env;
   let life;
   switch (type) {
     case 'terran': life = pick(rng, ['Forests and grazing herds', 'Dense woodland, birdsong', 'Rolling meadows, shy fauna', 'Old forests, quiet rivers']); break;
@@ -1105,6 +1175,7 @@ function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   makeActivity(makeRng(world.seed + '|activity'), 'gas', world, P);
   world.rings = rng() < 0.65 ? makeRings(rng, mix(bands[0], [1, 1, 1], 0.2), 1) : null;
   world.moons = makeMoons(rng, "gas", !!world.rings);
+  describeLife({ seed: world.seed, world });
   const fauna = makeGasFauna(makeRng(world.seed + '|fauna'), maxFauna, world);
   world.stats = makeStats(frng, 'gas', world, 0);
   post(96, 'Almost there');

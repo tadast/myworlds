@@ -8,6 +8,7 @@ The fauna pipeline has four stages. Each stage lives in one file.
 
 | Stage | File | Runs in | Output |
 |---|---|---|---|
+| 0. The lore engine | `lore.js` | Web Worker, page | `self.Lore`: tags, gated text pools, story slots, relations |
 | 1. Roll the species | `species.js` | Web Worker | `world.species`: an array of genomes with lore |
 | 2. Place the creatures | `worker.js` | Web Worker | `fauna`: a `Float32Array`, 9 floats per creature |
 | 3. Build and animate | `fauna.js` | Main thread | One `InstancedMesh` per species on the globe, two on the ground, one rig shader |
@@ -17,9 +18,11 @@ The same seed always gives the same species, the same names, and the same placem
 
 ## Stage 1: genomes (`species.js`)
 
-`species.js` is a classic script. The worker loads it with `importScripts('./species.js')`. It sets `self.Species = { makeSpeciesSet, NICHE }`. It does not use three.js. Keep it that way, so the worker stays free of rendering code.
+`species.js` is a classic script. The worker loads it with `importScripts('./species.js')`, after `lore.js`. It sets `self.Species = { makeSpeciesSet, describe, bodyMetres, NICHE, RELATIONS, POOLS }`. It does not use three.js. Keep it that way, so the worker stays free of rendering code.
 
-`makeSpeciesSet(rng, type, world, P)` returns two to four genomes for one world. `P` is the raw palette from `makePalette()` in the worker.
+`makeSpeciesSet(rng, type, world, P)` returns two to four genomes for one world, with their sociality, and no text. `P` is the raw palette from `makePalette()` in the worker.
+
+`describe(world, rng)` writes the lore of every species. It runs later, and it runs from its own stream, so text changes never move a body.
 
 ### Niches
 
@@ -95,19 +98,87 @@ texture. It is no longer that many metres of the planet. `patch.metresAcross` an
 
 `G.social` says how the species groups: `{ kind, n, spread }`. The weights come from the locomotion. A quad or a hexapod is usually a herd animal. A serpent, a sac, and a sky whale are usually alone. A swarm is always a herd. Herd `n` is 4 to 14, a pair is 2, and a solitary animal is 1. `spread` is `n` times the body metres times 0.8, so a herd of large animals has room.
 
-`makeSpeciesSet()` rolls `social` in a second pass, after every species has its lore. Nothing before it moves in the random stream, so a seed keeps its names and its sizes.
+`makeSpeciesSet()` rolls `social` in a second pass, after every body exists, because a relation between two species reads the sociality of both.
 
-`applySocial()` then writes the sociality into the lore. It adds one story sentence, and it sets the manner text from the habit and the sociality together, for example `Placid, herds of nine` or `Wary, solitary`. A species that is not a herd loses the `herd` habit sentence, because that sentence would contradict the gene.
+`describe()` then writes the sociality into the lore. It adds one story sentence, and it sets the manner text from the habit and the sociality together, for example `Placid, herds of nine` or `Wary, solitary`. A species that is not a herd never gets the `herd` habit, because that sentence would contradict the gene. A line that says "alone" is gated on `solo`, and a line that says "the others" on `grouped`, for the same reason.
 
-### Lore
+### The lore engine (`lore.js`)
 
-`makeLore()` assembles all text from the parts the animal has. Do not add a sentence that names a part unless the code checks that the part is present.
+`lore.js` holds the machinery and no vocabulary. It exposes `self.Lore`. The flora will use the same engine, so never put an animal word in it.
 
-- **Name**: an optional place word from the niche, an adjective from `ADJ` keyed by one extra or the head, and a noun from `NOUN` keyed by the locomotion.
-- **Latin**: a genus from `GENUS` keyed by the locomotion, and an epithet from `EPITHET` keyed by the same adjective. On a collision the niche epithet is used.
-- **Diet**: from the head, then the niche. Plates always give a mineral diet. Sub-surface animals filter the ground.
-- **Manner**: `habitKey()` derives it from the locomotion, the head, and the `move` values.
-- **Story**: one origin sentence (locomotion), one feature sentence (a different part than the name adjective), one habit sentence (the manner), and, in 65 percent of cases, one closing sentence (the world type). `{ground}` and `{world}` are replaced in the text.
+**Tags.** `Lore.makeEnv(facts)` turns the raw numbers of a planet into `env.tags`, a `Set` of short words. The bands are:
+
+| Axis | Tags |
+|---|---|
+| Temperature °C | `frozen` < -40, `cold` -40 to 5, `temperate` 5 to 32, `hot` 32 to 120, `molten` >= 120; plus `subzero` below 0, `searing` at 60 and up, `waterliquid` between 0 and 100 |
+| Gravity g | `lowgrav` < 0.7, `fairgrav`, `highgrav` > 1.35; plus `feathergrav` < 0.5, `crushgrav` > 1.8 |
+| Day hours | `shortday` < 12, `evenday`, `longday` >= 36; plus `slowspin` >= 48 |
+| Moons | `moonless`, `onemoon`, `twomoons`, `manymoons`, `moonlit`, `tides` |
+| Surface | `noground`, `hasocean`, `dryworld`, `mostlysea`, `mostlyland`, `rainy` |
+| Plants | `noflora`, `flora`, `sparseflora`, plus whatever the caller passes in `floraTags`: `woody`, `cactus`, `crystalflora`, `fungal`, `stoneflora` |
+| Other | `ringed`, `volcanic`, `geysers`, `auroral`, `stormy`, and the world type itself |
+
+A tide needs a moon, a sea, and liquid water. Rain needs liquid water and a sea. A fact the caller does not know adds no tag, so no line can claim it.
+
+The engine does not know what a plant kind is. `makeEnv` takes `floraTags` already resolved, and `plantWord` for the lines that name one plant. `FLORA_LORE` in `worker.js` is the one table that maps a kind code to both, and it sits next to `FLORA` so the two cannot drift. The flora file will read the same table.
+
+**Gates.** A line is `{ t, tags, if, w }`. `tags` is a string of terms tested against the tag set: `cold` requires, `!gas` forbids, `woody|fungal` takes either. `if(ctx)` tests the organism, where `ctx` holds `G`, `env`, `tags`, and `world`. `w` is the weight.
+
+**Specificity.** The engine multiplies a line's weight by `1 + 0.9 * conditions`. A line with one condition is about twice as likely as a plain line, and a line with three about four times. The planet therefore shows through without shutting the general lines out. When two lines must not compete at all, make the tests exclusive rather than leaning on the weights; see `DIET`.
+
+**Slots.** A story is `lore.parts`, a named set, assembled in `STORY_ORDER`. A later pass fills or replaces a part and the story is joined again. Nothing rewrites text by searching it.
+
+**Relations.** `Lore.relate(rng, members, rules, opts)` walks every ordered pair once, in a fixed order, and rolls at most one relation per member. A rule has `when(ctx)`, `t` for the first member, and `mirror` for the second, so both stories agree.
+
+Because `relate()` takes the first rule that fits a pair, a rule with a loose `when` starves the rest. The audit reports any rule that fits more than a quarter of all genome pairs.
+
+### Lore vocabulary (`species.js`)
+
+`describe(world, rng)` assembles all text from the parts the animal has and the tags the world has. Do not add a sentence that names a part unless the code checks that the part is present, or a condition unless the line is gated on it.
+
+- **Name**: an optional place word from `PLACE` (gated: "tide" needs a tide), an adjective from `ADJ` keyed by one extra or the head, or, one name in four, a word from `WORLD_ADJ` keyed by the planet, and a noun from `NOUN` keyed by the locomotion. No two species of one world repeat a word.
+- **Latin**: a genus from `GENUS` keyed by the locomotion, and an epithet from `EPITHET` keyed by the same adjective. On a collision the niche epithet is used, then `WORLD_EPITHET`.
+- **Diet**: one `DIET` pool. Every line carries a `src`, the source the food comes from, and the tests are exclusive: plates beat a head, a head beats the general lines, and a burrower feeds below. All the lines that fit one animal must name one `src`; the audit tool checks it.
+- **Manner**: `habitKey()` derives it from the locomotion, the head, and the `move` values, then the sociality gene. A species that is not a herd cannot carry the herd manner.
+- **Story**: four lines always — `origin` (locomotion), `feature` (a part the name did not use), `habit` (the manner), `social` (the sociality gene) — and two of the four optional ones: `synergy` (a relation, which always takes a place when there is one), `climate` (the planet), `sky` (moons, rings, activity), `close` (the world type). A core slot repeats a line rather than go empty; an optional slot asks `Lore.line` for fresh text only (`strict`) and is dropped when it has none, because `trimStory` will reach for a different one. Two species of one world repeating a sentence word for word reads as one species. `{ground}`, `{world}`, `{day}`, `{night}`, `{temp}`, `{grav}`, `{moon}`, `{moons}`, `{plant}`, and `{other}` are replaced in the text. Every part is capitalised on assembly, so a line stays usable in any slot.
+
+### The gates a line may test
+
+Every predicate a line can carry is defined once, at the top of the lore section, and the relation rules read the same ones. That is what stops a synergy sentence contradicting the origin sentence three clauses earlier.
+
+| Gate | True when | Keeps out |
+|---|---|---|
+| `onFoot` | `cls === 'land'` | a line that names feet, or standing, reaching a flyer or a burrower |
+| `grounded` | `cls !== 'air'` | a line about the ground reaching a sac, which never lands |
+| `roams` | not a burrower other than a plough | a line that has the animal travel reaching one whose own sociality line says "None of them ever moves" |
+| `solo` / `grouped` / `herded` | the sociality gene | "alone" reaching a herd, "the others" reaching a solitary animal |
+
+### Relations
+
+`RELATIONS` holds the rules and `RELATION_CONTRACT` holds what each rule needs of each side, in the same words: `mobile`, `walks`, `flies`, `tunnels`, `notburied`. The contract is not used at run time — it is the statement the audit checks the predicates against. Adding a rule means adding its row; a rule with a `mirror` line must state a `b` list, and an empty list is the deliberate way to say the mirror fits anything.
+
+### The environment
+
+`world.env` carries the facts the lore reads. It fills up as the world is built:
+
+1. `worldContext()` calls `rollPlanet()`, which draws the radius, the gravity, the day length, and the temperature from the flavour stream, in the order `makeStats()` used to draw them. It then rolls the species and writes a first draft of the lore, so a patch that runs without a globe build still finds a name on every animal.
+2. `generate()` learns the moons, the rings, and the activity only after the globe exists. `describeLife()` copies them into `world.env` and writes the lore again. Same stream, same seed, same text.
+3. `makeStats()` formats the numbers `rollPlanet()` drew and adds only the life text, so the flavour stream keeps its order: designation, radius, gravity, day, temperature, life.
+
+The lore draws from `seed + '|lore'`, its own stream. Adding or removing a line never moves a body, a colour, or a placement.
+
+### Reviewing the permutations
+
+`node tools/lore-audit/audit.mjs` runs without a browser and exits non-zero on a finding.
+
+- **Coverage.** It sweeps every world type against every value it can reach — 11,616 worlds — times every class, every sociality, every locomotion, every head, and every part, and asserts that no pool is ever empty. A slot that is full on one planet and empty on the next is a dropped sentence. The grid is not written in the tool: `worker.js` exports `PLANET_RANGES`, so the sweep cannot drift from the ranges the generator rolls.
+- **Reachability.** The other side of coverage: a line no world in the sweep can reach is dead text, usually a gate naming two tags no planet carries together.
+- **Relations.** Every rule is run against every pair of genome shapes, under a sky with moons and one without, and each pair it accepts must satisfy `RELATION_CONTRACT`. This is the check that catches a blind burrower gathering at a light, or a flyer whose feet turn up food. It also reports a rule no pair can reach, and a rule that fits more than a quarter of all pairs.
+- **The lexicon.** A word that claims a fact may only appear where the world has that fact: "rain" needs `rainy`, "tide" needs `tides`, "bark" needs `woody`, "drinks" needs `waterliquid`. Add a rule to `LEXICON` whenever you write a line that leans on the world.
+- **Diet exclusivity.** Two `src` values in one candidate set is a finding, because a weighted roll could then hand a predator leaf litter.
+- **The lexicon exemptions** are scoped to one rule each. `LEX_SKIP` used to be matched against the whole sentence, so a line that happened to contain "sky whale" skipped every rule; an entry now names the gate it relaxes.
+- `--seeds N` runs N real worlds through `worker.js` and checks the finished stories for unfilled tokens, repeated sentences, sociality claims that contradict `G.social`, and mobility claims on an animal that never moves.
+- `--show N` prints N sample stories with their planet.
 
 ## Stage 2: placement (`worker.js`)
 
@@ -458,9 +529,11 @@ holds none of it.
 
 ## Checklist for changes
 
-- Add a locomotion: add it to `LOCO`, `PLAN`, `HEAD`, `EXTRAS`, `MOVE`, and `NOUN`, `GENUS`, `ORIGIN` in `species.js`. Add its legs or body in `buildCreature()`, and a carriage in `rigConstants()` if it moves in a new way.
+- Add a locomotion: add it to `LOCO`, `PLAN`, `HEAD`, `EXTRAS`, `MOVE`, and `NOUN`, `GENUS`, `ORIGIN` in `species.js`. Add its legs or body in `buildCreature()`, and a carriage in `rigConstants()` if it moves in a new way. Its `ORIGIN` pool needs at least one line with no gate, or a world will find it empty.
+- Add a line of lore: put it in the pool it belongs to, gate it on the tags it needs, and run `node tools/lore-audit/audit.mjs --seeds 200`. If the line leans on a fact of the world, add the word to `LEXICON` in the audit tool as well, so the next line that uses it is checked too.
+- Add a world fact: add the tag in `makeEnv()` in `lore.js`, the raw value in `world.env` in `worker.js`, and the axis to the grid in the audit tool.
 - Add a legged locomotion: add it to `LEG_SWING`, `LEG_DUTY`, `BOB_BEATS`, and `ROCK_K` in `fauna.js`, and give its legs a footfall order in `legPlan()`. Without an entry in `LEG_SWING` the gait clock does not lock and the feet slide.
 - Change how far a leg swings, or how long its foot stays down: the gait clock reads both, so the stride and the rate follow on their own. Check the new stride against the body size before you keep it.
 - Add a niche: add it to `NICHE` and `WORLD_NICHES` in `species.js`, and a test in `makeFauna()` in `worker.js`.
-- Test the worker without a browser: run `worker.js` in Node with a fake `self` that has `postMessage` and `importScripts`. Print `world.species` for several seeds and read the lore for sentences that contradict the parts.
+- Test the worker without a browser: run `node tools/lore-audit/audit.mjs --seeds 200 --show 8`. It loads `worker.js` in Node with a fake `self` and reports every finding with an example world.
 - Test the geometry in Chrome: open the page, then call `__mw.inspect(k)` for each species index and look at the card.
