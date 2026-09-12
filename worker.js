@@ -1316,6 +1316,32 @@ const SIZE_CURVE = 1.9;      // over 1 the sizes bunch at the small end, so a bi
 const MARK_MARGIN = 220;     // units: an arrangement stays this far inside the edge of the box
 const BIG_GAP = 340;         // units: the least distance between two colossus bodies
 
+// Issue 27. A world type carries a density of its own, and terran, ocean, and exotic all hold more
+// than 1. The chance of a plant then saturated over most of the range of the mask, so nearly every
+// land cell of the grid took a plant and the reader walked through one continuous thicket. The
+// excess density now buys contrast instead of more plants. The ceiling holds the chance short of
+// solid, and the thicket field keeps its crests full and gives up its troughs. A sparse world does
+// not change, because the shaping fades in with the density of the community that owns the ground.
+const FLORA_CEIL = 0.7;      // the most of the cell grid one thicket may fill
+const CLUST_WAVE = 72;       // units: the wavelength of one thicket
+const CLUST_DEPTH = 0.85;    // the share of the chance the trough of the thicket field takes away
+const CLUST_FROM = 0.5;      // the density of a community where the shaping starts
+const CLUST_FULL = 1.3;      // the density where the shaping cuts as deep as it can
+
+// Issue 27. The colossus stands one to three times in the whole box, so most of the ground carries
+// no landmark at all. The box is 3,000 units across and the reader sees about 900 of it, so the
+// patch also seats one or two mega plants in every square of MEGA_CELL. A mega plant is a plant of
+// the community that owns the ground, grown far past its kind. It stands over the canopy and under
+// the colossus, so the three steps of scale still read: canopy, mega, colossus.
+const MEGA_CELL = 400;       // units: the side of the square that seats the mega plants
+const MEGA_LOW = 2.0;        // the least a mega plant grows past the top of the range of its kind
+const MEGA_HIGH = 3.4;       // the most it grows past it
+const MEGA_MIN = 22;         // units: under this a plant does not stand over the canopy
+const MEGA_MAX = 58;         // units: over this it competes with the colossus, which starts at 70
+const MEGA_CLEAR = 150;      // units: a mega plant keeps this far from a colossus body
+const MEGA_GAP = 90;         // units: the least distance between two mega plants
+const MEGA_SEAT = 0.15;      // the least thicket value a square needs to seat a mega plant
+
 // units, the size of one plant, by kind. A tower mushroom is over the tallest pine of the same
 // patch, and the colossus stands over everything.
 const FLORA_M = [
@@ -1451,6 +1477,11 @@ function patchFlora(ctx, s) {
   const ob0 = rng() * 90, ob1 = rng() * 90;     // the bare field
   const ov0 = rng() * 90, ov1 = rng() * 90;     // the vigour field
   const oq0 = rng() * 90, oq1 = rng() * 90;     // the ground cover field
+  // Issue 27 draws its two fields from streams of their own, so the thicket field and the mega
+  // plants cannot move a plant that the scan already placed. The patch keeps the communities, the
+  // kinds, and the sizes it grew before this issue. See describePatchFlora() for the same rule.
+  const krng = makeRng(s.pseed + '|thicket'), mrng = makeRng(s.pseed + '|mega');
+  const ok0 = krng() * 90, ok1 = krng() * 90;   // the thicket field
   const comms = floraCommunities(type, rng, makeRng(ctx.world.seed + '|flora-kinds'));
   const bareShare = rrange(rng, 0.12, 0.5);     // how much open ground this patch holds
 
@@ -1481,6 +1512,11 @@ function patchFlora(ctx, s) {
     return smoothstep(1 - bareShare - 0.16, 1 - bareShare + 0.06, b);
   };
   const vigourAt = (x, z) => 0.7 + 0.6 * (noise.n3(x / VIGOUR_WAVE + ov0, z / VIGOUR_WAVE + ov1, 13.5) * 0.5 + 0.5);
+  // The thickets of a dense community, 0 in a glade and 1 in a stand. It is a field of its own and
+  // not the grove field, because the grove field also picks the kind: a shaping that emptied the
+  // low band of the grove field would take the companion plant of every dense community with it.
+  const clustAt = (x, z) =>
+    smoothstep(-0.25, 0.3, noise.n3(x / CLUST_WAVE + ok0, z / CLUST_WAVE + ok1, 27.5));
   const groveAt = (x, z) => noise.n3(x / GROVE_WAVE + og0, z / GROVE_WAVE + og1, 19.5);
   // Two fields, not one. Simplex noise bunches around the middle of its range, so one field cut
   // into bands gave the middle community most of the box. Two fields at two wavelengths make a
@@ -1531,7 +1567,15 @@ function patchFlora(ctx, s) {
       const edge = ed >= FLORA_EDGE ? 1 : smoothstep(0, FLORA_EDGE, ed);
       const open = 1 - bareAt(x, z);
       const lush = density * comm.density;
-      if (rng() >= (FLORA_FLOOR + (lush - FLORA_FLOOR) * smoothstep(-0.35, 0.35, mask)) * edge * open) continue;
+      // Issue 27. A community of a lush over 1 used to saturate this chance and stand as one
+      // continuous thicket. The ceiling holds it short of solid, and the depth of the shaping
+      // follows the lush, so the ground of a dense community gathers into stands and glades while
+      // a sparse community keeps the even scatter it always had.
+      const thick = Math.min(FLORA_CEIL,
+        FLORA_FLOOR + (lush - FLORA_FLOOR) * smoothstep(-0.35, 0.35, mask));
+      const heavy = smoothstep(CLUST_FROM, CLUST_FULL, lush);
+      const stand = 1 - heavy * CLUST_DEPTH * (1 - clustAt(x, z));
+      if (rng() >= thick * stand * edge * open) continue;
 
       // The gap test reads the four neighbours the scan already wrote, so it reads every pair
       // once. A cell two steps away is at least 6 units off, which is over the gap already.
@@ -1647,6 +1691,50 @@ function patchFlora(ctx, s) {
     }
   }
 
+  // ---------------------------------------------------------------- the mega plants
+  // One or two oversize plants in every square of MEGA_CELL, wherever the ground takes them. Each
+  // one sits at the crest of the thicket field, so a stand carries the landmark and the glades
+  // between the stands stay open. A square of water, of rock, or of open ground seats none, which
+  // is why the search scores its tries instead of taking the first one that holds. These plants
+  // stand past the cap, as the arrangements and the colossus do, because the cap must not drop a
+  // landmark.
+  const megaAt = [];
+  const megaCells = Math.max(1, Math.round(size / MEGA_CELL)), mw = size / megaCells;
+  const megaInner = half - FLORA_EDGE;
+  for (let mj = 0; mj < megaCells; mj++) {
+    for (let mi = 0; mi < megaCells; mi++) {
+      const want = 1 + (mrng() < 0.35 ? 1 : 0);
+      for (let k = 0; k < want; k++) {
+        let bx = 0, bz = 0, best = MEGA_SEAT;
+        for (let tries = 0; tries < 6; tries++) {
+          const x = -half + (mi + mrng()) * mw, z = -half + (mj + mrng()) * mw;
+          if (Math.abs(x) > megaInner || Math.abs(z) > megaInner) continue;
+          const g = ground(x, z);
+          if (!g.land || g.slope > 0.5) continue;
+          let far = true;
+          for (let q = 0; q < bigAt.length && far; q += 2) {
+            if (Math.hypot(x - bigAt[q], z - bigAt[q + 1]) < MEGA_CLEAR) far = false;
+          }
+          for (let q = 0; q < megaAt.length && far; q += 2) {
+            if (Math.hypot(x - megaAt[q], z - megaAt[q + 1]) < MEGA_GAP) far = false;
+          }
+          if (!far) continue;
+          const score = clustAt(x, z) * (1 - bareAt(x, z));
+          if (score > best) { best = score; bx = x; bz = z; }
+        }
+        if (best <= MEGA_SEAT) continue;
+        const comm = commAt(bx, bz);
+        const kind = mrng() < 0.7 ? comm.lead : comm.mate;
+        const g = ground(bx, bz);
+        if (g.slope > FLORA_SLOPE && !FLORA_ROCK.has(kind)) continue;
+        const mm = FLORA_M[kind] || FLORA_M[0];
+        const sz = clamp(mm[1] * rrange(mrng, MEGA_LOW, MEGA_HIGH), MEGA_MIN, MEGA_MAX);
+        fixed.push(bx, g.h, bz, g.nx, g.ny, g.nz, sz, kind);
+        megaAt.push(bx, bz);
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- the output
   const fixedCount = fixed.length / 8;
   const budget = Math.max(0, maxFlora - fixedCount);
@@ -1699,7 +1787,8 @@ function patchFlora(ctx, s) {
     }
   }
 
-  return { flora, grass, grassN: gN, grassStep: gStep, marks: markCount, fixed: fixedCount, big: bigAt.length / 2 };
+  return { flora, grass, grassN: gN, grassStep: gStep, marks: markCount, fixed: fixedCount,
+    big: bigAt.length / 2, mega: megaAt.length / 2 };
 }
 
 // ---------------------------------------------------------------- the lore of the plants
@@ -2282,7 +2371,7 @@ function patch(seed, lat, lon, opts) {
   post(94, 'Growing the plants');
   const grown = patchFlora(ctx, {
     heights, vary, n, grid, half, size, hPerM: H_PER_M, hPerU,
-    cellT, cellM, cellF, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000,
+    cellT, cellM, cellF, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000, pseed,
     blocked: act ? act.blocked : null,
   });
   const flora = grown.flora, grass = grown.grass;
@@ -2308,7 +2397,7 @@ function patch(seed, lat, lon, opts) {
       // the ground cover mask of issue 21, on its own grid at twice the terrain step
       cover: { n: grown.grassN, step: grown.grassStep },
       // what the two passes after the scan put on the patch, for the load log
-      marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big },
+      marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big, mega: grown.mega },
       activity: act ? act.info : null,
       biome,
       // The lore of every plant kind this patch grows, tallest first. See describePatchFlora().

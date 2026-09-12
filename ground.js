@@ -530,7 +530,8 @@ export class Ground {
     this.content.add(this.flora.group);
     const m = result.patch.marks;
     console.info(`[myworlds] ground flora ${this.flora.count} plants in ${this.flora.kinds.length} kinds`
-      + (m ? `, ${m.placed} of them in ${m.tried} arrangements and ${m.colossus} colossus courts` : ''));
+      + (m ? `, ${m.placed} of them in ${m.tried} arrangements, ${m.colossus} colossus courts`
+        + `, and ${m.mega} mega plants` : ''));
   }
 
   // The ground cover of the patch. The worker says where a tuft may grow; GrassField grows a

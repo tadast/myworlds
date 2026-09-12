@@ -262,3 +262,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 24 | The lore of the plants | HITL | 07, 21, 22 | CLOSED 483db6b |
 | 25 | The ground is penned in, so the reader walks a fifth of the patch | AFK | 20, 23 | CLOSED |
 | 26 | The LOD knob rings, so the plants pop | AFK | 11, 25 | CLOSED |
+| 27 | The flora of a wet world is one continuous thicket, and the ground holds no landmark | HITL | 21, 25, 26 | CLOSED |
