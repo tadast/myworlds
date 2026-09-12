@@ -15,30 +15,38 @@ import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
 import { perf } from './perf.js';
 
-export const PATCH_SIZE = 1500;      // metres, the side of the patch
+// metres, the side of the ground box. The tier picks the real one and sends it with the patch
+// request, so this is only the fallback for the moments before a patch arrives. See Q.ground in
+// app.js: HIGH draws 3,000 and LOW draws 1,500.
+export const PATCH_SIZE = 3000;
 export const FOG_NEAR = 450;         // metres, where the fog starts
 export const FOG_FAR = 750;          // metres, where the fog is solid
 export const SKY_RADIUS = 5000;      // metres, the sky dome
 // ---------------------------------------------------------------- the reach, issue 25
-// units, how far from the site the target of the camera may go. This was FOG_NEAR until issue 25,
-// on the rule that a target inside the fog always holds ground the reader can see. The rule cost
-// the reader most of the box. The patch draws PATCH_SIZE units and a clamp of 450 gave a walk of
-// 900 units across, which is 28% of the area.
+// How far from the site the target of the camera may go. This was FOG_NEAR until issue 25, on the
+// rule that a target inside the fog always holds ground the reader can see. The rule cost the
+// reader most of the box: a clamp of 450 in a box of 1,500 gave a walk of 900 units across, which
+// is 28% of the area.
 //
 // The plants, and not the fog, set the true limit. The terrain is already seamless past the box,
 // because the rim carries it and the patch fades its knolls into the rim. The plants stop:
 // worker.js thins them to nothing over the last FLORA_EDGE units of the box, so dense flora ends
-// at a square of half width PATCH_SIZE / 2 - FLORA_EDGE. TARGET_REACH must not go past that
-// square. A half width of 750 and a FLORA_EDGE of 100 put the corner of it at 650, and the reach
-// stands on that line: the reader stops where the plants start to thin, and the 100 units of box
-// that are left carry the fade. Measured on Aurora@18.91,129.00, the plant count in a disc of
-// radius 90 at the four limits was 72 to 134 per 10,000 square units, against 114 at the site.
+// at a square of half width half - FLORA_EDGE. The reach stands on that line. The reader stops
+// where the plants begin to thin, and the band that is left carries the fade. Measured on
+// Aurora@18.91,129.00 at a half width of 750, the plant count in a disc of radius 90 at the four
+// limits was 72 to 134 per 10,000 square units, against 114 at the site.
+//
+// The reach is a rule and not a number, because the two tiers hold different boxes. HIGH draws
+// 3,000 units and LOW draws 1,500, so one constant would be wrong for one of them. The worker
+// reports its own FLORA_EDGE with the patch, so the two cannot drift apart. REACH_FADE is only
+// the fallback for the moments before a patch arrives.
 //
 // The two numbers had to split here. FOG_NEAR also sets the depth of the fade, because update()
 // holds the ratio FOG_NEAR / FOG_FAR as the fog opens. At 650 the fade at the ceiling falls from
 // 530 units to 176, and the far ground then reads as a hard band with a straight edge against the
-// sky. So the fog keeps 450 and the reader gets 650.
-export const TARGET_REACH = 650;     // units, how far the target may stand from the site
+// sky. So the fog keeps 450 and the reader gets his own number.
+const REACH_FADE = 100;              // units, the fallback for the plant fade of the worker
+const reachOf = (half, fade) => half - (fade >= 0 ? fade : REACH_FADE);
 // The ceiling and the tilt hold the edge of the box out of sight. See "the rectangle" below.
 export const CEILING = 500;          // metres, the camera ceiling above the site
 export const FLOOR = 2;              // metres, the camera floor above the terrain
@@ -74,17 +82,27 @@ const LOD_SETTLE = 800;     // ms after a step: no decision, so no step reads it
 const LOD_STORE = 'myworlds.lod.v1';
 const LOD_START = 150;      // metres, where the knob starts before the store says otherwise
 const LOD_MIN = 40;         // metres, the floor of the knob
-const LOD_MAX = 400;        // metres, the ceiling of the knob. The tier may lower it; LOW asks 250.
+// metres, the ceiling of the knob. The tier lowers it: HIGH asks 220 and LOW asks 250. Issue 25
+// took HIGH down from 400, because a wider box puts the reader inside the forest and the sphere of
+// the knob then fills with plants the old box could not hold. See the Q table in app.js.
+const LOD_MAX = 400;
 
 export const CAM_START = 450;        // metres, the height the camera starts at over the site
 // The rim: the ground outside the patch. It must reach past the fog, or its outer edge shows.
-// At the ceiling the camera stands at most TARGET_REACH + CEILING * tan(POLAR_HIGH + POLAR_BAND),
-// about 1,800 units, from the site, and the fog is solid at FOG_FAR + FOG_LIFT * CEILING, about
-// 1,325 units. A ray from that height meets the ground sqrt(1325^2 - CEILING^2), about 1,227
-// units, out. So the ground must run to about 3,025 units. RIM keeps the wider value of issue 18,
-// which the ceiling of 1,200 m asked for. Issue 25 raised the reach from 450 to 650, which took
-// the margin from 320 units down to 125. It still holds. See _rimGeometry().
-export const RIM = 3150;             // units, how far the rim reaches from the site
+// At the ceiling the camera stands at most the reach + CEILING * tan(POLAR_HIGH + POLAR_BAND),
+// and the fog is solid at FOG_FAR + FOG_LIFT * CEILING. A ray from the ceiling meets the ground
+// sqrt(fog^2 - CEILING^2) further out, and the sum is the reach the ground needs:
+//
+//     1400 + 500 * tan(1.16)          = 1400 + 1148 = 2548 units, the stand-off of the camera
+//     750 + 1.15 * 500                = 1325 units, where the fog is solid
+//     sqrt(1325^2 - 500^2)            = 1227 units, where that fog meets the ground
+//     2548 + 1227                     = 3775 units, what the rim must cover
+//
+// Issue 25 took the reach of the wide tier to 1,400, which took the sum from 3,025 to 3,775 and
+// left the old RIM of 3,150 short. RIM is now 4,000, which keeps 225 units of margin and lands on
+// a whole rim cell: at size 3000 and grid 2 the rim step is 50, and (4000 - 1500) / 50 is exactly
+// 50 cells. The narrow tier asks for less and the same number covers it. See _rimGeometry().
+export const RIM = 4000;             // units, how far the rim reaches from the site
 
 // ---------------------------------------------------------------- the rectangle, issue 20
 // The patch holds a 2 m grid with knolls and rock. The rim outside it holds a 50 m grid with
@@ -255,6 +273,7 @@ export class Ground {
     this.heights = null;
     this.rim = null;
     this.n = 0; this.grid = 0; this.half = PATCH_SIZE / 2;
+    this.reach = reachOf(this.half, -1);
     this.base = 0;
 
     const pal = world.palette || {};
@@ -352,6 +371,8 @@ export class Ground {
     this.n = p ? p.n : 0;
     this.grid = p ? p.grid : 0;
     this.half = p ? p.size / 2 : PATCH_SIZE / 2;
+    // the clamp of the target follows the box this patch actually drew, not a constant
+    this.reach = reachOf(this.half, p && p.floraEdge >= 0 ? p.floraEdge : -1);
     this.rim = null;
     if (p) this._loadRim(result);
     this.base = this.heightAt(0, 0);
@@ -754,12 +775,12 @@ export class Ground {
     this._stepMove(dt);
     const p = this.camera.position, tg = this.controls.target;
 
-    // The target stays inside TARGET_REACH, so the view always holds ground that carries plants.
-    // The camera takes the same step, so a pan that reaches the limit stops the whole view there
+    // The target stays inside the reach, so the view always holds ground that carries plants. The
+    // camera takes the same step, so a pan that reaches the limit stops the whole view there
     // instead of sliding the camera on over a target that cannot follow.
     const tr = Math.hypot(tg.x, tg.z);
-    if (tr > TARGET_REACH) {
-      const k = TARGET_REACH / tr - 1;
+    if (tr > this.reach) {
+      const k = this.reach / tr - 1;
       const dx = tg.x * k, dz = tg.z * k;
       tg.x += dx; tg.z += dz;
       p.x += dx; p.z += dz;
@@ -923,7 +944,7 @@ export class Ground {
   setView(v) {
     if (!v || v.kind !== 'ground') return false;
     const r = Math.hypot(v.x, v.z);
-    const k = r > TARGET_REACH ? TARGET_REACH / r : 1;
+    const k = r > this.reach ? this.reach / r : 1;
     const x = v.x * k, z = v.z * k;
     // The offset can be longer than controls.maxDistance: the clamps of update() move the camera
     // after the controls aimed it, and over a deep sea the target sits on the bed far below. So the
@@ -1075,8 +1096,8 @@ export class Ground {
       // slows, so the reader still walks along the edge and back in at full speed.
       const tr = Math.hypot(tg.x, tg.z);
       const out = tr > 1e-6 ? (wx * tg.x + wz * tg.z) / tr : 0;
-      if (out > 0 && tr > TARGET_REACH - WALK_EDGE) {
-        const cut = THREE.MathUtils.smoothstep(tr, TARGET_REACH - WALK_EDGE, TARGET_REACH) * out;
+      if (out > 0 && tr > this.reach - WALK_EDGE) {
+        const cut = THREE.MathUtils.smoothstep(tr, this.reach - WALK_EDGE, this.reach) * out;
         wx -= (tg.x / tr) * cut; wz -= (tg.z / tr) * cut;
       }
     } else { wx = 0; wz = 0; }
@@ -1101,7 +1122,7 @@ export class Ground {
   glideTo(point, done) {
     const to = point.clone();
     const r = Math.hypot(to.x, to.z);
-    if (r > TARGET_REACH) { const k = TARGET_REACH / r; to.x *= k; to.z *= k; }
+    if (r > this.reach) { const k = this.reach / r; to.x *= k; to.z *= k; }
     to.y = this._groundAt(to.x, to.z) + TARGET_LIFT;
     const d0 = this.camera.position.distanceTo(this.controls.target);
     const d1 = d0 > GLIDE_HIGH ? d0 * (1 - GLIDE_PULL) : d0;

@@ -1201,12 +1201,17 @@ const FIELD_N = 65;                    // samples of the globe field across the 
 // edge. RIM_REACH is the default reach in units; ground.js sends the value it needs. A rim cell
 // is RIM_CELL patch steps, so a low tier draws a coarser rim, and the rim reads the globe field
 // once per RIM_FIELD_CELLS rim cells.
-const RIM_REACH = 3150;                // units from the site to the outer edge of the rim
+const RIM_REACH = 4000;                // units from the site to the outer edge of the rim
 const RIM_CELL = 25;                   // patch grid steps per rim cell
 const RIM_FIELD_CELLS = 2;             // rim cells per sample of the globe field over the rim
 const RIM_FIELD_MAX = 65;              // the most samples the rim field takes, per side
 const EDGE_CELLS = 2;                  // rim cells the patch fades its knolls and its rock over
-const TARGET_RELIEF = 120;             // units: how much large-scale relief a patch aims to show
+// The relief a patch shows is TARGET_RELIEF units from its lowest point to its highest, whatever
+// the cell holds, because V below divides the true relief down to it. That number is in units of
+// the box, so the gradient the reader walks is TARGET_RELIEF / size. It must move with the size or
+// a wider box gets a flatter world per step. Issue 25 doubled the size from 1,500 to 3,000 and
+// doubled this with it, which holds the gradient at 0.08 units of rise per unit of walk.
+const TARGET_RELIEF = 240;             // units: how much large-scale relief a patch aims to show
 const SLOPE_ROCK = [0.55, 1.15];       // the slope band where the ground turns to bare rock
 const BIOME_NAME = ['ocean', 'shallows', 'beach', 'tundra', 'snow', 'rock', 'forest', 'grass', 'dry', 'desert'];
 // The shore, in metres. The globe paints its beach over a band of the elevation field that stands
@@ -2295,6 +2300,9 @@ function patch(seed, lat, lon, opts) {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
       span, metresAcross: K, metresUp: V,
+      // the band the plants thin out over at the edge of the box. ground.js reads it to place the
+      // clamp of the camera target, so the two cannot drift apart. See TARGET_REACH there.
+      floraEdge: FLORA_EDGE,
       floraVariant: ctx.world.floraVariant,
       rim: { out: rimOut, step: rimStep, n: rimN, hasSea: rimSea },
       // the ground cover mask of issue 21, on its own grid at twice the terrain step

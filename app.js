@@ -24,12 +24,25 @@ const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet sta
 // also caps the LOD knob at 250 m, because a weak machine cannot spend the room a fast one
 // finds, and a knob that walks to 400 m only walks back down again.
 //
-// Issue 25 raised both flora caps by 1.4. The patch now grows plants over a dense square of 1,300
-// units instead of 900, because FLORA_EDGE in worker.js fell from 300 to 100. The densest cell I
-// measured, Aurora@18.91,129.00, went from 18,100 plants to 23,004 with the caps lifted out of
-// the way, which is 1.27. The caps carry 1.4, so the densest cell keeps about 20% of head room and
-// the cap binds no sooner than it did before. The cost is small: the LOD walk of ground-flora.js
-// reads about 9 ns per plant, so 28,000 plants cost about 0.25 ms of a 16.7 ms frame.
+// Issue 25 raised the flora caps, because the patch now grows plants over a wider dense square:
+// FLORA_EDGE in worker.js fell from 300 to 100. On LOW, where the box stays 1,500, the densest
+// cell measured went from 18,100 plants to 23,004, so 8,400 carries the same head room as 6,000
+// did. The LOD walk of ground-flora.js reads about 6 to 11 ns per plant, so even 120,000 plants
+// cost under 0.7 ms of a 16.7 ms frame; the walk was never the thing to fear.
+//
+// `size` is the side of the ground box, and the two tiers hold different ones. HIGH draws 3,000
+// units, which gives the reader a walk of 1,400 units from the site in every direction. LOW keeps
+// 1,500. The box costs area: the terrain build is O(area) and the plants are O(area), so 3,000 on
+// a phone would be four times the work and four times the plants for a reader who is holding the
+// thing in one hand. LOW keeps the patch of issue 20 with the wider walk of this issue, which is
+// already 2.1 times the ground it had.
+//
+// `lodMax` fell from 400 to 220 on HIGH. A wider box puts the reader inside the forest instead of
+// near the edge of it, so the LOD sphere of 900 units now fills with plants where the old box cut
+// it off. At 400 the ground drew 7,459 plants as meshes and held 45 fps; at 200 it drew 2,755 and
+// held 60. The two frames are the same to the eye, because issue 22 gives every plant a floor
+// under its own swap distance: a plant only turns into a card once the card is no longer a
+// magnified picture. The knob was spending on meshes that a card already drew correctly.
 const Q = {
   detail: LOW ? 64 : 100,
   maxFlora: LOW ? 2500 : 10500,
@@ -37,8 +50,8 @@ const Q = {
   shadows: !LOW,
   dpr: Math.min(devicePixelRatio || 1, LOW ? 1.5 : 2),
   ground: LOW
-    ? { grid: 4, maxFlora: 8400, maxFauna: 100, shadows: false, lodMax: 250 }
-    : { grid: 2, maxFlora: 28000, maxFauna: 300, shadows: true, lodMax: 400 },
+    ? { grid: 4, size: 1500, maxFlora: 8400, maxFauna: 100, shadows: false, lodMax: 250 }
+    : { grid: 2, size: 3000, maxFlora: 120000, maxFauna: 300, shadows: true, lodMax: 220 },
 };
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
@@ -748,7 +761,7 @@ function requestPatch(target) {
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
     opts: {
-      grid: Q.ground.grid, size: 1500, span: cellSpan(current.world), rim: RIM,
+      grid: Q.ground.grid, size: Q.ground.size, span: cellSpan(current.world), rim: RIM,
       maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1,
       activity: activityHere(target),
     },
