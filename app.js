@@ -20,9 +20,16 @@ const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet sta
 // part that must know the tier reads it from here: the worker request, the Ground constructor,
 // and through the Ground the flora, the fauna, the sky, and the LOD knob.
 //
-// The LOW row of the budget table: a 4 m grid, 6,000 plants, 100 animals, and no shadows. It
+// The LOW row of the budget table: a 4 m grid, 8,400 plants, 100 animals, and no shadows. It
 // also caps the LOD knob at 250 m, because a weak machine cannot spend the room a fast one
 // finds, and a knob that walks to 400 m only walks back down again.
+//
+// Issue 25 raised both flora caps by 1.4. The patch now grows plants over a dense square of 1,300
+// units instead of 900, because FLORA_EDGE in worker.js fell from 300 to 100. The densest cell I
+// measured, Aurora@18.91,129.00, went from 18,100 plants to 23,004 with the caps lifted out of
+// the way, which is 1.27. The caps carry 1.4, so the densest cell keeps about 20% of head room and
+// the cap binds no sooner than it did before. The cost is small: the LOD walk of ground-flora.js
+// reads about 9 ns per plant, so 28,000 plants cost about 0.25 ms of a 16.7 ms frame.
 const Q = {
   detail: LOW ? 64 : 100,
   maxFlora: LOW ? 2500 : 10500,
@@ -30,8 +37,8 @@ const Q = {
   shadows: !LOW,
   dpr: Math.min(devicePixelRatio || 1, LOW ? 1.5 : 2),
   ground: LOW
-    ? { grid: 4, maxFlora: 6000, maxFauna: 100, shadows: false, lodMax: 250 }
-    : { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true, lodMax: 400 },
+    ? { grid: 4, maxFlora: 8400, maxFauna: 100, shadows: false, lodMax: 250 }
+    : { grid: 2, maxFlora: 28000, maxFauna: 300, shadows: true, lodMax: 400 },
 };
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;

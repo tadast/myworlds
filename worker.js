@@ -1289,7 +1289,14 @@ const FLORA_FLOOR = 0.02;    // the chance of a plant where the mask is at its l
 // The rim outside the box holds no plants. A hard line of forest at the edge of the box reads as
 // a rectangle from the air, so the chance of a plant falls to zero over the last FLORA_EDGE units
 // of the box. See "the rectangle" in ground.js. Issue 20.
-const FLORA_EDGE = 300;      // units, the band the plants thin out over at the edge of the box
+//
+// This band also sets how far the reader may walk, because dense flora ends at a square of half
+// width half - FLORA_EDGE and TARGET_REACH in ground.js must stay inside it. At 300 the dense
+// square was 900 units across, so the reader walked 28% of the area the patch draws. Issue 25 cut
+// the band to 100, which takes the dense square to 1,300 units and about 2.1 times the area. The
+// band is still wide enough to hide the line: the plants that go are the ones the reader sees
+// through the fog, and a fade of 100 units is two rim cells, the same band the terrain uses.
+const FLORA_EDGE = 100;      // units, the band the plants thin out over at the edge of the box
 // the four cells the scan writes before the current one: west, north-west, north, north-east
 const GAP_DI = [-1, -1, 0, 1], GAP_DJ = [0, -1, -1, -1];
 
