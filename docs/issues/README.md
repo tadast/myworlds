@@ -250,4 +250,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 21 | Alien flora and ground cover | HITL | 07, 11 | CLOSED 0ba4007 |
 | 22 | The flora signature of a world, and the card floor | HITL | 21 | CLOSED a151100 |
 | 23 | The reader cannot move on the ground | AFK | 06 | CLOSED fc43719 |
-| 24 | The lore of the plants | HITL | 07, 21, 22 | CLOSED |
+| 24 | The lore of the plants | HITL | 07, 21, 22 | CLOSED 483db6b |

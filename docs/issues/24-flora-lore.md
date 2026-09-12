@@ -1,6 +1,6 @@
 # 24 The lore of the plants
 
-Status: CLOSED, 2026-09-12.
+Status: CLOSED, 2026-09-12, merged as 483db6b.
 
 Type: HITL. Phase 2. Blocked by: 07, 21, 22. Read `docs/issues/README.md` first.
 
