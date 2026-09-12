@@ -79,6 +79,22 @@ const LOD_COOL = 3000;      // ms, the quiet time a step down buys before a step
 // frame has left the window.
 const LOD_UP_HOLD = 2;      // good readings in a row before the knob goes out
 const LOD_SETTLE = 800;     // ms after a step: no decision, so no step reads its own rebuild
+// Issue 26: the knob remembers the distance that was too slow. LOD_COOL and LOD_UP_HOLD were meant
+// to stop the knob ringing, and they are not enough, because neither of them remembers anything. A
+// knob that steps down from a distance it cannot hold waits its three seconds, reads two good
+// frames at the lower distance, and climbs straight back into the distance that failed. Measured on
+// Aurora@18.91,129.00 walking at eye level, the knob ran 400, 340, 374, 400, 340, 400 over 30 s and
+// left 40 frames of 300 over 20 ms. The reader sees that as the plants popping in and out.
+//
+// So a step down marks the distance it came from, and the knob may not climb back over that mark.
+// The search then converges instead of swinging between two values. The mark thaws after
+// LOD_FORGET of quiet, because a reader who walks out of a forest or rises over it has earned the
+// distance back, and a single hitch from something else on the machine must not cap the view for
+// the whole landing. The thaw is slow on purpose: LOD_THAW over LOD_PERIOD is a climb the eye does
+// not read as a pop.
+const LOD_MARK = 0.97;      // the mark sits just under the distance that could not hold
+const LOD_FORGET = 30000;   // ms of no step down before the mark starts to thaw
+const LOD_THAW = 1.05;      // what the mark grows by, once per decision, after LOD_FORGET
 const LOD_STORE = 'myworlds.lod.v1';
 const LOD_START = 150;      // metres, where the knob starts before the store says otherwise
 const LOD_MIN = 40;         // metres, the floor of the knob
@@ -266,6 +282,10 @@ export class Ground {
     this._lodDown = 0;
     this._lodStep = 0;      // the time of the last step either way, for LOD_SETTLE
     this._lodGood = 0;      // good readings in a row, for LOD_UP_HOLD
+    // The distance the knob may not climb back over, because it already failed there. It starts at
+    // the ceiling of the tier, which is the same as no mark, and a new landing builds a new Ground
+    // and so starts clean. See _driveLod().
+    this._lodCeil = this.lod.max;
     this._lodPrev = this.lod.distance;
     this._shadowOn = false;
     this._shadowAt = 0;
@@ -866,14 +886,24 @@ export class Ground {
     if (now - this._lodStep < LOD_SETTLE) return;
     const lod = this.lod, avg = perf.avg, work = perf.avgWork, target = perf.target;
     let d = lod.distance;
+    // The mark thaws only while nothing has failed for a long time, so a knob that is holding its
+    // level keeps holding it, and a reader who has left the dense ground wins the distance back.
+    if (now - this._lodDown > LOD_FORGET) this._lodCeil = Math.min(lod.max, this._lodCeil * LOD_THAW);
     if (avg > target * LOD_OVER) {
+      // This distance could not hold, so the knob marks it and may not climb back over the mark.
+      this._lodCeil = Math.min(this._lodCeil, d * LOD_MARK);
       d *= LOD_DOWN; this._lodDown = now; this._lodStep = now; this._lodGood = 0;
     } else if (avg < target * LOD_STEADY && work < target * LOD_UNDER && now - this._lodDown > LOD_COOL) {
       // A good reading on its own is not a verdict, so the knob counts them and goes out on the
-      // LOD_UP_HOLD-th one. The count drops on any reading that is not good.
-      if (++this._lodGood >= LOD_UP_HOLD) { d *= LOD_UP; this._lodStep = now; this._lodGood = 0; }
+      // LOD_UP_HOLD-th one. The count drops on any reading that is not good. A step out that the
+      // mark forbids is not a step, so the count holds and the knob tries again on the next one.
+      if (++this._lodGood >= LOD_UP_HOLD && d * LOD_UP <= this._lodCeil) {
+        d *= LOD_UP; this._lodStep = now; this._lodGood = 0;
+      }
     } else this._lodGood = 0;
-    lod.distance = Math.min(lod.max, Math.max(lod.min, d));
+    lod.distance = Math.min(lod.max, this._lodCeil, Math.max(lod.min, d));
+    // the mark must never push the knob under its floor, which the tier owns
+    if (lod.distance < lod.min) lod.distance = lod.min;
     // A value that holds over two decisions is settled. It goes to the store, but only when it
     // has moved away from the value that is already there, so a settled site writes once.
     if (lod.distance === this._lodPrev

@@ -106,7 +106,11 @@ and it is the interesting one. See the decisions below.
    cell. `RIM_CELL` of 25 survives at size 3000 on both tiers: 3000 / 50 is 60 and 3000 / 100 is 30.
 6. **The sea `REACH` did not move.** It is measured from the camera target and not from the site,
    so it follows the reader and the wider box does not reach it.
-7. **The LOD ceiling fell from 400 to 220 on HIGH.** A wider box puts the reader inside the forest
+7. **The LOD ceiling fell from 400 to 220 on HIGH.** Superseded by issue 26: this was tuned on one
+   world and it is wrong as a rule. `lodMax` is 400 again, and the knob now converges on its own.
+   The reasoning below still explains why the wider box costs more to draw.
+
+   A wider box puts the reader inside the forest
    instead of near the edge of it. At half 750 the sphere of the knob, 900 units, was clipped by
    the patch; at half 1500 it fills. Measured at the same view, the same density, and the same
    knob, step 2 drew 6,914 plants as meshes where step 1 drew 3,227, and the frame fell to 45 fps.
@@ -146,9 +150,8 @@ K=4 then read as faster than K=3.
   a chunk is 300 units wide against 150 before, so the frustum cull of the branch this built on is
   half as sharp. It did not bind here, because at eye level the terrain draws about 104k triangles
   and the plants set the cost. It would be worth scaling `CHUNKS` with the size.
-- The knob ceiling of 400 was too high on HIGH before this issue as well, by the same argument. It
-  cost nothing visible then either. A pass over `LOD_MAX` and the per-kind `style.lod` against the
-  card floor of issue 22 would probably find more.
+- Issue 26 took the knob ceiling back to 400 and gave the knob a memory instead. The claim here
+  that 220 cost nothing to the eye was measured on one world and it did not hold on the next one.
 - `PATCH_SIZE` does not say how much of the planet the patch covers. `span` does, and it is
   `cellSpan(world)`, about 57 km, fixed per world. Doubling the size draws the same cell at 19 m to
   the unit instead of 38. The reader walks twice as far in metres over the same ground. A reader

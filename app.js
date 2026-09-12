@@ -37,12 +37,22 @@ const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet sta
 // thing in one hand. LOW keeps the patch of issue 20 with the wider walk of this issue, which is
 // already 2.1 times the ground it had.
 //
-// `lodMax` fell from 400 to 220 on HIGH. A wider box puts the reader inside the forest instead of
-// near the edge of it, so the LOD sphere of 900 units now fills with plants where the old box cut
-// it off. At 400 the ground drew 7,459 plants as meshes and held 45 fps; at 200 it drew 2,755 and
-// held 60. The two frames are the same to the eye, because issue 22 gives every plant a floor
-// under its own swap distance: a plant only turns into a card once the card is no longer a
-// magnified picture. The knob was spending on meshes that a card already drew correctly.
+// `lodMax` stays at 400. Issue 25 took it to 220 for a while, because a wider box puts the reader
+// inside the forest instead of near the edge of it and the LOD sphere then fills with plants the
+// old box could not hold. That was tuned on one world and it was wrong as a rule. What binds is the
+// number of plants the walk sends to the near mesh, and that is a property of the world, not of the
+// distance. Measured walking at eye level, interleaved so the load of the machine cannot colour the
+// order:
+//
+//     Quasar-579@48.13,60.09   lod 220: 741 near, 0 of 200 frames over 20 ms
+//                              lod 400: 2,377 near, 0 of 200 over 20 ms   <- free, and much better
+//     Aurora@18.91,129.00      lod 220: 2,259 near, 0 of 200 over 20 ms
+//                              lod 400: 5,926 near, 21 and 48 of 200 over 20 ms
+//
+// So about 2,300 plants as meshes is free and about 5,900 is not, on the same machine and the same
+// frame. A ceiling of 220 pays that worst case on every world, and on Quasar it drew 252k triangles
+// where 400 drew 2,011k for the same 60 fps. The knob is the right place to answer this, and issue
+// 26 gave it the memory it needed to settle instead of ring. See _driveLod() in ground.js.
 const Q = {
   detail: LOW ? 64 : 100,
   maxFlora: LOW ? 2500 : 10500,
@@ -51,7 +61,7 @@ const Q = {
   dpr: Math.min(devicePixelRatio || 1, LOW ? 1.5 : 2),
   ground: LOW
     ? { grid: 4, size: 1500, maxFlora: 8400, maxFauna: 100, shadows: false, lodMax: 250 }
-    : { grid: 2, size: 3000, maxFlora: 120000, maxFauna: 300, shadows: true, lodMax: 220 },
+    : { grid: 2, size: 3000, maxFlora: 120000, maxFauna: 300, shadows: true, lodMax: 400 },
 };
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
