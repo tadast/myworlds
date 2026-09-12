@@ -448,7 +448,7 @@ function frame() {
   if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
   step(now);
   updateCreatureFloat();
-  updateProbeFloat();   // after the creature button, because the marked animal takes the spot
+  updateProbeFloat();   // after the creature button, because the probe takes the spot it leaves
   perf.work(performance.now() - now);
 }
 
@@ -933,7 +933,8 @@ function updateProbeFloat() {
   if (!probeFloat) return;
   let label = '';
   if (!dive && !busy && !aiming) {
-    // the marked animal holds the spot: the two floating buttons share one place on the screen
+    // the two floating buttons share one place on the screen, and the creature button says here
+    // whether it wants it. See updateCreatureFloat().
     if (mode === 'ground' && ground && ground.atCeiling && !creatureLabel) label = 'Recall the probe';
     else if (mode === 'orbit' && canDescend() && camera.position.length() <= FLOAT_NEAR) label = 'Send a probe to the surface';
   }
@@ -965,10 +966,16 @@ let groundPlants = [];
 let groundVariant = 0;
 const plantOf = (kind) => groundPlants.find((p) => p.kind === kind) || null;
 
+// At the ceiling of the ground the marked plant or animal and the probe want the same place on
+// the screen. The last thing the reader asked for wins. A reader who keeps pulling back at the
+// ceiling asks to leave, so the probe takes the spot even while a ring lies on the ground. A tap
+// on a plant or an animal is a question about it, so the card button takes the spot back.
+const cardKeepsFloat = () => !ground || !ground.atCeiling || ground.lastGesture !== 'zoom-out';
+
 function updateCreatureFloat() {
   if (!creatureFloat) return;
   let label = '';
-  if (mode === 'ground' && !dive && !busy && creatureCard.hidden) {
+  if (mode === 'ground' && !dive && !busy && creatureCard.hidden && cardKeepsFloat()) {
     if (markedKind !== null) {
       const G = current && current.world.species[markedKind];
       if (G) label = `Study the ${G.lore.name}`;

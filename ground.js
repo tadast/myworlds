@@ -128,6 +128,9 @@ const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
 // units: how far behind a plant an animal may stand and still take the tap. A reader who taps an
 // animal beside a tree means the animal, so the animal wins unless it is clearly further back.
 const PICK_GRACE = 2;
+// units the offset from the target must grow between two frames to count as a zoom out. It holds
+// the test clear of the rounding of the clamps; a wheel step or a pinch moves it far more.
+const ZOOM_OUT_SLOP = 0.05;
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM. The
@@ -273,6 +276,12 @@ export class Ground {
     this.glide = null;
     this._tap = null;
     this._pointers = 0;
+    // The last thing the reader asked for: 'zoom-out' or 'mark'. At the ceiling the two floating
+    // buttons of the app want one place on the screen, and this says which of them the reader
+    // meant. A reader who keeps pulling back asks to leave; a reader who taps a plant asks about
+    // the plant. See updateCreatureFloat() in app.js.
+    this.lastGesture = '';
+    this._dist = Infinity;   // the offset at the end of the last frame; nothing grew before one ran
     // Issue 23: the keys the reader holds, by job, and the walk velocity of the pair in units per
     // second. The velocity eases in and out, so no step starts or stops on one frame.
     this.keys = new Set();
@@ -725,6 +734,11 @@ export class Ground {
 
   update(t, dt) {
     this._drive();               // the speeds and the tilt, both from the height of the camera
+    // A turn and a pan hold the offset from the target, and every clamp here and every glide only
+    // shortens it. So an offset that grew since the last frame is a zoom out: a wheel step, a
+    // pinch, or a middle drag. The controls answer the wheel between two frames, which is why the
+    // measure spans the frames and does not wrap the call below.
+    if (this.camera.position.distanceTo(this.controls.target) > this._dist + ZOOM_OUT_SLOP) this.lastGesture = 'zoom-out';
     this.controls.update();
     if (this.glide) this._stepGlide(dt);
     // Issue 23: a press that holds still, and does not move, becomes a walk.
@@ -795,6 +809,9 @@ export class Ground {
     // the LOD walk reads the camera, so it runs after the clamps too
     if (this.flora) this.flora.update(this.camera, t);
     if (this.grass) this.grass.update(this.camera, t);
+
+    // the offset the reader is left with, for the zoom out test at the top of the next frame
+    this._dist = this.camera.position.distanceTo(this.controls.target);
   }
 
   // The LOD controller: one knob, from the frame time. Every LOD_PERIOD it reads the rolling
@@ -1022,6 +1039,7 @@ export class Ground {
     // The zoom keys take the reader up over the trees and back down, so a reader with no wheel and
     // no pinch still owns the height. The clamps of update() hold the floor and the ceiling.
     const zoom = (K.has('in') ? 1 : 0) - (K.has('out') ? 1 : 0);
+    if (zoom < 0) this.lastGesture = 'zoom-out';   // the minus key asks the same as a wheel step
     if (zoom) {
       const d0 = p.distanceTo(tg);
       const d1 = THREE.MathUtils.clamp(d0 * Math.pow(KEY_ZOOM, -zoom * dt),
@@ -1120,6 +1138,7 @@ export class Ground {
     if (this.flora) this.flora.unmark();   // one mark at a time: the ring must name the open card
     if (!m) { this.fauna.unmark(); return false; }
     this.fauna.markMember(m);
+    this.lastGesture = 'mark';
     this.fauna.group.updateWorldMatrix(true, false);
     const point = new THREE.Vector3(m.px, m.py, m.pz).applyMatrix4(this.fauna.group.matrixWorld);
     if (m.g.flies && point.y > this.camera.position.y + 1) this.turnTo(point);
@@ -1137,6 +1156,7 @@ export class Ground {
     const hit = this.flora.nearest(kind, tg.x, tg.z);
     if (!hit) { this.flora.unmark(); return false; }
     this.flora.mark(hit);
+    this.lastGesture = 'mark';
     this.glideTo(hit.point);
     return true;
   }
@@ -1233,12 +1253,14 @@ export class Ground {
     }
     if (plant) {
       this.flora.mark(plant);
+      this.lastGesture = 'mark';
       if (this.fauna) this.fauna.unmark();
       this.glideTo(plant.point);
       if (this.onSelectPlant) this.onSelectPlant(plant.kind);
       return;
     }
     if (creature && creature.point) {
+      this.lastGesture = 'mark';
       if (this.flora) this.flora.unmark();
       if (this.fauna && creature.member) this.fauna.markMember(creature.member);
       // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
