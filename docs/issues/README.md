@@ -216,7 +216,8 @@ Three traps that make a good build look broken, or a bad one look good:
                                         │                        ├──► 07 ground-flora-lod ──┤
                                         └──► 12 sky-continuity   │                          ├──► 11 adaptive-lod-and-perf ──► 13 low-tier-pass
 08 sociality-gene ───────────────────────────────────────────────►├──► 09 ground-fauna-groups ──► 10 far-fauna-coarse-mesh ──┘
-14, 15, 16 are phase two and need design first. 17 and 18 are defects found after the
+15 and 16 are phase two and need design first. 14 held its design session on 2026-09-12,
+and its file records the decisions. 17 and 18 are defects found after the
 phase one merge; they need no design and can run at any time.
 ```
 
@@ -237,7 +238,7 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 11 | Adaptive LOD and the perf overlay | AFK | 07, 10 | CLOSED 54563e6 |
 | 12 | Sky continuity: sun, moons, rings, clouds | AFK | 03 | CLOSED acf2a18 |
 | 13 | LOW tier pass | AFK | 05, 06, 11, 12 | CLOSED 4f861c1 |
-| 14 | Ground-scale phenomena | HITL | 04, design | open |
+| 14 | Ground-scale phenomena | AFK | 04 | open |
 | 15 | Sea species | HITL | 05, 09, design | open |
 | 16 | Herd behaviour on the anchor | HITL | 09, design | open |
 | 17 | The view cannot look up, so a flyer is never seen | AFK | 06, 09 | CLOSED 65a87bc |
