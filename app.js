@@ -502,10 +502,41 @@ function step(now) {
   } else {
     showMarker(lockedSite, current); // the ring stays on the fixed site through the transition
   }
-  renderer.render(scene, camera);
+  if (!warming) renderer.render(scene, camera);   // see warmShaders()
 }
 function pitchFor(d) { return (1 - THREE.MathUtils.smoothstep(d, CAM_MIN, 2.3)) * 0.95; }
 requestAnimationFrame(frame);
+
+// ---------------------------------------------------------------- the shader warm-up
+// three.js builds the program of a material on the first draw that needs it, and the build blocks
+// the frame it lands in. A world of a type the reader has not opened yet brings a whole set of new
+// materials, so that one frame froze for 545 ms on an M2. A world of a type the page already holds
+// costs 77 ms, which is the geometry and not the programs.
+//
+// compileAsync hands the build to the driver through KHR_parallel_shader_compile and resolves once
+// the driver is done, so the wait sits under the overlay of the build and not in a frame. The frame
+// loop draws nothing while it runs, because the first draw would build the programs itself and the
+// warm-up would then save nothing. The canvas holds the last frame of the world before this one,
+// and the overlay is over it, so the reader sees the same picture either way.
+let warming = false;
+
+// ms: the warm-up waits on a driver, so it takes a limit. A driver that never reports back would
+// otherwise hold the frame loop for ever, and the reader would sit in front of a still picture.
+// The first draw then pays for the programs, which is what the page did before the warm-up.
+const WARM_MS = 4000;
+
+async function warmShaders() {
+  if (!renderer.compileAsync) return;     // an older three.js: the first draw pays, as before
+  warming = true;
+  try {
+    await Promise.race([
+      renderer.compileAsync(scene, camera),
+      new Promise((r) => setTimeout(r, WARM_MS)),
+    ]);
+  } catch (e) {
+    console.warn('[myworlds] the shader warm-up failed; the first frame pays for it', e);
+  } finally { warming = false; }
+}
 
 // ---------------------------------------------------------------- the perf overlay
 // The rows of `?perf`, read twice a second at the top of the frame. renderer.info holds the
@@ -1041,7 +1072,7 @@ function generate(seed, { save = true } = {}) {
       overlayBar.style.width = `${msg.pct.toFixed(0)}%`;
       overlayLabel.textContent = msg.label;
     },
-    done: (result) => {
+    done: async (result) => {
       const msg = { result };
       genJob = null;
       overlayBar.style.width = "100%";
@@ -1053,6 +1084,11 @@ function generate(seed, { save = true } = {}) {
       if (orbit) pendingView = null;
       if (!(wanted && placeCameraOverSite(wanted)) && !placeCameraAtView(orbit)) resetCamera();
       console.info(`[myworlds] "${seed}" ${msg.result.world.type} built in ${Math.round(performance.now() - t0)} ms, worker ${Math.round(t0 - genStart)} ms, flora ${msg.result.world.floraCount}, fauna ${msg.result.world.faunaCount}`);
+      // The programs of the new materials build here, under the overlay, and not in the first draw
+      // that needs them. This has to stand before saveWorld(), because the thumbnail of a world is
+      // a frame of it: makeThumb() draws the scene, and that draw would build the programs itself.
+      // See warmShaders().
+      await warmShaders();
       renderInfo(msg.result.world);
       music.play(msg.result.world);
       if (save) saveWorld(msg.result.world);

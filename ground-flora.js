@@ -21,6 +21,15 @@ const HYSTERESIS = 0.05;     // ±5% around the LOD distance: a band of 10%, so 
 const IN_BAND = (1 - HYSTERESIS) * (1 - HYSTERESIS);
 const OUT_BAND = (1 + HYSTERESIS) * (1 + HYSTERESIS);
 const CARD_ALPHA = 0.4;      // the alpha test of the card. No blending, so the card writes depth.
+// Units a plant keeps outside the four side planes of the view before the walk drops it. The ball
+// of the plant already carries its own body, so this is only a margin. See update().
+const EDGE_SLACK = 2;
+// A plant outside the frame can still lay a shadow inside it, so the walk tests the ground where
+// the shadow of the plant falls as well. The offset of that ground runs as 1 / sunDir.y, which a
+// sun on the horizon takes to infinity, so it stops at this many plant heights. The shadow box of
+// the sun is 200 m wide, and 8 heights carries the tallest plant past the edge of that box, so a
+// shadow the cap cuts off is a shadow the sun never draws.
+const SHADOW_REACH = 8;
 const SUN_FACE = 0.6;        // the mean of the sun on the lit half of a plant, a rough ball
 const TINT_HUE = 0.16;       // how far one plant may lean from the colour of its kind
 const TINT_LIT = 0.22;       // how far one plant may lean from the brightness of its kind
@@ -40,6 +49,9 @@ const RING_MIN = 0.6;        // units: a ring never falls under this, so a tuft 
 const RING_LIFT = 0.05;      // units: the ring sits this far over the ground, clear of z-fighting
 
 const _size = new THREE.Vector2();   // scratch for the view size the card floor reads
+// scratch for the four side planes of the view, which the walk tests every plant against
+const _pmat = new THREE.Matrix4();
+const _frustum = new THREE.Frustum();
 const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pw = new THREE.Vector3();
 const _up2 = new THREE.Vector3(), _fwd2 = new THREE.Vector3(), _rgt2 = new THREE.Vector3();
 const _pos2 = new THREE.Vector3(), _mat2 = new THREE.Matrix4();
@@ -205,6 +217,15 @@ export class Flora {
     this.nearCount = 0;
     this.cardCount = 0;
     this.group = new THREE.Group();
+    // Where the tip of a plant lays its shadow, per unit of plant height, as a step over the
+    // ground. The frustum test of the walk reads it, so a caster outside the frame whose shadow
+    // falls inside it still draws. ground.js writes `casts` from the shadow gate of the sun: with
+    // the sun off nothing casts, and the walk then keeps only what the reader can see directly.
+    const sd = sky ? sky.sunDir : null;
+    const reach = sd ? Math.min(SHADOW_REACH, 1 / Math.max(Math.abs(sd.y), 1e-3)) : 0;
+    this.shadowX = sd ? -sd.x * reach : 0;
+    this.shadowZ = sd ? -sd.z * reach : 0;
+    this.casts = !!tier.shadows;
     this.kinds = [];
     this.targets = [];
     this.materials = [];
@@ -278,7 +299,14 @@ export class Flora {
       const cards = new Float32Array(n * 2);    // the scale of the card and the height of its base
       const tints = new Float32Array(n * 3);    // the tint of every plant, for both meshes
       const sz2 = new Float32Array(n);          // the square of the height, for the card-size floor
+      const rad = new Float32Array(n);          // the radius of the body, for the frustum test
       const rock = kind === FLORA.BOULDER;
+      // The radius of a ball at the base of a plant that holds the whole body, as a share of the
+      // height of the plant. The frustum test of the walk reads it, so a plant whose base falls
+      // outside the frame and whose crown falls inside it still draws. The lateral reach takes the
+      // widest body the style allows, because the test must hold for every plant of the kind.
+      const radK = Math.hypot(Math.max(Math.abs(bb.min.y), bb.max.y) / height,
+        (width / height) * (1 + style.flat));
       for (let j = 0; j < n; j++) {
         const o = list[j] * 8;
         const units = flora[o + 6], s = units / height;
@@ -308,6 +336,7 @@ export class Flora {
         // a slope does not float.
         cards[j * 2] = s; cards[j * 2 + 1] = pos.y - units * 0.02;
         sz2[j] = units * units;
+        rad[j] = units * radK;
         // The tint. One plant leans warm and the next leans cool, and both lean light or dark, so
         // a hillside of one kind reads as many plants and not as one plant copied.
         const lit = 1 + (h1 - 0.5) * 2 * TINT_LIT;
@@ -318,7 +347,7 @@ export class Flora {
       }
 
       this.kinds.push({
-        kind, style, count: n, near, far, nearM, at, cards, tints, sz2, state: new Uint8Array(n),
+        kind, style, count: n, near, far, nearM, at, cards, tints, sz2, rad, state: new Uint8Array(n),
         // the geometry of one plant of this kind, at one unit of instance scale. The pick puts the
         // top of a body from it, and the mark sizes its ring from it.
         height, wRatio: width / height,
@@ -382,6 +411,9 @@ export class Flora {
   // camera. The hysteresis band keeps a plant on one side until it is clearly past the other, so
   // a plant at the boundary cannot flicker. The LOD distance of a kind is the knob times the style
   // of the kind, so a colossus stays a mesh out to the fog and a tuft turns into a card at once.
+  //
+  // The walk also drops every plant outside the frame. The four side planes of the view cut the
+  // ring around the camera down to the part the reader looks at, which is about a third of it.
   update(camera, t) {
     if (!this.count) return;
     const t0 = performance.now();
@@ -398,6 +430,34 @@ export class Flora {
     this.renderer.getSize(_size);
     const focal = _size.y / (2 * Math.tan(camera.fov * Math.PI / 360));
 
+    // The four side planes of the view. A plant behind the reader used to go into the mesh all the
+    // same: the walk read the distance and nothing else, so a camera that sees about a third of the
+    // ring around it still carried the whole ring. The planes cut the rest.
+    //
+    // Every plane holds a normal and a constant, and nx*x + ny*y + nz*z + c is the distance of a
+    // point to it, positive on the side the reader sees. A plant is out when its ball lies wholly
+    // outside any one plane, so the test reads the four planes and stops at the first one that
+    // clears the ball. The near plane and the far plane stay out of it: the cut distance above
+    // holds the far end, and the reach of the ball holds the near end.
+    //
+    // The camera moves in ground.update() after the last frame drew, so its inverse is a frame old
+    // until the renderer writes it again. One call brings it up to date, and a fast turn then
+    // cannot drop a plant that has already come into the frame.
+    camera.updateMatrixWorld();
+    _pmat.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_pmat);
+    const pl = _frustum.planes;
+    const n0 = pl[0].normal, c0 = pl[0].constant, n1 = pl[1].normal, c1 = pl[1].constant;
+    const n2 = pl[2].normal, c2 = pl[2].constant, n3 = pl[3].normal, c3 = pl[3].constant;
+    const a0x = n0.x, a0y = n0.y, a0z = n0.z, a1x = n1.x, a1y = n1.y, a1z = n1.z;
+    const a2x = n2.x, a2y = n2.y, a2z = n2.z, a3x = n3.x, a3y = n3.y, a3z = n3.z;
+    // The shadow of a plant runs from its base to the step above. The walk tests the middle of that
+    // run with a ball wide enough to hold the whole of it, which is one test instead of two and
+    // never drops a shadow the reader can see.
+    const casts = this.casts;
+    const shX = this.shadowX * 0.5, shZ = this.shadowZ * 0.5;
+    const shR = Math.hypot(shX, shZ);
+
     for (let b = 0; b < this.kinds.length; b++) {
       const k = this.kinds[b];
       const d = this.lod.distance * k.style.lod;
@@ -405,6 +465,7 @@ export class Flora {
       const cardK = focal / k.style.card, card2 = cardK * cardK;
       const cutK = this.cut * k.style.cut, cut2 = cutK * cutK;
       const src = k.nearM, at = k.at, cards = k.cards, tints = k.tints, sz2 = k.sz2, state = k.state, n = k.count;
+      const rad = k.rad;
       const nearArr = k.near.instanceMatrix.array, cardArr = k.far.instanceMatrix.array;
       const nearCol = k.near.instanceColor.array, cardCol = k.far.instanceColor.array;
       let a = 0, c = 0;
@@ -422,6 +483,24 @@ export class Flora {
         let s = state[i];
         if (s === 0) { if (dd > out2) s = 1; } else s = dd < in2 ? 0 : 1;
         state[i] = s;
+        // Out of the frame, so out of the draw. The state stands: it holds the near-or-card
+        // reading of this plant, and the plant comes back with the reading it went away with. The
+        // bands above run on the frame it comes back, so a plant that moved far away while it was
+        // out of the frame turns into a card on the same frame it returns.
+        const rd = rad[i], r = rd + EDGE_SLACK;
+        if (a0x * px + a0y * py + a0z * pz + c0 < -r
+          || a1x * px + a1y * py + a1z * pz + c1 < -r
+          || a2x * px + a2y * py + a2z * pz + c2 < -r
+          || a3x * px + a3y * py + a3z * pz + c3 < -r) {
+          // The plant is out of the frame. A card casts nothing and a sun that is off casts
+          // nothing, so both go. A near mesh under a sun stays if its shadow is in the frame.
+          if (s !== 0 || !casts) continue;
+          const qx = px + shX * rd, qz = pz + shZ * rd, qr = r + shR * rd;
+          if (a0x * qx + a0y * py + a0z * qz + c0 < -qr
+            || a1x * qx + a1y * py + a1z * qz + c1 < -qr
+            || a2x * qx + a2y * py + a2z * qz + c2 < -qr
+            || a3x * qx + a3y * py + a3z * qz + c3 < -qr) continue;
+        }
         if (s === 0) {
           copy16(src, i * 16, nearArr, a);
           nearCol[a / 16 * 3] = tints[p]; nearCol[a / 16 * 3 + 1] = tints[p + 1]; nearCol[a / 16 * 3 + 2] = tints[p + 2];

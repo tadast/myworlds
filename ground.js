@@ -38,6 +38,19 @@ const LOD_STEADY = 1.02;    // the interval sits at the refresh, so no frame is 
 const LOD_DOWN = 0.85;      // the step down
 const LOD_UP = 1.1;         // the step up
 const LOD_COOL = 3000;      // ms, the quiet time a step down buys before a step up
+// A step up is asymmetric against a step down, because the two carry different risks. A step down
+// that comes late costs the reader late frames; a step up that comes early costs nothing but a
+// step down after it. So the knob comes down on one bad reading and it goes out on LOD_UP_HOLD
+// good ones in a row, and it reads nothing at all for LOD_SETTLE after a step either way.
+//
+// LOD_SETTLE exists because the step itself is the slowest frame of the window. A step up builds
+// the plants it just let in, and that one frame sat inside the rolling average of 30 frames when
+// the next decision came 500 ms later. The knob read its own rebuild as a machine that cannot
+// hold the refresh, came back down, and rang: I measured 209, 306, 314, 227, 250, 333 over 26 s
+// with nothing else on the machine. LOD_SETTLE holds off the next decision until the rebuild
+// frame has left the window.
+const LOD_UP_HOLD = 2;      // good readings in a row before the knob goes out
+const LOD_SETTLE = 800;     // ms after a step: no decision, so no step reads its own rebuild
 const LOD_STORE = 'myworlds.lod.v1';
 const LOD_START = 150;      // metres, where the knob starts before the store says otherwise
 const LOD_MIN = 40;         // metres, the floor of the knob
@@ -212,6 +225,8 @@ export class Ground {
     }
     this._lodAt = performance.now();
     this._lodDown = 0;
+    this._lodStep = 0;      // the time of the last step either way, for LOD_SETTLE
+    this._lodGood = 0;      // good readings in a row, for LOD_UP_HOLD
     this._lodPrev = this.lod.distance;
     this._shadowOn = false;
     this._shadowAt = 0;
@@ -794,15 +809,28 @@ export class Ground {
   // sits at the refresh and the app uses less than 70% of the frame. A step down also buys
   // LOD_COOL of quiet, so the knob cannot ring around the value where the machine is exactly at
   // the refresh.
+  //
+  // The two steps are also asymmetric in time. A step down runs on one bad reading, because a late
+  // frame is a cost the reader pays now. A step up waits for LOD_UP_HOLD good readings. And neither
+  // step reads anything for LOD_SETTLE after it, because the rebuild it carries is the slowest
+  // frame of the window and it is not a verdict on the step.
   _driveLod() {
     const now = performance.now();
     if (now - this._lodAt < LOD_PERIOD) return;
     this._lodAt = now;
     if (!perf.ready) return;
+    // The frame that carried the last step is the slowest frame of the window, and it says nothing
+    // about the step. Wait until it has left the window.
+    if (now - this._lodStep < LOD_SETTLE) return;
     const lod = this.lod, avg = perf.avg, work = perf.avgWork, target = perf.target;
     let d = lod.distance;
-    if (avg > target * LOD_OVER) { d *= LOD_DOWN; this._lodDown = now; }
-    else if (avg < target * LOD_STEADY && work < target * LOD_UNDER && now - this._lodDown > LOD_COOL) d *= LOD_UP;
+    if (avg > target * LOD_OVER) {
+      d *= LOD_DOWN; this._lodDown = now; this._lodStep = now; this._lodGood = 0;
+    } else if (avg < target * LOD_STEADY && work < target * LOD_UNDER && now - this._lodDown > LOD_COOL) {
+      // A good reading on its own is not a verdict, so the knob counts them and goes out on the
+      // LOD_UP_HOLD-th one. The count drops on any reading that is not good.
+      if (++this._lodGood >= LOD_UP_HOLD) { d *= LOD_UP; this._lodStep = now; this._lodGood = 0; }
+    } else this._lodGood = 0;
     lod.distance = Math.min(lod.max, Math.max(lod.min, d));
     // A value that holds over two decisions is settled. It goes to the store, but only when it
     // has moved away from the value that is already there, so a settled site writes once.
@@ -837,6 +865,8 @@ export class Ground {
       this._shadowAt = now;
     }
     sun.castShadow = this._shadowOn;
+    // The walk of the plants keeps a caster outside the frame only while the sun draws a shadow.
+    if (this.flora) this.flora.casts = this._shadowOn;
     if (!this._shadowOn) return;
     sun.target.position.set(tg.x, tg.y, tg.z);
     sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6).add(sun.target.position);
