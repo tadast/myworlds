@@ -1,11 +1,53 @@
 # Flora lore: architecture
 
-This document describes how myworlds writes the text of its plants. Read it before you change
-`flora-lore.js`, `flora-card.js`, the flora parts of `worker.js`, or the plant parts of
+This document describes how myworlds writes the text of its flora. Read it before you change
+`flora-lore.js`, `flora-card.js`, the flora parts of `worker.js`, or the flora parts of
 `ground-flora.js` and `app.js`.
 
 Read `docs/fauna.md` first. The two systems share one engine and one card, and the differences
 between them are the whole point of this file.
+
+## What "flora" means here
+
+**Flora is anything alive that stays in one place. It is not necessarily a plant.**
+
+The word is a container, not a claim. A body counts as flora when it is rooted or seated, and
+nothing more follows from that. It does not have to hold leaves, wood, seeds, sap, or chlorophyll,
+and it does not have to descend from anything on Earth.
+
+The sixteen kinds say so. Only four of them are woody: the tree, the pine, the palm, and the
+colossus. The other twelve are two fungal bodies, two crystal bodies, a stone, a cactus, a whip, a
+blade, a turf, a stack of balanced plates, and two kinds of breathing sac. Six of the sixteen glow.
+Three of them breathe: the body swells and falls on a clock of its own. `KIND` in `flora-lore.js`
+carries the tags that say this, and the tags are the gate every line of text goes through:
+`fungal`, `crystalflora`, `stoneflora`, `mineral`, `sacs`, `breathes`, `glows`, `plated`, `whip`,
+`blade`, `turf`.
+
+The code says "plant", because a short word is necessary for one body in an array and `flora` is
+already the name of the array. Read "plant" as "one stationary body". Read "grow" and "rooted" the
+same way: `patchFlora()` grows a crystal shard, and that shard is rooted in no soil.
+
+### The rule for new text and new kinds
+
+The reader stands on an alien world. Every line the card shows must hold on an alien world.
+
+- **Write the alien reading first.** The seven kinds that carry Earth words are the kinds the globe
+  grows, where the reader has only a silhouette at orbit distance. They are the minority case, and
+  they are not the default. A new kind belongs beside the nine alien kinds.
+- **Do not name an Earth species, an Earth genus, or an Earth place.** `GENUS` and `EPITHET` in
+  `flora-lore.js` are invented words in the shape of Latin, and they must stay that way.
+- **Do not assume a life process.** Photosynthesis, seeds, pollen, roots in soil, wood, bark, a
+  flower, and a winter death are Earth facts. A body that glows, breathes, or pushes out of rock
+  keeps none of them. Say what the body does, and let the reader ask how.
+- **Gate every claim on a tag.** A line that names a leaf needs `canopy`. A line that has the body
+  drink the light must not sit in a pool a `mineral` body can reach. `tools/lore-audit` catches the
+  second fault. Only the writer catches the first.
+- **Keep the strange thing strange.** A colossus of 150 units, a sac that breathes, and a stack of
+  plates that stands without a stem are the reasons the reader walks the patch. Text that makes them
+  ordinary throws that away.
+
+`docs/fauna.md` states the same rule for the creatures. The two must agree, because `FAUNA_LINKS`
+writes one line that names a body from each side.
 
 ## Overview
 

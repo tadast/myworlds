@@ -1,6 +1,45 @@
 # Fauna generation: architecture and topology
 
-This document describes how myworlds makes its creatures. Read it before you change `species.js`, `fauna.js`, the fauna parts of `worker.js`, or the fauna parts of `app.js`.
+This document describes how myworlds makes its fauna. Read it before you change `species.js`, `fauna.js`, the fauna parts of `worker.js`, or the fauna parts of `app.js`.
+
+## What "fauna" means here
+
+**Fauna is anything alive that moves under its own power. It is not necessarily an animal.**
+
+The word is a container, not a claim. A body counts as fauna when it travels, and nothing more
+follows from that. It does not have to hold blood, bone, a spine, a face, or a mouth, and it does
+not have to descend from anything on Earth.
+
+The roll says so. A body plan may be a `swarm`, which is one creature made of many small bodies, or
+a `disc`, or a `blob`. A locomotion may be a `monopod` on one leg, a `tripod` on three, a `sac` that
+floats and never lands, a `periscope` or a `plough` that travels under the surface, or `fins` on a
+whale that swims in air. A head may be a `lure`, a pair of `stalks`, or `none`. An extra may be a
+`garden`, which is flora that lives on the back of the creature. A gas giant always holds a whale,
+because a gas giant holds no ground to stand on.
+
+The code says "animal" and "creature", because a short word is necessary for one body in an array.
+Read "animal" as "one body that travels".
+
+### The rule for new text and new species
+
+The reader stands on an alien world. Every line the inspector card shows must hold on an alien
+world.
+
+- **Write the alien reading first.** The words `beak`, `tusks`, and `quad` name a shape the builder
+  makes, and not a family of Earth animals. A quad with a lure and a sail is not a dog.
+- **Do not name an Earth species, an Earth genus, or an Earth place.** `GENUS`, `EPITHET`, `NOUN`,
+  and `PLACE` in `species.js` are invented words, and they must stay that way.
+- **Do not assume a life process.** Lungs, a heart, warm blood, milk, eggs, a nest, a herd instinct,
+  and a year of seasons are Earth facts. The genome states what the body has. `DIET` states what it
+  eats and where the food comes from, and the sociality gene states whether it keeps company at all.
+- **Gate every claim on a part or a tag.** Do not add a sentence that names a part unless the code
+  checks that the part is present. The gate table below lists every predicate a line may test.
+- **Keep the strange thing strange.** A sac that never lands, a swarm that acts as one body, and a
+  whale in the sky of a gas giant are the reasons the reader looks up. Text that makes them
+  ordinary throws that away.
+
+`docs/flora.md` states the same rule for the stationary bodies. The two must agree, because
+`FAUNA_LINKS` writes one line that names a body from each side.
 
 ## Overview
 
