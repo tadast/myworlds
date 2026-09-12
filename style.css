@@ -219,6 +219,9 @@ button.probe[hidden] { display: none; }
 
 /* ---------- small screens: the sidebar docks at the bottom as a sheet */
 @media (max-width: 600px) {
+  /* The sidebar docks at the bottom here, where the floating buttons live. The buttons ride
+     above the sheet instead of covering it, folded or open. app.js writes --panel-h. */
+  .floatbtn { bottom: calc(var(--panel-h, 0px) + 12px); }
   #panel {
     top: auto; left: 0; right: 0; bottom: 0; width: 100%;
     max-height: 72vh; border-radius: var(--radius) var(--radius) 0 0; border-bottom: 0;

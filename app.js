@@ -1238,6 +1238,14 @@ function setCollapsed(on) {
   if (!on) showProbeBtn();
 }
 toggleBtn.addEventListener('click', () => setCollapsed(!panel.classList.contains('collapsed')));
+// On a phone the sidebar docks at the bottom, where the floating buttons live. The observer
+// writes the height of the panel to a variable, and the phone media query lifts the buttons
+// over the sheet, folded or open. On a wide screen the variable sits unused.
+if (window.ResizeObserver) {
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--panel-h', `${panel.offsetHeight}px`);
+  }).observe(panel);
+}
 panel.querySelector('header').addEventListener('click', (e) => {
   if (e.target.closest('button')) return;
   setCollapsed(!panel.classList.contains('collapsed'));
