@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
   <title>My Worlds — every name hides a planet</title>
   <meta name="description" content="Every name hides a planet. Type yours and meet its creatures, its weather, and its song.">
   <meta name="theme-color" content="#070a16">
@@ -110,6 +110,9 @@
        there when app.js starts.
        The page does not load flora-lore.js. The plant lore is written in the worker, at patch
        time, and it crosses to the page as plain data on the patch result. -->
+  <!-- The page owns every gesture on it. viewport.js blocks the pinch, the double tap, and the
+       rubber band the browser would answer with, so a pinch zooms the world and not the page. -->
+  <script src="./viewport.js"></script>
   <script src="./lore.js"></script>
   <script src="./species.js"></script>
   <script type="module" src="./app.js"></script>

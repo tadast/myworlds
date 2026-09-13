@@ -13,14 +13,21 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+/* The page does not scroll and does not zoom. It is fixed to the viewport so iOS cannot drag it,
+   `touch-action: manipulation` drops the double-tap zoom, and `-webkit-text-size-adjust` stops
+   Safari resizing the text on a rotate. viewport.js blocks the pinch, which no CSS reaches. */
+html, body {
+  position: fixed; inset: 0; height: 100%; width: 100%; margin: 0;
+  overflow: hidden; overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 #c {
   position: fixed; inset: 0; width: 100%; height: 100%; display: block;
