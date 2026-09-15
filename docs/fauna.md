@@ -90,7 +90,7 @@ each body and never the group. See "The impulse mover".
 |---|---|---|---|
 | `monopod` | Crouches on its one foot | Hops | None. It holds the heading it crouched on |
 | `roller` | Folds its legs and its head into its hull | Rolls ahead as a ball for several seconds, spun by the ground it covers | Longer downhill, shorter uphill, and no launch up a rise over `ROLL_MAX_UP` |
-| `flow` | Lets go of its shape and runs downhill as a flat slick | Gathers, then jets uphill as a column, and lands as a body | Follows the fall line down and the rise line up |
+| `flow` | Lurks still, melts into a sheet, runs the fall line as a sheet, and stands back up as a column where the sheet stopped | Hops the whole body back up the rise and lands as a blob | Follows the fall line down and the rise line up. It covers no ground on the flat and none while it holds a shape |
 | `slinger` | Hooks a cord on a plant and hauls its body back | Lets go and flies a ballistic arc past the plant | Real plants only. It crawls when none is in reach |
 
 `LOCO_GATE` in `species.js` holds what a niche and a world must give a locomotion before the roll
@@ -318,7 +318,7 @@ A carriage moves the whole body. `rigConstants(G)` picks it from the locomotion 
 | `ARCH` | arch | The loop rises and sinks in place |
 | `RISE` | periscope, plough | The body sinks below the ground on a slow cycle. `SINK` sets how often |
 | `ROLL` | roller | `aBurst` is the clock of the fold. The legs and the head fold to the hull over the charge, and the hull then drops `ROLLDROP` on to the ground and turns about the right axis of the animal by `aGait`. The recovery runs the same numbers backwards, so the unfold is the fold played in reverse. The hull is a body of revolution about that axis, so a ball that stops at any angle still stands right |
-| `FLOW` | flow | A stack of rings on one pivot at the ground point. The charge scales them down in y and out in xz into a slick `FLOWW` widths across, `CHARGE` gathers them back to the blob, and the discharge scales them up into a column `FLOWH` tall, the top ring leading. The slick holds its `glow` at full, so the reader can find a bright slick in the grass |
+| `FLOW` | flow | A stack of rings on one pivot at the ground point. The charge runs a clock of its own: the stack melts by `FLOWMELT` into a sheet `FLOWW` widths across, holds the sheet to `FLOWSET`, and stands up into a column `FLOWH` tall by `FLOWRISE`. The discharge is one hop: it lifts the whole body by `FLOWHOP` on a parabola, eases the column back to the rest shape, and spreads it by `FLOWSQ` as it lands. The sheet holds its `glow` at full, so the reader can find a bright sheet in the grass. `flowHold()` reads `FLOWMELT`, `FLOWSET`, and `FLOWRISE` too, so the animal covers ground only while the sheet is spread |
 | `SLING` | slinger | The charge hauls the body back along `-aim` by `SLINGB`, the discharge pitches it nose first along a ballistic arc of height `SLINGH`, which the gravity sets, and with no hold at all the body crawls low and slow. `RIG.TENDON` lays the cord from the nose to `aAnchor` |
 
 ### Shader
@@ -477,6 +477,7 @@ locomotion rule lives:
 | Key | Meaning |
 |---|---|
 | `rest`, `recover` | parts of the throw cycle the animal spends waiting and settling |
+| `still` | the animal holds its own ground between two throws. A tier that carries its animals in a formation may not shuffle such an animal on to its slot, and may not cap its speed: every metre of its step is a metre its own rule asked for. Only a solitary species may ask for this. The flow takes it, because a gathered flow is a stone until it melts |
 | `fly` | stretches the discharge alone. `aBurst` still runs `CHARGE_END` to 1 over it, so the body reads the same and only the seconds change. A roller takes 5, because a ball that stops after a second reads as a ball that fell over. A row that stretches its discharge accepts a cap: every phase comes down together until one throw fits inside `LEASH_THROW` of the leash, so a long roll fills a ground leash of a hundred metres and stays short on a globe leash of a few seconds of travel. A row with no stretch is never capped, so the hop of a monopod keeps the rate `hopGait(G)` always gave it |
 | `ready(st)` | may it charge now? The slinger asks for a plant here |
 | `hold(st)` | the part of its speed it covers while it waits and charges. A crawl, or a run down a slope |
@@ -484,8 +485,8 @@ locomotion rule lives:
 
 `impulseCycle(G)` gives the seconds of one throw. A monopod takes `2 pi / hopGait(G)`, so its hop
 rate is the rate it always had. A roller and a slinger take a cycle the gravity sets, as the hop
-does. A flow takes five seconds: it needs a long charge to spread and run, and a long throw to
-rise, stand as a column, and fall back.
+does. A flow takes five seconds, which its `rest` of 2.0 and its `fly` of 0.4 stretch to a whole cycle of
+about fourteen: ten seconds of lurk, two of melt, run, and rise, and one and a quarter of hop.
 
 A row may also carry `steer(st, dt)`, which runs while the animal waits and charges, and
 `track(st, dt)`, which runs at the end of every step. The flow steers its charge down the fall

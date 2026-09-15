@@ -127,7 +127,7 @@
     // ---- flow (issue 28) ----
     // The slowest land body of the set. It covers its ground in one throw and waits between throws,
     // so the speed here is the mean over a whole throw and not the speed of the throw itself.
-    flow: { leash: 0.016, speed: 0.005, turn: 0.7, pause: 0.35, flies: false, shadow: true, mode: 'impulse' },
+    flow: { leash: 0.016, speed: 0.007, turn: 0.7, pause: 0.35, flies: false, shadow: true, mode: 'impulse' },
     // slinger (issue 28). It covers its ground in one throw and crawls between throws, so the
     // speed here is the mean of the two, as it is for every impulse row. The leash is wider than a
     // walker of the same size takes, because one throw carries the body most of a leash: an animal
@@ -525,6 +525,8 @@
     flow: pool([
       'It holds no shape of its own. It lets the one it has go, spreads to a sheet a few paces across, and runs the fall of the {ground} until the fall runs out.',
       'It gathers at the foot of every slope it comes down, holds there for a moment, and throws the whole of itself back up the rise in one column.',
+      // ---- flow (issue 29) ---- the lurk, which is most of the life of this animal
+      'It spends most of its life on a high point, gathered and still. A watcher takes it for a stone until it lets its shape go.',
       'It reads the fall of the {ground} through the whole of its underside. On a slope it is quick, and on the flat it barely goes anywhere at all.',
       { t: 'Nothing holds it together but the damp it carries. On dry {ground} it would set where it stands, and it never lets that happen.', tags: 'waterliquid' },
       // The lava variant. The weight is high, so a molten world nearly always opens with the line
@@ -739,6 +741,10 @@
     pour: pool([
       'It spends most of a day going down and the moment after it going up, and it ends the day within sight of where it began.',
       'It spreads, runs the fall of the {ground}, gathers at the foot of it, and throws itself back up. Then it waits, and then it does it again.',
+      // ---- flow (issue 29) ---- why it goes down at all, and why it comes back up
+      'It feeds spread. For the few seconds of one run it is a mouth several paces wide, and it takes whatever the {ground} under it will give.',
+      { t: 'It waits on the high ground until there is something below worth the run. It goes down to eat, and it comes back up to wait.', tags: '!noground' },
+      'It holds one high point for a season at a time. A mate is the one thing that will take it off that point and on to another.',
       'It will not go down a fall it cannot come back up. It has been watched turning aside from good feeding for that reason alone.',
       { t: 'It works one slope for a season and then crosses to the next one. Nobody has recorded what makes it choose.', tags: 'longday|shortday' },
     ]),
@@ -874,7 +880,7 @@
   // ---- flow (issue 28) ----
   // The manner word of the flow. It goes on its own line, so a second new locomotion adds a second
   // line and neither one rewrites the row above.
-  TEMPER.pour = 'Unhurried';
+  TEMPER.pour = 'Still, then sudden';
   // ---- roller (issue 28) ----
   TEMPER.bursts = 'Still, then headlong';
 
@@ -944,7 +950,7 @@
     // A flow takes its food off the ground it pours over. The line is gated on noHeadFood as the
     // general ground lines are, so a flow that carries a lantern or a pair of stalks still feeds
     // the way that head feeds, and one animal never sees two sources. See the diet rule above.
-    { t: 'Whatever the {ground} gives up as it pours over it', if: (c) => flows(c) && noHeadFood(c), w: 5, src: 'ground' },
+    { t: 'Whatever the {ground} gives up under the sheet it spreads into', if: (c) => flows(c) && noHeadFood(c), w: 5, src: 'ground' },
   ]);
 
   // ---------------------------------------------------------------- sociality text

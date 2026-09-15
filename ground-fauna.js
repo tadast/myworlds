@@ -638,6 +638,12 @@ export class GroundFauna {
     }
     let vx, vz, step;
     if (m.mover) {
+      // ---- flow (issue 29) ----
+      // A still animal holds its own ground between two throws. The formation may not shuffle it
+      // one metre it did not throw itself, so its slot is wherever it already stands: the swing and
+      // the shuffle in _stepBurst() then both read a gap of nothing and leave the body alone. Its
+      // own leash is what keeps it in the patch. Only a solitary species may ask for this.
+      if (m.mover.still) { tx = m.x; tz = m.z; }
       this._stepBurst(m, tx, tz, t, dt);
       vx = _step[0]; vz = _step[1]; step = _step[2];
     } else {
@@ -807,8 +813,11 @@ export class GroundFauna {
         if (ease > 0) { vx += (ox / gap) * ease; vz += (oz / gap) * ease; st.owed -= ease; }
       }
       step = Math.hypot(vx, vz);
+      // The cap is on a body the formation drags, and a still animal is never dragged: every metre
+      // of its step is a metre its own rule asked for. A flow runs its sheet at several times the
+      // cruise speed, and the cap would hold the sheet to a walk. Issue 29.
       const maxStep = m.top * MEMBER_RUSH * (dt > 0 ? dt : 1);
-      if (step > maxStep && step > 1e-9) { const f = maxStep / step; vx *= f; vz *= f; step = maxStep; }
+      if (!st.still && step > maxStep && step > 1e-9) { const f = maxStep / step; vx *= f; vz *= f; step = maxStep; }
     }
     _step[0] = vx; _step[1] = vz; _step[2] = step;
   }

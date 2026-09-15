@@ -249,7 +249,18 @@ const FLOW_W = 2.8;            // how many body widths across the slick spreads
 const FLOW_H = 2.6;            // how many body heights tall the column stands
 const FLOW_SLICK = 0.16;       // the height of the slick, as a part of the rest height
 const FLOW_NARROW = 0.5;       // the width of the column, as a part of the rest width
-const FLOW_LEAD = 0.45;        // the part of the throw the foot of the stack runs behind the top
+const FLOW_SQUASH = 0.25;      // how much the body spreads as it lands
+// ---- flow (issue 29) ----
+// The clock of the charge, as parts of it. The body melts by FLOW_MELT, runs as a sheet until
+// FLOW_SET, and stands as a column by FLOW_RISE. The shader reads the three to shape the stack and
+// flowHold() reads the same three to say when the animal covers ground, so every metre a flow
+// travels downhill it travels as a sheet, and it is still whenever it holds a shape. The window is
+// narrow on purpose: the ground one run covers is set by the bank and not by these three, so a
+// narrow window spends the same ground in less time and the sheet reads as a liquid and not as a
+// walk.
+const FLOW_MELT = 0.10;
+const FLOW_SET = 0.34;
+const FLOW_RISE = 0.52;
 function flowBody(G) {
   return { n: G.rings || 6, h: G.bodyR * 1.7, r: G.bodyR };
 }
@@ -873,33 +884,36 @@ const RIG_GLSL = `
   #elif CARRY == 5
     transformed.y -= RISE * (1.0 - smoothstep(SINK, SINK + 0.4, sin(sb * 0.35)));
   #elif CARRY == 7
-    // ---- flow (issue 28) ----
+    // ---- flow (issue 28, reshaped by issue 29) ----
     // A flow holds no shape of its own, so the carriage is the whole of its body. aBurst says what
-    // the stack is now: 0 is the gathered blob it rests as, the charge flattens it into a slick
-    // FLOWW widths across, CHARGE gathers it back, and the discharge throws it up into a column
-    // FLOWH tall and lets it fall again. Every part scales about the ground point, so the stack
-    // stays one body however far it spreads, and the head on top goes with it.
-    float fu = clamp(transformed.y / FLOWY, 0.0, 1.0);   // 0 at the ground, 1 at the top of the rest body
-    float spread = 0.0, sy = 1.0, sxz = 1.0;
+    // the stack is now, and the animal covers ground in exactly two of the four states: it melts
+    // into a sheet FLOWW widths across and runs the fall of the ground as a sheet, it stands back
+    // up as a column FLOWH tall where the sheet stopped, and the discharge is one hop that carries
+    // the column back up the rise. Every other moment it is a gathered blob and it is still.
+    // Every part scales about the ground point, so the stack stays one body however far it
+    // spreads, and the head on top goes with it.
+    float spread = 0.0, sy = 1.0, sxz = 1.0, lift = 0.0;
     if (aBurst <= CHARGE) {
-      // The slick holds through the middle of the charge, because that is the whole of the run down
-      // the fall line. It spreads at the head of the charge and gathers again at the end of it.
       float q = aBurst / CHARGE;
-      spread = smoothstep(0.0, 0.3, q) * (1.0 - smoothstep(0.75, 1.0, q));
-      sy = mix(1.0, FLOWS, spread);
-      sxz = mix(1.0, FLOWW, spread);
+      spread = smoothstep(0.0, FLOWMELT, q) * (1.0 - smoothstep(FLOWSET, FLOWRISE, q));
+      float rise = smoothstep(FLOWSET, FLOWRISE, q);   // the column, standing where the sheet ran out
+      sy = mix(mix(1.0, FLOWS, spread), FLOWH, rise);
+      sxz = mix(mix(1.0, FLOWW, spread), FLOWN, rise);
     } else {
-      // The throw. The top of the stack leads it by FLOWLEAD of the flight, so the column reads as
-      // one jet and not as a body scaled up, and every part is back where it started at the end.
+      // The hop. It leaves the ground as the column it stood as, is a ball again by the top of the
+      // arc, and spreads as it lands. Every part is back at the rest shape at the end of it, so
+      // the step into the next rest costs the body nothing.
       float a = (aBurst - CHARGE) / (1.0 - CHARGE);
-      float lead = clamp(a * (1.0 + FLOWLEAD) - (1.0 - fu) * FLOWLEAD, 0.0, 1.0);
-      float jet = sin(lead * 3.1416);
-      sy = mix(1.0, FLOWH, jet);
-      sxz = mix(1.0, FLOWN, jet);
+      float fall = smoothstep(0.0, 0.45, a);
+      float land = sin(smoothstep(0.72, 1.0, a) * 3.1416);
+      lift = FLOWHOP * 4.0 * a * (1.0 - a);
+      sy = mix(FLOWH, 1.0, fall) - FLOWSQ * land;
+      sxz = mix(FLOWN, 1.0, fall) + FLOWSQ * land;
     }
     transformed.y *= sy;
     transformed.xz *= sxz;
-    // The slick is the one moment the reader can pick the animal out of the grass from a distance,
+    transformed.y += lift;
+    // The sheet is the one moment the reader can pick the animal out of the grass from a distance,
     // so it carries its glow at full while it is spread and gives it back as it gathers.
     vGlow = max(vGlow, spread);
   #elif CARRY == 6
@@ -1041,7 +1055,12 @@ function rigConstants(G) {
   const rollC = G.legLen > 0 ? G.legLen - B.bot : -B.bot * 0.95, rollR = rollRadius(G);
   rows.push(['ROLLR', rollR], ['ROLLC', rollC], ['ROLLDROP', Math.max(0, rollC - rollR)], ['ROLLTUCK', ROLL_TUCK]);
   // ---- flow (issue 28) ---- the shape of the slick and of the column; see CARRY == 7
-  rows.push(['FLOWY', flowY], ['FLOWW', FLOW_W], ['FLOWH', FLOW_H], ['FLOWS', FLOW_SLICK], ['FLOWN', FLOW_NARROW], ['FLOWLEAD', FLOW_LEAD]);
+  rows.push(['FLOWY', flowY], ['FLOWW', FLOW_W], ['FLOWH', FLOW_H], ['FLOWS', FLOW_SLICK], ['FLOWN', FLOW_NARROW]);
+  // The hop clears the ground the way the hop of a monopod does, and it takes its height from the
+  // gravity for the same reason. It is the taller of the two: a flow throws the whole of its body,
+  // and it carries no legs to hide the arc behind. Issue 29.
+  rows.push(['FLOWMELT', FLOW_MELT], ['FLOWSET', FLOW_SET], ['FLOWRISE', FLOW_RISE], ['FLOWSQ', FLOW_SQUASH],
+    ['FLOWHOP', clamp(0.75 / grav, 0.25, 1.5)]);
   // ---- slinger (issue 28) ---- the haul, the arc, the pitch, the tendon stub, and the crawl
   rows.push(['SLINGB', slingB], ['SLINGH', slingH], ['SLINGP', slingP], ['TENDL', TENDON_STUB], ['CRAWLZ', crawlZ], ['CRAWLY', crawlY]);
   return rows.map(([k, v]) => `#define ${k} ${ints.has(k) ? v : fx(v)}\n`).join('');
@@ -1241,25 +1260,34 @@ function burstSpeed(q) {
 // A monopod has no rest and no recovery, so its hop reads exactly as it read before: a crouch of
 // CHARGE_END of the cycle, then a parabola. Each new locomotion adds its own row below.
 //
-// ---- flow (issue 28) ---- the numbers of the flow row, and the three parts of its rule
-export const FLOW_UP = 1.2;            // the least a throw covers, as a multiple of the run down
-const FLOW_REST = 0.4;                 // the part of one throw it spends gathered and still
-const FLOW_CREEP = 0.1;                // the part of its speed it covers on flat ground
-const FLOW_GRAD = 2.5;                 // the gradient, rise over run, that gives it the whole of FLOW_RUN
+// ---- flow (issue 28, renumbered by issue 29) ---- the numbers of the flow row and of its rule
+export const FLOW_UP = 1.0;            // the least a hop covers, as a multiple of the run down
+const FLOW_REST = 2.0;                 // the part of one cycle it lurks, gathered and still
+const FLOW_RECOVER = 0.15;             // the part of one cycle it settles in where it lands
+const FLOW_FLY = 0.4;                  // the discharge is one hop, so it is shorter than a full one
+const FLOW_GRAD = 4.0;                 // the gradient, rise over run, that gives it the whole of FLOW_RUN
 const FLOW_LEVEL = 0.02;               // under this gradient the ground is flat and the wander steers
 const FLOW_TURN = 3.0;                 // how quickly it swings onto the fall line, in radians a second
-const FLOW_MARGIN = 0.8;               // how much of the cap it really takes, so the bank never runs dry
-// The most of its speed the fall line may give the run down. The mover pays every throw out of the
-// ground the cruise banked, and every second the animal does not spend on the run banks some of
-// it, so the cap follows from the three parts of the throw. The run takes FLOW_CREEP of the speed
-// through the rest and up to FLOW_RUN through the charge, and the throw gets what is left of the
-// whole cycle. Set the throw to FLOW_UP times the run and this is the answer. Above it the run
-// would cover more than the throw can pay back, and the animal would work its way downhill.
-const FLOW_RUN = (FLOW_MARGIN * (1 + FLOW_REST - FLOW_REST * FLOW_CREEP * (1 + FLOW_UP)))
-  / (CHARGE_END * (1 + FLOW_UP));
+const FLOW_MARGIN = 0.9;               // how much of the cap it really takes, so the bank never runs dry
+// The part of the charge the animal really runs for. flowHold() and the shader both read the same
+// window, so the sheet is spread for every metre the animal covers, and the mean of the window
+// over the whole charge is what the cap below has to divide by.
+const flowWindow = (q) => smoothstep01(q, 0, FLOW_MELT) * (1 - smoothstep01(q, FLOW_SET, FLOW_RISE));
+const FLOW_WIN = (() => { let a = 0; const n = 256; for (let i = 0; i < n; i++) a += flowWindow((i + 0.5) / n); return a / n; })();
+// The most of its speed the fall line may give the run down. The mover pays every hop out of the
+// ground the cruise banked, and the animal banks the whole cycle except the run, so the cap is
+// what holds the hop longer than the run. Set the hop to FLOW_UP times the run and this is the
+// answer. Above it the run would cover more than the hop can pay back, and the animal would work
+// its way downhill instead of ending each cycle above where it began.
+const FLOW_PARTS = CHARGE_END + (1 - CHARGE_END) * FLOW_FLY + FLOW_REST + FLOW_RECOVER;
+const FLOW_RUN = (FLOW_MARGIN * FLOW_PARTS) / (FLOW_WIN * CHARGE_END * (1 + FLOW_UP));
 
 // A row may also carry `track(st)`, which runs at the end of every step. A row that holds a point
 // in the world uses it to keep that point in the frame of the instance while the body moves.
+//
+// A row may also carry `still: true`. It tells a tier that the animal holds its own ground between
+// throws, so nothing may slide the body one metre it did not throw itself. A tier that carries its
+// animals in a formation reads it and leaves such an animal where it stands. See st.still.
 
 // ---------------------------------------------------------------- slinger (issue 28)
 // The slinger travels on real holds. It looks for a plant inside its reach, throws a cord at it,
@@ -1375,13 +1403,17 @@ function slingerTrack(st, dt) {
 const IMPULSE = {
   monopod: { rest: 0, recover: 0 },
   // ---- flow (issue 28) ----
-  // A flow has nothing to push against, so the ground under it is what moves it. It spreads into a
-  // slick and runs the fall line while it charges, then it gathers and throws itself back up the
-  // same rise. The throw always covers more ground than the run did, so the animal ends a little
-  // above where it started and never pours itself into the sea; FLOW_RUN is the cap that holds
-  // that. It takes no recovery: the column falls back inside the throw itself, and the long rest
-  // is where it settles. See CARRY == 7 for the body the same numbers shape.
-  flow: { rest: FLOW_REST, recover: 0, steer: flowSteer, hold: flowHold, launch: flowLaunch },
+  // A flow has nothing to push against, so the ground under it is what moves it. It lurks where it
+  // stands for most of a cycle, melts into a sheet, runs the fall line as a sheet, stands back up
+  // as a column where the sheet ran out, and hops the whole of itself back up the rise. It covers
+  // ground in two states only, the sheet and the hop, and it is still in every other one. The hop
+  // always covers more ground than the run did, so the animal ends a little above where it started
+  // and never pours itself into the sea; FLOW_RUN is the cap that holds that. See CARRY == 7 for
+  // the body the same numbers shape.
+  flow: {
+    rest: FLOW_REST, recover: FLOW_RECOVER, fly: FLOW_FLY, still: true,
+    steer: flowSteer, hold: flowHold, launch: flowLaunch,
+  },
   // ---- slinger (issue 28) ----
   // It waits for a plant it can hold, hauls back against the cord, and throws itself past the
   // plant. With nothing in reach it crawls on the wander at CRAWL of its speed and asks again
@@ -1414,19 +1446,22 @@ function flowSteer(st, dt) {
   const down = Math.atan2(-g.gz, -g.gx);
   st.heading += wrapAngle(down - st.heading) * Math.min(1, dt * FLOW_TURN);
 }
-// The part of its speed it covers while it waits and charges. A steep fall line carries it at
-// FLOW_RUN of the cruise, and flat ground gives it a creep. The cap is what matters: the mover pays
-// every throw out of the ground the cruise banked, so a run that took more than FLOW_RUN would
-// leave the throw shorter than the run, and the animal would work its way downhill throw by throw.
+// The part of its speed it covers in this step. It is zero in every phase but the charge, and zero
+// through the head and the tail of the charge as well, so the animal moves only while the sheet is
+// spread. A steep fall line carries the sheet at FLOW_RUN of the cruise; flat ground carries it
+// nowhere, because a flow on the flat has nothing to run down. The cap is what matters: the mover
+// pays every hop out of the ground the cruise banked, so a run that took more than FLOW_RUN would
+// leave the hop shorter than the run, and the animal would work its way downhill cycle by cycle.
 function flowHold(st) {
-  if (st.phase === 'rest') return FLOW_CREEP;
   if (st.phase !== 'charge') return 0;
-  return FLOW_CREEP + (FLOW_RUN - FLOW_CREEP) * clamp(st.grad * FLOW_GRAD, 0, 1);
+  const q = clamp(st.tPhase / st.chargeT, 0, 1);
+  return FLOW_RUN * flowWindow(q) * clamp(st.grad * FLOW_GRAD, 0, 1);
 }
-// The throw goes up the rise the run came down. Past half of its leash it goes home instead: an
-// animal that only ever went up would climb out of its range and never come back, because the
-// ground it charges over always falls away from it. The range is the whole of the banked ground,
-// so the mean speed over many throws is the cruise speed the species carries.
+// The hop goes up the rise the run came down, which puts the animal back on the high ground it
+// lurks from. Past half of its leash it goes home instead: an animal that only ever went up would
+// climb out of its range and never come back, because the ground it charges over always falls away
+// from it. The range is the whole of the banked ground, so the mean speed over many hops is the
+// cruise speed the species carries.
 function flowLaunch(st, owed) {
   const g = flowSlope(st);
   let aim = g && st.grad >= FLOW_LEVEL ? Math.atan2(g.gz, g.gx) : st.heading;
@@ -1481,9 +1516,10 @@ IMPULSE.roller = {
 // The length of one throw of a species, in seconds.
 export function impulseCycle(G) {
   if (G.loco === 'monopod') return TAU / hopGait(G);
-  // ---- flow (issue 28) ----
-  // A flow is slow. It needs a long charge to spread and run the fall line, and a long throw to
-  // rise, stand as a column, and fall back, so one whole throw runs several seconds.
+  // ---- flow (issue 28, reshaped by issue 29) ----
+  // A flow is slow. The charge alone has to read as three things, a melt, a run, and a column that
+  // stands back up, and the lurk before it is longer than all three. One whole cycle runs about
+  // nine seconds, of which five are the lurk.
   if (G.loco === 'flow') return 5;
   // ---- roller (issue 28) ----
   // A ball this size cannot flick. The fold, the roll, and the unfold each have to be read, so the
@@ -1574,6 +1610,8 @@ export function makeImpulseMover(rng, mv, hooks = {}) {
   st.reach = slingReach(st);
   st.reachMax = st.reach * SLING_WIDE;
   st.holds = !!rule.track;              // it carries a point in the world, so the caller writes aAnchor
+  // It is still between throws, so no tier may shuffle it on to a place in a formation. Issue 29.
+  st.still = !!rule.still;
   // A herd of them would go off as one body without this. Every member takes its own offset, so a
   // herd of rollers reads as a burst of seeds. It is spent on the first throw and never returns.
   // The offset comes from a phase the wander already drew, and not from a fresh draw: the three
