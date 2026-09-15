@@ -89,7 +89,7 @@ each body and never the group. See "The impulse mover".
 | Locomotion | Charge | Discharge | Terrain rule |
 |---|---|---|---|
 | `monopod` | Crouches on its one foot | Hops | None. It holds the heading it crouched on |
-| `roller` | Folds its legs and its head into its hull | Rolls ahead as a ball, spun by the ground it covers | Longer downhill, shorter uphill, and no launch up a rise over `ROLL_MAX_UP` |
+| `roller` | Folds its legs and its head into its hull | Rolls ahead as a ball for several seconds, spun by the ground it covers | Longer downhill, shorter uphill, and no launch up a rise over `ROLL_MAX_UP` |
 | `flow` | Lets go of its shape and runs downhill as a flat slick | Gathers, then jets uphill as a column, and lands as a body | Follows the fall line down and the rise line up |
 | `slinger` | Hooks a cord on a plant and hauls its body back | Lets go and flies a ballistic arc past the plant | Real plants only. It crawls when none is in reach |
 
@@ -477,6 +477,7 @@ locomotion rule lives:
 | Key | Meaning |
 |---|---|
 | `rest`, `recover` | parts of the throw cycle the animal spends waiting and settling |
+| `fly` | stretches the discharge alone. `aBurst` still runs `CHARGE_END` to 1 over it, so the body reads the same and only the seconds change. A roller takes 5, because a ball that stops after a second reads as a ball that fell over. A row that stretches its discharge accepts a cap: every phase comes down together until one throw fits inside `LEASH_THROW` of the leash, so a long roll fills a ground leash of a hundred metres and stays short on a globe leash of a few seconds of travel. A row with no stretch is never capped, so the hop of a monopod keeps the rate `hopGait(G)` always gave it |
 | `ready(st)` | may it charge now? The slinger asks for a plant here |
 | `hold(st)` | the part of its speed it covers while it waits and charges. A crawl, or a run down a slope |
 | `launch(st, owed)` | the ground the throw covers, or 0 to refuse it and pick a new heading |

@@ -1224,6 +1224,7 @@ export function stepMover(st, t, dt, burst = 1) {
 export const CHARGE_END = 0.4;   // the part of aBurst the charge covers; the discharge takes the rest
 const BURST_RAMP = 0.1;          // the part of the flight the throw takes to load and to unload
 const REST_MOVING = 0.05;        // it charges only once it wants to travel at this part of its cruise
+const LEASH_THROW = 0.8;         // the part of its leash one stretched throw may cover
 const OWED_CAP = 2.5;            // the most ground one throw may bank, in whole cycles of the cruise
 // The speed through the flight, as a part of the mean. The two ramps hold the ends, so the body
 // does not jump from a stand to full speed, and each ramp gives half of its width, so the mean of
@@ -1462,7 +1463,12 @@ const ROLL_LONG = 2.2;       // the longest a fall may carry one
 // before it folds and it settles for longer after it stops, because the fold, the roll, and the
 // unfold each have to be read.
 IMPULSE.roller = {
-  rest: 0.35, recover: 0.45,
+  // The roll is the whole point of the body, and a ball that stops after a second reads as a ball
+  // that fell over. The discharge runs five times the plain one, and the wait grows with it, so
+  // the throw still covers the ground the cruise speed asks for and the ball still rolls briskly.
+  // A short wait and a long roll would make a ball that trundles; a long wait and a long roll make
+  // one that stands, folds, goes, and stands again, which is what the manner text already says.
+  rest: 2.5, recover: 0.45, fly: 5,
   launch(st, owed) {
     const s = slopeAlong(st, st.aim);
     // It refuses a rise it cannot hold. The debt stays on the books, and the wander picks another
@@ -1513,11 +1519,34 @@ export function makeImpulseMover(rng, mv, hooks = {}) {
   st.hooks = hooks;
   st.gravity = mv.gravity || 1;
   st.cycle = mv.cycle > 0 ? mv.cycle : 2;
+  // `fly` stretches the discharge alone. aBurst still runs CHARGE_END to 1 over it, so the body
+  // reads the same; only the seconds change. A roller takes it, because a ball that stops after a
+  // second reads as a ball that fell over.
+  const fly = rule.fly > 0 ? rule.fly : 1;
   st.chargeT = st.cycle * CHARGE_END;
-  st.flyT = st.cycle * (1 - CHARGE_END);
+  st.flyT = st.cycle * (1 - CHARGE_END) * fly;
   st.restT = st.cycle * (rule.rest || 0);
   st.recoverT = st.cycle * (rule.recover || 0);
   st.total = st.chargeT + st.flyT + st.restT + st.recoverT;
+  // One throw covers the ground the cruise speed banked over the whole cycle, so a stretched
+  // discharge asks for a long throw. A leash the throw would fly straight past is no leash at all:
+  // the animal would spend its life at the end of its rope. A row that stretches its discharge
+  // therefore accepts a cap: every phase comes down together until one throw fits inside
+  // LEASH_THROW of the leash. The three tiers then keep their own character, because the leash of
+  // a tier is what says how much room there is. The ground gives an animal a leash of a hundred
+  // metres and the whole long roll fits; the globe gives it a leash of a few seconds of travel,
+  // and the roll there stays short, where a creature is two pixels across and nobody counts it.
+  //
+  // A row with no stretch is left alone. The hop of a monopod is its own rate, hopGait(G), and a
+  // cap on it would change a body that has read the same way since before this mover existed.
+  if (fly > 1 && st.speed > 0) {
+    const room = st.leash * LEASH_THROW;
+    if (st.total * st.speed > room) {
+      const k = room / (st.total * st.speed);
+      st.chargeT *= k; st.flyT *= k; st.restT *= k; st.recoverT *= k;
+      st.cycle *= k; st.total *= k;
+    }
+  }
   st.phase = 'rest';
   st.tPhase = 0;
   st.burst = 0;
