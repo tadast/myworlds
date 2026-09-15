@@ -716,6 +716,10 @@ function generate(seed, opts) {
   }
   world.floraCount = fc;
   world.floraKinds = P.flora;
+  // ---- slinger (issue 28) ----
+  // One index of the flora of the globe, so an animal that travels by holding a plant can find the
+  // nearest one without reading every plant of the world. See buildFloraGrid().
+  const floraGrid = buildFloraGrid(flora, fc);
 
   post(86, 'Surveying the ground');
   // coarse lat/lon height map (radius factors) so creatures can follow the terrain on the main thread
@@ -738,8 +742,40 @@ function generate(seed, opts) {
   world.stats = makeStats(frng, type, world, fc);
 
   post(98, 'Almost there');
-  const result = { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna, heightMap };
-  self.postMessage({ type: 'done', result }, [outPos.buffer, outCol.buffer, flora.buffer, clouds.buffer, fauna.buffer, heightMap.buffer]);
+  const result = { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna, heightMap, floraGrid };
+  self.postMessage({ type: 'done', result }, [outPos.buffer, outCol.buffer, flora.buffer, clouds.buffer, fauna.buffer, heightMap.buffer, floraGrid.buffer]);
+}
+
+// ---------------------------------------------------------------- slinger (issue 28)
+// A bucket sort of the flora of the globe into cells of latitude and longitude, packed into one
+// array so it can be transferred with the rest of the result. An animal that holds a plant asks
+// "what stands within a degree of me?" several times a second, and a world carries thousands of
+// plants, so it may not read them all.
+//
+// The cells are FLORA_GRID_W by FLORA_GRID_H, which is about a cell to the reach of a throw. The
+// layout is: the two sizes and the count, then one start offset per cell and one past the last,
+// then the flora indices, cell by cell. app.js reads it; see nearAnchor() there.
+const FLORA_GRID_W = 256, FLORA_GRID_H = 128;
+function floraCellOf(x, y, z, W, H) {
+  const lat = Math.asin(Math.min(1, Math.max(-1, y)));
+  const lon = Math.atan2(z, x);
+  let j = Math.floor(((lat + Math.PI / 2) / Math.PI) * H);
+  let i = Math.floor(((lon + Math.PI) / (2 * Math.PI)) * W);
+  if (j < 0) j = 0; else if (j >= H) j = H - 1;
+  if (i < 0) i = 0; else if (i >= W) i = W - 1;
+  return j * W + i;
+}
+function buildFloraGrid(flora, count) {
+  const W = FLORA_GRID_W, H = FLORA_GRID_H, cells = W * H, head = 3;
+  const out = new Int32Array(head + cells + 1 + count);
+  out[0] = W; out[1] = H; out[2] = count;
+  // the unit direction of a plant is the surface normal the placement wrote beside its position
+  const cellAt = (i) => floraCellOf(flora[i * 8 + 3], flora[i * 8 + 4], flora[i * 8 + 5], W, H);
+  for (let i = 0; i < count; i++) out[head + cellAt(i) + 1]++;
+  for (let c = 0; c < cells; c++) out[head + c + 1] += out[head + c];
+  const fill = new Int32Array(cells), idx = head + cells + 1;
+  for (let i = 0; i < count; i++) { const c = cellAt(i); out[idx + out[head + c] + fill[c]++] = i; }
+  return out;
 }
 
 function makeClouds(rng, noise, count, type, storm) {

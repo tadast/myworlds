@@ -27,7 +27,7 @@
 //
 // Ground frame: x east, y up, z south. One unit is one metre.
 import * as THREE from 'three';
-import { buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked } from './fauna.js';
+import { buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked, anchorFits, anchorLocal } from './fauna.js';
 
 export const LEASH = [60, 200];        // metres: how far a group roams from its anchor
 export const AIR_HOVER = [12, 40];     // metres above the ground for an air group
@@ -45,6 +45,18 @@ const TRAIL_LEN = 64;        // samples of the anchor path, for the species that
 const TRAIL_STEP = 0.1;      // seconds between two samples of the path
 const WATER_MARGIN = 0.5;    // metres above sea level a walker keeps
 const SLOPE_STEP = 4;        // metres: the run an impulse animal reads its slope over
+// ---------------------------------------------------------------- slinger (issue 28)
+// A slinger travels by holding a real plant, so the patch has to answer "what stands near here?"
+// several times a second. The plants of a patch number in the thousands, so they are sorted once
+// into a grid of ANCHOR_CELL metres and the ask reads only the cells the reach covers.
+//
+// The grid is built over the whole flora array of the patch, so the mega plants and the colossus
+// courts of issue 27 are in it beside every ordinary plant: a landmark is the best hold there is.
+// The ground cover is not. A tuft under ANCHOR_MIN_H holds nothing, so it never enters the grid.
+const ANCHOR_CELL = 50;      // metres: the grid the patch sorts its plants into
+const ANCHOR_MIN_H = 1.2;    // metres: shorter growth is ground cover, and holds nothing
+const ANCHOR_HOLD = 0.7;     // the part of the way up a plant the cord takes hold
+const _anc = [0, 0, 0];      // scratch: the hold of one animal, in the frame of its instance
 // ---------------------------------------------------------------- the flyer, issue 17
 // A walker has the ground, a plant, and its own herd beside it, so the reader reads its size from
 // them. A flyer hangs in an empty sky 100 m away and it is the one thing up there the reader looks
@@ -137,6 +149,67 @@ export function turnRadius(G) {
   return Math.max(2, m * TURN_RADIUS * (G.cls === 'air' ? 3 : 1));
 }
 
+// ---------------------------------------------------------------- slinger (issue 28)
+// One bucket sort of the plants of a patch, on a grid of ANCHOR_CELL metres. It keeps the place of
+// each plant and the height the cord takes hold at, and nothing else: the slinger only asks where
+// to throw. A patch with no plant gives an empty grid, and every ask then answers null, which is
+// the answer that makes the animal crawl.
+function buildAnchorGrid(flora) {
+  const empty = { n: 0 };
+  if (!flora || flora.length < 8) return empty;
+  const xs = [], zs = [], ys = [];
+  for (let o = 0; o < flora.length; o += 8) {
+    const h = flora[o + 6];
+    if (h < ANCHOR_MIN_H) continue;
+    xs.push(flora[o]); zs.push(flora[o + 2]); ys.push(h * ANCHOR_HOLD);
+  }
+  const n = xs.length;
+  if (!n) return empty;
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (xs[i] < minX) minX = xs[i]; if (xs[i] > maxX) maxX = xs[i];
+    if (zs[i] < minZ) minZ = zs[i]; if (zs[i] > maxZ) maxZ = zs[i];
+  }
+  const gw = Math.max(1, Math.floor((maxX - minX) / ANCHOR_CELL) + 1);
+  const gh = Math.max(1, Math.floor((maxZ - minZ) / ANCHOR_CELL) + 1);
+  const cell = (i) => Math.min(gh - 1, Math.floor((zs[i] - minZ) / ANCHOR_CELL)) * gw
+    + Math.min(gw - 1, Math.floor((xs[i] - minX) / ANCHOR_CELL));
+  const start = new Int32Array(gw * gh + 1);
+  for (let i = 0; i < n; i++) start[cell(i) + 1]++;
+  for (let c = 0; c < gw * gh; c++) start[c + 1] += start[c];
+  const fill = new Int32Array(gw * gh), idx = new Int32Array(n);
+  for (let i = 0; i < n; i++) { const c = cell(i); idx[start[c] + fill[c]++] = i; }
+  return {
+    n, w: gw, h: gh, minX, minZ,
+    x: Float32Array.from(xs), z: Float32Array.from(zs), y: Float32Array.from(ys),
+    start, idx,
+  };
+}
+
+// The nearest hold to (x, z) that the arc of the animal accepts. It reads only the cells the reach
+// covers, so the cost is the plants of a few cells and not the plants of the patch.
+function nearAnchorIn(grid, x, z, reach, st) {
+  if (!grid.n || !(reach > 0)) return null;
+  const i0 = Math.max(0, Math.floor((x - reach - grid.minX) / ANCHOR_CELL));
+  const i1 = Math.min(grid.w - 1, Math.floor((x + reach - grid.minX) / ANCHOR_CELL));
+  const j0 = Math.max(0, Math.floor((z - reach - grid.minZ) / ANCHOR_CELL));
+  const j1 = Math.min(grid.h - 1, Math.floor((z + reach - grid.minZ) / ANCHOR_CELL));
+  let best = -1, bd = Infinity;
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const c = j * grid.w + i;
+      for (let k = grid.start[c]; k < grid.start[c + 1]; k++) {
+        const p = grid.idx[k];
+        const dx = grid.x[p] - x, dz = grid.z[p] - z;
+        if (!anchorFits(dx, dz, reach, st)) continue;
+        const d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; best = p; }
+      }
+    }
+  }
+  return best < 0 ? null : { x: grid.x[best], z: grid.z[best], y: grid.y[best] };
+}
+
 export class GroundFauna {
   // heightAt(x, z) gives the elevation in metres.
   // lod is the shared LOD knob of the ground: { distance, min, max } in metres.
@@ -168,6 +241,11 @@ export class GroundFauna {
     this._night = night || 0;
     this._pxPerM = 0;
 
+    // The plants of the patch, sorted into a grid, so a slinger can find one to hold. `result` is
+    // the patch result the worker sent, and result.flora is 8 floats per plant: x y z, nx ny nz,
+    // height, kind, in the metres of the ground frame. Slinger, issue 28.
+    this.anchors = buildAnchorGrid(result && result.flora);
+
     // The hooks an impulse animal reads on the ground. The slope is the gradient of the terrain by
     // central difference over SLOPE_STEP metres, so it is a rise over a run, as on the globe.
     this.hooks = {
@@ -175,6 +253,7 @@ export class GroundFauna {
         gx: (this.heightAt(x + SLOPE_STEP, z) - this.heightAt(x - SLOPE_STEP, z)) / (2 * SLOPE_STEP),
         gz: (this.heightAt(x, z + SLOPE_STEP) - this.heightAt(x, z - SLOPE_STEP)) / (2 * SLOPE_STEP),
       }),
+      nearAnchor: (x, z, reach, st) => nearAnchorIn(this.anchors, x, z, reach, st),
     };
 
     const patch = result && result.patch;
@@ -238,7 +317,7 @@ export class GroundFauna {
       const widthM = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) * scale;
       const entry = {
         G, kind: k, near, far, mat, scale, widthM,
-        nearN: 0, farN: 0, phaseDirty: true,
+        nearN: 0, farN: 0, phaseDirty: true, anchorDirty: false,
         // the gait clock of this species, and the tightest circle it walks
         locked: gaitLocked(G), turnR: turnRadius(G), hipY: full.userData.hipY || 0,
         tris: { full: full.attributes.position.count / 3, coarse: coarse.attributes.position.count / 3 },
@@ -265,6 +344,13 @@ export class GroundFauna {
       // The mover of this group: the steady wander, or the impulse model that charges and throws.
       // G.move.mode picks between them, and nothing here tests the locomotion.
       const st = makeAnyMover(rng, G, mv, this.hooks);
+      // What a mover that holds a point in the world needs of this tier. The mover keeps (u, v) as
+      // an offset from the anchor of the group, so the origin puts its asks back into the metres of
+      // the patch. One creature unit is the scale the species was measured at, and the (x, z) plane
+      // of the ground turns to the left of the heading, so the hand is +1. Slinger, issue 28.
+      st.ox = gs[o]; st.oz = gs[o + 1];
+      st.unit = entry.scale;
+      st.hand = 1;
       const g = {
         G, entry, flies, mover: st, phase: gs[o + 5],
         x0: gs[o], z0: gs[o + 1], x: gs[o], z: gs[o + 1],
@@ -406,6 +492,12 @@ export class GroundFauna {
       e.far.instanceMatrix.needsUpdate = true;
       e.near.geometry.attributes.aAnim.needsUpdate = true;
       e.far.geometry.attributes.aAnim.needsUpdate = true;
+      // the hold of a tendon, for the one species that carries one. Slinger, issue 28.
+      if (e.anchorDirty) {
+        e.near.geometry.attributes.aAnchor.needsUpdate = true;
+        e.far.geometry.attributes.aAnchor.needsUpdate = true;
+        e.anchorDirty = false;
+      }
       // the phase of an animal only moves when the animal changes its slot, which is rare
       if (e.phaseDirty) {
         e.near.geometry.attributes.aPhase.needsUpdate = true;
@@ -561,6 +653,18 @@ export class GroundFauna {
     a[ao + 1] = m.gait ? m.gait.phase : 0;
     a[ao + 2] = m.turn;
     a[ao + 3] = g.mover.burst || 0;
+    // The hold the tendon is on, in the frame of this instance. Only a species that holds a point
+    // in the world writes here; every other one leaves the three floats at zero for the life of
+    // the mesh. This animal stands beside the anchor of its group and faces its own way, so it
+    // measures the hold from where it really stands. Slinger, issue 28.
+    if (g.mover.holds) {
+      const an = at.aAnchor.array, no = slot * 3;
+      if (g.mover.anchor) {
+        anchorLocal(_anc, g.mover.anchor, nx, nz, m.heading, e.scale, 1);
+        an[no] = _anc[0]; an[no + 1] = _anc[1]; an[no + 2] = _anc[2];
+      } else { an[no] = 0; an[no + 1] = 0; an[no + 2] = 0; }
+      e.anchorDirty = true;
+    }
     // The shadow of a flyer comes last. It writes the same basis and the same matrix this step
     // used, so it must run after the animal takes its own copy of them.
     if (m.shade >= 0 && this.shade) this._stepShade(m, nx, nz, lift);

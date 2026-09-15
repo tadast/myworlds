@@ -130,9 +130,13 @@ function lexCheck(text, tags) {
 // Every pool is asked, for every world and every genome shape that can reach it, whether it has
 // at least one line. `reach` says which genomes may read the pool at all.
 const P = Species.POOLS;
-const LOCOS = ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent', 'sac', 'wings', 'fins', 'arch', 'periscope', 'plough'];
+// A locomotion added to species.js belongs in both lists below, or the sweep never asks its pools
+// a question, and never runs a relation rule that names it against a pair.
+const LOCOS = ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent', 'sac', 'wings', 'fins', 'arch', 'periscope', 'plough',
+  'slinger'];   // issue 28
 const HEADS = ['beak', 'stalks', 'crest', 'mandibles', 'tusks', 'lure', 'none'];
-const CLASSES = { monopod: 'land', biped: 'land', tripod: 'land', quad: 'land', hexapod: 'land', serpent: 'land', sac: 'air', wings: 'air', fins: 'air', arch: 'sub', periscope: 'sub', plough: 'sub' };
+const CLASSES = { monopod: 'land', biped: 'land', tripod: 'land', quad: 'land', hexapod: 'land', serpent: 'land', sac: 'air', wings: 'air', fins: 'air', arch: 'sub', periscope: 'sub', plough: 'sub',
+  slinger: 'land' };   // issue 28
 const EXTRAS = ['sail', 'spikes', 'beads', 'tendrils', 'garden', 'plates', 'tail', 'flukes', 'antennae', 'mounds'];
 const NICHES = Object.keys(Species.NICHE);
 

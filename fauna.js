@@ -6,6 +6,10 @@
 // (mode, phase, amplitude, weight) and a pivot, and the shader animates each part by its mode on top of
 // a whole-body "carriage" (walk bob, hop, wave, float, arch, rise). Nothing here is hand-placed per species.
 import * as THREE from 'three';
+// The inspector card grows real plants for a species that hooks one; see Inspector.buildPosts().
+// flora-geometry.js imports mergeGeos and M4 from this file, so the two modules form a cycle. It
+// holds: neither one reads a name of the other while its own body runs.
+import { floraGeometry, FLORA } from './flora-geometry.js';
 
 export const BASE_SCALE = 0.0077; // 30% smaller than the first pass, so the globe reads as a miniature
 
@@ -202,6 +206,15 @@ function legPlan(G, len) {
 // runs at half the amplitude, so the silhouette does not shimmer at a small pixel size.
 // The build stays under 80 triangles for every species. See docs/fauna.md, "Ground tier".
 export const COARSE_SWING = 0.5;   // the part of the full leg swing a coarse creature keeps
+// ---- slinger (issue 28) ----
+// The tendon is built as a short stub that runs back from its pivot into the body hull, and the
+// shader lays it along the line from the pivot to the hold. The stub has to stay inside the hull:
+// the ground scales a creature by the extent of its geometry along one axis, and a tendon of any
+// real length would make every slinger the size of the gap between two plants. The length of the
+// stub is only the parameter of the tube, so the shader divides the offset along it by TENDON_STUB
+// to get the part of the way along the tendon a vertex sits at.
+const TENDON_STUB = 0.05;
+const SLING_SWAY = 0.05;           // how far the body of a slinger ripples as it crawls
 export function buildCreature(G, pal, flora, detail = 'full') {
   const coarse = detail === 'coarse';
   const { body, body2, accent, glow } = G.colors;
@@ -275,7 +288,12 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     for (const s of B.secs) {
       const color = s.second || s.alt ? body2 : (G.loco === 'sac' ? accent : body);
       const geo = s.shape === 'dodeca' ? block(s.r) : ball(s.r, s.d || 0);
-      const o = G.loco === 'sac' ? { glow: 0.35, rig: [RIG.PULSE, 0, 0.05, 1], pivot: [0, yc, 0] } : {};
+      // A slinger has no legs. With nothing in reach it crawls, and a rigid body dragged over the
+      // ground reads as a sledge, so its sections take SWAY about the tail: the tail end holds its
+      // place and the front ripples, which is the end that reaches for a hold. See CARRY.SLING.
+      const o = G.loco === 'sac' ? { glow: 0.35, rig: [RIG.PULSE, 0, 0.05, 1], pivot: [0, yc, 0] }
+        : G.loco === 'slinger' ? { rig: [RIG.SWAY, 0, SLING_SWAY, 1], pivot: [0, yc, B.back] }
+          : {};
       P(geo, color, M4(0, yc + s.y, s.z, ...s.s), o);
     }
   }
@@ -383,6 +401,19 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       eyes(); break;
     default:
       if (!coarse && (land || sub)) eyes();
+  }
+
+  // ---- slinger (issue 28): the tendon
+  // One thin tube on RIG.TENDON, with its pivot at the front of the body. The shader stretches it
+  // from that pivot to aAnchor, the hold in the frame of the instance, and collapses it onto the
+  // pivot while aAnchor is the zero vector, which is what a slinger with nothing to hold shows.
+  // The stub runs back into the hull, so it adds nothing to the extent the ground scale measures.
+  if (G.loco === 'slinger') {
+    const tp = [0, yc + B.top * 0.45, B.front * 0.9];
+    const tr = clamp(R * 0.07, 0.008, 0.025);
+    P(cyl(tr, tr, TENDON_STUB, coarse ? 3 : 4, true), accent,
+      M4(tp[0], tp[1], tp[2] - TENDON_STUB * 0.5, 1, 1, 1, -Math.PI / 2, 0),
+      { glow: 0.5, rig: [RIG.TENDON, 0, 0, 1], pivot: tp });
   }
 
   // ---- locomotion extras: wings, fins, the sac's vent
@@ -553,6 +584,10 @@ const RIG_GLSL = `
   float gl = max(GLIDE, smoothstep(-0.25, 0.25, sin(sb * 0.33 + 1.0))); // 1 = wings beat, 0 = wings held out
   vec3 d = transformed - aPivot;
   float c, sn, th;
+  // ---- slinger (issue 28) ----
+  // How far along the tendon this vertex sits: 0 at the body and 1 at the hold. The carriage reads
+  // it, so the root of the tendon rides with the body while its far end stays on the plant.
+  float tendT = 0.0;
   if (mode == 1.0) {            // LEG: a stance with the foot planted, then a swing that lifts it and carries it forward
     // One cycle is a stance of DUTY and a swing of the rest. Through the stance the leg sweeps back
     // at a constant rate, and the gait clock runs at the rate that makes that sweep match the
@@ -620,6 +655,23 @@ const RIG_GLSL = `
     th = sin(f - 1.2) * amp; c = cos(th); sn = sin(th);
     d.yz = vec2(d.y * c - d.z * sn, d.y * sn + d.z * c);
     transformed = aPivot + d;
+  } else if (mode == 9.0) {     // TENDON: one tube laid from its pivot to the hold on the plant
+    // The part is built as a stub running back from the pivot along -z, so d.z gives the place of
+    // this vertex along the tube and d.xy gives its offset from the axis. The tube is then laid
+    // along the line from the pivot to aAnchor, and the two offsets ride on a frame of that line.
+    // aAnchor is the zero vector while the animal holds nothing, and the tube collapses onto its
+    // own pivot: a part of no size, and no pixels. See RIG.TENDON and TENDON_STUB.
+    tendT = clamp(-d.z / TENDL, 0.0, 1.0);
+    vec3 ta = aAnchor - aPivot;
+    float tl = length(ta);
+    if (tl < 0.0001) { transformed = aPivot; }
+    else {
+      vec3 tdir = ta / tl;
+      vec3 tref = abs(tdir.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+      vec3 t1v = normalize(cross(tref, tdir));
+      vec3 t2v = cross(tdir, t1v);
+      transformed = aPivot + tdir * (tendT * tl) + t1v * d.x + t2v * d.y;
+    }
   }
   if (mode != 7.0) {
   #if CARRY == 0
@@ -665,6 +717,42 @@ const RIG_GLSL = `
     transformed.x += 0.05 * sin(sb * 0.6) * clamp(transformed.y, 0.0, 1.0);
   #elif CARRY == 5
     transformed.y -= RISE * (1.0 - smoothstep(SINK, SINK + 0.4, sin(sb * 0.35)));
+  #elif CARRY == 8
+    // ---- slinger (issue 28): the throw ----
+    // aBurst is the clock, as it is for every impulse carriage. It holds at 0 while the animal has
+    // nothing to hold, runs 0 to CHARGE while the body hauls back against the tendon, and CHARGE to
+    // 1 through the throw. The mover covers the ground, so the carriage adds no travel of its own:
+    // it adds the haul, the arc over the ground, and the pitch that puts the nose down the arc.
+    //
+    // The throw ends level, with no arc and no pitch left, so the body needs no phase to settle in:
+    // aBurst falls back through the same band in a recovery, which would replay the arc backwards.
+    // The slinger therefore takes no recovery, and it settles by lying still and crawling. See
+    // IMPULSE.slinger.
+    vec3 off = vec3(0.0);
+    float pit = 0.0, acti = smoothstep(0.0, 0.3, mv);
+    if (aBurst < 0.0001) {
+      // Nothing in reach: it crawls. The body keeps low and creeps forward and back on the slow
+      // clock, and the sections sway, so a slinger with nothing to hold still reads as alive.
+      off.z += CRAWLZ * sin(sb * 0.6) * acti;
+      off.y -= CRAWLY * (0.5 + 0.5 * sin(sb * 1.2)) * acti;
+    } else if (aBurst < CHARGE) {
+      float q = aBurst / CHARGE;
+      off.z -= SLINGB * sin(q * 1.5708);            // it hauls back along -aim against the tendon
+      off.y -= SLINGB * 0.35 * sin(q * 3.1416);     // and it sinks a little as it winds
+      pit = -SLINGP * 0.4 * sin(q * 1.5708);        // a negative pitch lifts the nose
+    } else {
+      float a = (aBurst - CHARGE) / (1.0 - CHARGE);
+      off.y += SLINGH * 4.0 * a * (1.0 - a);        // the arc, whose height comes from the gravity
+      pit = -SLINGP * (1.0 - 2.0 * a) * sin(a * 3.1416);   // nose up out of the throw, nose down into the landing
+    }
+    // The pitch turns the body about its own left axis, so the nose goes down and the tail goes up.
+    // The tendon takes neither the pitch nor the offset at its far end: that end is on the plant,
+    // and a carriage that moved the whole tube would take the tip off the hold.
+    vec3 pre = transformed;
+    c = cos(pit); sn = sin(pit);
+    transformed.yz = vec2(transformed.y * c - transformed.z * sn, transformed.y * sn + transformed.z * c);
+    float hold = mode == 9.0 ? tendT : 0.0;
+    transformed = mix(transformed, pre, hold) + off * (1.0 - hold);
   #endif
   }
 `;
@@ -682,7 +770,8 @@ const ROCK_K = { biped: 0.15, tripod: 0.08, quad: 0.09, hexapod: 0.03 };
 const LEAN_K = { wings: 0.55, fins: 0.35, sac: 0.15 };
 
 function rigConstants(G) {
-  const carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? CARRY.WALK;
+  const carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE,
+    slinger: CARRY.SLING }[G.loco] ?? CARRY.WALK;   // slinger (issue 28)
   const B = bodySections(G), len = B.front - B.back;
   const grav = G.gravity || 1;
   const gait = G.loco === 'monopod' ? hopGait(G) : G.gait;
@@ -698,9 +787,17 @@ function rigConstants(G) {
   const duty = LEG_DUTY[G.loco] || 0.6;
   // the roll axis: the hip line of a walker, the body centre of a flyer
   const rolly = G.cls === 'air' ? 0.5 : G.legLen;
+  // ---- slinger (issue 28) ----
+  // The haul back against the tendon, the height of the arc, the pitch that carries the nose down
+  // it, and the two amplitudes of the crawl. The arc reads the gravity the way the hop does: a
+  // light world throws the body high and a heavy one keeps it flat. Every one of them sits in the
+  // program key, so a change here compiles a new program instead of moving a live body.
+  const slingB = len * 0.22, slingH = clamp(0.5 / grav, 0.18, 1.0), slingP = 0.55;
+  const crawlZ = len * 0.05, crawlY = Math.max(0.01, G.bodyR * 0.12);
   const fx = (v) => Number(v).toFixed(4);
   const ints = new Set(['CARRY', 'LOCK']);
   return [['CARRY', carry], ['LOCK', gaitLocked(G) ? 1 : 0], ['GAIT', gait], ['FLAP', G.flap], ['SLOW', G.slow],
+    ['SLINGB', slingB], ['SLINGH', slingH], ['SLINGP', slingP], ['TENDL', TENDON_STUB], ['CRAWLZ', crawlZ], ['CRAWLY', crawlY],
     ['BOB', bob], ['BOBN', BOB_BEATS[G.loco] || 2], ['ROCK', (ROCK_K[G.loco] || 0) * G.bodyR], ['DUTY', duty],
     ['SKEW', legged ? 0.35 : 0], ['LEAN', LEAN_K[G.loco] ?? (legged ? 0.1 : 0)], ['ROLLY', rolly],
     ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
@@ -886,14 +983,145 @@ function burstSpeed(q) {
 //
 // A monopod has no rest and no recovery, so its hop reads exactly as it read before: a crouch of
 // CHARGE_END of the cycle, then a parabola. Each new locomotion adds its own row below.
+//
+// A row may also carry `track(st)`, which runs at the end of every step. A row that holds a point
+// in the world uses it to keep that point in the frame of the instance while the body moves.
+
+// ---------------------------------------------------------------- slinger (issue 28)
+// The slinger travels on real holds. It looks for a plant inside its reach, throws a cord at it,
+// hauls the body back against the cord, and lets go: the throw carries the body past the plant, so
+// the cord comes off on its own. With nothing in reach it crawls and asks again.
+//
+// The plant says how long the throw is, not the mover, so a throw can carry the body further than
+// the cruise speed has yet asked for. The extra is borrowed: `over` holds it, and every step pays
+// as much of it back as the wander has banked, so the ground covered over many throws is still the
+// ground the cruise asks for. The animal may not charge again until the debt is clear, and it
+// crawls while it waits. That one rule is what holds the mean speed on any ground: a stand far
+// apart makes the waits long and the throws long, and the mean of the two does not move.
+//
+// The reach widens while the asks come back empty and drops to the nominal one on a hold, so the
+// animal reads the stand it is really in instead of a number set here.
+const CRAWL = 0.2;            // the part of its speed it covers while it waits, charges, and crawls
+const SLING_REST = 0.65;      // the part of the cycle it spends looking before it may charge
+const SLING_PAST = 1.2;       // a throw carries the body this many times the distance to the hold
+const SLING_LOOK = 1;         // seconds between two asks while it crawls
+const SLING_WIDEN = 1.4;      // how much wider it asks after an ask that found nothing
+const SLING_WIDE = 3;         // the widest it may ask, in nominal reaches
+// How far either side of its heading a hold may stand. This is what keeps the leash: the wander
+// has already turned the body toward home, so the only holds it will take are on the way home.
+// A narrower arc leaves too few plants to choose from, and the animal then crawls most of its life
+// on ground that really does carry a stand it could use.
+export const ANCHOR_ARC = 1.9;
+
+// True when a point (dx, dz) from the animal is a hold it can use: inside the reach, and inside
+// the arc the body already faces. Every tier tests its own candidates with this, so the three
+// nearAnchor hooks agree on what counts as a hold.
+export function anchorFits(dx, dz, reach, st) {
+  const d2 = dx * dx + dz * dz;
+  if (d2 > reach * reach || d2 < 1e-12) return false;
+  return Math.abs(wrapAngle(Math.atan2(dz, dx) - st.heading)) <= ANCHOR_ARC;
+}
+
+// The nominal reach of one animal: the ground its cruise speed covers in one whole throw cycle.
+// Every tier gets the same rule, because both numbers are already in the units of that tier.
+const slingReach = (st) => st.speed * st.total;
+
+// It asks for a hold once a second while it waits. A hold it finds is kept on the state, and the
+// charge then begins. Without one it stays at rest, where `hold` keeps it crawling on the wander,
+// and it asks again a second later with a wider reach.
+function slingerReady(st) {
+  const find = st.hooks && st.hooks.nearAnchor;
+  if (!find) { st.anchor = null; return false; }
+  // The last throw ran ahead of the cruise speed. It pays that back before it throws again, and
+  // the crawl is what it does while it waits.
+  if (st.over > 0) return false;
+  if (st.look > 0) return !!st.anchor;
+  st.look = SLING_LOOK;
+  const p = find(st.ox + st.u, st.oz + st.v, st.reach, st);
+  if (p) { st.anchor = { x: p.x, z: p.z, y: p.y || 0 }; st.reach = slingReach(st); return true; }
+  st.anchor = null;
+  st.reach = Math.min(st.reach * SLING_WIDEN, st.reachMax);
+  return false;
+}
+
+// The throw. It aims at the hold, not at the heading the wander left the body on, and it carries
+// the body SLING_PAST times the distance to the hold, so the body passes it and the cord comes
+// off. Whatever of that the cruise speed has not yet asked for is borrowed, and slingerTrack()
+// pays it back out of the next few seconds of banking.
+function slingerLaunch(st, owed) {
+  const a = st.anchor;
+  if (!a) return 0;
+  const dx = a.x - (st.ox + st.u), dz = a.z - (st.oz + st.v);
+  const d = Math.hypot(dx, dz);
+  if (d < 1e-9) { st.anchor = null; return 0; }
+  st.aim = Math.atan2(dz, dx);
+  st.heading = st.aim;
+  const range = Math.max(owed, d * SLING_PAST);
+  st.over = range - owed;      // zero when the debt already covered the throw
+  return range;
+}
+
+// The hold is a point in the world and the body moves, so the offset to it is measured again every
+// step. aAnchor is in the frame of the instance: the animal faces its own +z and its own +x is its
+// left, and the instance matrix is built from the heading, so +z lies along (cos hd, sin hd) over
+// the ground the mover runs on and +x lies a quarter turn from it. Which quarter turn depends on
+// the tier: the (u, v) plane of the globe and the (x, z) plane of the ground have opposite hands,
+// so `st.hand` carries the sign and each caller sets it. `st.unit` is the size of one creature
+// unit in the units the mover runs in, so the offset lands in the units the geometry is built in.
+// The offset from an animal at (px, pz) facing `heading` to the hold `p`, in the frame of its
+// instance. A tier whose drawn body stands a little away from its own mover — a member of a group
+// beside the anchor of that group — measures from where the body really stands, and takes `unit`
+// and `hand` from the same tier. `out` is a three-float array the caller owns.
+export function anchorLocal(out, p, px, pz, heading, unit, hand) {
+  const dx = p.x - px, dz = p.z - pz;
+  const c = Math.cos(heading), s = Math.sin(heading);
+  const u = unit > 0 ? unit : 1;
+  out[0] = (hand * (dx * s - dz * c)) / u;
+  out[1] = (p.y || 0) / u;
+  out[2] = (dx * c + dz * s) / u;
+  return out;
+}
+const _a3 = [0, 0, 0];
+
+function slingerTrack(st, dt) {
+  if (st.look > 0) st.look -= dt;
+  // Pay back whatever the last throw ran ahead by, out of the ground the wander has banked since.
+  // Both sides fall together, so the two never count one metre twice and the mean speed holds.
+  if (st.over > 0 && st.owed > 0) {
+    const pay = Math.min(st.over, st.owed);
+    st.over -= pay; st.owed -= pay;
+  }
+  if (!st.anchor) { st.ax = 0; st.ay = 0; st.az = 0; return; }
+  // The cord comes off when the throw is over: the body has passed the hold.
+  if (st.phase === 'rest') { st.anchor = null; st.ax = 0; st.ay = 0; st.az = 0; return; }
+  anchorLocal(_a3, st.anchor, st.ox + st.u, st.oz + st.v, st.heading, st.unit, st.hand);
+  st.ax = _a3[0]; st.ay = _a3[1]; st.az = _a3[2];
+}
+
 const IMPULSE = {
   monopod: { rest: 0, recover: 0 },
+  // ---- slinger (issue 28) ----
+  // It waits for a plant it can hold, hauls back against the cord, and throws itself past the
+  // plant. With nothing in reach it crawls on the wander at CRAWL of its speed and asks again
+  // every SLING_LOOK seconds. It takes no recovery: see the comment on CARRY.SLING in RIG_GLSL.
+  slinger: {
+    rest: SLING_REST, recover: 0,
+    hold: () => CRAWL,
+    ready: slingerReady,
+    launch: slingerLaunch,
+    track: slingerTrack,
+  },
 };
 const IMPULSE_DEFAULT = { rest: 0, recover: 0 };
 
 // The length of one throw of a species, in seconds.
 export function impulseCycle(G) {
   if (G.loco === 'monopod') return TAU / hopGait(G);
+  // A slinger hangs on its arc, so a light world gives it a long throw and a heavy one a short.
+  // The cycle is long for a reason as well as for the look of it: the reach the animal asks for is
+  // the ground it owes, and the ground it owes is the cruise speed times the cycle. A short cycle
+  // would give a reach of a few metres, and a slinger would then crawl past every stand it met.
+  if (G.loco === 'slinger') return clamp(3.0 / Math.sqrt(G.gravity || 1), 2.0, 4.2);
   return 2;
 }
 // The steering record an impulse mover needs, built from the genome and the move record of a tier.
@@ -901,8 +1129,11 @@ export function impulseMove(G, mv) {
   return { ...mv, loco: G.loco, cycle: impulseCycle(G), gravity: G.gravity || 1 };
 }
 
-// hooks.slope(x, z, st)      -> { gx, gz }, the gradient of the ground, or null on a tier with none
-// hooks.nearAnchor(x, z, r)  -> { x, z } or null. Only the slinger reads it.
+// hooks.slope(x, z, st)         -> { gx, gz }, the gradient of the ground, or null on a tier with none
+// hooks.nearAnchor(x, z, r, st) -> { x, z, y } or null. Only the slinger reads it. The point comes
+//   back in the coordinates the tier passed in, with `y` its height over the ground. It must be
+//   the nearest hold that anchorFits() accepts, so the arc that keeps the leash holds on every
+//   tier. `st` is passed as `slope` already takes it, and a tier free to ignore it.
 export function makeImpulseMover(rng, mv, hooks = {}) {
   const st = makeMover(rng, mv);
   const rule = IMPULSE[mv.loco] || IMPULSE_DEFAULT;
@@ -924,6 +1155,26 @@ export function makeImpulseMover(rng, mv, hooks = {}) {
   st.range = 0;
   st.anchor = null;
   st.ax = 0; st.ay = 0; st.az = 0;      // aAnchor, in the frame of the instance
+  // ---- slinger (issue 28) ----
+  // What a row that holds a point in the world needs of its tier. The caller sets all four after
+  // it builds the mover; the defaults are the ones a tier with no frame of its own would use.
+  //   ox, oz  the point (u, v) is measured from, in the coordinates the hooks understand
+  //   unit    the size of one creature unit there, so aAnchor lands in the units of the geometry
+  //   hand    +1 where the (u, v) plane turns to the left of the heading, -1 where it turns right
+  st.ox = 0; st.oz = 0;
+  st.unit = 1;
+  st.hand = 1;
+  st.look = 0;                          // seconds left before it may ask for a hold again
+  st.over = 0;                          // the ground the last throw ran ahead of the cruise by
+  // The reach it asks with, and the widest it may ask. The nominal reach is one cycle of cruise,
+  // and it may widen to SLING_WIDE of them on ground that carries nothing nearer. The bound is a
+  // multiple of the cycle and not a part of the leash, because the globe gives an animal a leash
+  // of about one cycle: a bound off the leash there would hold the reach at the nominal one, and
+  // a slinger on a globe would crawl its whole life past plants it could have held. The leash is
+  // kept by the arc instead: the pull home turns the body, and the arc only takes a hold it faces.
+  st.reach = slingReach(st);
+  st.reachMax = st.reach * SLING_WIDE;
+  st.holds = !!rule.track;              // it carries a point in the world, so the caller writes aAnchor
   // A herd of them would go off as one body without this. Every member takes its own offset, so a
   // herd of rollers reads as a burst of seeds. It is spent on the first throw and never returns.
   // The offset comes from a phase the wander already drew, and not from a fresh draw: the three
@@ -986,6 +1237,9 @@ export function stepImpulse(st, t, dt) {
     st.turnN = 0;
     if (st.tPhase >= st.recoverT) { st.phase = 'rest'; st.tPhase = 0; st.burst = 0; }
   }
+  // A row that holds a point in the world keeps it in the frame of the instance here, because the
+  // body has moved this step and the point has not. See IMPULSE.slinger and slingerTrack().
+  if (st.rule.track) st.rule.track(st, dt);
   return st.spd > st.speed * 0.05;
 }
 // The caller met water, or the edge of the patch, and put the animal back where it was. A throw
@@ -1018,6 +1272,14 @@ export const moverActivity = (st) => (st.speed > 0 ? smoothstep01(st.spd / st.sp
 export const speedActivity = (spd, top) => (top > 0 ? smoothstep01(spd / top, 0.05, 0.3) : 1);
 
 // ---------------------------------------------------------------- inspector card
+// ---- slinger (issue 28) ----
+// The posts the card grows for a species that hooks a plant. They stand in a ring between these
+// two radii of the ground disc, so the animal reaches them from most of its walk and none of them
+// stands where it lands. See Inspector.buildPosts().
+const POST_RING = [1.5, 2.6];   // card units from the centre of the disc
+const POST_H = 1.0;             // card units: the height of one post
+const POST_HOLD = 0.7;          // the part of the way up a post the cord takes hold
+
 export class Inspector {
   constructor({ card, canvas, onClose }) {
     this.card = card; this.canvas = canvas;
@@ -1047,12 +1309,58 @@ export class Inspector {
     this.scene.add(this.trail);
     this.mesh = null; this.mover = null; this.trailPts = [];
     this.pathScale = 1; this.fit = 1;
+    this.posts = null; this.postAt = [];   // slinger (issue 28): the holds the card grows
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = new THREE.Vector3(); this._s = new THREE.Vector3();
   }
-  // The hooks the impulse mover reads on this tier. The card is a flat disc, so it has no slope.
-  // A locomotion that needs a real anchor grows its own posts here; see RIG.TENDON.
+  // ---- slinger (issue 28) ----
+  // The holds the card grows, and the hooks the impulse mover reads on this tier. The card is a
+  // flat disc, so it has no slope. A species that hooks a real plant needs real plants to hook, so
+  // the card seats three or four posts on the disc and the mover throws between them; every other
+  // species keeps a bare disc. The card seed places them, so one species always gets one card.
+  //
+  // The posts are laid out in the units the mover runs in, because that is what nearAnchor is
+  // asked in: the drawn positions are those times pathScale. So show() must know pathScale before
+  // it calls this.
+  buildPosts(G, palette, rngSeed) {
+    if (this.posts) { this.scene.remove(this.posts); this.posts.geometry.dispose(); this.posts.material.dispose(); this.posts = null; }
+    this.postAt = [];
+    if (G.loco !== 'slinger' || !(this.pathScale > 0)) return;
+    let s = rngSeed * 2654435761 >>> 0;
+    const r = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    const n = 3 + Math.floor(r() * 2);
+    const geo = floraGeometry(FLORA.PINE, palette.flora, 0);
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0 });
+    const inst = new THREE.InstancedMesh(geo, mat, n);
+    inst.castShadow = true; inst.receiveShadow = true;
+    const a0 = r() * TAU;
+    for (let i = 0; i < n; i++) {
+      // one post per sector of the disc, so no two stand together and none stands at the centre
+      const a = a0 + ((i + 0.15 + r() * 0.7) / n) * TAU;
+      const rad = POST_RING[0] + r() * (POST_RING[1] - POST_RING[0]);
+      const x = Math.cos(a) * rad, z = Math.sin(a) * rad, h = POST_H * (0.8 + r() * 0.5);
+      this._m.compose(this._p.set(x, 0, z), this._q.setFromAxisAngle(_up, r() * TAU), this._s.set(h, h, h));
+      inst.setMatrixAt(i, this._m);
+      // the hold is partway up the post, in mover units
+      this.postAt.push({ x: x / this.pathScale, z: z / this.pathScale, y: (h * POST_HOLD) / this.pathScale });
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    this.posts = inst;
+    this.scene.add(inst);
+  }
   hooks() {
-    return {};
+    if (!this.postAt.length) return {};
+    // The nearest post the arc accepts. The card holds four of them, so the walk is the whole list.
+    const nearAnchor = (x, z, reach, st) => {
+      let best = null, bd = Infinity;
+      for (const p of this.postAt) {
+        const dx = p.x - x, dz = p.z - z;
+        if (!anchorFits(dx, dz, reach, st)) continue;
+        const d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; best = p; }
+      }
+      return best;
+    };
+    return { nearAnchor };
   }
   show(G, palette, groundColor, rngSeed = 3) {
     if (!this.renderer) {
@@ -1081,18 +1389,26 @@ export class Inspector {
     // steering in card units: the leash maps to the whole ground disc, and the animal turns less than on the planet,
     // so it walks long arcs instead of wheeling on the spot
     let s = rngSeed; const rng = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    // The path scale and the posts come before the mover, because the mover asks the hooks for a
+    // hold in the units the path scale sets. Slinger, issue 28.
+    this.pathScale = G.move.leash > 0 ? this.walkR / G.move.leash : 0;
+    this.buildPosts(G, palette, rngSeed);
     // The card runs the same two models the planet runs, and it picks between them on G.move.mode.
     // The card has no terrain, so the impulse mover gets no slope hook and takes its plain throw.
     this.mover = makeAnyMover(rng, G, G.move, this.hooks());
     this.mover.leash = G.move.leash * 0.8; // no per-creature leash jitter on the card; the wide arcs of the pull home still fit the disc
     this.mover.turn = G.move.turn * 0.5;
-    this.pathScale = G.move.leash > 0 ? this.walkR / G.move.leash : 0;
     // time factor: every species crosses the card at about 1.2 units per second, whatever its planet speed
     this.timeK = G.move.speed > 0 ? clamp(1.2 / (G.move.speed * this.pathScale), 0.5, 2.5) : 1;
     // The tightest circle it walks, in the units the mover runs in: a body and a half of the card,
     // divided back through the path scale. The card is where the reader watches the walk closest,
     // so the same rule holds here as on the ground.
     this.mover.turnR = this.pathScale > 0 ? (this.fit * 1.5) / this.pathScale : 0;
+    // One creature unit, in the units the mover runs in: the card draws the creature at `fit` card
+    // units and the mover runs pathScale card units to one of its own. The frame of the card turns
+    // to the left of the heading, as the ground does, so the hand is +1. Slinger, issue 28.
+    this.mover.unit = this.pathScale > 0 ? this.fit / this.pathScale : 1;
+    this.mover.hand = 1;
     // the gait clock, in card units: the card scales the creature by `fit` and its own time factor
     this.gait = gaitLocked(G) && this.pathScale > 0 ? makeGait(G, this.fit / this.pathScale, this.mover.speed, geo.userData.hipY) : null;
     this.trailPts = [];
@@ -1153,6 +1469,14 @@ export class Inspector {
       a[2] = mv.turnN;
       a[3] = mv.burst || 0;
       at.aAnim.needsUpdate = true;
+      // The hold the tendon is on, in the frame of the instance. A species that holds nothing
+      // never writes here, so its three floats stay zero and its tendon, if it had one, would
+      // collapse onto its own pivot. Slinger, issue 28.
+      if (mv.holds) {
+        const an = at.aAnchor.array;
+        an[0] = mv.ax; an[1] = mv.ay; an[2] = mv.az;
+        at.aAnchor.needsUpdate = true;
+      }
     }
     this._q.setFromAxisAngle(_up, yaw);
     this._m.compose(this._p.set(x, this.hover, z), this._q, this._s.setScalar(this.fit));
