@@ -511,6 +511,38 @@ body toward home.
 | Globe | `app.js` reads `floraGrid`, which the worker builds once over the globe flora and returns with the world |
 | Card | `Inspector` grows three or four stub posts on its disc from `flora-geometry.js`. Only a slinger gets them; every other species keeps a bare disc |
 
+A tier may add a key of its own to the point it hands back. The ground adds `i`, the index of the
+plant, so `GroundFauna` can hold a claim on it; see "Impulse herds". A caller reads only the keys
+it knows.
+
+### Impulse herds
+
+An impulse group breaks the group model of the ground tier, because the whole point of these
+bodies is that each one waits, charges, and throws on its own clock. A herd that went off as one
+body would read as one animal drawn many times.
+
+- **Every member of an impulse group carries its own mover.** The anchor of such a group keeps a
+  plain wander mover, so the group still holds one range and still stops together. `g.mover.burst`
+  and `g.mover.anchor` are therefore meaningless on an impulse group: `_stepMember()` reads them
+  from `m.mover`.
+- **The formation holds by the aim, not by the ease.** A member swings the heading of its own mover
+  toward its slot while it waits and charges, harder the further out it stands, so the throw
+  carries it home. The ease of the wander model could not do this work: the `rest` of a monopod has
+  no length at all, and a roller covers no ground while it waits.
+- **`MEMBER_RUSH` does not apply in `fly`**: the throw sets the speed. The ease runs in `rest` only,
+  past a slack of the formation radius, and it is charged against `owed`, so a member that closes
+  on its slot does not thereby travel further than its cruise speed allows. A member lands past or
+  short of its slot and does not slide to it: over 21,879 throws the gap to the slot came out at a
+  median of 26.9 m, and only twice under half a metre.
+- **One plant carries one body.** Two slingers that stand close would otherwise hook the same
+  plant. `GroundFauna.claims` maps a plant index to the mover that holds it, `nearAnchor` skips a
+  plant another mover has claimed, and the claim goes when the throw ends. The map is site wide,
+  because two slingers of two groups can stand as close as two of one group.
+- Member movers draw from a stream of their own, `patchSeed + '|impulse-members'`, so the one
+  generator that builds every group and every member keeps its exact order and a wander species
+  lands on the same metre it landed on before.
+- `lag`, the chain of a serpent and a plough, is untouched. Neither is an impulse species.
+
 `anchorLocal()` turns a hold into `aAnchor`. The animal faces its own `+z` and its own `+x` is its
 left, so the offset turns by the heading, and `st.hand` carries the sign: the `(u, v)` plane of the
 globe and the `(x, z)` plane of the ground have opposite hands. `st.unit` is one creature unit in
@@ -690,10 +722,12 @@ faster than `turnCap()` allows, and `turnLean()` gives the lean.
 Two `InstancedMesh` per species, near and far. `Ground.update()` calls `GroundFauna.update()`,
 which walks the groups, then the members, and writes each member into the near mesh or the far one
 in the same step, so no matrix is written twice. On a site with 299 creatures the walk costs about
-0.10 ms. The gait clock, the measured speed, and the turn of each animal come out of the noise of
+0.10 ms, and about a third more on a site where every animal is an impulse animal, because each
+one then carries a mover of its own instead of one per group. The gait clock, the measured speed, and the turn of each animal come out of the noise of
 that measure: a site of 198 creatures costs 0.08 ms with them and 0.08 ms without them. At the 1,200 m ceiling all 299 are coarse, which takes 200,000 triangles out of the frame
 and about 1 ms off the graphics card. `window.__mw.ground.fauna` holds the live state: `count`,
-`nearCount`, `farCount`, `groups`, `members`, `kinds`, and `stepMs`. Each entry of `kinds` carries
+`nearCount`, `farCount`, `groups`, `members`, `kinds`, `claims`, and `stepMs`. A member of an
+impulse group carries `mover`; a member of a wander group carries null. Each entry of `kinds` carries
 `tris`, the triangle count of both builds, and the build logs the same numbers per species.
 
 ### The inspector on the ground
