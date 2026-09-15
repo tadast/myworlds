@@ -170,11 +170,18 @@ export class GroundFauna {
 
     // The hooks an impulse animal reads on the ground. The slope is the gradient of the terrain by
     // central difference over SLOPE_STEP metres, so it is a rise over a run, as on the globe.
+    // ---- roller (issue 28) ----
+    // The mover hands over its own offset from its home, because that is all it holds. Here the
+    // home is the anchor of the group, so the anchor point has to come back in: _load() writes it
+    // on the mover as ox and oz. Without it every group would read the slope at the landing site.
     this.hooks = {
-      slope: (x, z) => ({
-        gx: (this.heightAt(x + SLOPE_STEP, z) - this.heightAt(x - SLOPE_STEP, z)) / (2 * SLOPE_STEP),
-        gz: (this.heightAt(x, z + SLOPE_STEP) - this.heightAt(x, z - SLOPE_STEP)) / (2 * SLOPE_STEP),
-      }),
+      slope: (x, z, st) => {
+        const ax = x + ((st && st.ox) || 0), az = z + ((st && st.oz) || 0);
+        return {
+          gx: (this.heightAt(ax + SLOPE_STEP, az) - this.heightAt(ax - SLOPE_STEP, az)) / (2 * SLOPE_STEP),
+          gz: (this.heightAt(ax, az + SLOPE_STEP) - this.heightAt(ax, az - SLOPE_STEP)) / (2 * SLOPE_STEP),
+        };
+      },
     };
 
     const patch = result && result.patch;
@@ -265,6 +272,10 @@ export class GroundFauna {
       // The mover of this group: the steady wander, or the impulse model that charges and throws.
       // G.move.mode picks between them, and nothing here tests the locomotion.
       const st = makeAnyMover(rng, G, mv, this.hooks);
+      // ---- roller (issue 28) ----
+      // The anchor of this group, so the slope hook can turn the offset of the mover into a point
+      // on the patch. See the hooks in the constructor.
+      st.ox = gs[o]; st.oz = gs[o + 1];
       const g = {
         G, entry, flies, mover: st, phase: gs[o + 5],
         x0: gs[o], z0: gs[o + 1], x: gs[o], z: gs[o + 1],

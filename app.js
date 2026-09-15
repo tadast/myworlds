@@ -1077,7 +1077,13 @@ function updateMovers(t, dt) {
     const act = mv.flies ? 1 : moverActivity(mv);
     const a = at.aAnim.array, o = mv.j * 4;
     if (!mv.flies) a[o] = act;                 // legs only swing while it walks
-    if (mv.gait) a[o + 1] = stepGait(mv.gait, mv.spd, act, dt);
+    // ---- roller (issue 28) ----
+    // The gait clock reads the ground the animal really covered, and not the speed the wander
+    // asked for. An impulse animal covers the whole of its ground in one throw, so the two are not
+    // one number: a ball driven by the wander speed would turn while it stood still. A wander
+    // species covers its speed times the step, so the measure gives it what it had before, and a
+    // step the water branch took back gives no ground at all.
+    if (mv.gait) a[o + 1] = stepGait(mv.gait, Math.hypot(mv.u - pu, mv.v - pv) / dt, act, dt);
     a[o + 2] = mv.turnN;             // turnN already falls to zero as the animal slows
     if (mv.impulse) a[o + 3] = mv.burst;
     dirty.add(mv.inst);
