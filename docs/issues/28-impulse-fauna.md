@@ -111,13 +111,33 @@ numbers in `MOVE` keep their meaning.
 
 ### Instance attributes
 
-| Attribute | Floats | Writer | Reader |
-|---|---|---|---|
-| `aBurst` | 1 | the impulse mover, every frame, on impulse species only | `CARRY.HOP`, `CARRY.ROLL`, `CARRY.FLOW`, `CARRY.SLING` |
-| `aAnchor` | 3 | the impulse mover, at launch, on the slinger only | `RIG.TENDON` |
+**Changed by P1, 2026-09-15.** A creature program already used all 16 attribute slots the hardware
+promises, and `aBurst` and `aAnchor` as two more would have overflowed it. The four dynamic floats
+now travel in one `vec4`:
 
-Wander species set both once to 0 and never update them. Both go on every fauna mesh, including
-the coarse mesh and the card mesh, so one material serves all.
+| Attribute | Floats | Holds | Writer |
+|---|---|---|---|
+| `aAnim` | 4 | `[aMove, aGait, aTurn, aBurst]` | the mover, every frame |
+| `aAnchor` | 3 | the point the tendon holds, in the frame of the instance | the impulse mover, at launch, on the slinger only |
+
+`aMove`, `aGait`, `aTurn`, and `aBurst` are no longer attributes. The shader reads them back by
+name from `aAnim` at the head of the rig block, so every line of `RIG_GLSL` still uses the old
+names. A caller that used to write `at.aMove.setX(j, v)` now writes `at.aAnim.array[j * 4] = v`.
+`aBurst` is index 3, and a wander species leaves it at 0 for the life of the mesh.
+
+Both attributes go on every fauna mesh, including the coarse mesh and the card mesh, so one
+material serves all. A program now uses 14 of the 16 slots.
+
+### The mover state, in the names the code uses
+
+The table above writes `x`, `z`, and `hd`. `makeMover()` calls them `u`, `v`, and `heading`, and
+the impulse mover keeps those names. The impulse fields are as the table says, plus `owed`: the
+ground the cruise speed has asked for and no throw has yet given. A throw pays the whole debt at
+once, so the ground covered over many throws is the ground the cruise asks for.
+
+`impulseBlocked(st)` ends a throw the caller refused, because a flight holds one heading and would
+otherwise drive the body into the same water for the rest of the throw. Both ground callers call it
+in their water and edge branch.
 
 ### New carriages and modes
 

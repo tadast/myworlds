@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
-import { BASE_SCALE, buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, makeGait, stepGait, gaitLocked, hopGait, hopBurst, Inspector } from './fauna.js';
+import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, activitySite } from './site.js';
 import { PlantInspector } from './flora-card.js';
@@ -308,8 +308,26 @@ function buildWorld(res) {
     }
   }
 
+// The step the globe reads a slope over, in globe units. The height map is 384 by 192, so one
+// texel is about 0.016 units of arc; a shorter step would read the same texel twice.
+const SLOPE_STEP = 0.02;
+
   // fauna (one instanced mesh per species, animated in the vertex shader, roaming on the CPU)
   const faunaMats = [], movers = [], faunaMeshes = [];
+  // The hooks an impulse animal reads on the globe. The slope is the gradient of the height map in
+  // the tangent frame of that one animal, by central difference over a step of SLOPE_STEP units.
+  // The gradient is a rise over a run, so it means the same thing here and on the ground.
+  const _sd = new THREE.Vector3();
+  const globeSlope = (x, z, st) => {
+    if (!heightMap) return null;
+    const h = (du, dv) => {
+      _sd.copy(st.n).addScaledVector(st.t1, x + du).addScaledVector(st.t2, z + dv).normalize();
+      return groundRadius(world, heightMap, _sd);
+    };
+    const e = SLOPE_STEP;
+    return { gx: (h(e, 0) - h(-e, 0)) / (2 * e), gz: (h(0, e) - h(0, -e)) / (2 * e) };
+  };
+  const globeHooks = { slope: globeSlope };
   if (world.faunaCount > 0 && fauna) {
     const kinds = new Map();
     for (let i = 0; i < world.faunaCount; i++) {
@@ -326,10 +344,12 @@ function buildWorld(res) {
       const phases = new Float32Array(list.length);
       list.forEach((i, j) => { phases[j] = fauna[i * 9 + 8]; });
       geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
-      geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(list.length).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
-      // the gait clock and the turn of each creature; updateMovers() writes both as it steers
-      geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1).setUsage(THREE.DynamicDrawUsage));
-      geo.setAttribute('aTurn', new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1).setUsage(THREE.DynamicDrawUsage));
+      // aAnim carries the four dynamic floats of one creature: the activity, the gait clock, the
+      // turn, and the burst of an impulse animal. updateMovers() writes all four as it steers.
+      const anim = new Float32Array(list.length * 4);
+      for (let j = 0; j < list.length; j++) anim[j * 4] = 1;
+      geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(anim, 4).setUsage(THREE.DynamicDrawUsage));
+      geo.setAttribute('aAnchor', new THREE.InstancedBufferAttribute(new Float32Array(list.length * 3), 3).setUsage(THREE.DynamicDrawUsage));
       const mat = faunaMaterial(G);
       faunaMats.push(mat);
       const inst = new THREE.InstancedMesh(geo, mat, list.length);
@@ -353,11 +373,12 @@ function buildWorld(res) {
           const t2 = new THREE.Vector3().crossVectors(nrm, t1).normalize();
           // The tightest circle it can walk, in globe units. A creature is about one unit long in
           // its own frame, so its scale is its length, and a body turns about a body and a half.
-          const st = makeMover(rng, { ...G.move, turnR: sc * (G.cls === 'air' ? 4 : 1.5) });
+          // The mover of this animal: the steady wander, or the impulse model that charges and
+          // throws. G.move.mode picks between them, and nothing else here tests the locomotion.
+          const st = makeAnyMover(rng, G, { ...G.move, turnR: sc * (G.cls === 'air' ? 4 : 1.5) }, globeHooks);
           st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
           // the gait clock: the leg cycle runs off the ground it covers, so its feet do not slide
           st.gait = gaitLocked(G) ? makeGait(G, sc, st.speed, geo.userData.hipY) : null;
-          if (G.loco === 'monopod') { st.hop = hopGait(G); st.phase = phases[j]; } // a hopper moves in bursts, in step with its shader hop
           const g0 = groundRadius(world, heightMap, nrm);
           st.hover = pos.length() - g0;
           st.dry = !world.seaRadius || g0 > world.seaRadius + 0.0005;
@@ -1033,12 +1054,14 @@ function updateMovers(t, dt) {
   const seaR = world.seaRadius || 0;
   for (const mv of movers) {
     const pu = mv.u, pv = mv.v;
-    stepMover(mv, t, dt, mv.hop ? hopBurst(mv.hop, t, mv.phase) : 1);
+    stepAny(mv, t, dt);
     _u.copy(mv.n).addScaledVector(mv.t1, mv.u).addScaledVector(mv.t2, mv.v).normalize();
     let ground = groundRadius(world, heightMap, _u);
     if (!mv.flies && mv.dry && ground < seaR + 0.0005) {
-      // water ahead: step back and turn around
+      // water ahead: step back and turn around. A throw in flight ends here, because it holds one
+      // heading and would drive the body into the same water for the rest of the throw.
       mv.u = pu; mv.v = pv; mv.heading += Math.PI * 0.75; mv.spd = 0;
+      impulseBlocked(mv);
       _u.copy(mv.n).addScaledVector(mv.t1, mv.u).addScaledVector(mv.t2, mv.v).normalize();
       ground = groundRadius(world, heightMap, _u);
     }
@@ -1052,15 +1075,17 @@ function updateMovers(t, dt) {
     mv.inst.setMatrixAt(mv.j, _m);
     const at = mv.inst.geometry.attributes;
     const act = mv.flies ? 1 : moverActivity(mv);
-    if (!mv.flies) at.aMove.setX(mv.j, act);   // legs only swing while it walks
-    if (mv.gait) at.aGait.setX(mv.j, stepGait(mv.gait, mv.spd, act, dt));
-    at.aTurn.setX(mv.j, mv.turnN);   // turnN already falls to zero as the animal slows
+    const a = at.aAnim.array, o = mv.j * 4;
+    if (!mv.flies) a[o] = act;                 // legs only swing while it walks
+    if (mv.gait) a[o + 1] = stepGait(mv.gait, mv.spd, act, dt);
+    a[o + 2] = mv.turnN;             // turnN already falls to zero as the animal slows
+    if (mv.impulse) a[o + 3] = mv.burst;
     dirty.add(mv.inst);
   }
   for (const inst of dirty) {
     const at = inst.geometry.attributes;
     inst.instanceMatrix.needsUpdate = true;
-    at.aMove.needsUpdate = true; at.aGait.needsUpdate = true; at.aTurn.needsUpdate = true;
+    at.aAnim.needsUpdate = true;
   }
 }
 // ---------------------------------------------------------------- worker / generation

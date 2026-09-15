@@ -82,20 +82,23 @@
   };
   // parts that a locomotion always has
   const ALWAYS = { sac: ['tendrils'], fins: ['flukes'], arch: ['mounds'], periscope: ['mounds'], plough: ['mounds'] };
-  // leash (world units), cruise speed, turn amplitude, pause habit, flies, casts a shadow
+  // leash (world units), cruise speed, turn amplitude, pause habit, flies, casts a shadow, and the
+  // steering model. `mode` says which mover carries the animal: 'wander' is the steady model every
+  // species ran before, and 'impulse' is the model that charges and lets go in one throw. The three
+  // callers of the mover read this field and nothing else. See docs/fauna.md, "The impulse mover".
   const MOVE = {
-    monopod: { leash: 0.03, speed: 0.012, turn: 1.6, pause: 0.5, flies: false, shadow: true },
-    biped: { leash: 0.03, speed: 0.011, turn: 1.4, pause: 0.55, flies: false, shadow: true },
-    tripod: { leash: 0.02, speed: 0.007, turn: 0.9, pause: 0.7, flies: false, shadow: true },
-    quad: { leash: 0.025, speed: 0.006, turn: 0.8, pause: 0.6, flies: false, shadow: true },
-    hexapod: { leash: 0.018, speed: 0.0035, turn: 1.0, pause: 0.4, flies: false, shadow: true },
-    serpent: { leash: 0.025, speed: 0.006, turn: 0.7, pause: 0.3, flies: false, shadow: true },
-    sac: { leash: 0.045, speed: 0.006, turn: 0.45, pause: 0, flies: true, shadow: true },
-    wings: { leash: 0.035, speed: 0.02, turn: 1.0, pause: 0, flies: true, shadow: false },
-    fins: { leash: 0.16, speed: 0.03, turn: 0.35, pause: 0, flies: true, shadow: true },
-    arch: { leash: 0, speed: 0, turn: 0, pause: 0, flies: false, shadow: true },
-    periscope: { leash: 0, speed: 0, turn: 0, pause: 0, flies: false, shadow: true },
-    plough: { leash: 0.012, speed: 0.002, turn: 1.0, pause: 0.5, flies: false, shadow: false },
+    monopod: { leash: 0.03, speed: 0.012, turn: 1.6, pause: 0.5, flies: false, shadow: true, mode: 'impulse' },
+    biped: { leash: 0.03, speed: 0.011, turn: 1.4, pause: 0.55, flies: false, shadow: true, mode: 'wander' },
+    tripod: { leash: 0.02, speed: 0.007, turn: 0.9, pause: 0.7, flies: false, shadow: true, mode: 'wander' },
+    quad: { leash: 0.025, speed: 0.006, turn: 0.8, pause: 0.6, flies: false, shadow: true, mode: 'wander' },
+    hexapod: { leash: 0.018, speed: 0.0035, turn: 1.0, pause: 0.4, flies: false, shadow: true, mode: 'wander' },
+    serpent: { leash: 0.025, speed: 0.006, turn: 0.7, pause: 0.3, flies: false, shadow: true, mode: 'wander' },
+    sac: { leash: 0.045, speed: 0.006, turn: 0.45, pause: 0, flies: true, shadow: true, mode: 'wander' },
+    wings: { leash: 0.035, speed: 0.02, turn: 1.0, pause: 0, flies: true, shadow: false, mode: 'wander' },
+    fins: { leash: 0.16, speed: 0.03, turn: 0.35, pause: 0, flies: true, shadow: true, mode: 'wander' },
+    arch: { leash: 0, speed: 0, turn: 0, pause: 0, flies: false, shadow: true, mode: 'wander' },
+    periscope: { leash: 0, speed: 0, turn: 0, pause: 0, flies: false, shadow: true, mode: 'wander' },
+    plough: { leash: 0.012, speed: 0.002, turn: 1.0, pause: 0.5, flies: false, shadow: false, mode: 'wander' },
   };
   // globe units. They follow the 30% cut in BASE_SCALE, so a flyer keeps the same gap in body lengths.
   const HOVER = { sac: 0.0098, wings: 0.014, fins: 0.021 };
@@ -174,7 +177,7 @@
       jointed: loco === 'quad' ? rng() < 0.7 : rng() < 0.75,
       gait: 1, flap: 1, slow: rr(rng, 0.8, 1.3),
       size: 1, hover: HOVER[loco] || 0,
-      move: { ...MOVE[loco] },
+      move: { ...MOVE[loco], loco },   // the mover reads `loco` to find the rule of an impulse throw
       density: DENSITY[cls] * rr(rng, 0.7, 1.3),
       fsign: rng() < 0.5 ? -1 : 1, fcut: rr(rng, -0.35, 0.05),
     };

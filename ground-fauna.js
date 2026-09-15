@@ -27,7 +27,7 @@
 //
 // Ground frame: x east, y up, z south. One unit is one metre.
 import * as THREE from 'three';
-import { buildCreature, faunaMaterial, makeMover, stepMover, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked, hopGait, hopBurst } from './fauna.js';
+import { buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked } from './fauna.js';
 
 export const LEASH = [60, 200];        // metres: how far a group roams from its anchor
 export const AIR_HOVER = [12, 40];     // metres above the ground for an air group
@@ -44,6 +44,7 @@ const TURN_RADIUS = 1.3;     // the tightest circle an animal can walk, in body 
 const TRAIL_LEN = 64;        // samples of the anchor path, for the species that follow it with a lag
 const TRAIL_STEP = 0.1;      // seconds between two samples of the path
 const WATER_MARGIN = 0.5;    // metres above sea level a walker keeps
+const SLOPE_STEP = 4;        // metres: the run an impulse animal reads its slope over
 // ---------------------------------------------------------------- the flyer, issue 17
 // A walker has the ground, a plant, and its own herd beside it, so the reader reads its size from
 // them. A flyer hangs in an empty sky 100 m away and it is the one thing up there the reader looks
@@ -167,6 +168,15 @@ export class GroundFauna {
     this._night = night || 0;
     this._pxPerM = 0;
 
+    // The hooks an impulse animal reads on the ground. The slope is the gradient of the terrain by
+    // central difference over SLOPE_STEP metres, so it is a rise over a run, as on the globe.
+    this.hooks = {
+      slope: (x, z) => ({
+        gx: (this.heightAt(x + SLOPE_STEP, z) - this.heightAt(x - SLOPE_STEP, z)) / (2 * SLOPE_STEP),
+        gz: (this.heightAt(x, z + SLOPE_STEP) - this.heightAt(x, z - SLOPE_STEP)) / (2 * SLOPE_STEP),
+      }),
+    };
+
     const patch = result && result.patch;
     const gs = result && result.groups, ms = result && result.members;
     this.limit = (patch ? patch.size : 1500) / 2 - 30;
@@ -181,10 +191,12 @@ export class GroundFauna {
   // One instanced mesh with room for every member of a species. The walk sets count every frame.
   _mesh(geo, mat, n, casts) {
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1).setUsage(THREE.DynamicDrawUsage));
-    // the gait clock and the turn of each animal; the walk writes both every frame
-    geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute('aTurn', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
+    // aAnim carries the four dynamic floats of one animal: the activity, the gait clock, the turn,
+    // and the burst of an impulse animal. The walk writes all four every frame.
+    const anim = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) anim[i * 4] = 1;
+    geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(anim, 4).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aAnchor', new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
     const inst = new THREE.InstancedMesh(geo, mat, n);
     inst.frustumCulled = false;     // the animals move every frame, so the bounding sphere is stale
     inst.castShadow = casts;
@@ -250,7 +262,9 @@ export class GroundFauna {
       if (!entry) { this.groups.push(null); continue; }
       const flies = G.cls === 'air';
       const mv = groundMove(G);
-      const st = makeMover(rng, mv);
+      // The mover of this group: the steady wander, or the impulse model that charges and throws.
+      // G.move.mode picks between them, and nothing here tests the locomotion.
+      const st = makeAnyMover(rng, G, mv, this.hooks);
       const g = {
         G, entry, flies, mover: st, phase: gs[o + 5],
         x0: gs[o], z0: gs[o + 1], x: gs[o], z: gs[o + 1],
@@ -262,7 +276,6 @@ export class GroundFauna {
         trail: new Float32Array(TRAIL_LEN * 3), ti: 0, tAcc: 0, n: 0,
       };
       g.lagSteps = Math.max(1, Math.round((g.spread / Math.max(mv.speed, 0.3)) / TRAIL_STEP / Math.max(gs[o + 3], 2)));
-      if (G.loco === 'monopod') g.hop = hopGait(G);   // a hopper covers ground only while it is in the air
       for (let k = 0; k < TRAIL_LEN; k++) { g.trail[k * 3] = g.x; g.trail[k * 3 + 1] = g.z; g.trail[k * 3 + 2] = g.heading; }
       this.groups.push(g);
     }
@@ -391,12 +404,8 @@ export class GroundFauna {
       near += e.nearN; far += e.farN;
       e.near.instanceMatrix.needsUpdate = true;
       e.far.instanceMatrix.needsUpdate = true;
-      e.near.geometry.attributes.aMove.needsUpdate = true;
-      e.far.geometry.attributes.aMove.needsUpdate = true;
-      e.near.geometry.attributes.aGait.needsUpdate = true;
-      e.far.geometry.attributes.aGait.needsUpdate = true;
-      e.near.geometry.attributes.aTurn.needsUpdate = true;
-      e.far.geometry.attributes.aTurn.needsUpdate = true;
+      e.near.geometry.attributes.aAnim.needsUpdate = true;
+      e.far.geometry.attributes.aAnim.needsUpdate = true;
       // the phase of an animal only moves when the animal changes its slot, which is rare
       if (e.phaseDirty) {
         e.near.geometry.attributes.aPhase.needsUpdate = true;
@@ -419,14 +428,17 @@ export class GroundFauna {
   _stepGroup(g, t, dt) {
     const st = g.mover;
     const pu = st.u, pv = st.v;
-    stepMover(st, t, dt, g.hop ? hopBurst(g.hop, t, g.phase) : 1);
+    stepAny(st, t, dt);
     let x = g.x0 + st.u, z = g.z0 + st.v;
     const lim = this.limit;
     // a walker turns away from the water and from the edge of the patch; a flyer only from the edge
     const blocked = Math.abs(x) > lim || Math.abs(z) > lim
       || (!g.flies && this.heightAt(x, z) < WATER_MARGIN);
     if (blocked) {
+      // A throw in flight ends here too: it holds one heading, so it would drive the body into the
+      // same water or the same edge for the rest of the throw.
       st.u = pu; st.v = pv; st.heading += Math.PI * 0.75; st.spd = 0;
+      impulseBlocked(st);
       x = g.x0 + st.u; z = g.z0 + st.v;
     }
     g.x = x; g.z = z; g.heading = st.heading;
@@ -544,9 +556,11 @@ export class GroundFauna {
     }
     inst.setMatrixAt(slot, _mat);
     const at = inst.geometry.attributes;
-    at.aMove.setX(slot, act);
-    at.aGait.setX(slot, m.gait ? m.gait.phase : 0);
-    at.aTurn.setX(slot, m.turn);
+    const a = at.aAnim.array, ao = slot * 4;
+    a[ao] = act;
+    a[ao + 1] = m.gait ? m.gait.phase : 0;
+    a[ao + 2] = m.turn;
+    a[ao + 3] = g.mover.burst || 0;
     // The shadow of a flyer comes last. It writes the same basis and the same matrix this step
     // used, so it must run after the animal takes its own copy of them.
     if (m.shade >= 0 && this.shade) this._stepShade(m, nx, nz, lift);

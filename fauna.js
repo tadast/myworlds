@@ -9,10 +9,11 @@ import * as THREE from 'three';
 
 export const BASE_SCALE = 0.0077; // 30% smaller than the first pass, so the globe reads as a miniature
 
-// part modes
-const RIG = { NONE: 0, LEG: 1, WING: 2, SWAY: 3, PULSE: 4, NOD: 5, SPIN: 6, STATIC: 7, FLUKE: 8 };
-// whole-body carriages
-const CARRY = { WALK: 0, HOP: 1, WAVE: 2, FLOAT: 3, ARCH: 4, RISE: 5 };
+// part modes. TENDON stretches one part from its pivot to aAnchor; the slinger hooks a plant with it.
+const RIG = { NONE: 0, LEG: 1, WING: 2, SWAY: 3, PULSE: 4, NOD: 5, SPIN: 6, STATIC: 7, FLUKE: 8, TENDON: 9 };
+// Whole-body carriages. HOP, ROLL, FLOW, and SLING are the four impulse carriages: each one reads
+// aBurst, which the impulse mover writes, so the body and the steering cannot drift apart.
+const CARRY = { WALK: 0, HOP: 1, WAVE: 2, FLOAT: 3, ARCH: 4, RISE: 5, ROLL: 6, FLOW: 7, SLING: 8 };
 
 // ---------------------------------------------------------------- geometry helpers
 const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
@@ -533,6 +534,10 @@ export function buildCreature(G, pal, flora, detail = 'full') {
 // ---------------------------------------------------------------- the rig shader
 // Part modes move a part relative to its pivot; the carriage then moves the whole body.
 const RIG_GLSL = `
+  // The four dynamic per-instance floats travel in one vec4. A creature program already sat at the
+  // 16 attribute slots the hardware promises, and aBurst and aAnchor would have overflowed it, so
+  // the four ride together and the shader reads them back by name here.
+  float aMove = aAnim.x, aGait = aAnim.y, aTurn = aAnim.z, aBurst = aAnim.w;
   float mode = aRig.x, ph = aRig.y + aPhase * 7.0, amp = aRig.z, w = aRig.w;
   // The gait clock. LOCK species read aGait, which the steering advances by the ground the animal
   // covers, so a foot on the ground cannot slide. Everything else runs off a fixed rate.
@@ -631,10 +636,13 @@ const RIG_GLSL = `
     // a hop: a crouch on the ground (HOPG of the cycle), then a parabola of height HOPH set by the gravity.
     // The spring leg follows the body up to EXT, then the foot leaves the ground.
     // Any movement gives a full hop; the spring extends by EXT at take-off, then tucks under the body at the apex.
-    float hp = fract(gb / 6.2832), act = smoothstep(0.0, 0.3, mv), yb, stx;
-    if (hp < HOPG) { yb = -CROUCH * sin(hp / HOPG * 3.1416) * act; stx = yb; }
+    // aBurst is the clock now: the impulse mover writes it, so the crouch and the parabola always
+    // land on the ground the steering covers. It runs 0 to CHARGE through the crouch and CHARGE to
+    // 1 through the flight, and it holds at 0 while the animal stands still.
+    float hp = aBurst, act = smoothstep(0.0, 0.3, mv), yb, stx;
+    if (hp < CHARGE) { yb = -CROUCH * sin(hp / CHARGE * 3.1416) * act; stx = yb; }
     else {
-      float a = (hp - HOPG) / (1.0 - HOPG), arc = sin(a * 3.1416);
+      float a = (hp - CHARGE) / (1.0 - CHARGE), arc = sin(a * 3.1416);
       yb = HOPH * 4.0 * a * (1.0 - a) * act;
       stx = min(yb, EXT) - (EXT + CROUCH * 0.6) * arc * arc * act;
     }
@@ -663,18 +671,6 @@ const RIG_GLSL = `
 
 // the hop rate of a monopod: quick short hops in high gravity, slow long ones in low gravity
 export const hopGait = (G) => G.gait * clamp(Math.sqrt(G.gravity || 1), 0.6, 1.6);
-// speed factor for a hopper at real time t: it covers ground in the air and not on the ground. The mean is 1.
-export function hopBurst(gait, t, phase) {
-  const hp = ((t * gait + phase * 7) / (2 * Math.PI)) % 1;
-  const air = clamp((hp - HOP_GROUND) / HOP_RAMP, 0, 1) * clamp((1 - hp) / HOP_RAMP, 0, 1);
-  // The foot is on the ground for HOP_GROUND of the cycle and has to hold its place, so the animal
-  // covers all of its ground in the air. The two ramps each give half of their width, so the mean
-  // of `air` over one cycle is the width of the air window less one ramp. Dividing by it keeps the
-  // mean of the burst at 1, and the cruise speed of the species holds.
-  return air / (1 - HOP_GROUND - HOP_RAMP);
-}
-const HOP_GROUND = 0.4;   // the part of the hop cycle the foot spends on the ground
-const HOP_RAMP = 0.06;    // how quickly the foot loads and unloads at the two ends of the flight
 
 // How many times the body rises in one gait cycle: once over every footfall. A quad in the lateral
 // sequence takes four steps a cycle, a biped two, an insect two, because its tripods alternate.
@@ -709,7 +705,7 @@ function rigConstants(G) {
     ['SKEW', legged ? 0.35 : 0], ['LEAN', LEAN_K[G.loco] ?? (legged ? 0.1 : 0)], ['ROLLY', rolly],
     ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
     ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
-    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['HOPG', HOP_GROUND], ['CROUCH', crouch], ['EXT', ext]]
+    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext]]
     .map(([k, v]) => `#define ${k} ${ints.has(k) ? v : fx(v)}\n`).join('');
 }
 
@@ -723,7 +719,7 @@ export function faunaMaterial(G) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\n${consts}uniform float uTime; attribute float aPhase; attribute float aMove; attribute float aGait; attribute float aTurn; attribute float glow; attribute vec4 aRig; attribute vec3 aPivot; attribute vec3 aPivot2; varying float vGlow;`)
+      .replace('#include <common>', `#include <common>\n${consts}uniform float uTime; attribute float aPhase; attribute vec4 aAnim; attribute vec3 aAnchor; attribute float glow; attribute vec4 aRig; attribute vec3 aPivot; attribute vec3 aPivot2; varying float vGlow;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\n vGlow = glow;\n{${RIG_GLSL}}`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vGlow;')
@@ -859,6 +855,161 @@ export function stepMover(st, t, dt, burst = 1) {
   st.v += Math.sin(st.heading) * st.spd * burst * dt;
   return st.spd > st.speed * 0.05;
 }
+// ---------------------------------------------------------------- the impulse mover
+// An impulse animal stores energy and lets it go in one throw. It picks a heading while it charges
+// and holds that heading through the whole discharge: it never turns in flight. The world is what
+// moves it, so the slope under it, the gravity, and whatever stands near it all shape the throw.
+//
+// One mover carries every impulse locomotion, and `aBurst` is the one number the shader reads: 0
+// at rest, 0 to CHARGE_END through the charge, CHARGE_END to 1 through the discharge. The mover
+// owns the timing, so it can wait for a slope, a plant, or the rest of its herd. The body and the
+// steering therefore cannot drift apart, which is what the old hop speed factor could not promise.
+//
+// The mean speed over one whole cycle equals the cruise speed of the species, so the leash and the
+// numbers in MOVE keep their meaning: the throw covers `range` of ground, and `range` is that
+// cruise speed times the length of the whole cycle, times whatever the terrain rule allows.
+export const CHARGE_END = 0.4;   // the part of aBurst the charge covers; the discharge takes the rest
+const BURST_RAMP = 0.1;          // the part of the flight the throw takes to load and to unload
+const REST_MOVING = 0.05;        // it charges only once it wants to travel at this part of its cruise
+const OWED_CAP = 2.5;            // the most ground one throw may bank, in whole cycles of the cruise
+// The speed through the flight, as a part of the mean. The two ramps hold the ends, so the body
+// does not jump from a stand to full speed, and each ramp gives half of its width, so the mean of
+// the profile over the whole flight is 1.
+function burstSpeed(q) {
+  return (clamp(q / BURST_RAMP, 0, 1) * clamp((1 - q) / BURST_RAMP, 0, 1)) / (1 - BURST_RAMP);
+}
+
+// One row per impulse locomotion. `rest` and `recover` are parts of the throw cycle the animal
+// spends waiting and settling. `ready(st)` says whether it may charge now, `hold(st)` gives the
+// part of its speed it covers while it waits and charges, and `launch(st, want)` gives the ground
+// the throw will cover, or 0 to refuse the throw and pick a new heading next time.
+//
+// A monopod has no rest and no recovery, so its hop reads exactly as it read before: a crouch of
+// CHARGE_END of the cycle, then a parabola. Each new locomotion adds its own row below.
+const IMPULSE = {
+  monopod: { rest: 0, recover: 0 },
+};
+const IMPULSE_DEFAULT = { rest: 0, recover: 0 };
+
+// The length of one throw of a species, in seconds.
+export function impulseCycle(G) {
+  if (G.loco === 'monopod') return TAU / hopGait(G);
+  return 2;
+}
+// The steering record an impulse mover needs, built from the genome and the move record of a tier.
+export function impulseMove(G, mv) {
+  return { ...mv, loco: G.loco, cycle: impulseCycle(G), gravity: G.gravity || 1 };
+}
+
+// hooks.slope(x, z, st)      -> { gx, gz }, the gradient of the ground, or null on a tier with none
+// hooks.nearAnchor(x, z, r)  -> { x, z } or null. Only the slinger reads it.
+export function makeImpulseMover(rng, mv, hooks = {}) {
+  const st = makeMover(rng, mv);
+  const rule = IMPULSE[mv.loco] || IMPULSE_DEFAULT;
+  st.impulse = true;
+  st.loco = mv.loco;
+  st.rule = rule;
+  st.hooks = hooks;
+  st.gravity = mv.gravity || 1;
+  st.cycle = mv.cycle > 0 ? mv.cycle : 2;
+  st.chargeT = st.cycle * CHARGE_END;
+  st.flyT = st.cycle * (1 - CHARGE_END);
+  st.restT = st.cycle * (rule.rest || 0);
+  st.recoverT = st.cycle * (rule.recover || 0);
+  st.total = st.chargeT + st.flyT + st.restT + st.recoverT;
+  st.phase = 'rest';
+  st.tPhase = 0;
+  st.burst = 0;
+  st.aim = st.heading;
+  st.range = 0;
+  st.anchor = null;
+  st.ax = 0; st.ay = 0; st.az = 0;      // aAnchor, in the frame of the instance
+  // A herd of them would go off as one body without this. Every member takes its own offset, so a
+  // herd of rollers reads as a burst of seeds. It is spent on the first throw and never returns.
+  // The offset comes from a phase the wander already drew, and not from a fresh draw: the three
+  // callers share one generator over every creature they build, so one more draw here would move
+  // every animal built after an impulse animal.
+  st.stagger = (st.pp / TAU) * st.total;
+  st.owed = 0;          // the ground the cruise has asked for and no throw has yet given
+  return st;
+}
+
+export function stepImpulse(st, t, dt) {
+  if (st.leash <= 0) return false;
+  st.tPhase += dt;
+  // The wander runs in every phase, so the speed keeps breathing, the pause habit still stops the
+  // animal, and the leash still knows where home is. It covers ground only where `hold` lets it.
+  const hold = st.phase === 'fly' ? 0 : (st.rule.hold ? st.rule.hold(st) : 0);
+  const hd = st.heading;
+  stepMover(st, t, dt, hold);
+  // The ground the wander asked for and the throw has not yet given. A throw pays the whole debt
+  // at once, so the ground covered over many cycles is the ground the cruise speed asks for, and
+  // the leash and the numbers in MOVE keep their meaning. A refused throw banks the debt instead.
+  st.owed = Math.min(st.owed + st.spd * (1 - hold) * dt, st.speed * st.total * OWED_CAP);
+
+  if (st.phase === 'rest') {
+    st.burst = 0;
+    const wait = st.restT + st.stagger;
+    const willing = st.spd > st.speed * REST_MOVING;
+    const ready = st.rule.ready ? st.rule.ready(st) : true;
+    if (st.tPhase >= wait && willing && ready) { st.stagger = 0; st.phase = 'charge'; st.tPhase = 0; }
+  } else if (st.phase === 'charge') {
+    st.burst = clamp(st.tPhase / st.chargeT, 0, 1) * CHARGE_END;
+    if (st.tPhase >= st.chargeT) {
+      // The heading is locked here, and it holds through the whole flight.
+      st.aim = st.heading;
+      st.range = st.rule.launch ? st.rule.launch(st, st.owed) : st.owed;
+      if (st.range > 0) { st.owed = 0; st.phase = 'fly'; st.tPhase = 0; }
+      // A refused throw drops it back to rest, where the wander picks a new heading. The debt
+      // stays on the books, so the next throw that goes carries the ground this one did not.
+      else { st.phase = 'rest'; st.tPhase = 0; st.burst = 0; }
+    }
+  } else if (st.phase === 'fly') {
+    const q = clamp(st.tPhase / st.flyT, 0, 1);
+    st.burst = CHARGE_END + q * (1 - CHARGE_END);
+    const v = (st.range / st.flyT) * burstSpeed(q);
+    st.u += Math.cos(st.aim) * v * dt;
+    st.v += Math.sin(st.aim) * v * dt;
+    st.heading = st.aim;      // it never turns in flight
+    st.rate = 0;
+    st.turnN = 0;
+    if (st.tPhase >= st.flyT) {
+      st.phase = st.recoverT > 0 ? 'recover' : 'rest';
+      st.tPhase = 0;
+      if (st.recoverT <= 0) st.burst = 0;
+    }
+  } else {
+    // recover: the body settles and the burst eases out of the shape the throw left it in
+    st.burst = 1 - clamp(st.tPhase / st.recoverT, 0, 1);
+    st.heading = hd;
+    st.rate = 0;
+    st.turnN = 0;
+    if (st.tPhase >= st.recoverT) { st.phase = 'rest'; st.tPhase = 0; st.burst = 0; }
+  }
+  return st.spd > st.speed * 0.05;
+}
+// The caller met water, or the edge of the patch, and put the animal back where it was. A throw
+// in flight has to end there: the flight holds one heading and would otherwise drive the body into
+// the same edge for the rest of the throw. The ground the throw had left to cover goes back on the
+// books, so the cruise speed of the species still holds over the next few throws.
+export function impulseBlocked(st) {
+  if (!st.impulse) return;
+  if (st.phase === 'fly') st.owed += st.range * (1 - clamp(st.tPhase / st.flyT, 0, 1));
+  st.phase = 'rest';
+  st.tPhase = 0;
+  st.burst = 0;
+}
+
+// One step of whichever model carries this animal. The three callers hold movers of both kinds in
+// one list, so they ask for the step and never test the mode again.
+export function stepAny(st, t, dt) {
+  return st.impulse ? stepImpulse(st, t, dt) : stepMover(st, t, dt);
+}
+// The mover of one animal, from its genome and the move record of the tier it lives on.
+export function makeAnyMover(rng, G, mv, hooks) {
+  return G.move.mode === 'impulse' ? makeImpulseMover(rng, impulseMove(G, mv), hooks) : makeMover(rng, mv);
+}
+
 // 0..1 activity for the rig: the amplitude of the leg swing. It holds at zero until the animal
 // really moves and reaches full swing at a third of the top speed, so a nearly still animal stands
 // on straight legs instead of shuffling. Below that the gait clock caps its own rate; see stepGait.
@@ -898,6 +1049,11 @@ export class Inspector {
     this.pathScale = 1; this.fit = 1;
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = new THREE.Vector3(); this._s = new THREE.Vector3();
   }
+  // The hooks the impulse mover reads on this tier. The card is a flat disc, so it has no slope.
+  // A locomotion that needs a real anchor grows its own posts here; see RIG.TENDON.
+  hooks() {
+    return {};
+  }
   show(G, palette, groundColor, rngSeed = 3) {
     if (!this.renderer) {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
@@ -909,10 +1065,10 @@ export class Inspector {
     this.species = G;
     if (this.mesh) { this.scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
     const geo = buildCreature(G, palette, palette.flora);
+    // aAnim carries the four dynamic floats: the activity, the gait clock, the turn, and the burst.
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
-    geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(new Float32Array([1]), 1));
-    geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
-    geo.setAttribute('aTurn', new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
+    geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(new Float32Array([1, 0, 0, 0]), 4));
+    geo.setAttribute('aAnchor', new THREE.InstancedBufferAttribute(new Float32Array([0, 0, 0]), 3));
     this.mesh = new THREE.InstancedMesh(geo, faunaMaterial(G), 1);
     this.mesh.castShadow = true; this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
@@ -925,7 +1081,9 @@ export class Inspector {
     // steering in card units: the leash maps to the whole ground disc, and the animal turns less than on the planet,
     // so it walks long arcs instead of wheeling on the spot
     let s = rngSeed; const rng = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-    this.mover = makeMover(rng, G.move);
+    // The card runs the same two models the planet runs, and it picks between them on G.move.mode.
+    // The card has no terrain, so the impulse mover gets no slope hook and takes its plain throw.
+    this.mover = makeAnyMover(rng, G, G.move, this.hooks());
     this.mover.leash = G.move.leash * 0.8; // no per-creature leash jitter on the card; the wide arcs of the pull home still fit the disc
     this.mover.turn = G.move.turn * 0.5;
     this.pathScale = G.move.leash > 0 ? this.walkR / G.move.leash : 0;
@@ -937,7 +1095,6 @@ export class Inspector {
     this.mover.turnR = this.pathScale > 0 ? (this.fit * 1.5) / this.pathScale : 0;
     // the gait clock, in card units: the card scales the creature by `fit` and its own time factor
     this.gait = gaitLocked(G) && this.pathScale > 0 ? makeGait(G, this.fit / this.pathScale, this.mover.speed, geo.userData.hipY) : null;
-    this.hop = G.loco === 'monopod' ? hopGait(G) : 0; // the hop clock runs on real time, like the shader
     this.trailPts = [];
     this.trail.geometry.attributes.position.array.fill(0);
     this.trail.geometry.attributes.position.needsUpdate = true;
@@ -977,7 +1134,7 @@ export class Inspector {
     let x = 0, z = 0, yaw = t * 0.4;
     if (mv.leash > 0) {
       // run the same steering as on the planet, with time scaled so the walk reads well on the card
-      stepMover(mv, t * this.timeK, dt * this.timeK, this.hop ? hopBurst(this.hop, t, 0) : 1);
+      stepAny(mv, t * this.timeK, dt * this.timeK);
       x = mv.u * this.pathScale; z = mv.v * this.pathScale;
       const rr = Math.hypot(x, z), rMax = this.groundR - 0.35;
       if (rr > rMax) { x *= rMax / rr; z *= rMax / rr; }
@@ -990,9 +1147,12 @@ export class Inspector {
       this.trail.geometry.attributes.position.needsUpdate = true;
       const at = this.mesh.geometry.attributes;
       const act = moverActivity(mv);
-      at.aMove.setX(0, act); at.aMove.needsUpdate = true;
-      if (this.gait) { at.aGait.setX(0, stepGait(this.gait, mv.spd, act, dt * this.timeK)); at.aGait.needsUpdate = true; }
-      at.aTurn.setX(0, mv.turnN); at.aTurn.needsUpdate = true;
+      const a = at.aAnim.array;
+      a[0] = act;
+      a[1] = this.gait ? stepGait(this.gait, mv.spd, act, dt * this.timeK) : 0;
+      a[2] = mv.turnN;
+      a[3] = mv.burst || 0;
+      at.aAnim.needsUpdate = true;
     }
     this._q.setFromAxisAngle(_up, yaw);
     this._m.compose(this._p.set(x, this.hover, z), this._q, this._s.setScalar(this.fit));
