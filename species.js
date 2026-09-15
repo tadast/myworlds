@@ -62,23 +62,35 @@
   };
 
   // ---------------------------------------------------------------- body catalogue
-  const LOCO = { land: ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent'], air: ['sac', 'wings', 'fins'], sub: ['arch', 'periscope', 'plough'] };
+  const LOCO = { land: ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent', 'flow'], air: ['sac', 'wings', 'fins'], sub: ['arch', 'periscope', 'plough'] };
   const PLAN = {
     monopod: ['blob', 'dome'], biped: ['blob', 'spindle'], tripod: ['blob'], quad: ['blob', 'dome', 'spindle'], hexapod: ['dome', 'chain'], serpent: ['chain'],
     sac: ['blob', 'disc'], wings: ['blob', 'spindle', 'swarm'], fins: ['spindle'],
     arch: ['chain'], periscope: ['chain'], plough: ['dome'],
+    // ---- flow (issue 28) ----
+    // A flow has no fixed body, so it has one plan. fauna.js builds it as a stack of rings and the
+    // carriage decides what the stack is at each moment.
+    flow: ['blob'],
   };
   const HEAD = {
     monopod: ['beak', 'stalks', 'crest', 'mandibles'], biped: ['mandibles', 'stalks', 'beak', 'crest'], tripod: ['lure', 'lure', 'mandibles', 'stalks'],
     quad: ['tusks', 'tusks', 'beak', 'stalks'], hexapod: ['mandibles', 'stalks', 'none', 'beak'], serpent: ['mandibles', 'none', 'lure', 'crest'],
     sac: ['none', 'none', 'lure', 'crest'], wings: ['beak', 'mandibles', 'crest', 'none'], fins: ['none', 'none', 'beak', 'crest'],
     arch: ['mandibles', 'none', 'stalks'], periscope: ['lure', 'stalks', 'beak', 'crest'], plough: ['tusks', 'mandibles', 'none'],
+    // ---- flow (issue 28) ----
+    // A jaw needs something to close on, and a flow has no fixed shape to hang one from. It carries
+    // a lantern, a pair of stalks, or nothing at all.
+    flow: ['none', 'none', 'stalks', 'lure'],
   };
   const EXTRAS = {
     monopod: ['tail', 'spikes', 'antennae', 'beads', 'sail'], biped: ['sail', 'spikes', 'beads', 'tail', 'antennae', 'tendrils'], tripod: ['beads', 'antennae', 'spikes'],
     quad: ['garden', 'plates', 'spikes', 'tail', 'beads', 'sail'], hexapod: ['plates', 'spikes', 'antennae', 'beads'], serpent: ['spikes', 'beads', 'sail', 'antennae'],
     sac: ['beads', 'tail'], wings: ['tail', 'beads', 'sail', 'tendrils', 'spikes'], fins: ['beads', 'spikes', 'sail', 'tendrils'],
     arch: ['beads', 'spikes', 'antennae'], periscope: ['beads', 'antennae', 'tendrils'], plough: ['spikes', 'plates', 'antennae'],
+    // ---- flow (issue 28) ----
+    // Only the two parts that survive a body with no shape: lamps in the skin, and a fringe of
+    // feelers round the foot. A spike or a plate would sit on a surface that is not there.
+    flow: ['beads', 'tendrils'],
   };
   // parts that a locomotion always has
   const ALWAYS = { sac: ['tendrils'], fins: ['flukes'], arch: ['mounds'], periscope: ['mounds'], plough: ['mounds'] };
@@ -99,6 +111,10 @@
     arch: { leash: 0, speed: 0, turn: 0, pause: 0, flies: false, shadow: true, mode: 'wander' },
     periscope: { leash: 0, speed: 0, turn: 0, pause: 0, flies: false, shadow: true, mode: 'wander' },
     plough: { leash: 0.012, speed: 0.002, turn: 1.0, pause: 0.5, flies: false, shadow: false, mode: 'wander' },
+    // ---- flow (issue 28) ----
+    // The slowest land body of the set. It covers its ground in one throw and waits between throws,
+    // so the speed here is the mean over a whole throw and not the speed of the throw itself.
+    flow: { leash: 0.016, speed: 0.005, turn: 0.7, pause: 0.35, flies: false, shadow: true, mode: 'impulse' },
   };
   // globe units. They follow the 30% cut in BASE_SCALE, so a flyer keeps the same gap in body lengths.
   const HOVER = { sac: 0.0098, wings: 0.014, fins: 0.021 };
@@ -114,6 +130,10 @@
     quad: { k: 2.6, axis: 'height' }, hexapod: { k: 2.2, axis: 'length' }, serpent: { k: 6, axis: 'length' },
     sac: { k: 1.6, axis: 'height' }, wings: { k: 2.4, axis: 'length' }, fins: { k: 17, axis: 'length', whole: true },
     arch: { k: 2.8, axis: 'length' }, periscope: { k: 2.4, axis: 'height' }, plough: { k: 3, axis: 'length' },
+    // ---- flow (issue 28) ----
+    // The number measures the blob it gathers into, which is the tallest shape it holds at rest.
+    // The slick and the column are what the carriage makes of that blob, so neither one sets it.
+    flow: { k: 2.4, axis: 'height' },
   };
   const SWARM_BODY = { k: 7, axis: 'length', whole: true }; // a swarm is measured across the whole wheel
 
@@ -138,6 +158,10 @@
     arch: [['solitary', 0.6], ['pair', 0.2], ['herd', 0.2]],
     periscope: [['solitary', 0.6], ['pair', 0.2], ['herd', 0.2]],
     plough: [['solitary', 0.6], ['pair', 0.2], ['herd', 0.2]],
+    // ---- flow (issue 28) ----
+    // Always alone. Two of them on one slope would run into each other and the reader would see
+    // one body, not two.
+    flow: [['solitary', 1.0]],
   };
 
   function rollSocial(rng, G) {
@@ -153,8 +177,40 @@
     return { kind, n, spread: n * bodyMetres(G).metres * 0.8 };
   }
 
-  function rollGenome(rng, type, niche, cls, usedLoco, hasFlora, forceLoco) {
-    const options = cls === 'air' && niche !== 'sea' && niche !== 'cloud' ? LOCO.air.filter((l) => l !== 'fins') : LOCO[cls]; // whales need open air
+  // ---------------------------------------------------------------- the locomotion gate
+  // A niche and a world can shut a locomotion out. The gate is a table rather than a branch inside
+  // rollGenome(), so each new locomotion adds one row and nothing else moves.
+  //
+  // A gate reads only facts that exist before the species roll: the niche, the world type, and the
+  // planet numbers rollPlanet() drew. It draws nothing of its own, so a species no gate touches
+  // keeps the numbers it drew before.
+  //
+  // ---- flow (issue 28) ----
+  // A flow needs a slope to run down and a body that stays loose, so it takes the four niches with
+  // soil under them, and only on a world where water is liquid. A molten world is the other case:
+  // there the body is hot rock instead, and the ash plain is the only niche such a world holds, so
+  // the lava variant rolls there and nowhere else. See the summary of P3 for that exception.
+  const FLOW_NICHES = new Set(['lowland', 'meadow', 'forest', 'beach']);
+  const flowFits = (niche, w) => (w.molten ? niche === 'ash' : w.waterliquid && FLOW_NICHES.has(niche));
+  const LOCO_GATE = {
+    flow: flowFits,     // ---- flow (issue 28) ----
+  };
+  // The options one roll may pick from. It never returns an empty list: a gate that shuts every
+  // option out is dropped, so a niche always has a body to fill it.
+  function locoOptions(options, niche, w) {
+    const out = options.filter((l) => !LOCO_GATE[l] || LOCO_GATE[l](niche, w));
+    return out.length ? out : options;
+  }
+  // The world facts a gate reads. The bands come from lore.js, so a gate and a lore line cannot
+  // disagree about what "molten" means.
+  function worldFacts(type, world) {
+    const tags = self.Lore.makeEnv((world && world.env) || { type }).tags;
+    return { type, waterliquid: tags.has('waterliquid'), molten: tags.has('molten') };
+  }
+
+  function rollGenome(rng, type, niche, cls, usedLoco, hasFlora, forceLoco, w) {
+    const byClass = cls === 'air' && niche !== 'sea' && niche !== 'cloud' ? LOCO.air.filter((l) => l !== 'fins') : LOCO[cls]; // whales need open air
+    const options = locoOptions(byClass, niche, w);
     let loco = forceLoco || pick(rng, options);
     for (let i = 0; i < 4 && !forceLoco && usedLoco.has(loco); i++) loco = pick(rng, options);
     usedLoco.add(loco);
@@ -186,6 +242,16 @@
     G.size = { monopod: rr(rng, 1.2, 1.6), biped: rr(rng, 1.3, 1.7), tripod: rr(rng, 1.3, 1.6), quad: rr(rng, 1.4, 1.8), hexapod: rr(rng, 1.1, 1.4), serpent: rr(rng, 1.3, 1.7),
       sac: rr(rng, 1.2, 1.5), wings: plan === 'swarm' ? rr(rng, 1.3, 1.6) : rr(rng, 1.0, 1.4), fins: type === 'gas' ? rr(rng, 2.6, 3.6) : rr(rng, 2.0, 2.5),
       arch: rr(rng, 1.4, 1.7), periscope: rr(rng, 1.3, 1.6), plough: rr(rng, 1.1, 1.4) }[loco];
+    // ---- flow (issue 28) ----
+    // The numbers of a flow are drawn here and not in the three tables above, because every entry
+    // of those tables is evaluated for every species. One more entry there would draw one more
+    // number for every animal of every world and move all of them. `rings` is how many open rings
+    // fauna.js stacks into the body; see flowBody() there.
+    if (loco === 'flow') {
+      G.gait = rr(rng, 0.5, 0.9);
+      G.size = rr(rng, 1.1, 1.5);
+      G.rings = 5 + Math.floor(rng() * 4);
+    }
     if (type === 'gas' && loco !== 'fins') G.size *= 1.5;
     if (loco === 'fins') { G.density = niche === 'cloud' ? 0.02 : 0.0025; G.fsign = 1; G.fcut = 0.3; }
     if (plan === 'swarm') G.move.shadow = false;
@@ -224,6 +290,10 @@
     serpent: ['ribbon', 'slither', 'coil'], sac: ['drifter', 'float', 'bell'], wings: ['flitter', 'darter', 'sailer'],
     fins: ['whale', 'sky whale', 'leviathan'], arch: ['worm', 'loop', 'bow'],
     periscope: ['watcher', 'reed', 'sentinel'], plough: ['keel', 'mole', 'furrow'],
+    // ---- flow (issue 28) ----
+    // None of the three may be the word "flow": the audit reads "the flow" as a claim that the
+    // world holds a lava flow, and a name has to be free of any claim about the world.
+    flow: ['slick', 'seep', 'pour'],
   };
   const ADJ = {
     sail: 'sail-backed', spikes: 'thorn-backed', beads: 'lamp-flanked', tendrils: 'tendril', garden: 'moss-backed', plates: 'shell', tail: 'long-tailed',
@@ -258,6 +328,7 @@
   const GENUS = {
     monopod: 'Saltator', biped: 'Velatrix', tripod: 'Tripus', quad: 'Gravipes', hexapod: 'Sexipes', serpent: 'Serpula', sac: 'Aerocyst', wings: 'Volucris',
     fins: 'Cetus', arch: 'Lumbricus', periscope: 'Speculator', plough: 'Fossor',
+    flow: 'Defluxus',   // ---- flow (issue 28) ----
   };
   const EPITHET = {
     sail: 'velifer', spikes: 'spinosus', beads: 'lucifer', tendrils: 'filamentosus', garden: 'hortulanus', plates: 'loricatus', tail: 'caudatus', flukes: 'bifurcus',
@@ -290,6 +361,12 @@
   const solo = (c) => c.G.social.kind === 'solitary';
   const grouped = (c) => c.G.social.kind !== 'solitary';
   const herded = (c) => c.G.social.kind === 'herd';
+  // ---- impulse fauna (issue 28) ----
+  // An impulse animal banks its travel and lets it go in one throw. `bursts` is the gate a line
+  // about that throw carries, and all four impulse locomotions pass it. `flows` is the one body
+  // that has no shape of its own.
+  const bursts = (c) => c.G.move.mode === 'impulse';
+  const flows = (c) => c.G.loco === 'flow';
   const ORIGIN = {
     monopod: pool([
       'It has one leg and no need for a second. The whole body is a spring, and it lands where it looks.',
@@ -374,6 +451,20 @@
       'It pushes a mound of {ground} ahead of it as it goes and eats what the mound turns up.',
       'It has no eyes. The whole skin reads pressure, and pressure is all it has ever needed.',
       { t: 'It works the thin warm layer under the frozen crust and never breaks through to the air.', tags: 'frozen' },
+    ]),
+    // ---- flow (issue 28) ----
+    // Every line here has to hold for both variants, or carry the gate that separates them. The
+    // molten line names heat and never the damp, and the damp lines carry the tag that grants it.
+    flow: pool([
+      'It holds no shape of its own. It lets the one it has go, spreads to a sheet a few paces across, and runs the fall of the {ground} until the fall runs out.',
+      'It gathers at the foot of every slope it comes down, holds there for a moment, and throws the whole of itself back up the rise in one column.',
+      'It reads the fall of the {ground} through the whole of its underside. On a slope it is quick, and on the flat it barely goes anywhere at all.',
+      { t: 'Nothing holds it together but the damp it carries. On dry {ground} it would set where it stands, and it never lets that happen.', tags: 'waterliquid' },
+      // The lava variant. The weight is high, so a molten world nearly always opens with the line
+      // that names the heat rather than with one of the three plain lines above.
+      { t: 'It is a body of rock that has never cooled. At {temp} it keeps the heat it was born with, and it runs on the fall of the {ground} the same way anything else here does.', tags: 'molten', w: 4 },
+      { t: 'At {grav} one throw carries it clear over the rise it gathered under, and it lands looking for the next one.', tags: 'lowgrav' },
+      { t: 'At {grav} it gathers for a long time and goes up very little. Most of a day is the gathering.', tags: 'highgrav' },
     ]),
   };
   const SWARM_ORIGIN = pool([
@@ -541,6 +632,15 @@
       'It will abandon good feeding over a sound it cannot place, and it does that most days.',
       { t: 'It works the open ground only in the dark, and in the light it is somewhere you cannot see it.', tags: 'longday|moonlit' },
     ]),
+    // ---- flow (issue 28) ----
+    // The manner of a flow is the throw itself, so it has a pool of its own. Two lines carry no
+    // gate, because every world the coverage sweep reaches must find one here.
+    pour: pool([
+      'It spends most of a day going down and the moment after it going up, and it ends the day within sight of where it began.',
+      'It spreads, runs the fall of the {ground}, gathers at the foot of it, and throws itself back up. Then it waits, and then it does it again.',
+      'It will not go down a fall it cannot come back up. It has been watched turning aside from good feeding for that reason alone.',
+      { t: 'It works one slope for a season and then crosses to the next one. Nobody has recorded what makes it choose.', tags: 'longday|shortday' },
+    ]),
   };
 
   // ---------------------------------------------------------------- story slot 4: the planet
@@ -582,6 +682,11 @@
     { t: 'The spores are in everything here. It breathes them from birth, and something of the {plant} grows in its gut that it cannot live without.', tags: 'fungal' },
     { t: 'It knows every standing {plant} in its range, and it knows which ones are worth the trip.', tags: 'woody|cactus' },
     { t: 'The air over {world} is thick and it holds the heat. It has never had to work to stay warm.', tags: 'gas' },
+    // ---- impulse fauna (issue 28) ----
+    // An impulse animal pays for its travel in one lump, so the weight of the world sets how far
+    // one throw takes it and how long it has to wait for the next one.
+    { t: 'At {grav} one throw carries it a long way, and it spends the rest of the day standing where the last one put it.', tags: 'lowgrav', if: bursts },
+    { t: 'At {grav} every throw is short, and it makes a great many of them to get anywhere at all.', tags: 'highgrav', if: bursts },
   ]);
 
   // ---------------------------------------------------------------- story slot 5: the sky
@@ -594,7 +699,10 @@
     { t: 'Two moons cross the sky of {world}. It breeds in the week the two rise together, and at no other time.', tags: 'twomoons' },
     { t: 'There are {moons} moons over {world}. The night light is never the same twice, and it has given up using light to tell the time.', tags: 'manymoons' },
     { t: '{moon} pulls the water up the shore and lets it down twice a day, and its whole life runs on that clock.', tags: 'tides' },
-    { t: 'The ring cuts the sky of {world} in half. It keeps to the shadow the ring throws, and it is moving by the time the shadow is.', tags: 'ringed' },
+    // The line has the animal move, so it needs the roams gate the other two mobility lines below
+    // carry. Without it the line reaches a burrower whose own sociality line says it never moves.
+    // The hole was here before issue 28; the new locomotion only changed which seed found it.
+    { t: 'The ring cuts the sky of {world} in half. It keeps to the shadow the ring throws, and it is moving by the time the shadow is.', tags: 'ringed', if: roams },
     { t: 'Ring light and {moon} together make a night here brighter than a dull day, and it feeds straight through.', tags: 'ringed moonlit' },
     { t: 'When the sky over {world} lights up it raises its head, and so does every other one, at the same moment.', tags: 'auroral' },
     { t: 'The ash out of the vents blanks the sun for days at a time. It goes quiet and waits that out.', tags: 'volcanic' },
@@ -655,6 +763,10 @@
     ]),
   };
   const TEMPER = { herd: 'Placid', ambush: 'Still, then sudden', strike: 'Still, then sudden', restless: 'Restless', patient: 'Patient', serene: 'Serene', tide: 'Unaware', buried: 'Unaware', armoured: 'Indifferent', wary: 'Wary' };
+  // ---- flow (issue 28) ----
+  // The manner word of the flow. It goes on its own line, so a second new locomotion adds a second
+  // line and neither one rewrites the row above.
+  TEMPER.pour = 'Unhurried';
 
   // ---------------------------------------------------------------- diet
   // The head decides what it eats; the world decides what there is to eat. Every line is gated on
@@ -697,6 +809,11 @@
     { t: 'Frozen litter, and whatever is under the crust', if: (c) => noHeadFood(c) && c.G.cls === 'land', tags: 'woody|fungal subzero', w: 3, src: 'ground' },
     { t: 'Caps and the litter under them', if: (c) => noHeadFood(c) && c.G.cls === 'land', tags: 'fungal', w: 2, src: 'ground' },
     { t: 'Minerals licked from the rock', if: (c) => noHeadFood(c) && c.G.cls !== 'air', w: 1, src: 'ground' },
+    // ---- flow (issue 28) ----
+    // A flow takes its food off the ground it pours over. The line is gated on noHeadFood as the
+    // general ground lines are, so a flow that carries a lantern or a pair of stalks still feeds
+    // the way that head feeds, and one animal never sees two sources. See the diet rule above.
+    { t: 'Whatever the {ground} gives up as it pours over it', if: (c) => flows(c) && noHeadFood(c), w: 5, src: 'ground' },
   ]);
 
   // ---------------------------------------------------------------- sociality text
@@ -820,6 +937,10 @@
   // ---------------------------------------------------------------- assembly
   function habitKey(G) {
     const m = G.move;
+    // ---- flow (issue 28) ----
+    // A flow has one manner and it is the throw. Nothing about a pause or a turn rate can describe
+    // a body that spends half its time as a sheet on the ground.
+    if (G.loco === 'flow') return 'pour';
     if (G.loco === 'arch') return G.niche === 'beach' ? 'tide' : 'buried';
     if (G.loco === 'periscope' || G.loco === 'plough') return 'buried';
     if (G.loco === 'fins') return 'serene';
@@ -845,6 +966,10 @@
       case 'arch': return `${m} m exposed, far more below`;
       case 'periscope': return `${m} m of neck above the ${N.ground}`;
       case 'plough': return `${m} m, mostly under the ${N.ground}`;
+      // ---- flow (issue 28) ----
+      // The number measures the blob, which is the shape it holds between two throws. The slick is
+      // wider and the column is taller, and neither of them is the size of the animal.
+      case 'flow': return `${m} m gathered`;
       default: return `${m} m tall`;
     }
   }
@@ -993,6 +1118,9 @@
     const niches = W.niches.slice();
     const usedLoco = new Set();
     const list = [];
+    // The world facts the locomotion gate reads. They are drawn before this call, so the gate can
+    // test them; see worldFacts() and LOCO_GATE.
+    const w = worldFacts(type, world);
     for (let i = 0; i < W.count && niches.length; i++) {
       // keep the first two niches (the world's signature biomes), then pick the rest at random
       const niche = i < 2 ? niches.shift() : niches.splice(Math.floor(rng() * niches.length), 1)[0];
@@ -1001,9 +1129,13 @@
       if (type === 'gas') cls = 'air';
       if (i === 0 && type !== 'gas' && N.cls.includes('land')) cls = 'land'; // every world with ground gets at least one walker
       const force = type === 'gas' && i === 0 ? 'fins' : null; // a gas giant always has a whale
-      const G = rollGenome(rng, type, niche, cls, usedLoco, !!P.floraColor, force);
+      const G = rollGenome(rng, type, niche, cls, usedLoco, !!P.floraColor, force, w);
       G.id = i;
       G.colors = rollColors(rng, P.faunaColor, i);
+      // ---- flow (issue 28) ----
+      // The lava variant burns. It takes its glow from its own accent, so the slick it spreads on
+      // the charge reads as hot rock. It draws nothing: it renames a colour the roll already made.
+      if (G.loco === 'flow' && w.molten) G.colors.glow = G.colors.accent;
       list.push(G);
     }
     // The sociality rolls in a second pass, after every body exists, because a relation between

@@ -188,6 +188,24 @@ function legPlan(G, len) {
   return out;
 }
 
+// ---------------------------------------------------------------- flow (issue 28)
+// The body of a flow is a stack of open rings on one pivot at the ground point. It holds no shape
+// of its own: the carriage alone says whether the stack is a slick, a gathered blob, or a column.
+// The builder and rigConstants() both read the rest shape from flowBody(), so the geometry and the
+// shader cannot disagree about how tall the body stands.
+const FLOW_COARSE = 3;         // rings in a coarse build. The outline is a stack, not a ring count
+const FLOW_W = 2.8;            // how many body widths across the slick spreads
+const FLOW_H = 2.6;            // how many body heights tall the column stands
+const FLOW_SLICK = 0.16;       // the height of the slick, as a part of the rest height
+const FLOW_NARROW = 0.5;       // the width of the column, as a part of the rest width
+const FLOW_LEAD = 0.45;        // the part of the throw the foot of the stack runs behind the top
+function flowBody(G) {
+  return { n: G.rings || 6, h: G.bodyR * 1.7, r: G.bodyR };
+}
+// The radius of the stack at height u, 0 at the ground and 1 at the top: a drop sitting on the
+// ground, widest where it touches. The floor of 0.04 keeps the top ring a ring and not a point.
+const flowR = (r, u) => r * Math.sqrt(Math.max(0.04, 1 - u * u));
+
 // ---------------------------------------------------------------- creature geometry (base at y = 0, +y up, faces +z)
 // detail: 'full' for a creature the reader can walk up to, 'coarse' for one past the LOD distance.
 // A coarse creature is a dozen pixels tall, so it keeps the silhouette and the rig and drops
@@ -261,6 +279,23 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       B.secs.push({ z: 0, y: y - yc, r, s: [1, 1.1, 1] });
     }
     B.front = R * 0.5; B.back = -R * 0.5; B.top = R * 0.55; B.bot = -R * 0.55;
+  } else if (G.loco === 'flow') {
+    // ---- flow (issue 28) ----
+    // A stack of open rings, every one of them about the ground point. Nothing closes a ring, so
+    // the reader can see the body has no skin to hold, which is the strange thing about it. The cap
+    // at the top is the one closed piece: without it the reader looks straight down the stack.
+    // A coarse build keeps three rings; the outline of a stack does not need more at that size.
+    const F = flowBody(G), n = coarse ? FLOW_COARSE : F.n, sides = coarse ? 4 : 8;
+    yc = 0; B.secs = [];
+    for (let i = 0; i < n; i++) {
+      const u0 = i / n, u1 = (i + 1) / n, um = (u0 + u1) * 0.5;
+      const r0 = flowR(F.r, u0), r1 = flowR(F.r, u1), hr = F.h / n, rm = (r0 + r1) * 0.5;
+      // The rings overlap a little, so the slick shows no gap between them when it flattens.
+      P(cyl(r1, r0, hr * 1.08, sides, true), i % 2 ? accent : body, M4(0, um * F.h, 0), { glow: i % 2 ? 0.35 : 0.1 });
+      B.secs.push({ z: 0, y: um * F.h, r: rm, s: [1, (hr * 0.5) / rm, 1] });
+    }
+    P(ball(flowR(F.r, 1) * 1.15), body2, M4(0, F.h, 0, 1, 0.55, 1));
+    B.front = F.r * 0.5; B.back = -F.r * 0.5; B.top = F.h; B.bot = 0;
   } else if (coarse && G.plan === 'chain') {
     // A chain of seven balls is the widest body in the set. The coarse build joins the section
     // centres with tapered tubes instead: one tube per joint, and the two end tubes reach out by
@@ -339,7 +374,11 @@ export function buildCreature(G, pal, flora, detail = 'full') {
 
   // ---- head
   const headR = G.plan === 'chain' ? B.secs[0].r * 1.05 : clamp(R * 0.45, 0.06, 0.16);
-  const tall = G.loco === 'biped' || G.loco === 'monopod' || G.loco === 'tripod';
+  // A tall walker carries its head on a neck above the body. A flow carries its head on the top of
+  // the stack for the same reason, so the throw takes the head up the column with it. A flow with
+  // no head grows no neck: a bare stub above an empty stack reads as a fault. Issue 28.
+  const tall = G.loco === 'biped' || G.loco === 'monopod' || G.loco === 'tripod'
+    || (G.loco === 'flow' && G.head !== 'none');
   let H, neckBase;
   if (G.loco === 'periscope') { H = [0, yc + R * 0.9, R * 0.3]; neckBase = [0, yc, 0]; }
   else if (tall) {
@@ -460,6 +499,22 @@ export function buildCreature(G, pal, flora, detail = 'full') {
         break;
       }
       case 'tendrils': {
+        if (G.loco === 'flow') {
+          // ---- flow (issue 28) ----
+          // A fringe round the foot of the stack, and not the trailing pair a walker carries. The
+          // carriage scales the whole body about the ground point, so a feeler that reached a body
+          // length behind would be thrown that much further out again every time the slick spread.
+          const F = flowBody(G), r0 = flowR(R, 0.12) * 0.9, rl = R * 0.9;
+          for (let i = 0; i < 5; i++) {
+            const a = (i / 5) * Math.PI * 2 + 0.4;
+            const t0 = [Math.cos(a) * r0, F.h * 0.12, Math.sin(a) * r0];
+            const t1 = [Math.cos(a) * (r0 + rl), 0.012, Math.sin(a) * (r0 + rl)];
+            const s = seg(t0, t1, 0.01, body2, 0.014, 3);
+            P(s.geo, s.color, s.matrix, { rig: [RIG.SWAY, i, 0.1, 1], pivot: t0 });
+            P(ico(0.016), glow, M4(...t1), { glow: 0.8, rig: [RIG.SWAY, i, 0.1, 1], pivot: t0 });
+          }
+          break;
+        }
         if (air) {
           const n = G.loco === 'sac' ? 6 : 4, lenT = (G.loco === 'sac' ? 0.5 : 0.25) + R;
           for (let i = 0; i < n; i++) {
@@ -665,6 +720,36 @@ const RIG_GLSL = `
     transformed.x += 0.05 * sin(sb * 0.6) * clamp(transformed.y, 0.0, 1.0);
   #elif CARRY == 5
     transformed.y -= RISE * (1.0 - smoothstep(SINK, SINK + 0.4, sin(sb * 0.35)));
+  #elif CARRY == 7
+    // ---- flow (issue 28) ----
+    // A flow holds no shape of its own, so the carriage is the whole of its body. aBurst says what
+    // the stack is now: 0 is the gathered blob it rests as, the charge flattens it into a slick
+    // FLOWW widths across, CHARGE gathers it back, and the discharge throws it up into a column
+    // FLOWH tall and lets it fall again. Every part scales about the ground point, so the stack
+    // stays one body however far it spreads, and the head on top goes with it.
+    float fu = clamp(transformed.y / FLOWY, 0.0, 1.0);   // 0 at the ground, 1 at the top of the rest body
+    float spread = 0.0, sy = 1.0, sxz = 1.0;
+    if (aBurst <= CHARGE) {
+      // The slick holds through the middle of the charge, because that is the whole of the run down
+      // the fall line. It spreads at the head of the charge and gathers again at the end of it.
+      float q = aBurst / CHARGE;
+      spread = smoothstep(0.0, 0.3, q) * (1.0 - smoothstep(0.75, 1.0, q));
+      sy = mix(1.0, FLOWS, spread);
+      sxz = mix(1.0, FLOWW, spread);
+    } else {
+      // The throw. The top of the stack leads it by FLOWLEAD of the flight, so the column reads as
+      // one jet and not as a body scaled up, and every part is back where it started at the end.
+      float a = (aBurst - CHARGE) / (1.0 - CHARGE);
+      float lead = clamp(a * (1.0 + FLOWLEAD) - (1.0 - fu) * FLOWLEAD, 0.0, 1.0);
+      float jet = sin(lead * 3.1416);
+      sy = mix(1.0, FLOWH, jet);
+      sxz = mix(1.0, FLOWN, jet);
+    }
+    transformed.y *= sy;
+    transformed.xz *= sxz;
+    // The slick is the one moment the reader can pick the animal out of the grass from a distance,
+    // so it carries its glow at full while it is spread and gives it back as it gathers.
+    vGlow = max(vGlow, spread);
   #endif
   }
 `;
@@ -682,7 +767,12 @@ const ROCK_K = { biped: 0.15, tripod: 0.08, quad: 0.09, hexapod: 0.03 };
 const LEAN_K = { wings: 0.55, fins: 0.35, sac: 0.15 };
 
 function rigConstants(G) {
-  const carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? CARRY.WALK;
+  let carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? CARRY.WALK;
+  // ---- flow (issue 28) ---- a flow has no walk to fall back on; the carriage is its whole body
+  if (G.loco === 'flow') carry = CARRY.FLOW;
+  // The rest height of the ring stack. The shader divides by it to find where a vertex sits in the
+  // body, so the top of the stack can lead the throw. Every other carriage leaves it alone.
+  const flowY = G.loco === 'flow' ? flowBody(G).h : 1;
   const B = bodySections(G), len = B.front - B.back;
   const grav = G.gravity || 1;
   const gait = G.loco === 'monopod' ? hopGait(G) : G.gait;
@@ -705,7 +795,9 @@ function rigConstants(G) {
     ['SKEW', legged ? 0.35 : 0], ['LEAN', LEAN_K[G.loco] ?? (legged ? 0.1 : 0)], ['ROLLY', rolly],
     ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
     ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
-    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext]]
+    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext],
+    // ---- flow (issue 28) ---- the shape of the slick and of the column; see CARRY == 7
+    ['FLOWY', flowY], ['FLOWW', FLOW_W], ['FLOWH', FLOW_H], ['FLOWS', FLOW_SLICK], ['FLOWN', FLOW_NARROW], ['FLOWLEAD', FLOW_LEAD]]
     .map(([k, v]) => `#define ${k} ${ints.has(k) ? v : fx(v)}\n`).join('');
 }
 
@@ -886,14 +978,89 @@ function burstSpeed(q) {
 //
 // A monopod has no rest and no recovery, so its hop reads exactly as it read before: a crouch of
 // CHARGE_END of the cycle, then a parabola. Each new locomotion adds its own row below.
+//
+// ---- flow (issue 28) ---- the numbers of the flow row, and the three parts of its rule
+export const FLOW_UP = 1.2;            // the least a throw covers, as a multiple of the run down
+const FLOW_REST = 0.4;                 // the part of one throw it spends gathered and still
+const FLOW_CREEP = 0.1;                // the part of its speed it covers on flat ground
+const FLOW_GRAD = 2.5;                 // the gradient, rise over run, that gives it the whole of FLOW_RUN
+const FLOW_LEVEL = 0.02;               // under this gradient the ground is flat and the wander steers
+const FLOW_TURN = 3.0;                 // how quickly it swings onto the fall line, in radians a second
+const FLOW_MARGIN = 0.8;               // how much of the cap it really takes, so the bank never runs dry
+// The most of its speed the fall line may give the run down. The mover pays every throw out of the
+// ground the cruise banked, and every second the animal does not spend on the run banks some of
+// it, so the cap follows from the three parts of the throw. The run takes FLOW_CREEP of the speed
+// through the rest and up to FLOW_RUN through the charge, and the throw gets what is left of the
+// whole cycle. Set the throw to FLOW_UP times the run and this is the answer. Above it the run
+// would cover more than the throw can pay back, and the animal would work its way downhill.
+const FLOW_RUN = (FLOW_MARGIN * (1 + FLOW_REST - FLOW_REST * FLOW_CREEP * (1 + FLOW_UP)))
+  / (CHARGE_END * (1 + FLOW_UP));
+
 const IMPULSE = {
   monopod: { rest: 0, recover: 0 },
+  // ---- flow (issue 28) ----
+  // A flow has nothing to push against, so the ground under it is what moves it. It spreads into a
+  // slick and runs the fall line while it charges, then it gathers and throws itself back up the
+  // same rise. The throw always covers more ground than the run did, so the animal ends a little
+  // above where it started and never pours itself into the sea; FLOW_RUN is the cap that holds
+  // that. It takes no recovery: the column falls back inside the throw itself, and the long rest
+  // is where it settles. See CARRY == 7 for the body the same numbers shape.
+  flow: { rest: FLOW_REST, recover: 0, steer: flowSteer, hold: flowHold, launch: flowLaunch },
 };
 const IMPULSE_DEFAULT = { rest: 0, recover: 0 };
+
+// The gradient under the animal and the way the ground falls. The hook answers in the units of its
+// own tier, and a tier with no terrain under it, the inspector card, answers with nothing at all.
+function flowSlope(st) {
+  const g = st.hooks.slope && st.hooks.slope(st.u, st.v, st);
+  if (!g) { st.grad = 0; return null; }
+  st.grad = Math.hypot(g.gx, g.gz);
+  return g;
+}
+// It faces down the fall line while it waits and while it charges. stepMover() carries the animal
+// along st.heading and the wander is what picks that heading, so the heading is what has to point
+// downhill. On flat ground it leaves the heading alone and the wander and the leash work as usual.
+function flowSteer(st, dt) {
+  const g = flowSlope(st);
+  if (!g || st.grad < FLOW_LEVEL) return;
+  const down = Math.atan2(-g.gz, -g.gx);
+  st.heading += wrapAngle(down - st.heading) * Math.min(1, dt * FLOW_TURN);
+}
+// The part of its speed it covers while it waits and charges. A steep fall line carries it at
+// FLOW_RUN of the cruise, and flat ground gives it a creep. The cap is what matters: the mover pays
+// every throw out of the ground the cruise banked, so a run that took more than FLOW_RUN would
+// leave the throw shorter than the run, and the animal would work its way downhill throw by throw.
+function flowHold(st) {
+  if (st.phase === 'rest') return FLOW_CREEP;
+  if (st.phase !== 'charge') return 0;
+  return FLOW_CREEP + (FLOW_RUN - FLOW_CREEP) * clamp(st.grad * FLOW_GRAD, 0, 1);
+}
+// The throw goes up the rise the run came down. Past half of its leash it goes home instead: an
+// animal that only ever went up would climb out of its range and never come back, because the
+// ground it charges over always falls away from it. The range is the whole of the banked ground,
+// so the mean speed over many throws is the cruise speed the species carries.
+function flowLaunch(st, owed) {
+  const g = flowSlope(st);
+  let aim = g && st.grad >= FLOW_LEVEL ? Math.atan2(g.gz, g.gx) : st.heading;
+  const d = Math.hypot(st.u, st.v);
+  if (d > st.leash * 0.5) {
+    const home = Math.atan2(-st.v, -st.u);
+    aim += wrapAngle(home - aim) * clamp((d - st.leash * 0.5) / (st.leash * 0.5), 0, 1);
+  }
+  st.aim = aim;   // the mover reads st.aim after this call, so the rule sets the heading of the throw here
+  // A refusal costs nothing: the wander picks a new heading and the bank fills again. It only
+  // happens when a long charge down a steep fall line has already covered the ground the cruise
+  // asked for, and there is then nothing left for a throw to carry.
+  return Math.max(0, owed);
+}
 
 // The length of one throw of a species, in seconds.
 export function impulseCycle(G) {
   if (G.loco === 'monopod') return TAU / hopGait(G);
+  // ---- flow (issue 28) ----
+  // A flow is slow. It needs a long charge to spread and run the fall line, and a long throw to
+  // rise, stand as a column, and fall back, so one whole throw runs several seconds.
+  if (G.loco === 'flow') return 5;
   return 2;
 }
 // The steering record an impulse mover needs, built from the genome and the move record of a tier.
@@ -937,6 +1104,12 @@ export function makeImpulseMover(rng, mv, hooks = {}) {
 export function stepImpulse(st, t, dt) {
   if (st.leash <= 0) return false;
   st.tPhase += dt;
+  // ---- flow (issue 28) ----
+  // An optional hook on the rule, called while the animal waits and while it charges. stepMover()
+  // carries the animal along st.heading, and the wander is what picks that heading, so a rule whose
+  // charge has to follow the ground sets the heading here, before the step. A rule with no steer()
+  // is untouched, so the monopod, the roller, and the slinger read as they read before.
+  if (st.rule.steer && (st.phase === 'rest' || st.phase === 'charge')) st.rule.steer(st, dt);
   // The wander runs in every phase, so the speed keeps breathing, the pause habit still stops the
   // animal, and the leash still knows where home is. It covers ground only where `hold` lets it.
   const hold = st.phase === 'fly' ? 0 : (st.rule.hold ? st.rule.hold(st) : 0);
