@@ -188,6 +188,15 @@ export class GroundFauna {
     // binds no listener of its own: two listeners would open the card before the glide ran.
   }
 
+  // ---- flow (issue 28) ----
+  // The hooks of one group. A mover holds its place as an offset from the anchor of its group, and
+  // this.hooks reads the terrain at a point of the patch, so the offset goes back on the anchor
+  // here. Without it an impulse animal would read the slope at the origin of the patch and run the
+  // wrong way. One object per group, and every member of the group shares it.
+  _groupHooks(x0, z0) {
+    return { slope: (x, z) => this.hooks.slope(x0 + x, z0 + z) };
+  }
+
   // One instanced mesh with room for every member of a species. The walk sets count every frame.
   _mesh(geo, mat, n, casts) {
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
@@ -264,7 +273,7 @@ export class GroundFauna {
       const mv = groundMove(G);
       // The mover of this group: the steady wander, or the impulse model that charges and throws.
       // G.move.mode picks between them, and nothing here tests the locomotion.
-      const st = makeAnyMover(rng, G, mv, this.hooks);
+      const st = makeAnyMover(rng, G, mv, this._groupHooks(gs[o], gs[o + 1]));
       const g = {
         G, entry, flies, mover: st, phase: gs[o + 5],
         x0: gs[o], z0: gs[o + 1], x: gs[o], z: gs[o + 1],
