@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
-import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, Inspector } from './fauna.js';
+import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, activitySite } from './site.js';
 import { PlantInspector } from './flora-card.js';
@@ -222,7 +222,7 @@ function disposeWorld() {
 
 function buildWorld(res) {
   disposeWorld();
-  const { world, terrain, flora, clouds, fauna, heightMap } = res;
+  const { world, terrain, flora, clouds, fauna, heightMap, floraGrid } = res;
   const group = new THREE.Group();
   const planet = new THREE.Group();          // spins
   planet.rotation.z = world.tilt;
@@ -311,6 +311,15 @@ function buildWorld(res) {
 // The step the globe reads a slope over, in globe units. The height map is 384 by 192, so one
 // texel is about 0.016 units of arc; a shorter step would read the same texel twice.
 const SLOPE_STEP = 0.02;
+  // ---- slinger (issue 28) ----
+  // The height the cord takes hold at on a globe plant, in globe units. `baseScale` above is the
+  // scale the flora is drawn at and the seventh float of a flora row is its own size factor, so
+  // the two together give the height of that one plant. The tendon is under a pixel out here; the
+  // number is there so the cord leaves the body at the right slant, and no more.
+  const GLOBE_FLORA_SCALE = 0.0066;
+  const GLOBE_HOLD = 0.7;
+  // A plant more than this far round the curve of the planet is behind the horizon of the animal.
+  const GLOBE_FACING = 0.2;
 
   // fauna (one instanced mesh per species, animated in the vertex shader, roaming on the CPU)
   const faunaMats = [], movers = [], faunaMeshes = [];
@@ -327,7 +336,50 @@ const SLOPE_STEP = 0.02;
     const e = SLOPE_STEP;
     return { gx: (h(e, 0) - h(-e, 0)) / (2 * e), gz: (h(0, e) - h(0, -e)) / (2 * e) };
   };
-  const globeHooks = { slope: globeSlope };
+  // ---- slinger (issue 28) ----
+  // The nearest plant this animal can hold, in the tangent coordinates its own mover roams in.
+  // The mover reads (u, v) through normalize(n + t1 * u + t2 * v), so the way back from a plant on
+  // the sphere to those two numbers is the ratio below: the plant seen from the centre, over how
+  // far it lies round the curve. It reads only the cells of floraGrid the reach covers; see
+  // buildFloraGrid() in worker.js.
+  const _af = new THREE.Vector3();
+  const globeNearAnchor = (x, z, reach, st) => {
+    if (!floraGrid || !flora || !(reach > 0)) return null;
+    const W = floraGrid[0], H = floraGrid[1], n = floraGrid[2], head = 3;
+    if (!n) return null;
+    const idx = head + W * H + 1;
+    _af.copy(st.n).addScaledVector(st.t1, x).addScaledVector(st.t2, z).normalize();
+    const lat = Math.asin(Math.min(1, Math.max(-1, _af.y))), lon = Math.atan2(_af.z, _af.x);
+    const band = (a) => Math.min(H - 1, Math.max(0, Math.floor(((a + Math.PI / 2) / Math.PI) * H)));
+    const j0 = band(lat - reach), j1 = band(lat + reach);
+    // The rings of longitude close up toward a pole, so the reach covers more of them there. Over
+    // a pole it covers all of them, and the whole band is read.
+    const cl = Math.cos(lat);
+    const dlon = cl > 1e-3 ? Math.min(Math.PI, reach / cl) : Math.PI;
+    const ic = Math.floor(((lon + Math.PI) / (2 * Math.PI)) * W);
+    const iw = Math.min(W >> 1, Math.ceil((dlon / (2 * Math.PI)) * W) + 1);
+    let best = -1, bu = 0, bv = 0, bd = Infinity;
+    for (let j = j0; j <= j1; j++) {
+      for (let k = -iw; k <= iw; k++) {
+        const c = j * W + (((ic + k) % W) + W) % W;
+        for (let m = floraGrid[head + c]; m < floraGrid[head + c + 1]; m++) {
+          const o = floraGrid[idx + m] * 8;
+          const qx = flora[o + 3], qy = flora[o + 4], qz = flora[o + 5];
+          const dn = qx * st.n.x + qy * st.n.y + qz * st.n.z;
+          if (dn <= GLOBE_FACING) continue;
+          const u = (qx * st.t1.x + qy * st.t1.y + qz * st.t1.z) / dn;
+          const v = (qx * st.t2.x + qy * st.t2.y + qz * st.t2.z) / dn;
+          const dx = u - x, dz = v - z;
+          if (!anchorFits(dx, dz, reach, st)) continue;
+          const d = dx * dx + dz * dz;
+          if (d < bd) { bd = d; best = o; bu = u; bv = v; }
+        }
+      }
+    }
+    if (best < 0) return null;
+    return { x: bu, z: bv, y: GLOBE_FLORA_SCALE * flora[best + 6] * GLOBE_HOLD };
+  };
+  const globeHooks = { slope: globeSlope, nearAnchor: globeNearAnchor };
   if (world.faunaCount > 0 && fauna) {
     const kinds = new Map();
     for (let i = 0; i < world.faunaCount; i++) {
@@ -377,6 +429,13 @@ const SLOPE_STEP = 0.02;
           // throws. G.move.mode picks between them, and nothing else here tests the locomotion.
           const st = makeAnyMover(rng, G, { ...G.move, turnR: sc * (G.cls === 'air' ? 4 : 1.5) }, globeHooks);
           st.inst = inst; st.j = j; st.home = pos.clone(); st.n = nrm.clone(); st.t1 = t1; st.t2 = t2; st.sc = sc;
+          // What a mover that holds a point in the world needs of this tier. Its (u, v) are already
+          // the coordinates the globe hooks take, so the origin stays at zero. One creature unit is
+          // `sc` globe units. The hand is -1: the instance takes its left from n cross forward, and
+          // t1 cross t2 is n, so the (u, v) plane of the globe turns the other way from the (x, z)
+          // plane of the ground, which takes its up from +y. See slingerTrack(). Slinger, issue 28.
+          st.unit = sc;
+          st.hand = -1;
           // the gait clock: the leg cycle runs off the ground it covers, so its feet do not slide
           st.gait = gaitLocked(G) ? makeGait(G, sc, st.speed, geo.userData.hipY) : null;
           const g0 = groundRadius(world, heightMap, nrm);
@@ -1051,6 +1110,7 @@ function updateMovers(t, dt) {
   if (far && moverFrame % 4) return;
   if (far) dt *= 4;
   const dirty = new Set();
+  const anchored = new Set();   // the meshes whose tendon moved this frame. Slinger, issue 28.
   const seaR = world.seaRadius || 0;
   for (const mv of movers) {
     const pu = mv.u, pv = mv.v;
@@ -1086,6 +1146,13 @@ function updateMovers(t, dt) {
     if (mv.gait) a[o + 1] = stepGait(mv.gait, Math.hypot(mv.u - pu, mv.v - pv) / dt, act, dt);
     a[o + 2] = mv.turnN;             // turnN already falls to zero as the animal slows
     if (mv.impulse) a[o + 3] = mv.burst;
+    // The hold the tendon is on, in the frame of this instance. Only a species that holds a point
+    // in the world writes here; every other one leaves the three floats at zero. Slinger, issue 28.
+    if (mv.holds) {
+      const an = at.aAnchor.array, no = mv.j * 3;
+      an[no] = mv.ax; an[no + 1] = mv.ay; an[no + 2] = mv.az;
+      anchored.add(mv.inst);
+    }
     dirty.add(mv.inst);
   }
   for (const inst of dirty) {
@@ -1093,6 +1160,7 @@ function updateMovers(t, dt) {
     inst.instanceMatrix.needsUpdate = true;
     at.aAnim.needsUpdate = true;
   }
+  for (const inst of anchored) inst.geometry.attributes.aAnchor.needsUpdate = true;
 }
 // ---------------------------------------------------------------- worker / generation
 // One worker serves two jobs: the globe and the ground patch. Only one of them runs at a time,

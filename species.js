@@ -62,9 +62,9 @@
   };
 
   // ---------------------------------------------------------------- body catalogue
-  // A roller lives on any land niche, so it needs no gate of its own. A flow needs water or heat,
-  // and LOCO_GATE below holds that test.
-  const LOCO = { land: ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent', 'flow', 'roller'], air: ['sac', 'wings', 'fins'], sub: ['arch', 'periscope', 'plough'] };
+  // A roller lives on any land niche, so it needs no gate of its own. A flow needs water or heat
+  // and a slinger needs plants, and LOCO_GATE below holds both tests.
+  const LOCO = { land: ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent', 'flow', 'roller', 'slinger'], air: ['sac', 'wings', 'fins'], sub: ['arch', 'periscope', 'plough'] };
   const PLAN = {
     monopod: ['blob', 'dome'], biped: ['blob', 'spindle'], tripod: ['blob'], quad: ['blob', 'dome', 'spindle'], hexapod: ['dome', 'chain'], serpent: ['chain'],
     sac: ['blob', 'disc'], wings: ['blob', 'spindle', 'swarm'], fins: ['spindle'],
@@ -73,6 +73,7 @@
     // A flow has no fixed body, so it has one plan. fauna.js builds it as a stack of rings and the
     // carriage decides what the stack is at each moment.
     flow: ['blob'],
+    slinger: ['spindle', 'blob'],   // slinger (issue 28)
   };
   const HEAD = {
     monopod: ['beak', 'stalks', 'crest', 'mandibles'], biped: ['mandibles', 'stalks', 'beak', 'crest'], tripod: ['lure', 'lure', 'mandibles', 'stalks'],
@@ -83,6 +84,7 @@
     // A jaw needs something to close on, and a flow has no fixed shape to hang one from. It carries
     // a lantern, a pair of stalks, or nothing at all.
     flow: ['none', 'none', 'stalks', 'lure'],
+    slinger: ['beak', 'mandibles', 'stalks'],   // slinger (issue 28)
   };
   const EXTRAS = {
     monopod: ['tail', 'spikes', 'antennae', 'beads', 'sail'], biped: ['sail', 'spikes', 'beads', 'tail', 'antennae', 'tendrils'], tripod: ['beads', 'antennae', 'spikes'],
@@ -93,6 +95,7 @@
     // Only the two parts that survive a body with no shape: lamps in the skin, and a fringe of
     // feelers round the foot. A spike or a plate would sit on a surface that is not there.
     flow: ['beads', 'tendrils'],
+    slinger: ['tail', 'spikes', 'antennae'],   // slinger (issue 28)
   };
   // parts that a locomotion always has
   const ALWAYS = { sac: ['tendrils'], fins: ['flukes'], arch: ['mounds'], periscope: ['mounds'], plough: ['mounds'] };
@@ -125,6 +128,11 @@
     // The slowest land body of the set. It covers its ground in one throw and waits between throws,
     // so the speed here is the mean over a whole throw and not the speed of the throw itself.
     flow: { leash: 0.016, speed: 0.005, turn: 0.7, pause: 0.35, flies: false, shadow: true, mode: 'impulse' },
+    // slinger (issue 28). It covers its ground in one throw and crawls between throws, so the
+    // speed here is the mean of the two, as it is for every impulse row. The leash is wider than a
+    // walker of the same size takes, because one throw carries the body most of a leash: an animal
+    // that travels in leaps holds a wider range than one that steps.
+    slinger: { leash: 0.045, speed: 0.010, turn: 1.1, pause: 0.45, flies: false, shadow: true, mode: 'impulse' },
   };
   // ---- roller (issue 28) ----
   // It cruises at about the speed of a quad and it holds a range about as wide as a biped holds.
@@ -149,6 +157,10 @@
     // The number measures the blob it gathers into, which is the tallest shape it holds at rest.
     // The slick and the column are what the carriage makes of that blob, so neither one sets it.
     flow: { k: 2.4, axis: 'height' },
+    // slinger (issue 28). The measure is the body alone. The tendon reaches many body lengths when
+    // it holds a plant, and the builder therefore keeps it out of the extent the ground reads: it
+    // is one short stub that runs back into the hull, and the shader stretches it. See fauna.js.
+    slinger: { k: 2.4, axis: 'length' },
   };
   const SWARM_BODY = { k: 7, axis: 'length', whole: true }; // a swarm is measured across the whole wheel
   // ---- roller (issue 28) ----
@@ -181,6 +193,8 @@
     // Always alone. Two of them on one slope would run into each other and the reader would see
     // one body, not two.
     flow: [['solitary', 1.0]],
+    // slinger (issue 28). A hold carries one body, so a crowd of them would queue at every plant.
+    slinger: [['solitary', 0.6], ['pair', 0.4]],
   };
   // ---- roller (issue 28) ----
   // A throw is cheap to copy: one animal goes and the rest follow the same line, so a roller keeps
@@ -215,13 +229,19 @@
   // the lava variant rolls there and nowhere else. See the summary of P3 for that exception.
   const FLOW_NICHES = new Set(['lowland', 'meadow', 'forest', 'beach']);
   const flowFits = (niche, w) => (w.molten ? niche === 'ash' : w.waterliquid && FLOW_NICHES.has(niche));
+  // ---- slinger (issue 28) ----
+  // A slinger travels by hooking a plant and throwing itself past it, so it needs plants. On a
+  // world that grows none, or on ground that holds none, it could do nothing but crawl.
+  const SLINGER_NICHES = new Set(['forest', 'meadow', 'lowland']);
+  const slingerFits = (niche, w, hasFlora) => hasFlora && SLINGER_NICHES.has(niche);
   const LOCO_GATE = {
-    flow: flowFits,     // ---- flow (issue 28) ----
+    flow: flowFits,         // ---- flow (issue 28) ----
+    slinger: slingerFits,   // ---- slinger (issue 28) ----
   };
   // The options one roll may pick from. It never returns an empty list: a gate that shuts every
   // option out is dropped, so a niche always has a body to fill it.
-  function locoOptions(options, niche, w) {
-    const out = options.filter((l) => !LOCO_GATE[l] || LOCO_GATE[l](niche, w));
+  function locoOptions(options, niche, w, hasFlora) {
+    const out = options.filter((l) => !LOCO_GATE[l] || LOCO_GATE[l](niche, w, hasFlora));
     return out.length ? out : options;
   }
   // The world facts a gate reads. The bands come from lore.js, so a gate and a lore line cannot
@@ -233,7 +253,7 @@
 
   function rollGenome(rng, type, niche, cls, usedLoco, hasFlora, forceLoco, w) {
     const byClass = cls === 'air' && niche !== 'sea' && niche !== 'cloud' ? LOCO.air.filter((l) => l !== 'fins') : LOCO[cls]; // whales need open air
-    const options = locoOptions(byClass, niche, w);
+    const options = locoOptions(byClass, niche, w, hasFlora);
     let loco = forceLoco || pick(rng, options);
     for (let i = 0; i < 4 && !forceLoco && usedLoco.has(loco); i++) loco = pick(rng, options);
     usedLoco.add(loco);
@@ -286,6 +306,11 @@
       G.gait = rr(rng, 1.2, 1.8);
       G.size = rr(rng, 1.1, 1.5);
     }
+    // ---- slinger (issue 28) ----
+    // The size and the rhythm of a slinger are drawn here and not in the three tables above. Each
+    // of those is one object literal, so every entry in it draws from the generator for every
+    // species of every world, and one more entry would move every animal built after it.
+    if (loco === 'slinger') { G.size = rr(rng, 1.2, 1.6); G.gait = rr(rng, 1.0, 1.6); }
     if (type === 'gas' && loco !== 'fins') G.size *= 1.5;
     if (loco === 'fins') { G.density = niche === 'cloud' ? 0.02 : 0.0025; G.fsign = 1; G.fcut = 0.3; }
     if (plan === 'swarm') G.move.shadow = false;
@@ -328,6 +353,7 @@
     // None of the three may be the word "flow": the audit reads "the flow" as a claim that the
     // world holds a lava flow, and a name has to be free of any claim about the world.
     flow: ['slick', 'seep', 'pour'],
+    slinger: ['slinger', 'caster', 'grapnel'],   // slinger (issue 28)
   };
   // ---- roller (issue 28) ----
   NOUN.roller = ['roller', 'tumbler', 'wheel'];
@@ -365,6 +391,7 @@
     monopod: 'Saltator', biped: 'Velatrix', tripod: 'Tripus', quad: 'Gravipes', hexapod: 'Sexipes', serpent: 'Serpula', sac: 'Aerocyst', wings: 'Volucris',
     fins: 'Cetus', arch: 'Lumbricus', periscope: 'Speculator', plough: 'Fossor',
     flow: 'Defluxus',   // ---- flow (issue 28) ----
+    slinger: 'Tendrix',   // slinger (issue 28)
   };
   // ---- roller (issue 28) ----
   GENUS.roller = 'Volvator';
@@ -402,9 +429,11 @@
   // ---- impulse fauna (issue 28) ----
   // An impulse animal banks its travel and lets it go in one throw. `bursts` is the gate a line
   // about that throw carries. It reads the steering model and not the locomotion, so all four
-  // impulse locomotions pass it at once. `flows` is the one body that has no shape of its own.
+  // impulse locomotions pass it at once. `flows` is the one body that has no shape of its own,
+  // and `tethers` the one that throws a cord at a plant and swings past it.
   const bursts = (c) => !!c.G.move && c.G.move.mode === 'impulse';
   const flows = (c) => c.G.loco === 'flow';
+  const tethers = (c) => c.G.loco === 'slinger';
   const ORIGIN = {
     monopod: pool([
       'It has one leg and no need for a second. The whole body is a spring, and it lands where it looks.',
@@ -503,6 +532,15 @@
       { t: 'It is a body of rock that has never cooled. At {temp} it keeps the heat it was born with, and it runs on the fall of the {ground} the same way anything else here does.', tags: 'molten', w: 4 },
       { t: 'At {grav} one throw carries it clear over the rise it gathered under, and it lands looking for the next one.', tags: 'lowgrav' },
       { t: 'At {grav} it gathers for a long time and goes up very little. Most of a day is the gathering.', tags: 'highgrav' },
+    ]),
+    // ---- slinger (issue 28) ----
+    slinger: pool([
+      'It travels by throwing a cord ahead of itself. The cord takes hold, the body winds back against it, and lets go on the far side of the hold.',
+      'The cord is one fibre, grown at the head end. It sheds a worn one and grows the next while it crawls, so a crawling one is a mending one.',
+      { t: 'At {grav} one throw carries it further than a day of crawling, and it picks the next hold while it is still in the air.', tags: 'lowgrav' },
+      { t: 'At {grav} the cord takes the whole weight of the body at the turn. It throws short, low, and often.', tags: 'highgrav' },
+      { t: 'Where the standing growth is thin it can pass days without a throw, and it crawls the whole of it.', tags: 'sparseflora' },
+      { t: 'It works the {ground} where the growth stands thickest, and it has never had to cross open ground.', tags: 'flora' },
     ]),
   };
   // ---- roller (issue 28) ----
@@ -752,6 +790,9 @@
     { t: 'At {grav} every throw is short, and it makes a great many of them to get anywhere at all.', tags: 'highgrav', if: bursts },
     { t: 'At {grav} one throw carries it further than it meant to go, and it spends the next one coming back.', tags: 'lowgrav', if: bursts },
     { t: 'At {grav} it gets little for what it spends. It goes where the {ground} will do some of the work, and waits where it will not.', tags: 'highgrav', if: bursts },
+    // ---- impulse animals (issue 28) ----
+    { t: 'At {grav} one throw carries it further than an hour of creeping. It stores everything it takes in and spends it all at once.', tags: 'lowgrav', if: bursts },
+    { t: 'At {grav} a throw costs it everything it has. It lies still between two of them and has never been seen to hurry one.', tags: 'highgrav', if: bursts },
   ]);
 
   // ---------------------------------------------------------------- story slot 5: the sky
@@ -852,8 +893,14 @@
   // sources of food and the audit would call it.
   const rolls = (c) => c.G.loco === 'roller';
   const filters = (c) => c.G.cls === 'sub' && c.G.head !== 'lure' && !plated(c);
-  const byHead = (h) => (c) => c.G.head === h && !plated(c) && !filters(c) && !rolls(c);
-  const noHeadFood = (c) => !plated(c) && !filters(c) && !HEAD_FED.has(c.G.head) && !rolls(c);
+  // ---- slinger (issue 28) ----
+  // A slinger holds a plant to travel and it feeds on the plant it holds, whatever its head is,
+  // so its own lines take the whole pool and the head lines step aside. The test names the world
+  // as well as the body: where nothing grows there is nothing to hold and nothing to eat, so the
+  // head lines come back and no animal is left without a diet. A plated animal keeps the rock.
+  const onPlant = (c) => tethers(c) && c.tags.has('flora') && !plated(c);
+  const byHead = (h) => (c) => c.G.head === h && !plated(c) && !filters(c) && !rolls(c) && !onPlant(c);
+  const noHeadFood = (c) => !plated(c) && !filters(c) && !rolls(c) && !onPlant(c) && !HEAD_FED.has(c.G.head);
   // Every line carries the source its food comes from. All the lines that fit one animal must
   // name the same source: an animal has one diet, not a choice of four. tools/lore-audit checks it.
   const DIET = pool([
@@ -865,6 +912,12 @@
     { t: 'Sifts the frozen {ground}', if: filters, tags: 'frozen|subzero', w: 4, src: 'filter' },
     { t: 'Sifts the dry {ground}', if: filters, tags: 'dryworld|hot', w: 4, src: 'filter' },
     { t: 'Works the {ground} and takes what is in it', if: filters, w: 2, src: 'filter' },
+    // ---- slinger (issue 28) ----
+    { t: 'Bark, and the soft growth under it', if: onPlant, tags: 'woody', w: 6, src: 'plant' },
+    { t: 'Caps, worked from the stem it holds', if: onPlant, tags: 'fungal', w: 6, src: 'plant' },
+    { t: 'Pulp, opened past the spines', if: onPlant, tags: 'cactus', w: 6, src: 'plant' },
+    { t: 'Crystal buds, cracked off the {plant} it holds', if: onPlant, tags: 'crystalflora', w: 6, src: 'plant' },
+    { t: 'The standing growth it holds, taken where it lands', if: onPlant, w: 3, src: 'plant' },
     { t: 'Anything drawn to the light', if: byHead('lure'), w: 4, src: 'lure' },
     { t: 'Smaller flyers, taken on the wing', if: (c) => byHead('mandibles')(c) && c.G.cls === 'air', w: 4, src: 'prey' },
     { t: 'Small creatures, taken at dusk', if: (c) => byHead('mandibles')(c) && c.G.cls !== 'air', w: 4, src: 'prey' },
@@ -955,6 +1008,7 @@
     mound: { a: ['tunnels'], b: ['notburied'] },
     shelter: { a: [], b: ['mobile'] },
     mingle: { a: ['mobile'], b: ['mobile'] },
+    hook: { a: ['walks', 'mobile'], b: ['walks', 'mobile'] },   // slinger (issue 28)
   };
   const RELATIONS = [
     { key: 'hunt', w: 3,
@@ -1010,6 +1064,14 @@
       when: ({ a, b }) => a.social && b.social && a.social.kind === 'herd' && b.social.kind === 'herd' && !sameGround(a, b) && !still(a) && !still(b) && !flies(a) && !flies(b),
       t: 'Where its range meets the range of {other} the two herds move as one body, and split again at the edge of it.',
       mirror: 'Where its range meets the range of {other} the two herds mix, and every animal goes back to its own at the boundary.' },
+    // ---- slinger (issue 28) ----
+    // A slinger needs something rooted to hold. The garden on the back of another animal is rooted
+    // in everything but the ground, so it takes hold there and is carried off with the cord still
+    // on it. Both sides walk, so the pair really can meet. See RELATION_CONTRACT.hook.
+    { key: 'hook', w: 3,
+      when: ({ a, b }) => a.loco === 'slinger' && b.extras.includes('garden') && walks(a) && walks(b) && !still(b),
+      t: 'It takes hold of the garden on the back of {other} and throws itself off that, and the {ground} under the two of them is the only thing that stays still.',
+      mirror: 'The garden on its back is a hold for {others}, which take it, swing past, and are gone before it has felt the weight.' },
   ];
 
   // ---------------------------------------------------------------- assembly
@@ -1027,6 +1089,11 @@
     // It neither grazes nor waits to strike. It gathers, and then it spends the whole of it, so
     // the manner has to say that and the card can never read as a leg walk.
     if (G.loco === 'roller') return 'bursts';
+    // ---- slinger (issue 28) ----
+    // It spends nothing while it waits for a hold and everything on the throw, which is the manner
+    // the strike lines describe. One that turns more than its kind usually does crosses more ground
+    // between holds, and reads as restless. Neither pool needs a part the slinger may not have.
+    if (G.loco === 'slinger') return m.turn > 1.15 ? 'restless' : 'strike';
     if (m.turn > 2) return 'restless';
     if (G.head === 'lure' && m.pause >= 0.6) return 'ambush';
     if (G.head === 'mandibles' && m.pause >= 0.6) return 'strike';
@@ -1052,6 +1119,8 @@
       // The number measures the blob, which is the shape it holds between two throws. The slick is
       // wider and the column is taller, and neither of them is the size of the animal.
       case 'flow': return `${m} m gathered`;
+      // slinger (issue 28). The number is the body. The cord reaches many times that when it holds.
+      case 'slinger': return `${m} m of body, and the cord beyond it`;
       default: return `${m} m tall`;
     }
   }
