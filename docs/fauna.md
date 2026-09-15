@@ -77,9 +77,28 @@ A class says where the animal lives. A locomotion says how its body moves.
 
 | Class | Locomotions |
 |---|---|
-| `land` | `monopod`, `biped`, `tripod`, `quad`, `hexapod`, `serpent` |
+| `land` | `monopod`, `biped`, `tripod`, `quad`, `hexapod`, `serpent`, `roller`, `flow`, `slinger` |
 | `air` | `sac`, `wings`, `fins` |
 | `sub` | `arch`, `periscope`, `plough` |
+
+**Four of the land locomotions travel in bursts.** A `monopod`, a `roller`, a `flow`, and a
+`slinger` store the ground they owe and let it go in one throw. They are not a class of their own:
+`cls` stays `land`, and the group is a steering model, `G.move.mode === 'impulse'`. The lore names
+each body and never the group. See "The impulse mover".
+
+| Locomotion | Charge | Discharge | Terrain rule |
+|---|---|---|---|
+| `monopod` | Crouches on its one foot | Hops | None. It holds the heading it crouched on |
+| `roller` | Folds its legs and its head into its hull | Rolls ahead as a ball, spun by the ground it covers | Longer downhill, shorter uphill, and no launch up a rise over `ROLL_MAX_UP` |
+| `flow` | Lets go of its shape and runs downhill as a flat slick | Gathers, then jets uphill as a column, and lands as a body | Follows the fall line down and the rise line up |
+| `slinger` | Hooks a cord on a plant and hauls its body back | Lets go and flies a ballistic arc past the plant | Real plants only. It crawls when none is in reach |
+
+`LOCO_GATE` in `species.js` holds what a niche and a world must give a locomotion before the roll
+may pick it. A `flow` needs a slope with soil under it and liquid water, or a molten world, where
+it is a body of hot rock on the ash plain. A `slinger` needs `forest`, `meadow`, or `lowland` and
+a world that grows plants: with nothing to hook it could only ever crawl. A `roller` needs nothing,
+so it has no row. A gate reads only facts that exist before the roll, and it draws no number of its
+own, so a species no gate touches keeps the numbers it drew before.
 
 Rules that limit the roll:
 
@@ -191,6 +210,9 @@ Every predicate a line can carry is defined once, at the top of the lore section
 | `grounded` | `cls !== 'air'` | a line about the ground reaching a sac, which never lands |
 | `roams` | not a burrower other than a plough | a line that has the animal travel reaching one whose own sociality line says "None of them ever moves" |
 | `solo` / `grouped` / `herded` | the sociality gene | "alone" reaching a herd, "the others" reaching a solitary animal |
+| `bursts` | `G.move.mode === 'impulse'` | a line about a throw reaching a body that walks. It reads the steering model, so all four impulse locomotions pass it at once |
+| `flows` | `loco === 'flow'` | a line about a body with no shape reaching one that has a shape |
+| `tethers` | `loco === 'slinger'` | a line about a cord reaching a body that carries none |
 
 ### Relations
 
@@ -281,6 +303,7 @@ The rig record tells the shader what a part does. The modes are in `RIG`:
 | `SPIN` | 6 | Rotate about the pivot's vertical axis (swarm shards) |
 | `STATIC` | 7 | No motion at all. Used for mounds |
 | `FLUKE` | 8 | Pitch at the flap rate with a lag |
+| `TENDON` | 9 | Stretch one tube from `aPivot` to `aAnchor`, in the frame of the instance. The part collapses on to its pivot when `aAnchor` is the zero vector, so an animal with no hold shows no cord |
 
 ### Carriages
 
@@ -294,6 +317,9 @@ A carriage moves the whole body. `rigConstants(G)` picks it from the locomotion 
 | `FLOAT` | sac, wings, fins | Slow vertical drift, plus a heave on each wing beat (`HEAVE`) and a tail wave for fins. The whole body also banks into a turn by `LEAN` times `aTurn`, wings and all |
 | `ARCH` | arch | The loop rises and sinks in place |
 | `RISE` | periscope, plough | The body sinks below the ground on a slow cycle. `SINK` sets how often |
+| `ROLL` | roller | `aBurst` is the clock of the fold. The legs and the head fold to the hull over the charge, and the hull then drops `ROLLDROP` on to the ground and turns about the right axis of the animal by `aGait`. The recovery runs the same numbers backwards, so the unfold is the fold played in reverse. The hull is a body of revolution about that axis, so a ball that stops at any angle still stands right |
+| `FLOW` | flow | A stack of rings on one pivot at the ground point. The charge scales them down in y and out in xz into a slick `FLOWW` widths across, `CHARGE` gathers them back to the blob, and the discharge scales them up into a column `FLOWH` tall, the top ring leading. The slick holds its `glow` at full, so the reader can find a bright slick in the grass |
+| `SLING` | slinger | The charge hauls the body back along `-aim` by `SLINGB`, the discharge pitches it nose first along a ballistic arc of height `SLINGH`, which the gravity sets, and with no hold at all the body crawls low and slow. `RIG.TENDON` lays the cord from the nose to `aAnchor` |
 
 ### Shader
 
@@ -348,8 +374,16 @@ speed fall to zero and the ratio of the two is what sets the rate, so the cap is
 finite. The visible sweep there is under one percent of the full one, so no slide shows.
 
 A serpent has no legs, but its wave carries it along the ground, so it takes the same clock with a
-stride of half a body length. A monopod keeps the fixed clock: `hopBurst()` already gives it all of
-its ground while its foot is in the air, and it now gives it none while the foot is down.
+stride of half a body length. A roller has no swing at all, and one turn of its hull covers one
+circumference, so `strideUnits()` gives it `2 pi` times the radius of the hull and the ball cannot
+skid. A monopod keeps the fixed clock: its carriage reads `aBurst`, and the mover gives it all of
+its ground while its foot is in the air and none while the foot is down.
+
+**The clock reads the ground the animal really covered, and not the speed the wander asked for.**
+For a wander species the two are one number. For an impulse animal they are not: it covers the
+whole of its ground in one throw, so a ball driven by the wander speed would turn while it stood
+still. `updateMovers()` in `app.js` and `Inspector.loop()` both measure the step instead. A step
+the water branch took back gives no ground at all, which is right.
 
 A coarse creature keeps `COARSE_SWING` of the swing and the same clock, so its feet slide by half.
 That is deliberate: it only draws past the LOD distance, where a foot is under a pixel.
@@ -448,7 +482,45 @@ locomotion rule lives:
 | `launch(st, owed)` | the ground the throw covers, or 0 to refuse it and pick a new heading |
 
 `impulseCycle(G)` gives the seconds of one throw. A monopod takes `2 pi / hopGait(G)`, so its hop
-rate is the rate it always had.
+rate is the rate it always had. A roller and a slinger take a cycle the gravity sets, as the hop
+does. A flow takes five seconds: it needs a long charge to spread and run, and a long throw to
+rise, stand as a column, and fall back.
+
+A row may also carry `steer(st, dt)`, which runs while the animal waits and charges, and
+`track(st, dt)`, which runs at the end of every step. The flow steers its charge down the fall
+line with the first, because `stepMover()` carries the animal along `st.heading` and the wander is
+what picks that heading. The slinger keeps its hold in the frame of the instance with the second.
+A `launch()` may also write `st.aim`, and it then wins: the mover reads `st.aim` after the call.
+
+**`nearAnchor`.** A locomotion that needs a real point of the world asks for one:
+
+```js
+nearAnchor(x, z, reach, st) -> { x, z, y? } | null
+```
+
+`x` and `z` are a plain point of the tier, in its own units, and the mover adds its own origin
+(`st.ox`, `st.oz`) before it asks. Every tier tests its candidates with `anchorFits()`, so the
+three agree on what counts as a hold: inside the reach, and inside `ANCHOR_ARC` of the heading the
+body already faces. That arc is what keeps the leash, because the wander has already turned the
+body toward home.
+
+| Tier | Where the holds come from |
+|---|---|
+| Ground | `ground-fauna.js` buckets the `flora` array of the patch on a grid of 50 m. A plant under 1.2 m is ground cover and is left out; a landmark of issue 27 is an ordinary tall row |
+| Globe | `app.js` reads `floraGrid`, which the worker builds once over the globe flora and returns with the world |
+| Card | `Inspector` grows three or four stub posts on its disc from `flora-geometry.js`. Only a slinger gets them; every other species keeps a bare disc |
+
+`anchorLocal()` turns a hold into `aAnchor`. The animal faces its own `+z` and its own `+x` is its
+left, so the offset turns by the heading, and `st.hand` carries the sign: the `(u, v)` plane of the
+globe and the `(x, z)` plane of the ground have opposite hands. `st.unit` is one creature unit in
+the units of the tier, so the offset lands in the units the geometry is built in.
+
+**The throw may run ahead of the cruise speed.** The plant says how long a slinger's throw is, not
+the mover, so a throw can cover more ground than the cruise has yet asked for. The extra is
+borrowed into `st.over`, every step pays back as much of it as the wander has banked, and the
+animal may not charge again until the debt is clear. It crawls while it waits. That one rule is
+what holds the mean speed on any density of plants: a stand far apart makes both the waits and the
+throws long, and the mean of the two does not move.
 
 **A caller must call `impulseBlocked(st)` wherever it refuses a step.** A flight holds one heading,
 so an animal the caller pushed back out of the water would drive into the same water for the rest
@@ -640,7 +712,9 @@ holds none of it.
 - Add a line of lore: put it in the pool it belongs to, gate it on the tags it needs, and run `node tools/lore-audit/audit.mjs --seeds 200`. If the line leans on a fact of the world, add the word to `LEXICON` in the audit tool as well, so the next line that uses it is checked too.
 - Add a world fact: add the tag in `makeEnv()` in `lore.js`, the raw value in `world.env` in `worker.js`, and the axis to the grid in the audit tool.
 - Add a legged locomotion: add it to `LEG_SWING`, `LEG_DUTY`, `BOB_BEATS`, and `ROCK_K` in `fauna.js`, and give its legs a footfall order in `legPlan()`. Without an entry in `LEG_SWING` the gait clock does not lock and the feet slide.
-- Add an impulse locomotion: set `mode: 'impulse'` on its `MOVE` row, add its row to `IMPULSE` and its case to `impulseCycle()` in `fauna.js`, and give it a carriage that reads `aBurst`. Add every constant the carriage needs to `rigConstants()`, so they sit in the program key. Change no caller: the three of them read `G.move.mode` and nothing else.
+- Add an impulse locomotion: set `mode: 'impulse'` on its `MOVE` row, add its row to `IMPULSE`, its carriage to `IMPULSE_CARRY`, and its case to `impulseCycle()` in `fauna.js`, and write a carriage that reads `aBurst`. Push every constant the carriage needs on to the `rows` array in `rigConstants()`, so they sit in the program key. A niche or a world that must shut it out takes one row in `LOCO_GATE` in `species.js`. Change no caller: the three of them read `G.move.mode` and nothing else.
+- Add a locomotion of any kind: add it to `LOCOS` and `CLASSES` in `tools/lore-audit/audit.mjs` as well. Without those two rows the sweep never asks its pools a question and never runs a relation rule that names it.
+- Draw a number for one locomotion only: put the draw in a branch of its own in `rollGenome()`, and never as a row in one of the `{...}[loco]` tables there. Each of those tables is one object literal, so every entry in it draws from the generator for every species of every world, and one more row would move every animal of every seed.
 - Change how far a leg swings, or how long its foot stays down: the gait clock reads both, so the stride and the rate follow on their own. Check the new stride against the body size before you keep it.
 - Add a niche: add it to `NICHE` and `WORLD_NICHES` in `species.js`, and a test in `makeFauna()` in `worker.js`.
 - Test the worker without a browser: run `node tools/lore-audit/audit.mjs --seeds 200 --show 8`. It loads `worker.js` in Node with a fake `self` and reports every finding with an example world.
