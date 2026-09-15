@@ -354,4 +354,85 @@ found in 300 tries has a niche gate that is too tight; report it.
 
 ## What it built
 
-To be written by the manager at close.
+Closed 2026-09-15. Six packages, merged in the order the plan set, and verified in Chrome after
+every merge.
+
+### Seeds
+
+| Locomotion | Seed | What it shows |
+|---|---|---|
+| `roller` | `#s3@0.00,-45.00` | Ice world, "Lantern roller". Stands, folds, rolls, unfolds |
+| `roller`, a herd | `#herd-13@24.59,168.84` | A herd of 14 and 294 rollers on one patch. The worst case for the frame rate |
+| `flow` | `#gate-2@10.81,-143.19` | Terran, "Pale slick". 10 of 20 groups are the flow |
+| `flow`, the lava variant | `#gate-70@57.7,176.85` | Lava world, glow from the accent, heat lore |
+| `slinger` | `#s6@-25.00,-45.00` | Terran, "Beaked slinger". 15 groups |
+| `monopod` | `#Auralis@11.61,150.94` | The body that moved on to the new mover |
+
+### The numbers
+
+| Measure | Result |
+|---|---|
+| Monopod heading through a hop | 0 rad of drift over four flights, on the globe, the ground, and the card |
+| Monopod mean speed | +2 percent against the model before the change, over three runs of 18 s. Offline the two models agree to 0.4 percent |
+| Wander species | Every mover of every species byte identical against `main`, on the same URL |
+| Frame time, HIGH | 16.6 ms at 294 rollers, all of them impulse animals. 16.6 ms at 299 wander animals, before and after |
+| Frame time, LOW | 16.6 ms at 98 rollers |
+| `stepMs`, HIGH | 0.766 ms at 294 impulse animals, against 0.572 ms at 299 wander animals on `main`. The walk costs about a third more where every animal carries a mover of its own |
+| Roller, the roll | 5.6 s and 8.7 m per throw on the ground, against 1.2 s before. One turn of the hull covers 5.96 m of stride against a 6.11 m circumference: no skid |
+| Roller, the slope | A throw of 10 m becomes 5.2 m up a slope of 0.30 and 14.8 m down it. A rise over `ROLL_MAX_UP` is refused |
+| Flow, the leash | 10 groups over 60 s: the furthest reached 35 m of a leash of 72 to 120 m, and none went below 197 m of elevation |
+| Flow, throw over run | A floor of 1.27 against a target of 1.20, over gradients of 0.05 to 2.0 |
+| Slinger, the holds | 26 of 26 live holds on the ground were a real plant of the patch. Headless: 127 throws over 900 s, 106 distinct holds, none outside the field |
+| Slinger, no plant | With every plant out of reach it never leaves `rest` and crawls at `CRAWL` of its speed |
+| Herd stagger | A herd of 14 rollers spreads its first launches over 0.77 of a cycle. A live herd held four phases at once |
+| Herd, no slide | 21,879 throws: the gap to the slot came out at a median of 26.9 m, and only twice under half a metre |
+| One plant, one body | 0 frames where two movers held one plant. With the rule taken out, 1,954 frames of 36,000 on a thin stand |
+| Gate sweeps | 400 worlds: no flow on a dry world, none in a `dune`, `snow`, `sea`, or `cloud` niche. 300 worlds: no slinger on `dune`, `snow`, or `ash`, and none on a world with no flora |
+| `node tools/lore-audit/audit.mjs --seeds 200` | Clean after every merge |
+
+### The boxes that stayed open
+
+- **`window.__mw.ground.fauna.stepMs` stays under 0.15 ms on a site of 299 creatures.** It does
+  not, and it did not before this issue either: `main` measures 0.572 ms on this machine for 299
+  wander animals. The 0.10 ms in `docs/fauna.md` is a number from another machine. This issue adds
+  a third of that on a site where every animal is an impulse animal, because the herd rule of P5
+  asks for one mover per member instead of one per group. The frame rate holds at 60 fps on both
+  tiers, which is the check the README really states.
+
+### Decisions changed from the design session
+
+1. **The lava variant of the flow takes the `ash` niche.** Decision 9 forbids `ash`, but `molten`
+   is only reachable on a `lava` world, and `WORLD_NICHES.lava` holds `ash` alone. The two clauses
+   together make the lava variant unreachable. It is now allowed on `ash`, and only on a molten
+   world. Every other niche gate of decision 9 holds.
+2. **`FLOW_UP` is a floor, not a multiplier on the throw.** The mover pays every throw out of the
+   ground the cruise speed banked. A multiplier on top of that would make the species faster than
+   `MOVE` says it is. The ratio is held from the other end, by a cap on the run down.
+3. **The flow and the slinger take no recovery phase.** The recovery runs `aBurst` from 1 back to
+   0, which would play the column and then the slick backwards. Both settle inside the discharge
+   and wait in a long rest instead.
+4. **`aBurst` and `aAnchor` are not two attributes.** A creature program already used all 16
+   attribute slots the hardware promises. The four dynamic floats now travel in one `vec4`,
+   `aAnim`, and `aAnchor` rides beside it. See "Instance attributes" above.
+5. **A roller rolls five times as long as one throw cycle would give it.** Asked for by the reader
+   after the merge: a ball that stops after a second reads as a ball that fell over. An `IMPULSE`
+   row may now stretch its discharge alone, and a stretched throw takes a cap against the leash, so
+   the long roll fills a ground leash and stays short on the globe.
+
+### Found on the way, and fixed
+
+- A `SKY` line about a ring had the animal move and carried no `roams` gate, so it could reach a
+  burrower whose own sociality line says that none of them ever moves. The hole was there before
+  this issue; a new land locomotion only changed which seed found it.
+- `tools/lore-audit/audit.mjs` holds its own list of locomotions. Without a row there the sweep
+  never asks a pool of a new locomotion a question and never runs a relation rule against it. All
+  three new rows are added, and `docs/fauna.md` now says so in the checklist.
+- A row in one of the four `{...}[loco]` tables of `rollGenome()` draws a number for every species
+  of every world, not only for its own. All three packages found it. Each locomotion now draws its
+  numbers in a branch of its own.
+- A group mover holds its place as an offset from its anchor, so a hook that read `(u, v)` directly
+  sampled the landing site. The mover now carries its own origin, and every hook takes a plain
+  point of its tier.
+- The gait clock read the speed the wander asked for. An impulse animal covers the whole of its
+  ground in one throw, so a ball driven by that speed would turn while it stood still. The clock
+  now reads the ground the animal really covered.
