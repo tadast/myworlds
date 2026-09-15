@@ -8,6 +8,13 @@
 // mover, and each member follows its anchor. The anchor is not drawn. One animal of the group can
 // stop, but the group stops together, because every speed in the group comes from the one anchor.
 //
+// An impulse species breaks that rule, and issue 28 is why. A roller, a flow, a slinger, and a
+// monopod each store energy and let it go in one throw, and a throw is the animal itself. A herd
+// that took its throw from the one mover of the group would tuck, charge, and fly in one frame,
+// which reads as one body and not as eight. So every member of an impulse group carries a mover of
+// its own. The anchor keeps the plain wander: it carries the formation over the ground and it holds
+// the activity the whole group reads. See _stepBurst().
+//
 // Each animal keeps its own gait clock, and the clock runs off the ground the animal covers, not
 // off the wall clock. A foot on the ground then holds its place while the body passes over it, so
 // no animal skids. Each animal also keeps its own turn, so it leans into a curve, shortens the
@@ -27,7 +34,7 @@
 //
 // Ground frame: x east, y up, z south. One unit is one metre.
 import * as THREE from 'three';
-import { buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked, anchorFits, anchorLocal } from './fauna.js';
+import { buildCreature, faunaMaterial, makeMover, makeAnyMover, stepAny, impulseBlocked, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked, anchorFits, anchorLocal } from './fauna.js';
 
 export const LEASH = [60, 200];        // metres: how far a group roams from its anchor
 export const AIR_HOVER = [12, 40];     // metres above the ground for an air group
@@ -45,6 +52,13 @@ const TRAIL_LEN = 64;        // samples of the anchor path, for the species that
 const TRAIL_STEP = 0.1;      // seconds between two samples of the path
 const WATER_MARGIN = 0.5;    // metres above sea level a walker keeps
 const SLOPE_STEP = 4;        // metres: the run an impulse animal reads its slope over
+// ---------------------------------------------------------------- impulse herds (issue 28)
+// A member of an impulse group throws itself. The formation is then held by the aim of the throw
+// and not by a pull on the body: the animal picks the way to its slot while it charges, and where
+// the throw puts it down is where it stands. Two numbers say how loose that is.
+const MEMBER_SLACK = 0.55;   // the part of the formation radius a member may land off its slot
+const SLOT_TURN = 1.6;       // 1/s: how fast a member swings its aim toward its slot
+const MEMBER_CREEP = 0.25;   // the part of its cruise a member may shuffle at between two throws
 // ---------------------------------------------------------------- slinger (issue 28)
 // A slinger travels by holding a real plant, so the patch has to answer "what stands near here?"
 // several times a second. The plants of a patch number in the thousands, so they are sorted once
@@ -57,6 +71,7 @@ const ANCHOR_CELL = 50;      // metres: the grid the patch sorts its plants into
 const ANCHOR_MIN_H = 1.2;    // metres: shorter growth is ground cover, and holds nothing
 const ANCHOR_HOLD = 0.7;     // the part of the way up a plant the cord takes hold
 const _anc = [0, 0, 0];      // scratch: the hold of one animal, in the frame of its instance
+const _step = [0, 0, 0];     // scratch: the step of one impulse member, and the ground it covers
 // ---------------------------------------------------------------- the flyer, issue 17
 // A walker has the ground, a plant, and its own herd beside it, so the reader reads its size from
 // them. A flyer hangs in an empty sky 100 m away and it is the one thing up there the reader looks
@@ -188,7 +203,11 @@ function buildAnchorGrid(flora) {
 
 // The nearest hold to (x, z) that the arc of the animal accepts. It reads only the cells the reach
 // covers, so the cost is the plants of a few cells and not the plants of the patch.
-function nearAnchorIn(grid, x, z, reach, st) {
+//
+// `taken` maps a plant to the mover that holds it, and it may be null. A plant another mover holds
+// is skipped, because one plant carries one body: without the rule two slingers on a thin stand
+// pick the same plant and throw themselves through each other. Herds, issue 28.
+function nearAnchorIn(grid, x, z, reach, st, taken) {
   if (!grid.n || !(reach > 0)) return null;
   const i0 = Math.max(0, Math.floor((x - reach - grid.minX) / ANCHOR_CELL));
   const i1 = Math.min(grid.w - 1, Math.floor((x + reach - grid.minX) / ANCHOR_CELL));
@@ -200,6 +219,7 @@ function nearAnchorIn(grid, x, z, reach, st) {
       const c = j * grid.w + i;
       for (let k = grid.start[c]; k < grid.start[c + 1]; k++) {
         const p = grid.idx[k];
+        if (taken && taken.has(p) && taken.get(p) !== st) continue;
         const dx = grid.x[p] - x, dz = grid.z[p] - z;
         if (!anchorFits(dx, dz, reach, st)) continue;
         const d = dx * dx + dz * dz;
@@ -207,7 +227,9 @@ function nearAnchorIn(grid, x, z, reach, st) {
       }
     }
   }
-  return best < 0 ? null : { x: grid.x[best], z: grid.z[best], y: grid.y[best] };
+  // `i` is the plant in the grid. The caller claims it by that number, so the claim survives the
+  // copy the mover takes of the point. Herds, issue 28.
+  return best < 0 ? null : { x: grid.x[best], z: grid.z[best], y: grid.y[best], i: best };
 }
 
 export class GroundFauna {
@@ -245,6 +267,11 @@ export class GroundFauna {
     // the patch result the worker sent, and result.flora is 8 floats per plant: x y z, nx ny nz,
     // height, kind, in the metres of the ground frame. Slinger, issue 28.
     this.anchors = buildAnchorGrid(result && result.flora);
+    // The plants of the patch that an animal holds right now, one entry per plant: the number of
+    // the plant in the anchor grid, and the mover that holds it. The claim is site wide and not
+    // per group, because two slingers of two groups can stand as close as two of one group.
+    // Herds, issue 28.
+    this.claims = new Map();
 
     // The hooks an impulse animal reads on the ground. The slope is the gradient of the terrain by
     // central difference over SLOPE_STEP metres, so it is a rise over a run, as on the globe.
@@ -257,7 +284,16 @@ export class GroundFauna {
         gx: (this.heightAt(x + SLOPE_STEP, z) - this.heightAt(x - SLOPE_STEP, z)) / (2 * SLOPE_STEP),
         gz: (this.heightAt(x, z + SLOPE_STEP) - this.heightAt(x, z - SLOPE_STEP)) / (2 * SLOPE_STEP),
       }),
-      nearAnchor: (x, z, reach, st) => nearAnchorIn(this.anchors, x, z, reach, st),
+      // A hold carries one body. The ask skips a plant another animal holds, and the animal that
+      // takes a plant claims it until its throw ends. _stepMember() frees the claim.
+      nearAnchor: (x, z, reach, st) => {
+        const p = nearAnchorIn(this.anchors, x, z, reach, st, this.claims);
+        if (!p) return null;
+        if (st.claim >= 0) this.claims.delete(st.claim);
+        this.claims.set(p.i, st);
+        st.claim = p.i;
+        return p;
+      },
     };
 
     const patch = result && result.patch;
@@ -345,18 +381,16 @@ export class GroundFauna {
       if (!entry) { this.groups.push(null); continue; }
       const flies = G.cls === 'air';
       const mv = groundMove(G);
-      // The mover of this group: the steady wander, or the impulse model that charges and throws.
-      // G.move.mode picks between them, and nothing here tests the locomotion.
-      const st = makeAnyMover(rng, G, mv, this.hooks);
-      // What a mover that holds a point in the world needs of this tier. The mover keeps (u, v) as
-      // an offset from the anchor of the group, so the origin puts its asks back into the metres of
-      // the patch. One creature unit is the scale the species was measured at, and the (x, z) plane
-      // of the ground turns to the left of the heading, so the hand is +1. Slinger, issue 28.
-      st.ox = gs[o]; st.oz = gs[o + 1];
-      st.unit = entry.scale;
-      st.hand = 1;
+      // The mover of this group. An impulse species is the one exception to the model of this file:
+      // every member of it charges and throws on its own clock, so the anchor keeps the plain
+      // wander. It carries the formation over the ground and it holds the activity the whole group
+      // reads, and no member takes its burst from it. See _stepMember(). Herds, issue 28.
+      const burst = G.move.mode === 'impulse';
+      // makeAnyMover() on a wander species is makeMover(), so both arms draw the same numbers in
+      // the same order and no animal built after this one moves.
+      const st = burst ? makeMover(rng, mv) : makeAnyMover(rng, G, mv, this.hooks);
       const g = {
-        G, entry, flies, mover: st, phase: gs[o + 5],
+        G, entry, flies, mover: st, mv, burst, phase: gs[o + 5],
         x0: gs[o], z0: gs[o + 1], x: gs[o], z: gs[o + 1],
         spread: gs[o + 4], heading: st.heading, act: flies ? 1 : 0,
         hover: flies ? AIR_HOVER[0] + rng() * (AIR_HOVER[1] - AIR_HOVER[0]) : 0,
@@ -370,19 +404,39 @@ export class GroundFauna {
       this.groups.push(g);
     }
 
+    // A mover is a fistful of random draws, and this file feeds one generator to every group and
+    // every member in order. A draw taken for a member mover below would therefore move every
+    // animal built after it, of any species. The member movers take a stream of their own off the
+    // same patch seed, so the patch a reader knows keeps every animal where it was. Issue 28.
+    let brng = null;
+
     // the members: a place in the formation, a phase, and a level of detail
     for (let i = 0; i < ms.length; i += 4) {
       const g = this.groups[ms[i]];
       if (!g) continue;
       const e = g.entry;
-      const top = Math.max(g.mover.speed, 0.01);
+      // A member of an impulse group carries a mover of its own, so it charges and throws on its
+      // own clock. It reads the slope and the plants from where it really stands, so the mover
+      // measures its (u, v) from the place this member starts and not from the anchor of the
+      // group. `unit` and `hand` put a hold into the frame of the instance; see anchorLocal().
+      let mo = null;
+      if (g.burst) {
+        if (!brng) brng = mulberry32(hashSeed(`${patch.patchSeed}|impulse-members`));
+        mo = makeAnyMover(brng, g.G, g.mv, this.hooks);
+        mo.ox = g.x0 + ms[i + 1]; mo.oz = g.z0 + ms[i + 2];
+        mo.unit = e.scale;
+        mo.hand = 1;
+        mo.claim = -1;      // the plant it holds, or -1. See the nearAnchor hook.
+      }
+      // Its own cruise speed, because its own mover is what carries it over the ground.
+      const top = Math.max(mo ? mo.speed : g.mover.speed, 0.01);
       const f1 = 0.11 + rng() * 0.2, f2 = 0.09 + rng() * 0.18;
       // The wobble is a real drift over the ground, and the legs have to carry the animal through
       // it, so it may not run faster than a part of the cruise speed. A wide formation used to give
       // a wobble that carried a member as fast as it walks, and it walked its whole range sideways.
       const wob = Math.min(Math.max(0.4, g.spread * MEMBER_WOBBLE), (WOBBLE_SPEED * top) / Math.max(f1, f2));
       const m = {
-        g, e, i: g.n++, scale: e.scale, top,
+        g, e, i: g.n++, scale: e.scale, top, mover: mo,
         dx: ms[i + 1], dz: ms[i + 2], phase: ms[i + 3],
         x: g.x + ms[i + 1], z: g.z + ms[i + 2], heading: g.heading,
         wob, f1, p1: rng() * 6.28, f2, p2: rng() * 6.28,
@@ -531,8 +585,8 @@ export class GroundFauna {
     const blocked = Math.abs(x) > lim || Math.abs(z) > lim
       || (!g.flies && this.heightAt(x, z) < WATER_MARGIN);
     if (blocked) {
-      // A throw in flight ends here too: it holds one heading, so it would drive the body into the
-      // same water or the same edge for the rest of the throw.
+      // A mover that throws ends its throw here: a throw holds one heading, so it would drive the
+      // body into the same water or the same edge for the rest of it.
       st.u = pu; st.v = pv; st.heading += Math.PI * 0.75; st.spd = 0;
       impulseBlocked(st);
       x = g.x0 + st.u; z = g.z0 + st.v;
@@ -555,8 +609,16 @@ export class GroundFauna {
   // formation, or drifting on its wobble, travels at its own speed, so it keeps its own gait clock
   // and its own turn. The group still stops together, because every speed here comes from the one
   // anchor, and the wobble stops with it.
+  //
+  // A member of an impulse group is the exception, and it is the whole of issue 28 on this tier.
+  // It carries a mover of its own, so it charges and throws itself on its own clock, and its four
+  // animation floats come from that mover. The formation then holds by the aim of the throw: the
+  // animal swings its heading toward its slot while it waits and charges, and where the throw puts
+  // it down is where it stands. Nothing pulls a body through a flight, and nothing slides it on to
+  // its slot after one, so a herd of rollers reads as a burst of seeds and not as one body.
   _stepMember(m, t, dt) {
     const g = m.g;
+    const mo = m.mover || g.mover;      // an impulse member throws itself; every other one follows
     let tx, tz;
     if (g.lag) {
       const back = Math.min(TRAIL_LEN - 1, m.i * g.lagSteps);
@@ -574,16 +636,38 @@ export class GroundFauna {
       tx += Math.sin(t * m.f1 + m.p1) * wob;
       tz += Math.cos(t * m.f2 + m.p2) * wob;
     }
-    const k = dt > 0 ? 1 - Math.exp(-MEMBER_EASE * dt) : 1;
-    let vx = (tx - m.x) * k, vz = (tz - m.z) * k;
-    // No animal may travel faster than it can run. The formation turns with the anchor, and a
-    // member out on the rim of a wide formation would be swung round at several times its cruise
-    // speed, faster than its legs could ever carry it. It falls behind instead, and the formation
-    // stretches through the turn and closes again after it.
-    let step = Math.sqrt(vx * vx + vz * vz);
-    const maxStep = m.top * MEMBER_RUSH * (dt > 0 ? dt : 1);
-    if (step > maxStep && step > 1e-9) { const f = maxStep / step; vx *= f; vz *= f; step = maxStep; }
-    const nx = m.x + vx, nz = m.z + vz;
+    let vx, vz, step;
+    if (m.mover) {
+      this._stepBurst(m, tx, tz, t, dt);
+      vx = _step[0]; vz = _step[1]; step = _step[2];
+    } else {
+      const k = dt > 0 ? 1 - Math.exp(-MEMBER_EASE * dt) : 1;
+      vx = (tx - m.x) * k; vz = (tz - m.z) * k;
+      // No animal may travel faster than it can run. The formation turns with the anchor, and a
+      // member out on the rim of a wide formation would be swung round at several times its cruise
+      // speed, faster than its legs could ever carry it. It falls behind instead, and the formation
+      // stretches through the turn and closes again after it.
+      step = Math.sqrt(vx * vx + vz * vz);
+      const maxStep = m.top * MEMBER_RUSH * (dt > 0 ? dt : 1);
+      if (step > maxStep && step > 1e-9) { const f = maxStep / step; vx *= f; vz *= f; step = maxStep; }
+    }
+    let nx = m.x + vx, nz = m.z + vz;
+    if (m.mover) {
+      // The water and the edge of the patch refuse a member as they refuse an anchor. A member used
+      // to need no test of its own, because it hung on the anchor and the anchor kept it out of the
+      // sea. A member that throws itself does not, so it takes the same test and the same refusal.
+      const st = m.mover, lim = this.limit;
+      if (Math.abs(nx) > lim || Math.abs(nz) > lim || (!g.flies && this.heightAt(nx, nz) < WATER_MARGIN)) {
+        nx = m.x; nz = m.z;
+        st.heading += Math.PI * 0.75; st.spd = 0;
+        impulseBlocked(st);
+        vx = 0; vz = 0; step = 0;      // it covered no ground, so its legs and its turn read none
+      }
+      // The mover and the body hold one point of the patch. Without this they drift apart over a
+      // few throws, and the slope and the plants the animal reads would be read where its own
+      // wander reached and not where the animal stands.
+      st.u = nx - st.ox; st.v = nz - st.oz;
+    }
     m.x = nx; m.z = nz;
     // the ground it covered this frame, low passed: the gait clock and the leg swing both read it
     const spd = dt > 0 ? step / dt : 0;
@@ -592,7 +676,11 @@ export class GroundFauna {
     // It turns to face the way it travels, and it holds its heading while it stands still. The turn
     // is no tighter than the circle its body can walk, so it cannot spin on the spot and slide.
     let rate = 0;
-    if (vx * vx + vz * vz > 1e-10) {
+    if (m.mover && m.mover.phase === 'fly') {
+      // It never turns in flight. The mover locked the aim at the end of the charge and it holds
+      // it, so the body takes that heading whole and the lean falls away to nothing.
+      m.heading = m.mover.heading;
+    } else if (vx * vx + vz * vz > 1e-10) {
       const want = Math.atan2(vz, vx);
       let turn = wrapAngle(want - m.heading) * (dt > 0 ? Math.min(1, dt * HEADING_EASE) : 1);
       const cap = turnCap(m.spd, m.top, m.e.turnR) * (dt > 0 ? dt : 1);
@@ -656,15 +744,17 @@ export class GroundFauna {
     a[ao] = act;
     a[ao + 1] = m.gait ? m.gait.phase : 0;
     a[ao + 2] = m.turn;
-    a[ao + 3] = g.mover.burst || 0;
+    // The burst of this animal, from its own mover. A herd used to read it from the one mover of
+    // the group, so every member of it tucked, charged, and threw in the same frame. Issue 28.
+    a[ao + 3] = mo.burst || 0;
     // The hold the tendon is on, in the frame of this instance. Only a species that holds a point
     // in the world writes here; every other one leaves the three floats at zero for the life of
     // the mesh. This animal stands beside the anchor of its group and faces its own way, so it
     // measures the hold from where it really stands. Slinger, issue 28.
-    if (g.mover.holds) {
+    if (mo.holds) {
       const an = at.aAnchor.array, no = slot * 3;
-      if (g.mover.anchor) {
-        anchorLocal(_anc, g.mover.anchor, nx, nz, m.heading, e.scale, 1);
+      if (mo.anchor) {
+        anchorLocal(_anc, mo.anchor, nx, nz, m.heading, e.scale, 1);
         an[no] = _anc[0]; an[no + 1] = _anc[1]; an[no + 2] = _anc[2];
       } else { an[no] = 0; an[no + 1] = 0; an[no + 2] = 0; }
       e.anchorDirty = true;
@@ -672,6 +762,55 @@ export class GroundFauna {
     // The shadow of a flyer comes last. It writes the same basis and the same matrix this step
     // used, so it must run after the animal takes its own copy of them.
     if (m.shade >= 0 && this.shade) this._stepShade(m, nx, nz, lift);
+  }
+
+  // ---------------------------------------------------------------- impulse herds (issue 28)
+  // One step of a member that throws itself. It writes the step of the body into _step: the two
+  // metres of ground and the length of them. `tx, tz` is the slot the formation holds for it.
+  //
+  // Three rules shape the step, and each answers a way the old model gave a herd one body:
+  //
+  // 1. It aims at its slot, not at the heading of the anchor. While it waits and charges it swings
+  //    its heading toward the slot, harder the further out it stands. The throw then carries it
+  //    home, and the formation is kept by where the animal chooses to throw itself.
+  // 2. In flight the mover alone moves the body. No pull, and no cap on the speed: the throw is
+  //    what sets the speed, and a hand on the body through a flight would be a skid.
+  // 3. It closes the last of the gap only while it rests, and only past a slack of the formation
+  //    radius. A member therefore lands past or short of its slot and stays there. Without the
+  //    slack a herd would close ranks after every throw and read as one body again.
+  _stepBurst(m, tx, tz, t, dt) {
+    const st = m.mover, g = m.g;
+    const ox = tx - m.x, oz = tz - m.z;
+    const gap = Math.hypot(ox, oz);
+    const slack = Math.max(2, g.spread * MEMBER_SLACK);
+    if (gap > slack && st.phase !== 'fly') {
+      // the swing onto the slot, before the step, so the wander of this frame starts from the way
+      // home and the launch at the end of the charge aims there
+      const k = clamp((gap - slack) / Math.max(slack, 1), 0, 1);
+      const want = wrapAngle(Math.atan2(oz, ox) - st.heading);
+      st.heading = wrapAngle(st.heading + want * Math.min(1, dt * SLOT_TURN * k));
+    }
+    const pu = st.u, pv = st.v;
+    stepAny(st, t, dt);
+    // It gave up the plant it held, or its throw ended. The plant is then free for the next animal.
+    if (st.claim >= 0 && !st.anchor) { this.claims.delete(st.claim); st.claim = -1; }
+    let vx = st.u - pu, vz = st.v - pv;     // the ground its own mover covered this frame
+    let step = Math.hypot(vx, vz);
+    if (st.phase !== 'fly') {
+      if (st.phase === 'rest' && gap > slack && dt > 0) {
+        // The last of the gap, at a shuffle. The animal is on its feet between two throws, so a
+        // herd that walks on carries every member with it. Three limits hold the shuffle honest:
+        // it starts only past the slack, it never runs faster than MEMBER_CREEP of the cruise, and
+        // the mover pays for it out of the ground the cruise banked. The next throw is then that
+        // much shorter, and the mean speed of the animal over many throws does not move.
+        const ease = Math.min((gap - slack) * (1 - Math.exp(-MEMBER_EASE * dt)), MEMBER_CREEP * m.top * dt, st.owed);
+        if (ease > 0) { vx += (ox / gap) * ease; vz += (oz / gap) * ease; st.owed -= ease; }
+      }
+      step = Math.hypot(vx, vz);
+      const maxStep = m.top * MEMBER_RUSH * (dt > 0 ? dt : 1);
+      if (step > maxStep && step > 1e-9) { const f = maxStep / step; vx *= f; vz *= f; step = maxStep; }
+    }
+    _step[0] = vx; _step[1] = vz; _step[2] = step;
   }
 
   // One shadow disc. The flyer is `lift` metres over the ground at (nx, nz), and the sun stands at
@@ -842,6 +981,7 @@ export class GroundFauna {
     if (this.ring) { this.ring.geometry.dispose(); this.ringMat.dispose(); this.ring = null; this.marked = null; }
     for (const e of this.kinds) { e.near.geometry.dispose(); e.far.geometry.dispose(); e.mat.dispose(); }
     this.group.clear();
+    this.claims.clear();
     this.kinds = []; this.groups = []; this.members = []; this.count = 0;
     this.nearCount = 0; this.farCount = 0;
   }
