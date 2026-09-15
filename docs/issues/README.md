@@ -263,3 +263,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 25 | The ground is penned in, so the reader walks a fifth of the patch | AFK | 20, 23 | CLOSED |
 | 26 | The LOD knob rings, so the plants pop | AFK | 11, 25 | CLOSED |
 | 27 | The flora of a wet world is one continuous thicket, and the ground holds no landmark | HITL | 21, 25, 26 | CLOSED |
+| 28 | Impulse fauna: the roller, the flow, and the slinger | HITL, manager agent | 09, 10, 27 | open, design held 2026-09-15 |
