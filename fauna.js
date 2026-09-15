@@ -113,6 +113,8 @@ function bodyProbe(secs, yc) {
 // ---------------------------------------------------------------- body plans (sections relative to the body centre; +z is forward)
 function bodySections(G) {
   const R = G.bodyR, S = G.stretch;
+  // ---- roller (issue 28) ----
+  if (G.loco === 'roller') return rollerSections(G);
   switch (G.plan) {
     case 'blob':
       return { secs: [{ z: 0, y: 0, r: R, s: [1, 0.8, 1.35 * S] }], front: 1.3 * R * S, back: -1.3 * R * S, top: 0.8 * R, bot: -0.8 * R };
@@ -154,12 +156,44 @@ function bodySections(G) {
   return { secs: [], front: R, back: -R, top: R, bot: -R };
 }
 
+// ---- roller (issue 28) ----
+// The hull of a roller turns about the right axis of the animal, so it has to be round about that
+// axis: every section sits on the axis and holds one radius in the y and the z. A hull longer than
+// it is tall would lift the animal and drop it once a turn, and the reader would read a hop. It
+// also means a hull that stops at any angle stands right, so the fold and the roll need no clock
+// of their own to bring the body back upright.
+//
+// A solid of flat faces does not rest at one height, though: an icosahedron of one subdivision
+// rests at 0.93 to 1.00 of its radius as it turns, and ROLL_REACH is the mean of that. It is the
+// radius the hull really rolls on. strideUnits() and the ROLL carriage both read it, so the ball
+// on the screen and the clock that turns it cannot drift apart, and the drop puts it on the
+// ground. See the hull in buildCreature().
+const ROLL_REACH = 0.9757;
+export const rollRadius = (G) => G.bodyR * ROLL_REACH;
+function rollerSections(G) {
+  const R = G.bodyR;
+  // The hull is drawn in buildCreature(), which holds the two levels of detail. The two sections
+  // give the reader the axis the hull turns about: a `dome` is a wheel on a wide hub, and a `blob`
+  // is a ball with the hub showing at each pole. Without a mark of some kind on the axis a turning
+  // ball of one colour would give the reader nothing to watch.
+  const secs = G.plan === 'dome'
+    ? [{ z: 0, y: 0, r: R, s: [0.62, 1, 1] }, { z: 0, y: 0, r: R * 0.55, s: [1.7, 1, 1], second: true }]
+    : [{ z: 0, y: 0, r: R, s: [1, 1, 1] }, { z: 0, y: 0, r: R * 0.5, s: [2.8, 1, 1], second: true }];
+  return { secs, front: R, back: -R, top: R, bot: -R };
+}
+
 // How far a leg swings, and how much of one cycle its foot stays on the ground (the duty factor).
 // A walking quadruped keeps a foot down for about two thirds of a cycle, so three feet carry it at
 // every moment; an insect runs an alternating tripod, so its duty is nearer a half. The shader
 // reads the duty factor and the gait clock reads the swing; see "the gait clock" below.
 export const LEG_SWING = { monopod: 0, biped: 0.5, tripod: 0.45, quad: 0.4, hexapod: 0.35 };
 export const LEG_DUTY = { monopod: 0.5, biped: 0.6, tripod: 0.6, quad: 0.65, hexapod: 0.55 };
+// ---- roller (issue 28) ----
+// A roller does not walk. The legs stand the hull up and aim the throw, so they swing by nothing
+// at all, and the ground comes from the hull. The gait clock still locks, because the hull turns
+// by the ground the animal covers; strideUnits() gives it one turn per circumference.
+LEG_SWING.roller = 0;
+LEG_DUTY.roller = 0.5;
 
 // A footfall order, as a part of the cycle. A leg touches down when its cycle wraps, and a larger
 // phase touches down earlier, so the phase is the complement of the footfall.
@@ -182,6 +216,19 @@ function legPlan(G, len) {
       const f = sx > 0 ? (sz > 0 ? 0.25 : 0) : (sz > 0 ? 0.75 : 0.5);
       out.push({ z: sz * len * 0.3, dir: [sx, 0], phase: footPhase(f) });
     } break;
+    // ---- roller (issue 28) ----
+    // Three to five stubby legs on one ring about the hull, as a tripod stands, so the hull sits
+    // level on them and no side of the animal is the front. The count comes from the genome and
+    // not from a new draw: the tables in species.js build every entry before they pick one, so a
+    // draw here would move every species rolled after a roller.
+    case 'roller': {
+      const n = 3 + (G.plan === 'dome' ? 1 : 0) + (G.jointed ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + 0.5;
+        out.push({ z: Math.sin(a) * len * 0.2, dir: [Math.cos(a), Math.sin(a)], phase: (i / n) * Math.PI * 2 });
+      }
+      break;
+    }
     // an insect keeps the alternating tripod: the front and the rear of one side with the middle of the other
     case 'hexapod': { let i = 0; for (const sz of [0.32, 0, -0.32]) for (const sx of [-1, 1]) out.push({ z: sz * len, dir: [sx, 0], phase: (i++ % 2) * Math.PI + (sz === 0 ? Math.PI : 0) }); break; }
   }
@@ -306,6 +353,19 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       const za = a.z + (i === 0 ? a.r * k * sz : 0), zb = b.z - (i === n - 2 ? b.r * k * sz : 0);
       PS(bone([0, yc + a.y, za], [0, yc + b.y, zb], a.r * k, i % 2 ? body2 : body, b.r * k));
     }
+  } else if (G.loco === 'roller') {
+    // ---- roller (issue 28) ----
+    // The hull of a roller is the one body in the set that turns on the ground, so it is the one
+    // body that has to be round. A plain icosahedron of radius r rests on a plane at 0.80 r on a
+    // face and at r on a vertex, so a hull of twenty faces would sink a tenth of its radius into
+    // the ground and lift out again every sixth of a turn. One subdivision holds 0.93 to 1, which
+    // no reader can see. The coarse octahedron takes the radius the full hull rolls on, so the two
+    // builds hold one outline through the LOD swap. It bounces, but it only draws past the LOD
+    // distance, where the whole animal is a dozen pixels, as COARSE_SWING does for a leg.
+    for (const s of B.secs) {
+      const geo = coarse ? oct(s.r * ROLL_REACH) : ico(s.r, 1);
+      P(geo, s.second ? body2 : body, M4(0, yc + s.y, s.z, ...s.s));
+    }
   } else {
     for (const s of B.secs) {
       const color = s.second || s.alt ? body2 : (G.loco === 'sac' ? accent : body);
@@ -340,6 +400,18 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     if (hb !== null && hb > hy) hy = hb + (ht - hb) * 0.35; // the hull is thin here: lift the hip into it
     const hip = [hx, hy, L.z];
     hipSum += hy; hipN++;
+    // ---- roller (issue 28) ----
+    // One stubby bone per leg, thick at the hip and blunt at the foot. It never swings: the swing
+    // is 0, so the LEG mode holds it still, and the knee sits on the hip, so nothing folds about a
+    // joint the animal has not got. The ROLL carriage is what moves it: it folds the whole leg
+    // into the hull on the charge and lets it out again on the recover.
+    if (G.loco === 'roller') {
+      const foot = [hip[0] + dx * h * 0.55, 0, hip[2] + dz * h * 0.55];
+      const rigR = { rig: [RIG.LEG, L.phase, 0, 0], pivot: hip, pivot2: hip };
+      PS(bone(hip, foot, th * 2.2, body2, th * 1.4), rigR);
+      if (!coarse) P(ico(th * 1.9), body2, M4(foot[0], th * 0.5, foot[2], 1.3, 0.5, 1.3), rigR);
+      continue;
+    }
     const splay = { hexapod: 1.0, tripod: 0.7, quad: 0.25, biped: 0.2, monopod: 0 }[G.loco];
     const foot = [hip[0] + dx * h * splay, 0, hip[2] + dz * h * splay + h * 0.05];
     let knee;
@@ -468,6 +540,34 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     // A coarse creature keeps only the sail and the plates. Every other extra is a bead, a spike,
     // a feeler, or a mound of a few centimetres, and none of them reaches the outline at distance.
     if (coarse && e !== 'sail' && e !== 'plates') continue;
+    // ---- roller (issue 28) ----
+    // Anything the hull carries rides the tread, so it rings the body about the spin axis. Placed
+    // along the body, as every other locomotion places it, one of these would stand on the ground
+    // at one stop of the ball and point at the sky at the next. The feelers are the exception:
+    // they grow on the head, and the head folds away before the hull turns.
+    if (G.loco === 'roller' && e !== 'antennae') {
+      // The hull rolls on RR, so nothing here may reach past it: a stud that stood proud of the
+      // tread would cut into the ground every time it came round to the bottom of the turn.
+      const n = e === 'plates' ? 3 : 5, RR = rollRadius(G);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + 0.4;    // one place on the rolling circle
+        const cy = Math.cos(a), cz = Math.sin(a); // and the way out of the hull there
+        if (e === 'spikes') {
+          const hs = R * 0.3, rr = RR - hs * 0.5;
+          P(spike(R * 0.16, hs, 4), accent, M4(0, yc + cy * rr, cz * rr, 1, 1, 1, a, 0), { glow: 0.4 });
+        } else if (e === 'beads') {
+          // A lamp on the tread holds still and rides the hull round. It takes no part mode at
+          // all: a mode that moves about a pivot is a limb to the ROLL carriage, and a limb folds
+          // into the hull instead of turning with it.
+          const br = clamp(R * 0.12, 0.02, 0.045), rr = RR - br * 0.7;
+          P(ico(br), glow, M4(0, yc + cy * rr, cz * rr), { glow: 0.9 });
+        } else if (e === 'plates') {
+          const pr = R * 0.5, rr = RR - pr * 0.45 * DODECA_REACH;
+          P(block(pr), body, M4(0, yc + cy * rr, cz * rr, 1.3, 0.45, 1.0, a, 0));
+        }
+      }
+      continue;
+    }
     switch (e) {
       case 'sail': {
         const bz = B.back * 0.15 + B.front * 0.1, base = [0, (probe.top(0, bz) ?? top) - 0.02, bz], sh = 0.35 + R;
@@ -750,6 +850,41 @@ const RIG_GLSL = `
     // The slick is the one moment the reader can pick the animal out of the grass from a distance,
     // so it carries its glow at full while it is spread and gives it back as it gathers.
     vGlow = max(vGlow, spread);
+  #elif CARRY == 6
+    // ---- roller (issue 28) ----
+    // A roll: it folds the legs and the head into the hull, drops on to the ball of its own body,
+    // and goes straight ahead. aBurst is the clock of the fold. It runs 0 to CHARGE while the
+    // animal folds, holds over CHARGE through the whole roll, and the recover runs it back down
+    // through the same numbers, so the unfold is the fold played backwards and costs no code.
+    float tk = smoothstep(0.0, CHARGE, aBurst);
+    vec3 hub = vec3(0.0, ROLLC, 0.0);           // the centre of the ball, with the animal standing
+    if (mode == 1.0 || mode == 3.0 || mode == 4.0 || mode == 5.0) {
+      // A limb: a leg, the head, a lantern, or a feeler. Each one folds about its own pivot. The
+      // reach away from the hull goes first, then the pivot itself comes home to ROLLTUCK of the
+      // hull radius and what is left of the part shrinks with it, so at the end of the fold the
+      // outline is the hull and nothing else. A limb never turns with the hull: it is inside the
+      // hull by the time the hull turns, so the legs of a standing animal point at the ground
+      // whatever angle the last roll left the hull at.
+      vec3 rad = aPivot - hub;
+      float rl = length(rad);
+      vec3 nrm = rl > 0.00001 ? rad / rl : vec3(0.0, -1.0, 0.0);
+      vec3 pin = hub + nrm * min(rl, ROLLR * ROLLTUCK);
+      vec3 dl = transformed - aPivot;
+      dl -= nrm * dot(dl, nrm) * tk;
+      transformed = mix(aPivot, pin, tk) + dl * (1.0 - 0.7 * tk);
+    } else {
+      // The hull, and everything that rides the tread. It turns about the right axis of the
+      // animal, which is the local x axis, by the gait clock. The steering advances that clock by
+      // the ground the animal covers, and strideUnits() gives it one turn for one circumference,
+      // so the ball cannot skid. The hull is round about the axis, so a ball that stops at any
+      // angle still stands right.
+      vec3 dr = transformed - hub;
+      c = cos(gb); sn = sin(gb);
+      dr.yz = vec2(dr.y * c - dr.z * sn, dr.y * sn + dr.z * c);
+      transformed = hub + dr;
+    }
+    // The legs hold the hull up. As they go in, the hull comes down on to the ground it rolls on.
+    transformed.y -= ROLLDROP * tk;
   #endif
   }
 `;
@@ -765,11 +900,19 @@ const BOB_BEATS = { biped: 2, tripod: 3, quad: 4, hexapod: 2 };
 const ROCK_K = { biped: 0.15, tripod: 0.08, quad: 0.09, hexapod: 0.03 };
 // How far the body leans into its tightest turn, in radians. A flyer banks; a walker leans a little.
 const LEAN_K = { wings: 0.55, fins: 0.35, sac: 0.15 };
+// ---- roller (issue 28) ----
+// The carriage of every impulse locomotion sits in a table of its own, so the three packages of
+// issue 28 each add one row and the merge keeps all three.
+const IMPULSE_CARRY = { roller: CARRY.ROLL, flow: CARRY.FLOW };
+// Where the pivot of a folded part sits at the end of the fold, as a part of the hull radius.
+// It is well inside the hull, so nothing a roller grows can break the outline of the ball.
+const ROLL_TUCK = 0.7;
 
 function rigConstants(G) {
-  let carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? CARRY.WALK;
-  // ---- flow (issue 28) ---- a flow has no walk to fall back on; the carriage is its whole body
-  if (G.loco === 'flow') carry = CARRY.FLOW;
+  // An impulse locomotion has no walk to fall back on: its carriage is the whole of its body, and
+  // IMPULSE_CARRY holds one row per locomotion.
+  const carry = { monopod: CARRY.HOP, serpent: CARRY.WAVE, sac: CARRY.FLOAT, wings: CARRY.FLOAT, fins: CARRY.FLOAT, arch: CARRY.ARCH, periscope: CARRY.RISE, plough: CARRY.RISE }[G.loco] ?? IMPULSE_CARRY[G.loco] ?? CARRY.WALK;
+  // ---- flow (issue 28) ----
   // The rest height of the ring stack. The shader divides by it to find where a vertex sits in the
   // body, so the top of the stack can lead the throw. Every other carriage leaves it alone.
   const flowY = G.loco === 'flow' ? flowBody(G).h : 1;
@@ -790,15 +933,21 @@ function rigConstants(G) {
   const rolly = G.cls === 'air' ? 0.5 : G.legLen;
   const fx = (v) => Number(v).toFixed(4);
   const ints = new Set(['CARRY', 'LOCK']);
-  return [['CARRY', carry], ['LOCK', gaitLocked(G) ? 1 : 0], ['GAIT', gait], ['FLAP', G.flap], ['SLOW', G.slow],
+  const rows = [['CARRY', carry], ['LOCK', gaitLocked(G) ? 1 : 0], ['GAIT', gait], ['FLAP', G.flap], ['SLOW', G.slow],
     ['BOB', bob], ['BOBN', BOB_BEATS[G.loco] || 2], ['ROCK', (ROCK_K[G.loco] || 0) * G.bodyR], ['DUTY', duty],
     ['SKEW', legged ? 0.35 : 0], ['LEAN', LEAN_K[G.loco] ?? (legged ? 0.1 : 0)], ['ROLLY', rolly],
     ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
     ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
-    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext],
-    // ---- flow (issue 28) ---- the shape of the slick and of the column; see CARRY == 7
-    ['FLOWY', flowY], ['FLOWW', FLOW_W], ['FLOWH', FLOW_H], ['FLOWS', FLOW_SLICK], ['FLOWN', FLOW_NARROW], ['FLOWLEAD', FLOW_LEAD]]
-    .map(([k, v]) => `#define ${k} ${ints.has(k) ? v : fx(v)}\n`).join('');
+    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext]];
+  // ---- roller (issue 28) ----
+  // The ball the animal rolls on: its radius, the height of its centre while the animal stands on
+  // its legs, and the drop that puts it on the ground when the legs go in. The radius is the one
+  // strideUnits() takes the circumference of, so the shape and the clock cannot drift apart.
+  const rollC = G.legLen > 0 ? G.legLen - B.bot : -B.bot * 0.95, rollR = rollRadius(G);
+  rows.push(['ROLLR', rollR], ['ROLLC', rollC], ['ROLLDROP', Math.max(0, rollC - rollR)], ['ROLLTUCK', ROLL_TUCK]);
+  // ---- flow (issue 28) ---- the shape of the slick and of the column; see CARRY == 7
+  rows.push(['FLOWY', flowY], ['FLOWW', FLOW_W], ['FLOWH', FLOW_H], ['FLOWS', FLOW_SLICK], ['FLOWN', FLOW_NARROW], ['FLOWLEAD', FLOW_LEAD]);
+  return rows.map(([k, v]) => `#define ${k} ${ints.has(k) ? v : fx(v)}\n`).join('');
 }
 
 export function faunaMaterial(G) {
@@ -847,6 +996,12 @@ const smoothstep01 = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); re
 // length a cycle, so the same clock keeps its body from sliding sideways over the ground.
 export function strideUnits(G, hipY = 0) {
   const swing = LEG_SWING[G.loco] || 0;
+  // ---- roller (issue 28) ----
+  // One turn of the ball carries it one circumference, and that is the whole reason the ball
+  // cannot skid: the clock gives the hull 2 pi of aGait over exactly that much ground, and the
+  // ROLL carriage turns the hull by aGait. The legs of a roller swing by nothing, so the branch
+  // has to come before the swing test, or the clock would not lock at all.
+  if (G.loco === 'roller') return TAU * rollRadius(G);
   if (swing > 0) {
     // The hip sits above the leg length, because the builder puts it inside the belly. Without the
     // real height the sweep of the foot comes out a third short and the feet slide backwards.
@@ -865,12 +1020,21 @@ export function gaitLocked(G) { return strideUnits(G) > 1e-4; }
 // would hold its feet grows without bound.
 export function makeGait(G, scale, top, hipY = 0) {
   const stride = strideUnits(G, hipY) * scale;
-  return { phase: 0, stride, rate: 0, max: stride > 0 ? (TAU * 2.5 * top) / stride : 0 };
+  // ---- roller (issue 28) ----
+  // A leg sweeps less at a low speed, so the stride of a walker shrinks with the activity and the
+  // clock reads that. A ball has no amplitude: one turn is one circumference at any speed. `amp`
+  // says which of the two this animal is, and a roller holds its stride.
+  const amp = G.loco !== 'roller';
+  // The cap is what holds the clock of a walker finite: its amplitude falls to zero as it stops,
+  // and the rate that would hold its feet in place grows without bound. A ball has no amplitude,
+  // so its rate is the ground over the stride and nothing more. A cap there would only turn the
+  // hull short through the fast part of a throw, which is the skid this clock exists to stop.
+  return { phase: 0, stride, rate: 0, amp, max: stride > 0 ? (amp ? (TAU * 2.5 * top) / stride : Infinity) : 0 };
 }
 // Advance the clock by the ground the animal covered. `act` is the amplitude of the swing, 0 to 1.
 export function stepGait(gt, spd, act, dt) {
   if (!gt || gt.stride <= 0) return 0;
-  const s = gt.stride * act;
+  const s = gt.stride * (gt.amp === false ? 1 : act);
   gt.rate = s > 1e-4 ? Math.min((TAU * spd) / s, gt.max) : 0;
   gt.phase = (gt.phase + gt.rate * dt) % TAU;
   return gt.phase;
@@ -1009,6 +1173,7 @@ const IMPULSE = {
 };
 const IMPULSE_DEFAULT = { rest: 0, recover: 0 };
 
+// ---- flow (issue 28) ----
 // The gradient under the animal and the way the ground falls. The hook answers in the units of its
 // own tier, and a tier with no terrain under it, the inspector card, answers with nothing at all.
 function flowSlope(st) {
@@ -1054,6 +1219,37 @@ function flowLaunch(st, owed) {
   return Math.max(0, owed);
 }
 
+// ---- roller (issue 28) ----
+// ---- roller (issue 28) ----
+// The rise of the ground along one heading, as a rise over a run. A positive value is uphill. Both
+// ground tiers hand the mover the gradient of the terrain under the animal; the card has no
+// terrain at all, so a tier with no slope hook reads as flat ground.
+export function slopeAlong(st, aim) {
+  const hook = st.hooks && st.hooks.slope;
+  if (!hook) return 0;
+  const g = hook(st.u, st.v, st);
+  return g ? g.gx * Math.cos(aim) + g.gz * Math.sin(aim) : 0;
+}
+const ROLL_MAX_UP = 0.35;    // the steepest rise a ball will start up: about 19 degrees
+const ROLL_SLOPE = 1.6;      // the part of one throw that one unit of slope gives, or takes away
+const ROLL_SHORT = 0.45;     // the shortest a rise may leave a throw
+const ROLL_LONG = 2.2;       // the longest a fall may carry one
+// A roller folds its legs and its head into its hull, drops on to the ball of its own body, and
+// rolls straight ahead. The world is what carries it, so the throw is longer down a slope and
+// shorter up one, and a rise over ROLL_MAX_UP it will not start at all. It waits for a while
+// before it folds and it settles for longer after it stops, because the fold, the roll, and the
+// unfold each have to be read.
+IMPULSE.roller = {
+  rest: 0.35, recover: 0.45,
+  launch(st, owed) {
+    const s = slopeAlong(st, st.aim);
+    // It refuses a rise it cannot hold. The debt stays on the books, and the wander picks another
+    // heading before the animal asks again.
+    if (s > ROLL_MAX_UP) return 0;
+    return owed * clamp(1 - ROLL_SLOPE * s, ROLL_SHORT, ROLL_LONG);
+  },
+};
+
 // The length of one throw of a species, in seconds.
 export function impulseCycle(G) {
   if (G.loco === 'monopod') return TAU / hopGait(G);
@@ -1061,6 +1257,14 @@ export function impulseCycle(G) {
   // A flow is slow. It needs a long charge to spread and run the fall line, and a long throw to
   // rise, stand as a column, and fall back, so one whole throw runs several seconds.
   if (G.loco === 'flow') return 5;
+  // ---- roller (issue 28) ----
+  // A ball this size cannot flick. The fold, the roll, and the unfold each have to be read, so the
+  // throw is slow, and G.gait gives the species its own tempo as it does for every locomotion. The
+  // gravity sets the rest, as it sets the rate of a hop: a heavy world gives short quick throws and
+  // a light one long slow ones. The ground one throw covers follows, because a throw pays whatever
+  // the cruise has banked over the whole cycle, so the lore of a light world holds: one throw there
+  // does carry the animal a long way.
+  if (G.loco === 'roller') return clamp(3.6 / ((G.gait || 1.5) * clamp(Math.sqrt(G.gravity || 1), 0.6, 1.6)), 1.6, 3.2);
   return 2;
 }
 // The steering record an impulse mover needs, built from the genome and the move record of a tier.
@@ -1307,7 +1511,14 @@ export class Inspector {
     let x = 0, z = 0, yaw = t * 0.4;
     if (mv.leash > 0) {
       // run the same steering as on the planet, with time scaled so the walk reads well on the card
-      stepAny(mv, t * this.timeK, dt * this.timeK);
+      // ---- roller (issue 28) ----
+      // The gait clock reads the ground the animal really covered, and not the speed the wander
+      // asked for. An impulse animal covers the whole of its ground in one throw, so the two are
+      // not one number: a ball driven by the wander speed would turn while it stood still. A
+      // wander species covers speed times the step, so the measure gives it what it had before.
+      const pu = mv.u, pv = mv.v, dtK = dt * this.timeK;
+      stepAny(mv, t * this.timeK, dtK);
+      const gspd = dtK > 0 ? Math.hypot(mv.u - pu, mv.v - pv) / dtK : 0;
       x = mv.u * this.pathScale; z = mv.v * this.pathScale;
       const rr = Math.hypot(x, z), rMax = this.groundR - 0.35;
       if (rr > rMax) { x *= rMax / rr; z *= rMax / rr; }
@@ -1322,7 +1533,7 @@ export class Inspector {
       const act = moverActivity(mv);
       const a = at.aAnim.array;
       a[0] = act;
-      a[1] = this.gait ? stepGait(this.gait, mv.spd, act, dt * this.timeK) : 0;
+      a[1] = this.gait ? stepGait(this.gait, gspd, act, dtK) : 0;
       a[2] = mv.turnN;
       a[3] = mv.burst || 0;
       at.aAnim.needsUpdate = true;

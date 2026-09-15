@@ -62,7 +62,9 @@
   };
 
   // ---------------------------------------------------------------- body catalogue
-  const LOCO = { land: ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent', 'flow'], air: ['sac', 'wings', 'fins'], sub: ['arch', 'periscope', 'plough'] };
+  // A roller lives on any land niche, so it needs no gate of its own. A flow needs water or heat,
+  // and LOCO_GATE below holds that test.
+  const LOCO = { land: ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'serpent', 'flow', 'roller'], air: ['sac', 'wings', 'fins'], sub: ['arch', 'periscope', 'plough'] };
   const PLAN = {
     monopod: ['blob', 'dome'], biped: ['blob', 'spindle'], tripod: ['blob'], quad: ['blob', 'dome', 'spindle'], hexapod: ['dome', 'chain'], serpent: ['chain'],
     sac: ['blob', 'disc'], wings: ['blob', 'spindle', 'swarm'], fins: ['spindle'],
@@ -94,6 +96,14 @@
   };
   // parts that a locomotion always has
   const ALWAYS = { sac: ['tendrils'], fins: ['flukes'], arch: ['mounds'], periscope: ['mounds'], plough: ['mounds'] };
+  // ---- roller (issue 28) ----
+  // The body of a roller is a hull it can fold into, so it takes the two round plans. The head is
+  // the tripod list, because a roller has no front either: it aims the whole body and lets go.
+  // Every extra it can carry sits flat on the hull or on the head, so nothing it grows can foul
+  // the roll.
+  PLAN.roller = ['dome', 'blob'];
+  HEAD.roller = ['lure', 'lure', 'mandibles', 'stalks'];
+  EXTRAS.roller = ['spikes', 'beads', 'plates', 'antennae'];
   // leash (world units), cruise speed, turn amplitude, pause habit, flies, casts a shadow, and the
   // steering model. `mode` says which mover carries the animal: 'wander' is the steady model every
   // species ran before, and 'impulse' is the model that charges and lets go in one throw. The three
@@ -116,6 +126,11 @@
     // so the speed here is the mean over a whole throw and not the speed of the throw itself.
     flow: { leash: 0.016, speed: 0.005, turn: 0.7, pause: 0.35, flies: false, shadow: true, mode: 'impulse' },
   };
+  // ---- roller (issue 28) ----
+  // It cruises at about the speed of a quad and it holds a range about as wide as a biped holds.
+  // The cruise speed is a mean over the whole throw cycle, not a speed the body ever travels at:
+  // the impulse mover banks the ground the cruise asks for and pays it all in one roll.
+  MOVE.roller = { leash: 0.03, speed: 0.006, turn: 0.9, pause: 0.45, flies: false, shadow: true, mode: 'impulse' };
   // globe units. They follow the 30% cut in BASE_SCALE, so a flyer keeps the same gap in body lengths.
   const HOVER = { sac: 0.0098, wings: 0.014, fins: 0.021 };
   const DENSITY = { land: 0.016, air: 0.007, sub: 0.045 };
@@ -136,6 +151,10 @@
     flow: { k: 2.4, axis: 'height' },
   };
   const SWARM_BODY = { k: 7, axis: 'length', whole: true }; // a swarm is measured across the whole wheel
+  // ---- roller (issue 28) ----
+  // A roller is measured standing, from the ground to the top of the hull, so "m tall" in
+  // sizeText() is the right text for it and it takes no case of its own there.
+  BODY.roller = { k: 2.4, axis: 'height' };
 
   function bodyMetres(G) {
     const B = G.loco === 'wings' && G.plan === 'swarm' ? SWARM_BODY : BODY[G.loco];
@@ -163,6 +182,10 @@
     // one body, not two.
     flow: [['solitary', 1.0]],
   };
+  // ---- roller (issue 28) ----
+  // A throw is cheap to copy: one animal goes and the rest follow the same line, so a roller keeps
+  // company more often than not.
+  SOCIAL.roller = [['herd', 0.5], ['pair', 0.3], ['solitary', 0.2]];
 
   function rollSocial(rng, G) {
     let kind;
@@ -252,6 +275,17 @@
       G.size = rr(rng, 1.1, 1.5);
       G.rings = 5 + Math.floor(rng() * 4);
     }
+    // ---- roller (issue 28) ----
+    // The four tables above build the whole object before they pick one entry from it, so every
+    // key in them draws a number for every species. A roller row in them would therefore move
+    // every world. It draws here instead, where only a roller passes, and no other locomotion
+    // takes one extra draw. bodyR keeps the common draw of the line above: a ball of 0.16 to 0.3.
+    // The legs are stubby, because they only stand and aim; the hull does the travelling.
+    if (loco === 'roller') {
+      G.legLen = rr(rng, 0.12, 0.2);
+      G.gait = rr(rng, 1.2, 1.8);
+      G.size = rr(rng, 1.1, 1.5);
+    }
     if (type === 'gas' && loco !== 'fins') G.size *= 1.5;
     if (loco === 'fins') { G.density = niche === 'cloud' ? 0.02 : 0.0025; G.fsign = 1; G.fcut = 0.3; }
     if (plan === 'swarm') G.move.shadow = false;
@@ -295,6 +329,8 @@
     // world holds a lava flow, and a name has to be free of any claim about the world.
     flow: ['slick', 'seep', 'pour'],
   };
+  // ---- roller (issue 28) ----
+  NOUN.roller = ['roller', 'tumbler', 'wheel'];
   const ADJ = {
     sail: 'sail-backed', spikes: 'thorn-backed', beads: 'lamp-flanked', tendrils: 'tendril', garden: 'moss-backed', plates: 'shell', tail: 'long-tailed',
     flukes: 'twin-fluked', antennae: 'feeler', mounds: 'tide', shard: 'shard', smooth: 'smooth-backed', lure: 'lantern', stalks: 'stalk-eyed',
@@ -330,6 +366,8 @@
     fins: 'Cetus', arch: 'Lumbricus', periscope: 'Speculator', plough: 'Fossor',
     flow: 'Defluxus',   // ---- flow (issue 28) ----
   };
+  // ---- roller (issue 28) ----
+  GENUS.roller = 'Volvator';
   const EPITHET = {
     sail: 'velifer', spikes: 'spinosus', beads: 'lucifer', tendrils: 'filamentosus', garden: 'hortulanus', plates: 'loricatus', tail: 'caudatus', flukes: 'bifurcus',
     antennae: 'antennatus', mounds: 'aestus', shard: 'vitreus', smooth: 'glaber', lure: 'lucernarius', stalks: 'oculatus', mandibles: 'mandibularis',
@@ -363,9 +401,9 @@
   const herded = (c) => c.G.social.kind === 'herd';
   // ---- impulse fauna (issue 28) ----
   // An impulse animal banks its travel and lets it go in one throw. `bursts` is the gate a line
-  // about that throw carries, and all four impulse locomotions pass it. `flows` is the one body
-  // that has no shape of its own.
-  const bursts = (c) => c.G.move.mode === 'impulse';
+  // about that throw carries. It reads the steering model and not the locomotion, so all four
+  // impulse locomotions pass it at once. `flows` is the one body that has no shape of its own.
+  const bursts = (c) => !!c.G.move && c.G.move.mode === 'impulse';
   const flows = (c) => c.G.loco === 'flow';
   const ORIGIN = {
     monopod: pool([
@@ -467,6 +505,18 @@
       { t: 'At {grav} it gathers for a long time and goes up very little. Most of a day is the gathering.', tags: 'highgrav' },
     ]),
   };
+  // ---- roller (issue 28) ----
+  // The strange thing is the fold. Every line here names the fold, the line it picks, or the roll,
+  // and not one of them has the animal walk anywhere.
+  ORIGIN.roller = pool([
+    'It folds the legs and the head into the hull, drops on to the ball of its own body, and goes. Nothing about the shape tells you which way it will pick.',
+    'The legs stand it up and aim it. They do no carrying at all, and it holds them drawn in from the moment it starts until the moment it stops.',
+    'It picks its line while it is still folding, and it holds that line to the end of the roll. One that has started cannot be turned.',
+    'It sleeps folded, and from a step away a sleeping one cannot be told from a stone.',
+    { t: 'At {grav} one throw carries it a long way, and it comes out of the fold slowly, while it still has ground to lose.', tags: 'lowgrav' },
+    { t: 'At {grav} it pays for every throw. It takes the downhill line wherever the ground offers one, and it will not start up a rise it cannot hold.', tags: 'highgrav' },
+    { t: 'It reads which way the ground falls through the feet before it folds them away, and it will not start up a rise it cannot hold.', tags: '!highgrav' },
+  ]);
   const SWARM_ORIGIN = pool([
     'Each shard is a separate animal, blind and nearly mindless. The core is not. It grows the shards from its own body and pays them in sugar to carry it from one patch of sun to the next.',
     'It is one animal or a hundred, depending on how you count. The shards share no nerve, only a chemical the core releases, and the chemical is enough.',
@@ -625,6 +675,19 @@
       'It has no flight response of any kind. It stops, and that has always been enough.',
       'It has outlived everything that ever evolved to open it.',
     ]),
+    // ---- roller (issue 28) ----
+    // The manner of an animal that stores what it has and spends all of it at once. Every impulse
+    // locomotion of issue 28 can carry it, so no line here names a hull, a leg, or a throw of one
+    // kind. Two lines carry no gate at all, so the pool is never empty on any world.
+    bursts: pool([
+      'It spends a long time doing nothing at all, and the little it then does it does at once.',
+      'Rest, for it, is the work. Everything it takes in goes into the next throw, and the throw is over in a breath.',
+      { t: 'It goes when the {ground} in front of it will pay for the throw, and it will stand a long while waiting for that.', if: roams },
+      { t: 'They rarely go at the same moment. One picks a line, and the others read it and pick their own.', if: grouped },
+      { t: 'It holds one range and crosses it a throw at a time, and it has never once been seen to hurry the waiting part.', if: solo },
+      { t: 'At {grav} it gathers for longer and goes further, and the whole day holds fewer of these than a heavier world would.', tags: 'lowgrav' },
+      { t: 'At {grav} it gathers for longer and gets less for it. It picks the line it will spend that on with care.', tags: 'highgrav' },
+    ]),
     wary: pool([
       'It keeps a distance from anything larger than itself and a longer distance from anything smaller.',
       'It feeds with the head up more often than down, and it has never finished a meal in one place.',
@@ -687,6 +750,8 @@
     // one throw takes it and how long it has to wait for the next one.
     { t: 'At {grav} one throw carries it a long way, and it spends the rest of the day standing where the last one put it.', tags: 'lowgrav', if: bursts },
     { t: 'At {grav} every throw is short, and it makes a great many of them to get anywhere at all.', tags: 'highgrav', if: bursts },
+    { t: 'At {grav} one throw carries it further than it meant to go, and it spends the next one coming back.', tags: 'lowgrav', if: bursts },
+    { t: 'At {grav} it gets little for what it spends. It goes where the {ground} will do some of the work, and waits where it will not.', tags: 'highgrav', if: bursts },
   ]);
 
   // ---------------------------------------------------------------- story slot 5: the sky
@@ -699,10 +764,12 @@
     { t: 'Two moons cross the sky of {world}. It breeds in the week the two rise together, and at no other time.', tags: 'twomoons' },
     { t: 'There are {moons} moons over {world}. The night light is never the same twice, and it has given up using light to tell the time.', tags: 'manymoons' },
     { t: '{moon} pulls the water up the shore and lets it down twice a day, and its whole life runs on that clock.', tags: 'tides' },
-    // The line has the animal move, so it needs the roams gate the other two mobility lines below
-    // carry. Without it the line reaches a burrower whose own sociality line says it never moves.
-    // The hole was here before issue 28; the new locomotion only changed which seed found it.
+    // A line that has the animal travel needs the roams gate, or it reaches a burrower whose own
+    // sociality line says that none of them ever moves. Issue 28 found this one: a new land
+    // locomotion moves which locomotion a seed rolls, and the audit then put this sentence on a
+    // periscope. The animals that never travel take the second line.
     { t: 'The ring cuts the sky of {world} in half. It keeps to the shadow the ring throws, and it is moving by the time the shadow is.', tags: 'ringed', if: roams },
+    { t: 'The ring cuts the sky of {world} in half. The band of shade it throws crosses the ground above it twice a day, and nothing it does marks either passing.', tags: 'ringed', if: (c) => !roams(c) },
     { t: 'Ring light and {moon} together make a night here brighter than a dull day, and it feeds straight through.', tags: 'ringed moonlit' },
     { t: 'When the sky over {world} lights up it raises its head, and so does every other one, at the same moment.', tags: 'auroral' },
     { t: 'The ash out of the vents blanks the sun for days at a time. It goes quiet and waits that out.', tags: 'volcanic' },
@@ -767,6 +834,8 @@
   // The manner word of the flow. It goes on its own line, so a second new locomotion adds a second
   // line and neither one rewrites the row above.
   TEMPER.pour = 'Unhurried';
+  // ---- roller (issue 28) ----
+  TEMPER.bursts = 'Still, then headlong';
 
   // ---------------------------------------------------------------- diet
   // The head decides what it eats; the world decides what there is to eat. Every line is gated on
@@ -776,13 +845,22 @@
   // a food beats the general lines. Without that, a weighted roll can hand a predator leaf litter.
   const HEAD_FED = new Set(['lure', 'mandibles', 'beak', 'stalks', 'tusks', 'crest']);
   const plated = (c) => c.G.extras.includes('plates');
+  // ---- roller (issue 28) ----
+  // A roller takes its food off the ground it rolls over, whatever head it carries: the head aims
+  // the body and the hull does the feeding. Its line therefore has to beat every head line, and
+  // the head lines and the plate line have to let it past, or one animal would be offered two
+  // sources of food and the audit would call it.
+  const rolls = (c) => c.G.loco === 'roller';
   const filters = (c) => c.G.cls === 'sub' && c.G.head !== 'lure' && !plated(c);
-  const byHead = (h) => (c) => c.G.head === h && !plated(c) && !filters(c);
-  const noHeadFood = (c) => !plated(c) && !filters(c) && !HEAD_FED.has(c.G.head);
+  const byHead = (h) => (c) => c.G.head === h && !plated(c) && !filters(c) && !rolls(c);
+  const noHeadFood = (c) => !plated(c) && !filters(c) && !HEAD_FED.has(c.G.head) && !rolls(c);
   // Every line carries the source its food comes from. All the lines that fit one animal must
   // name the same source: an animal has one diet, not a choice of four. tools/lore-audit checks it.
   const DIET = pool([
-    { t: 'Minerals licked from the rock', if: plated, w: 6, src: 'mineral' },
+    { t: 'Minerals licked from the rock', if: (c) => plated(c) && !rolls(c), w: 6, src: 'mineral' },
+    // ---- roller (issue 28) ----
+    { t: 'Seed and litter, taken off the {ground} it rolls over', if: rolls, tags: 'flora', w: 6, src: 'ground' },
+    { t: 'Whatever the {ground} gives up under the weight of it', if: rolls, w: 5, src: 'ground' },
     { t: 'Filters the wet {ground}', if: filters, tags: 'rainy', w: 4, src: 'filter' },
     { t: 'Sifts the frozen {ground}', if: filters, tags: 'frozen|subzero', w: 4, src: 'filter' },
     { t: 'Sifts the dry {ground}', if: filters, tags: 'dryworld|hot', w: 4, src: 'filter' },
@@ -945,6 +1023,10 @@
     if (G.loco === 'periscope' || G.loco === 'plough') return 'buried';
     if (G.loco === 'fins') return 'serene';
     if (G.loco === 'sac') return 'patient';
+    // ---- roller (issue 28) ----
+    // It neither grazes nor waits to strike. It gathers, and then it spends the whole of it, so
+    // the manner has to say that and the card can never read as a leg walk.
+    if (G.loco === 'roller') return 'bursts';
     if (m.turn > 2) return 'restless';
     if (G.head === 'lure' && m.pause >= 0.6) return 'ambush';
     if (G.head === 'mandibles' && m.pause >= 0.6) return 'strike';

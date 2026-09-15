@@ -170,6 +170,9 @@ export class GroundFauna {
 
     // The hooks an impulse animal reads on the ground. The slope is the gradient of the terrain by
     // central difference over SLOPE_STEP metres, so it is a rise over a run, as on the globe.
+    // A mover holds its place as an offset from its home, and the home of a group is its anchor,
+    // so _groupHooks() below puts the anchor back on before it asks. This one reads a plain point
+    // of the patch.
     this.hooks = {
       slope: (x, z) => ({
         gx: (this.heightAt(x + SLOPE_STEP, z) - this.heightAt(x - SLOPE_STEP, z)) / (2 * SLOPE_STEP),
