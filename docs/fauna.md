@@ -289,7 +289,7 @@ A carriage moves the whole body. `rigConstants(G)` picks it from the locomotion 
 | Carriage | Locomotions | Motion |
 |---|---|---|
 | `WALK` | biped, tripod, quad, hexapod | The body rises once over every footfall (`BOBN` times a cycle), rocks sideways once a cycle (`ROCK`), and rolls into a turn by `LEAN` times `aTurn` about the hip line (`ROLLY`). None of it reaches the legs, because their feet are on the ground. The activity scales the bob and the rock |
-| `HOP` | monopod | A crouch on the ground for `HOPG` of the cycle, then a parabola of height `HOPH`. `HOPH` is `0.45 / gravity`, clamped to 0.15 to 0.9, and the hop rate is `hopGait(G)`, which grows with the square root of the gravity. The bellows leg stretches by `EXT` (a quarter of its length) at take-off, then the foot leaves the ground and the leg tucks under the body at the apex. Any movement gives a full hop. `hopBurst()` makes the mover cover ground only in the air, in step with the shader |
+| `HOP` | monopod | A crouch on the ground for `CHARGE` of the throw, then a parabola of height `HOPH`. `HOPH` is `0.45 / gravity`, clamped to 0.15 to 0.9, and the hop rate is `hopGait(G)`, which grows with the square root of the gravity. The bellows leg stretches by `EXT` (a quarter of its length) at take-off, then the foot leaves the ground and the leg tucks under the body at the apex. It reads `aBurst` and not a clock of its own, so the crouch and the parabola always land on the ground the steering covers. A monopod at rest holds `aBurst` at 0 and stands still |
 | `WAVE` | serpent | A lateral wave runs from the head to the tail. Its amplitude grows toward the tail, and the head end moves as one piece. `FRONT` and `LEN` give the body extents |
 | `FLOAT` | sac, wings, fins | Slow vertical drift, plus a heave on each wing beat (`HEAVE`) and a tail wave for fins. The whole body also banks into a turn by `LEAN` times `aTurn`, wings and all |
 | `ARCH` | arch | The loop rises and sinks in place |
@@ -307,9 +307,18 @@ Uniforms and instance attributes:
 
 - `uTime`: seconds, set every frame in `app.js` for all fauna materials.
 - `aPhase` (per instance): a random offset so no two animals are in step.
-- `aMove` (per instance, dynamic): activity from 0 to 1. It is the amplitude of the leg swing. `moverActivity()` holds it at 0 until the animal really moves and reaches 1 at a third of the top speed, so a nearly still animal stands on straight legs. The walk bob and the rock scale with it too. Flyers keep 1.
-- `aGait` (per instance, dynamic): the gait cycle in radians, for a `LOCK` species. `stepGait()` advances it; see below.
-- `aTurn` (per instance, dynamic): how hard the animal turns, -1 to its right and 1 to its left. The body leans by it, the head yaws by it, and the inside legs shorten their stride by it. `turnLean()` writes it.
+- `aAnim` (per instance, dynamic, `vec4`): the four numbers the steering writes every frame, in the
+  order `[aMove, aGait, aTurn, aBurst]`. The shader reads them back by name at the head of the rig
+  block, so every line of `RIG_GLSL` still spells them `aMove`, `aGait`, `aTurn`, and `aBurst`.
+  **They travel together because a creature program had run out of room.** The hardware promises 16
+  attribute slots, `instanceMatrix` alone takes 4, and a locked species already used all 16.
+  `aBurst` and `aAnchor` as two more attributes would have broken every locked species. A caller
+  writes `at.aAnim.array[j * 4 + k] = v` and sets `at.aAnim.needsUpdate` once.
+  - `aMove`: activity from 0 to 1. It is the amplitude of the leg swing. `moverActivity()` holds it at 0 until the animal really moves and reaches 1 at a third of the top speed, so a nearly still animal stands on straight legs. The walk bob and the rock scale with it too. Flyers keep 1.
+  - `aGait`: the gait cycle in radians, for a `LOCK` species. `stepGait()` advances it; see below.
+  - `aTurn`: how hard the animal turns, -1 to its right and 1 to its left. The body leans by it, the head yaws by it, and the inside legs shorten their stride by it. `turnLean()` writes it.
+  - `aBurst`: the throw of an impulse animal, 0 to 1. 0 is at rest, the charge runs 0 to `CHARGE_END`, and the discharge runs from there to 1. Only the four impulse carriages read it, and a wander species leaves it at 0 for the life of the mesh. See "The impulse mover".
+- `aAnchor` (per instance, dynamic, `vec3`): the point a tendon holds, in the frame of the instance. `RIG.TENDON` stretches its part from the part pivot to this point, and hides the part when the vector is zero. Only the slinger writes it.
 
 ### The gait clock
 
@@ -385,6 +394,65 @@ A body cannot pivot on the spot and slide sideways out of the turn. Four rules h
 - A leash pulls the animal home once it is past 50 percent of its range. The pull is capped near the species turn rate, or at what a fast animal needs to turn round inside its leash, and the sum of the wander and the pull is capped too. The way home is an arc, not a snap.
 - The real turn rate eases toward the target with a time constant of half a second, so the heading has no kinks. The turn circle then clamps it, and `st.turnN` holds the lean the shader reads.
 - The speed breathes on a third oscillator. Grazers stop on a fourth one. A monopod moves only while it is in the air (`hopBurst()`).
+
+### The impulse mover (`fauna.js`)
+
+An impulse animal stores energy and lets it go in one throw. It picks a heading while it charges
+and it holds that heading through the whole discharge: **it never turns in flight.** The world is
+what moves it, so the slope under it, the gravity, and whatever stands near it all shape the throw.
+
+`G.move.mode` says which model carries a species: `'wander'` for the steady model above, `'impulse'`
+for this one. The three callers — `app.js` for the globe, `ground-fauna.js` for the ground, and
+`Inspector` for the card — read that one field and nothing else. `makeAnyMover(rng, G, mv, hooks)`
+and `stepAny(st, t, dt)` pick the model, so no caller names a locomotion.
+
+```js
+export function makeImpulseMover(rng, mv, hooks = {});
+//   hooks.slope(x, z, st)     -> { gx, gz }, the gradient of the ground, or absent on a tier with none
+//   hooks.nearAnchor(x, z, r) -> { x, z } or null. Only the slinger reads it.
+export function stepImpulse(st, t, dt);
+export function impulseMove(G, mv);      // the move record the mover needs, from the genome
+export function impulseBlocked(st);      // the caller met water or an edge: end the throw
+```
+
+The state carries every field of `makeMover()` (`u`, `v`, `heading`, `spd`, `turnN`, and the rest,
+so `moverActivity()`, `turnCap()`, and `turnLean()` still read it) plus:
+
+| Field | Meaning |
+|---|---|
+| `phase` | `'rest'`, `'charge'`, `'fly'`, or `'recover'` |
+| `burst` | 0 to 1, what `aBurst` takes |
+| `aim` | the heading, locked at the end of the charge and held through the flight |
+| `range` | the ground this throw will cover, set at launch from the slope and the gravity |
+| `owed` | the ground the cruise speed has asked for and no throw has yet given |
+| `anchor` | `{ x, z }` or null, the slinger only, with `ax`, `ay`, `az` for `aAnchor` |
+| `stagger` | seconds, once, so a herd does not fire as one body |
+
+`stepMover()` runs in every phase, so the speed keeps breathing, the pause habit still stops the
+animal, and the leash still knows where home is. It covers ground only where the rule of the
+locomotion lets it, through `hold(st)`.
+
+**The cruise speed holds because the mover keeps books.** Every frame it adds the ground the cruise
+asked for to `owed`, and one throw pays the whole debt at once. A throw the terrain refuses banks
+the debt instead, so the next throw that goes carries the ground this one did not. A monopod
+therefore covers the ground it covered before the impulse mover existed, within 2 percent.
+
+`IMPULSE` in `fauna.js` holds one row per impulse locomotion, and that row is the only place a
+locomotion rule lives:
+
+| Key | Meaning |
+|---|---|
+| `rest`, `recover` | parts of the throw cycle the animal spends waiting and settling |
+| `ready(st)` | may it charge now? The slinger asks for a plant here |
+| `hold(st)` | the part of its speed it covers while it waits and charges. A crawl, or a run down a slope |
+| `launch(st, owed)` | the ground the throw covers, or 0 to refuse it and pick a new heading |
+
+`impulseCycle(G)` gives the seconds of one throw. A monopod takes `2 pi / hopGait(G)`, so its hop
+rate is the rate it always had.
+
+**A caller must call `impulseBlocked(st)` wherever it refuses a step.** A flight holds one heading,
+so an animal the caller pushed back out of the water would drive into the same water for the rest
+of the throw. Both ground callers do this in their water and edge branch.
 
 `updateMovers()` in `app.js` samples the height map under the new position, keeps walkers out of the sea, builds the instance matrix from the surface normal and the heading, and writes `aMove`, `aGait`, and `aTurn`. Far from the camera it steps every fourth frame. The turn circle of a globe creature is 1.5 times its scale, because a creature is about one unit long in its own frame.
 
@@ -572,6 +640,7 @@ holds none of it.
 - Add a line of lore: put it in the pool it belongs to, gate it on the tags it needs, and run `node tools/lore-audit/audit.mjs --seeds 200`. If the line leans on a fact of the world, add the word to `LEXICON` in the audit tool as well, so the next line that uses it is checked too.
 - Add a world fact: add the tag in `makeEnv()` in `lore.js`, the raw value in `world.env` in `worker.js`, and the axis to the grid in the audit tool.
 - Add a legged locomotion: add it to `LEG_SWING`, `LEG_DUTY`, `BOB_BEATS`, and `ROCK_K` in `fauna.js`, and give its legs a footfall order in `legPlan()`. Without an entry in `LEG_SWING` the gait clock does not lock and the feet slide.
+- Add an impulse locomotion: set `mode: 'impulse'` on its `MOVE` row, add its row to `IMPULSE` and its case to `impulseCycle()` in `fauna.js`, and give it a carriage that reads `aBurst`. Add every constant the carriage needs to `rigConstants()`, so they sit in the program key. Change no caller: the three of them read `G.move.mode` and nothing else.
 - Change how far a leg swings, or how long its foot stays down: the gait clock reads both, so the stride and the rate follow on their own. Check the new stride against the body size before you keep it.
 - Add a niche: add it to `NICHE` and `WORLD_NICHES` in `species.js`, and a test in `makeFauna()` in `worker.js`.
 - Test the worker without a browser: run `node tools/lore-audit/audit.mjs --seeds 200 --show 8`. It loads `worker.js` in Node with a fake `self` and reports every finding with an example world.
