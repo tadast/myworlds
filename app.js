@@ -10,6 +10,7 @@ import { PlantInspector } from './flora-card.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
 import { perf, Hud } from './perf.js';
+import { rollStar, StarSystem } from './star.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
@@ -149,6 +150,10 @@ scene.add(new THREE.HemisphereLight('#8fb7ff', '#2b1d12', 0.55));
 const fill = new THREE.DirectionalLight('#5a78c8', 0.35);
 fill.position.set(-4, -2, -3);
 scene.add(fill);
+// The star of the world stands far out along sunDir, so the light and the star the reader sees
+// agree. See star.js.
+const SUN_INTENSITY = 3.2;
+const stars = new StarSystem(scene, sunDir);
 
 // stars
 {
@@ -224,6 +229,10 @@ function buildWorld(res) {
   disposeWorld();
   const { world, terrain, flora, clouds, fauna, heightMap, floraGrid } = res;
   const group = new THREE.Group();
+  world.star = rollStar(world.seed);
+  stars.set(world.star);
+  sun.color.copy(stars.lightColor());
+  sun.intensity = SUN_INTENSITY * stars.lightScale();
   const planet = new THREE.Group();          // spins
   planet.rotation.z = world.tilt;
   group.add(planet);
@@ -592,6 +601,7 @@ function step(now) {
       current.cloudMat.depthWrite = op > 0.9; // faded puffs must not punch holes in the atmosphere
       current.cloudGroup.visible = op > 0.02;
     }
+    stars.update(t, camera);
     for (const m of current.moons) {
       m.angle += m.speed * dt;
       m.mesh.position.set(Math.cos(m.angle) * m.dist, 0, Math.sin(m.angle) * m.dist);
@@ -951,6 +961,7 @@ function enterGround() {
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
   const view = skyView(current, lockedSite, sunDir);
+  view.starLight = stars.lightColor();   // the ground sun takes the colour of the star
   const t0 = performance.now();
   ground.load(patchState.result, { sunDir: view.sunDir, view });
   if (patchState.result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
@@ -1327,6 +1338,7 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
+      ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>

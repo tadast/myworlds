@@ -138,9 +138,10 @@ export class Sky {
     const atmo = new THREE.Color(pal.atmo || '#8fb7ff');
     this.horizon = atmo.clone().lerp(NIGHT_COLOR, this.night * 0.88);
     this.zenith = this.horizon.clone().multiplyScalar(0.7);
-    this.sunColor = SUN_LIGHT.clone().lerp(MOON_LIGHT, this.night);
+    const starLight = view?.starLight || SUN_LIGHT;
+    this.sunColor = starLight.clone().lerp(MOON_LIGHT, this.night);
     this.sunIntensity = 2.6 - 2.0 * this.night;
-    this.discColor = SUN_TINT.clone().lerp(MOON_LIGHT, this.night).multiplyScalar(1 - 0.5 * this.night);
+    this.discColor = (view?.starLight ? SUN_TINT.clone().multiply(view.starLight) : SUN_TINT.clone()).lerp(MOON_LIGHT, this.night).multiplyScalar(1 - 0.5 * this.night);
 
     this._addDome();
     if (view) {
