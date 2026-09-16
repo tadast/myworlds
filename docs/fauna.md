@@ -279,12 +279,21 @@ The builder makes a list of parts. Each part is `{ geo, color, matrix, glow, rig
 
 The build order is:
 
-1. **Body**: `bodySections(G)` returns sections and the extents `front`, `back`, `top`, `bot`. `arch`, `periscope`, and `swarm` build their own bodies. `arch` and `periscope` also fill `secs`, so the probe below works for them.
+1. **Body**: `bodySections(G)` returns sections and the extents `front`, `back`, `top`, `bot`. `arch`, `periscope`, and `swarm` build their own bodies. A sky whale (`fins`) is one lofted hull from `WHALE_PROFILE`, with a darker back and a lighter belly; its sections only feed the probe. `arch` and `periscope` also fill `secs`, so the probe below works for them.
 2. **Probe**: `bodyProbe(secs, yc)` treats each section as an ellipsoid. It gives the half-width of the body at a `(y, z)`, and the top or bottom surface at an `(x, z)`. Every part that touches the body gets its root from the probe. Do not place a part with a fixed multiple of `bodyR`; the body is not that wide everywhere.
 3. **Legs**: `legPlan(G, len)` returns the hip `z`, an outward direction, and a gait phase per leg. The hip `x` comes from the probe, and the hip sits inside the belly, so the thigh never shows a gap. Each leg is a thigh (hip to knee), a shin (knee to foot), a knee ball when `jointed`, and a foot pad. A leg without a knee has its knee point on the straight line, and a smaller fold.
 4. **Head**: attached at `front`. Tall walkers get a neck. Head parts use the `NOD` mode with the neck base as pivot.
-5. **Locomotion parts**: wing sheets from `wingGeo()` with a bone on the leading edge, pectoral fins and a belly glow, or the sac's vent and core. A spindle flyer gets a second, smaller pair of wings with a phase offset.
+5. **Locomotion parts**: wing sheets, the flippers of a whale, or the sac's vent and core.
+   - A wing takes one of three forms from `G.wingStyle`. `flit` is a veined paddle, and a spindle carries two pairs on two phases. `flap` is a membrane on an arm and three fingers, with a scallop between two fingers and a claw at the wrist. `glide` is a long narrow wing with a light band of coverts and five slotted primaries at the tip. `WING_FORM` holds the span, the chord, the beat, the fold, and the glide gate of each form, and `wingPlan()` holds the planform.
+   - A whale takes one of two heads from `G.whaleHead`. `hull` is the blunt front of the hull, with throat grooves under it. `bladder` starts the hull behind a cluster of gas bladders that breathe on their own phases, with a row of smaller bladders down the back. Both carry swept flippers with knobs on the leading edge, eyes, and a row of lamps down each flank. A `hull` whale with no sail carries a small dorsal fin.
+   - `species.js` sets both forms from a hash of `G.slow` and `G.bodyR`, so a form takes no draw and no world moves. A winged species takes the noun of its form: a flitter, a flapper, or a sailer.
 6. **Extras**: placed on the body surface with the probe. A bead or a spike is skipped when the probe finds no body at its place.
+
+- A **sail** is a row of raked spines with a membrane that sags between two spines. It shows three bands: the accent, the second body colour, and a lit rim.
+- A **tail** on a walker is six banded bones that droop from the hip and lift at the tip, with a club of spikes on a spiked animal and a tuft on the rest. A glider carries a fan of seven feathers. A flapper carries a whip with a vane, and any other flyer carries two streamers with paddles.
+- **Flukes** are a crescent flat to the ground, with a notch in the trailing edge.
+
+`tools/fauna-lab.html` builds hand-written genomes with the real builder, so a change to a part shows without a world roll. The README section "The fauna lab" lists its parameters.
 
 Add a new extra by adding a `case` in the extras loop and its name to `EXTRAS`, `ADJ`, `EPITHET`, and `FEATURE` in `species.js`. Use the probe for its root.
 
@@ -296,7 +305,7 @@ The rig record tells the shader what a part does. The modes are in `RIG`:
 |---|---|---|
 | `NONE` | 0 | Only the carriage |
 | `LEG` | 1 | Two bones and a duty cycle. Through `DUTY` of the cycle the foot is on the ground and the leg sweeps back about the hip (`aPivot`) at a constant rate. Through the rest the shin folds about the knee (`aPivot2`) by `weight` radians and a cubic carries the foot forward again. The leg also extends, so the arc of the pitch cannot lift the planted foot. `amplitude` is the swing in radians, and the activity scales it. See "The gait clock" |
-| `WING` | 2 | Roll about the root at the flap rate. `weight` is the side sign times the span. The angle grows with the distance from the root, and the tip lags the root, so the sheet bends. When `GLIDE` is 0 the wing holds still on a slow cycle |
+| `WING` | 2 | Roll about the root at the flap rate. `weight` is the side sign times the span. The angle grows with the distance from the root, and the tip lags the root by `LAG`, so the sheet bends. On the upstroke the wing past the wrist (`ELB`) droops and sweeps back by `FOLD`. When `GLIDE` is 0 the wing holds out at `HOLDA` plus `HOLDB` on a slow cycle, and `GLO` sets how much of that cycle it holds: a glider holds most of it, a flapper little of it |
 | `SWAY` | 3 | Lateral drift that grows with the distance from the pivot. A walker (`SWAYG` is 1) sways on the gait clock instead, with a lag along the part, so its tail swings with the stride |
 | `PULSE` | 4 | Scale about the pivot on a slow rhythm |
 | `NOD` | 5 | Slow pitch about the pivot, plus a yaw of `HEADYAW` times `aTurn`, so the head leads a turn |
@@ -314,7 +323,7 @@ A carriage moves the whole body. `rigConstants(G)` picks it from the locomotion 
 | `WALK` | biped, tripod, quad, hexapod | The body rises once over every footfall (`BOBN` times a cycle), rocks sideways once a cycle (`ROCK`), and rolls into a turn by `LEAN` times `aTurn` about the hip line (`ROLLY`). None of it reaches the legs, because their feet are on the ground. The activity scales the bob and the rock |
 | `HOP` | monopod | A crouch on the ground for `CHARGE` of the throw, then a parabola of height `HOPH`. `HOPH` is `0.45 / gravity`, clamped to 0.15 to 0.9, and the hop rate is `hopGait(G)`, which grows with the square root of the gravity. The bellows leg stretches by `EXT` (a quarter of its length) at take-off, then the foot leaves the ground and the leg tucks under the body at the apex. It reads `aBurst` and not a clock of its own, so the crouch and the parabola always land on the ground the steering covers. A monopod at rest holds `aBurst` at 0 and stands still |
 | `WAVE` | serpent | A lateral wave runs from the head to the tail. Its amplitude grows toward the tail, and the head end moves as one piece. `FRONT` and `LEN` give the body extents |
-| `FLOAT` | sac, wings, fins | Slow vertical drift, plus a heave on each wing beat (`HEAVE`) and a tail wave for fins. The whole body also banks into a turn by `LEAN` times `aTurn`, wings and all |
+| `FLOAT` | sac, wings, fins | Slow vertical drift, plus a heave on each wing beat (`HEAVE`) and a tail wave for fins. The wave of a whale runs up and down (`WAVEV`), as the wave of a whale on Earth does. The whole body also banks into a turn by `LEAN` times `aTurn`, wings and all |
 | `ARCH` | arch | The loop rises and sinks in place |
 | `RISE` | periscope, plough | The body sinks below the ground on a slow cycle. `SINK` sets how often |
 | `ROLL` | roller | `aBurst` is the clock of the fold. The legs and the head fold to the hull over the charge, and the hull then drops `ROLLDROP` on to the ground and turns about the right axis of the animal by `aGait`. The recovery runs the same numbers backwards, so the unfold is the fold played in reverse. The hull is a body of revolution about that axis, so a ball that stops at any angle still stands right |
@@ -627,14 +636,15 @@ outline and every rig record, and it drops what the reader cannot resolve at tha
   the tusks, and the eyes go: each measures a fraction of a metre.
 - A chain body is one tapered tube, not a string of balls. The two end joints reach out by the end
   radius, so the body holds the length of the full build.
-- Of the extras only the sail and the plates stay, because only those two break the outline. The
-  sail loses its ribs and the plates become one shell.
-- A wing sheet takes one panel and loses its leading-edge bone. A swarm keeps its nine shards and
-  loses their beads. A sky whale loses its gill beads and its belly glow.
+- Of the extras only the sail, the plates, and the flukes stay, because only those break the
+  outline. The sail is one band on three spines, and the plates become one shell.
+- A wing sheet takes two or three stations and loses its bones, its coverts, and its primaries. A
+  swarm keeps its nine shards and loses their beads. A sky whale keeps a hull of four sides and five
+  rings, and loses its eyes, its lamps, its grooves, and all but two of its bladders.
 - The leg swing runs at half the amplitude (`COARSE_SWING`), so a leg of a few pixels does not
   shimmer.
 
-The coarse build is 16 to 70 triangles over every species the roll can make, against a target of
+The coarse build is 16 to 72 triangles over every species the roll can make, against a target of
 80. A biped spindle is 55, a quad dome 52, and a tripod blob 31.
 
 The walk that places the animals also sorts them. An animal nearer to the camera than

@@ -113,6 +113,27 @@ The species of one world also know about each other. After every animal has a na
 
 `tools/lore-audit/audit.mjs` reviews the permutations without a browser. It sweeps every world type against every value it can reach — 11,616 worlds — times every class, every sociality, every locomotion, every head, and every part. It checks that no text slot is ever empty and that no line is unreachable; that no line claims a fact the world does not have; that an animal is never offered two sources of food; and that every relation rule, run against every pair of creature shapes, keeps to the contract its sentence implies, so a blind burrower is never described gathering at a light. Run `node tools/lore-audit/audit.mjs --seeds 200` to add two hundred real worlds through the worker.
 
+### The fauna lab
+
+`tools/fauna-lab.html` shows creature parts without a world roll. It builds hand-written genomes with the real `buildCreature()` and `faunaMaterial()` from `fauna.js`, and it draws each one in its own animated cell with its triangle count. Serve the directory and open <http://localhost:5555/tools/fauna-lab.html>.
+
+| Parameter | Values | Effect |
+|---|---|---|
+| `set` | `wings`, `whales`, `sails`, `tails`, `all` | The group of genomes to show. The default is `all` |
+| `t` | seconds | Freezes the clock at that time, so two screenshots show the same pose |
+| `view` | `side`, `top`, `front` | Fixes the camera. Without it, the camera turns about each creature |
+| `lod` | `coarse` | Shows the far build that the ground draws past the LOD distance |
+
+Example: `tools/fauna-lab.html?set=whales&t=1.3&view=side`.
+
+To add a case, add a row to `SETS` in the page. A row takes the genome fields that matter (`loco`, `plan`, `head`, `extras`, `wingStyle`, `whaleHead`), and the page fills in the rest. The page adds the parts that a locomotion always has, as `species.js` does. Headless Chrome can save a still for a review:
+
+```sh
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --use-angle=swiftshader --enable-unsafe-swiftshader --window-size=1000,600 --virtual-time-budget=4000 --screenshot=wings.png "http://localhost:5555/tools/fauna-lab.html?set=wings&t=1.3"
+```
+
+A browser can keep an old `fauna.js` in its module cache after an edit. Do a hard reload before you trust a triangle count.
+
 See `docs/fauna.md` for the architecture: the genome fields, the rig modes, the carriages, and the placement rules.
 
 Creatures roam on procedural paths. Two slow oscillators with per-creature random frequencies steer each one, a leash pulls it back toward its home spot, and grazers stop and start on a third oscillator. Land creatures follow a coarse height map from the worker and turn back at the shoreline. Click a creature, or a species chip in the info card, to open the inspector: a live turntable with the path trace and the species backstory.

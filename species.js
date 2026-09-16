@@ -251,6 +251,12 @@
     return { type, waterliquid: tags.has('waterliquid'), molten: tags.has('molten') };
   }
 
+  // A number in [0, 1) from two genes the roll already drew. It takes no draw of its own.
+  function formHash(G, salt) {
+    const x = Math.sin((G.slow * 1000 + G.bodyR * 7919 + salt * 101) * 12.9898) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
   function rollGenome(rng, type, niche, cls, usedLoco, hasFlora, forceLoco, w) {
     const byClass = cls === 'air' && niche !== 'sea' && niche !== 'cloud' ? LOCO.air.filter((l) => l !== 'fins') : LOCO[cls]; // whales need open air
     const options = locoOptions(byClass, niche, w, hasFlora);
@@ -314,6 +320,18 @@
     if (type === 'gas' && loco !== 'fins') G.size *= 1.5;
     if (loco === 'fins') { G.density = niche === 'cloud' ? 0.02 : 0.0025; G.fsign = 1; G.fcut = 0.3; }
     if (plan === 'swarm') G.move.shadow = false;
+    // The form of a wing and of the head of a whale. Each one comes from a hash of two numbers the
+    // roll already drew, so the form takes no draw and no species of any world moves.
+    //   flit:    veined paddles, two pairs on a spindle. Quick beats.
+    //   flap:    a membrane on an arm and three fingers. The outer wing folds on the upstroke.
+    //   glide:   a long narrow wing with slotted tips. It holds the wing out and beats now and then.
+    //   hull:    the head is the blunt front of one smooth hull.
+    //   bladder: the head is a cluster of gas bladders that breathe.
+    if (loco === 'wings' && plan !== 'swarm') {
+      const r = formHash(G, 1);
+      G.wingStyle = plan === 'spindle' ? (r < 0.55 ? 'flit' : 'glide') : (r < 0.5 ? 'flap' : r < 0.8 ? 'glide' : 'flit');
+    }
+    if (loco === 'fins') G.whaleHead = formHash(G, 2) < (type === 'gas' ? 0.55 : 0.35) ? 'bladder' : 'hull';
     if (niche === 'forest') G.fsign = 1; // the forest test already needs positive flora noise
     if (cls === 'sub' && niche !== 'beach') G.density *= 0.3; // beaches are thin strips; plains are not
     // heavier animals walk slower and wander less
@@ -355,6 +373,8 @@
     flow: ['slick', 'seep', 'pour'],
     slinger: ['slinger', 'caster', 'grapnel'],   // slinger (issue 28)
   };
+  // A winged species takes the noun of its wing form, so the name says how it flies.
+  const WING_NOUN = { flit: ['flitter', 'darter', 'hummer'], flap: ['flapper', 'beater', 'swooper'], glide: ['sailer', 'soarer', 'glider'] };
   // ---- roller (issue 28) ----
   NOUN.roller = ['roller', 'tumbler', 'wheel'];
   const ADJ = {
@@ -487,7 +507,10 @@
       { t: 'At {grav} it must brew gas all day to stay up, and a sick one sinks within the hour.', tags: 'highgrav' },
     ]),
     wings: pool([
-      'Each wing is a single stiff blade. It does not flap so much as row, and it turns by tilting the whole body.',
+      { t: 'Each wing is a veined paddle that beats faster than the eye can follow, and it turns by tilting the whole body.', if: (c) => c.G.wingStyle === 'flit' },
+      { t: 'Each wing is skin stretched over an arm and three long fingers. On every upstroke it folds the outer half away.', if: (c) => c.G.wingStyle === 'flap' },
+      { t: 'Its wings are long and narrow, and the feathers at each tip stand apart like fingers. It beats them only to climb.', if: (c) => c.G.wingStyle === 'glide' },
+      { t: 'Each shard is a single stiff blade. It does not flap so much as row, and the swarm turns as one body.', if: (c) => c.G.plan === 'swarm' },
       { t: 'It flies in a loose wheel of a dozen or more, and the wheel has a leader only in the sense that a whirlpool does.', if: herded },
       'It sleeps on the wing, one half of the brain at a time.',
       { t: 'At {grav} flight is work. The wings are short, the beat is fast, and it lands more often than it would like.', tags: 'highgrav' },
@@ -1166,7 +1189,7 @@
     // The place word must not echo the adjective: "Cinder cinder worm" is not a name.
     const places = L.candidates(PLACE[G.niche], ctx).map((e) => e.t)
       .filter((p) => !p || (p !== adj && !adj.includes(p) && !p.includes(adj)));
-    const nouns = G.plan === 'swarm' ? ['swarm', 'wheel'] : NOUN[G.loco];
+    const nouns = G.plan === 'swarm' ? ['swarm', 'wheel'] : G.wingStyle ? WING_NOUN[G.wingStyle] : NOUN[G.loco];
     const freshNouns = nouns.filter((x) => !used.words.has(x));
     const name = L.unique((i) => {
       const place = i === 0 ? L.pick(rng, places) : i < 4 ? L.pick(rng, places.filter(Boolean).concat('')) : '';

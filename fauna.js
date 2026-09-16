@@ -76,23 +76,92 @@ export function mergeGeos(parts) {
   return out;
 }
 
-// a tapered two-sided wing sheet along +x with the root at the origin; the tip sweeps back
-function wingGeo(span, chord, n = 5, sweep = 0.4) {
-  const pos = [];
-  const edge = (u) => {
-    const c = chord * Math.sqrt(Math.max(0, 1 - u * u)) * (0.7 + 0.3 * Math.min(1, u * 4)), zc = -sweep * chord * u * u;
-    return [zc + c * 0.5, zc - c * 0.5];
-  };
-  for (let i = 0; i < n; i++) {
-    const u0 = i / n, u1 = (i + 1) / n, x0 = u0 * span, x1 = u1 * span;
-    const [l0, t0] = edge(u0), [l1, t1] = edge(u1);
-    const a = [x0, 0, l0], b = [x1, 0, l1], c = [x1, 0, t1], d = [x0, 0, t0];
-    pos.push(...a, ...b, ...c, ...a, ...c, ...d); // top face
-    pos.push(...a, ...c, ...b, ...a, ...d, ...c); // bottom face
-  }
+const geoOf = (pos) => {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   return g;
+};
+// A two-sided sheet through a list of stations. A station is [x, y, zLead, zTrail]: one chord of
+// the sheet. The sheet runs from each station to the next, so a station list is a planform.
+function sheetGeo(st) {
+  const pos = [];
+  for (let i = 0; i < st.length - 1; i++) {
+    const [x0, y0, l0, t0] = st[i], [x1, y1, l1, t1] = st[i + 1];
+    const a = [x0, y0, l0], b = [x1, y1, l1], c = [x1, y1, t1], d = [x0, y0, t0];
+    pos.push(...a, ...b, ...c, ...a, ...c, ...d); // top face
+    pos.push(...a, ...c, ...b, ...a, ...d, ...c); // bottom face
+  }
+  return geoOf(pos);
+}
+// A two-sided sheet from a list of triangles, for a panel that a station list cannot describe.
+function trisGeo(tris) {
+  const pos = [];
+  for (const [a, b, c] of tris) pos.push(...a, ...b, ...c, ...a, ...c, ...b);
+  return geoOf(pos);
+}
+// A lofted hull along z. A ring is [z, y, rx, ry]. Only the faces whose angle lies in [a0, a1)
+// are built, so one hull can take two colours: a back and a belly. The angle 0 points up.
+// A ring with a radius of zero closes that end of the hull.
+function loftGeo(rings, sides, a0 = 0, a1 = 1) {
+  const pos = [];
+  const at = (r, k) => {
+    const a = (k / sides) * Math.PI * 2;
+    return [Math.sin(a) * r[2], r[1] + Math.cos(a) * r[3], r[0]];
+  };
+  for (let k = 0; k < sides; k++) {
+    const m = (k + 0.5) / sides;
+    if (m < a0 || m >= a1) continue;
+    for (let i = 0; i < rings.length - 1; i++) {
+      const p = at(rings[i], k), q = at(rings[i], k + 1), r = at(rings[i + 1], k + 1), s = at(rings[i + 1], k);
+      pos.push(...p, ...r, ...q, ...p, ...s, ...r);
+    }
+  }
+  return geoOf(pos);
+}
+
+// ---------------------------------------------------------------- wing forms
+// A wing is a planform of stations in parts of the span (x) and of the chord (z), plus the bones
+// that hold it. The form comes from the genome (G.wingStyle, set in species.js). A genome built
+// before the form existed takes the old paddle.
+export const wingStyle = (G) => (G.loco !== 'wings' || G.plan === 'swarm' ? null : G.wingStyle || 'flit');
+// The shape of each form, and the numbers the rig reads for it:
+//   span, chord: in body radii. amp: the beat. lag: how far the tip trails the root.
+//   elb: the wrist, as a part of the span. fold: how far the outer wing folds on the upstroke.
+//   glo: the gate of the glide clock. A high gate holds the wing out for most of the cycle.
+//   hold: the dihedral of a held wing at the root and at the tip. rate: a factor on the beat rate.
+const WING_FORM = {
+  flit: { span: 3.4, chord: 1.4, amp: 0.6, lag: 1.1, elb: 0.5, fold: 0, glo: 0, hold: [0.2, 0.25], rate: 1.5 },
+  flap: { span: 3.8, chord: 1.9, amp: 0.8, lag: 0.5, elb: 0.42, fold: 0.9, glo: -0.6, hold: [0.25, 0.2], rate: 0.85 },
+  glide: { span: 5.4, chord: 1.25, amp: 0.4, lag: 1.6, elb: 0.55, fold: 0.35, glo: 0.7, hold: [0.05, 0.12], rate: 0.55 },
+};
+// The planform of a form, as [u, lead, trail] in parts of the span and the chord.
+function wingPlan(style, coarse) {
+  if (style === 'flap') {
+    // The arm runs to the wrist at 0.42 along the leading edge. Three fingers run from the wrist
+    // to the trailing edge, and the membrane between two fingers sags into a scallop.
+    const st = [[0, 0.25, -0.85], [0.2, 0.3, -0.62], [0.42, 0.32, -0.42], [0.56, 0.22, -1.0],
+      [0.68, 0.12, -0.46], [0.8, 0.0, -0.78], [0.9, -0.14, -0.38], [1.0, -0.32, -0.34]];
+    return coarse ? [st[0], st[3], st[7]] : st;
+  }
+  if (style === 'glide') {
+    // Long and narrow. The trailing edge is a row of feather tips, so it alternates by a little.
+    // The tip is left open: the slotted primaries finish it. See wingFeathers().
+    if (coarse) return [[0, 0.35, -0.75], [0.6, 0.35, -0.5], [1.0, 0.1, -0.1]];
+    const st = [];
+    for (let i = 0; i <= 10; i++) {
+      const u = (i / 10) * 0.8;
+      st.push([u, 0.35 + 0.08 * Math.sin(u * 3.2) - 0.15 * u * u, -0.75 + 0.35 * u + (i % 2 ? 0.07 : 0)]);
+    }
+    return st;
+  }
+  // flit: a paddle with a narrow root and a round tip
+  const n = coarse ? 2 : 7, st = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n, c = Math.sqrt(Math.max(0, 1 - u ** 4)) * (0.35 + 0.65 * Math.min(1, u * 3));
+    const lead = 0.3 * c - 0.15 * u;
+    st.push([u, lead, lead - c]);
+  }
+  return st;
 }
 
 // the body as a set of ellipsoids: half-width at (y, z), and the top or bottom surface at (x, z)
@@ -119,6 +188,7 @@ function bodySections(G) {
   const R = G.bodyR, S = G.stretch;
   // ---- roller (issue 28) ----
   if (G.loco === 'roller') return rollerSections(G);
+  if (G.loco === 'fins') return whaleSections(G);
   switch (G.plan) {
     case 'blob':
       return { secs: [{ z: 0, y: 0, r: R, s: [1, 0.8, 1.35 * S] }], front: 1.3 * R * S, back: -1.3 * R * S, top: 0.8 * R, bot: -0.8 * R };
@@ -158,6 +228,33 @@ function bodySections(G) {
     }
   }
   return { secs: [], front: R, back: -R, top: R, bot: -R };
+}
+
+// ---------------------------------------------------------------- the sky whale
+// A whale is one smooth hull, not a string of balls. The profile is a table of stations from the
+// nose (t = 0) to the root of the flukes (t = 1): the radius as a part of the widest radius, and
+// the lift of the centre line. The hull is widest a third of the way back and runs out into a thin
+// stock that carries the flukes. It is a little flatter than it is wide.
+const WHALE_PROFILE = [
+  [0, 0.3, -0.03], [0.03, 0.62, -0.02], [0.08, 0.8, -0.01], [0.16, 0.9, 0], [0.28, 1, 0], [0.42, 0.97, 0],
+  [0.56, 0.84, 0.01], [0.68, 0.64, 0.03], [0.78, 0.44, 0.05], [0.87, 0.27, 0.07], [0.94, 0.17, 0.08], [1, 0.12, 0.08],
+];
+const WHALE_FLAT = 0.82;          // the height of the hull against its width
+// the head of a whale: 'hull' or 'bladder'. A genome built before the form existed takes the hull.
+export const whaleHead = (G) => (G.loco === 'fins' ? G.whaleHead || 'hull' : null);
+function whaleSections(G) {
+  const k = G.bodyR / 0.3, front = 1.15 * k, back = -1.35 * k, rmax = 0.3 * k;
+  const zAt = (t) => front + (back - front) * t;
+  const rings = WHALE_PROFILE.map(([t, r, y]) => [zAt(t), y * k, r * rmax, r * rmax * WHALE_FLAT]);
+  // Ellipsoids that follow the hull. The builder does not draw them: bodyProbe() reads them to put
+  // the fins, the lamps, and the spines on the skin.
+  const secs = [0.1, 0.26, 0.42, 0.58, 0.74, 0.88].map((t) => {
+    const i = WHALE_PROFILE.findIndex((p) => p[0] >= t);
+    const [t0, r0, y0] = WHALE_PROFILE[i - 1], [t1, r1, y1] = WHALE_PROFILE[i], f = (t - t0) / (t1 - t0);
+    const r = (r0 + (r1 - r0) * f) * rmax;
+    return { z: zAt(t), y: (y0 + (y1 - y0) * f) * k, r, s: [1, WHALE_FLAT, (0.3 * k) / r] };
+  });
+  return { secs, rings, zAt, k, front, back, top: rmax * WHALE_FLAT, bot: -rmax * WHALE_FLAT };
 }
 
 // ---- roller (issue 28) ----
@@ -367,6 +464,37 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     }
     P(ball(flowR(F.r, 1) * 1.15), body2, M4(0, F.h, 0, 1, 0.55, 1));
     B.front = F.r * 0.5; B.back = -F.r * 0.5; B.top = F.h; B.bot = 0;
+  } else if (G.loco === 'fins') {
+    // The sky whale: one lofted hull with a darker back and a lighter belly. A bladder head starts
+    // the hull behind the head and hides the blunt front in a cluster of gas bladders.
+    const bladder = whaleHead(G) === 'bladder', k = B.k;
+    const keep = coarse ? (bladder ? [3, 6, 8, 11] : [0, 2, 4, 8, 11]) : WHALE_PROFILE.map((p, i) => i).filter((i) => !bladder || i >= 3);
+    const kept = keep.map((i) => B.rings[i]);
+    const first = kept[0], last = kept[kept.length - 1];
+    const rings = [[first[0] + first[2] * 0.35, first[1], 0, 0], ...kept, [last[0] - 0.01 * k, last[1], 0, 0]];
+    const sides = coarse ? 4 : 10;
+    const hull = (a0, a1, color) => P(loftGeo(rings.map((r) => [r[0], yc + r[1], r[2], r[3]]), sides, a0, a1), color, M4(0, 0, 0));
+    hull(0, 0.3, body); hull(0.7, 1, body); hull(0.3, 0.7, body2);
+    if (bladder) {
+      // A cluster of bladders on the front of the hull. Each one breathes on its own phase, so
+      // the head never holds one shape. The coarse build keeps two of them.
+      const c = [0, yc + 0.02 * k, B.zAt(0.1)], cr = 0.3 * k;
+      const n = coarse ? 2 : 9;
+      for (let i = 0; i < n; i++) {
+        const v = 1 - ((i + 0.5) / n) * 2, rad = Math.sqrt(1 - v * v), a = i * 2.39996;
+        const p = [Math.cos(a) * rad * cr * 0.62, c[1] + v * cr * 0.5, c[2] + (Math.sin(a) * rad * 0.5 + 0.35) * cr];
+        const br = cr * (coarse ? 0.62 : 0.4 + 0.2 * ((i * 0.618) % 1));
+        P(ball(br, i < 2 ? 1 : 0), i % 3 === 0 ? glow : accent, M4(...p, 1, 0.92, 1.05),
+          { glow: i % 3 === 0 ? 0.55 : 0.2, rig: [RIG.PULSE, i * 0.9, 0.07, 1], pivot: p });
+      }
+      if (!coarse) {
+        // a row of smaller bladders down the back, as if the head ran on under the skin
+        for (const [t, s] of [[0.3, 0.1], [0.42, 0.08], [0.54, 0.06]]) {
+          const z = B.zAt(t), p = [0, yc + B.top * 0.92 + WHALE_PROFILE[4][2] * k, z];
+          P(ico(s * k), accent, M4(...p, 1, 0.8, 1.2), { glow: 0.25, rig: [RIG.PULSE, t * 9, 0.08, 1], pivot: p });
+        }
+      }
+    }
   } else if (coarse && G.plan === 'chain') {
     // A chain of seven balls is the widest body in the set. The coarse build joins the section
     // centres with tapered tubes instead: one tube per joint, and the two end tubes reach out by
@@ -487,12 +615,16 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     H = [0, yc + B.top + headR * 0.6, B.front + headR * 0.6];
     const s = bone(neckBase, H, headR * 0.35, body2, headR * 0.45);
     P(s.geo, s.color, s.matrix, { rig: [RIG.NOD, 0, 0.12, 1], pivot: neckBase });
+  } else if (G.loco === 'fins') {
+    // The head of a whale is the front of the hull, so the furniture sits on the hull and no ball
+    // is drawn for it. A beak runs forward out of the nose and a crest stands on the brow.
+    neckBase = [0, yc, B.front * 0.6]; H = [0, yc + B.top * 0.55, B.front - headR * 1.2];
   } else { neckBase = [0, yc, B.front * 0.8]; H = [0, yc + B.top * 0.2, B.front + headR * 0.7]; }
   const nod = { rig: [RIG.NOD, 0, G.head === 'lure' ? 0.04 : G.loco === 'periscope' ? 0.08 : 0.12, 1], pivot: neckBase };
   const nodG = (g) => ({ ...nod, glow: g });
   const eyeR = clamp(headR * 0.25, 0.02, 0.05);
-  const eyes = () => { for (const sx of [-1, 1]) P(ico(eyeR), glow, M4(H[0] + sx * headR * 0.55, H[1] + headR * 0.25, H[2] + headR * 0.8), nodG(0.6)); };
-  if (G.head !== 'none' || G.loco === 'periscope') P(ball(headR), G.plan === 'chain' ? body : body2, M4(H[0], H[1], H[2], 0.85, 0.85, 1.25), nod);
+  const eyes = () => { if (G.loco !== 'fins') for (const sx of [-1, 1]) P(ico(eyeR), glow, M4(H[0] + sx * headR * 0.55, H[1] + headR * 0.25, H[2] + headR * 0.8), nodG(0.6)); };
+  if ((G.head !== 'none' || G.loco === 'periscope') && G.loco !== 'fins') P(ball(headR), G.plan === 'chain' ? body : body2, M4(H[0], H[1], H[2], 0.85, 0.85, 1.25), nod);
   // the head furniture and the eyes measure a fraction of a metre: past the LOD distance the head
   // is a ball of a few pixels and none of them can be told apart from it
   switch (coarse ? 'coarse' : G.head) {
@@ -539,33 +671,99 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   }
 
   // ---- locomotion extras: wings, fins, the sac's vent
-  if (G.loco === 'wings') {
-    // wing sheets rooted in the flank, with a bone along the leading edge. A spindle gets a second, smaller pair.
-    const pairs = G.plan === 'spindle' ? [[B.front * 0.3, 1, 0], [B.back * 0.3, 0.72, 1.4]] : [[B.front * 0.05, 1, 0]];
-    for (const [z, k, ph] of pairs) for (const sx of [-1, 1]) {
-      const yw = yc + B.top * 0.35, span = R * 3.6 * k, chord = R * 1.5 * k;
+  const style = wingStyle(G);
+  if (style) {
+    // Wing sheets rooted in the flank. The form gives the planform and the bones; see WING_FORM.
+    // A flitter on a spindle carries a second, smaller pair on a later phase.
+    const F = WING_FORM[style], plan = wingPlan(style, coarse);
+    const zw = style === 'glide' && G.plan === 'spindle' ? B.front * 0.25 : B.front * 0.05;
+    const pairs = style === 'flit' && G.plan === 'spindle' ? [[B.front * 0.3, 1, 0], [B.back * 0.3, 0.72, 1.4]] : [[zw, 1, 0]];
+    for (const [z, kw, ph] of pairs) for (const sx of [-1, 1]) {
+      const yw = yc + B.top * 0.35, span = R * F.span * kw, chord = R * F.chord * kw;
       const root = [sx * Math.max(probe.hw(yw, z) * 0.8, R * 0.3), yw, z];
       const m = M4(root[0], root[1], root[2], sx, 1, 1, 0, sx * 0.12);
-      const o = { glow: 0.3, rig: [RIG.WING, ph, 0.55, sx * span], pivot: root };
-      // one panel per sheet at distance, and no leading-edge bone: the sheet is the silhouette
-      P(wingGeo(span, chord, coarse ? 1 : 5), accent, m, o);
+      const o = { glow: 0.3, rig: [RIG.WING, ph, F.amp, sx * span], pivot: root };
+      const pt = (u, c, y = 0) => [u * span, y, c * chord];   // a point of the planform, in the frame of the wing
+      const inWing = (geo, color, oo) => P(geo, color, m.clone(), oo);
+      inWing(sheetGeo(plan.map(([u, l, t]) => [u * span, 0, l * chord, t * chord])), accent, o);
+      // one sheet per wing at distance: the sheet is the silhouette
       if (coarse) continue;
-      const rib = seg([0, 0.004, 0], [span * 0.95, 0.004, -chord * 0.2], 0.012, body2, 0.02, 4);
-      P(rib.geo, rib.color, rib.matrix.premultiply(m), { ...o, glow: 0 });
+      const bone = (a, b, r0, r1) => { const s = seg(a, b, r0, body2, r1, 4); P(s.geo, s.color, s.matrix.premultiply(m), { ...o, glow: 0 }); };
+      if (style === 'flap') {
+        // an arm along the leading edge to the wrist, three fingers from the wrist, and a claw
+        const wrist = pt(0.42, 0.32, 0.006);
+        bone(pt(0, 0.25, 0.006), wrist, R * 0.075, R * 0.05);
+        for (const [u, c] of [[0.56, -1.0], [0.8, -0.78], [1.0, -0.33]]) bone(wrist, pt(u, c, 0.004), R * 0.035, R * 0.01);
+        P(cone(R * 0.04, R * 0.22, 4), body2, M4(...add(wrist, [0.02 * span, 0, R * 0.1]), 1, 1, 1, Math.PI / 2, 0).premultiply(m), { ...o, glow: 0 });
+      } else if (style === 'glide') {
+        // an arm to the wrist, a lighter band of coverts over the front of the wing, and five
+        // primaries that stand apart at the tip, each one curled up a little
+        bone(pt(0, 0.3, 0.005), pt(0.55, 0.36, 0.005), R * 0.05, R * 0.035);
+        bone(pt(0.55, 0.36, 0.005), pt(0.8, 0.26, 0.005), R * 0.035, R * 0.02);
+        inWing(sheetGeo(plan.map(([u, l]) => [u * span, 0.004, l * chord, (l - 0.4) * chord])), body2, { ...o, glow: 0.1 });
+        for (let i = 0; i < 5; i++) {
+          const f = i / 4, a = 0.12 - 0.75 * f, L = span * (0.26 - 0.07 * f), w = chord * (0.11 - 0.02 * f);
+          const bx = 0.77 * span, bz = (0.26 - 0.66 * f) * chord, ca = Math.cos(a), sa = Math.sin(a);
+          const st = [[0, 0.5], [0.55, 0.55], [0.85, 0.35], [1, 0]].map(([s, wk]) =>
+            [bx + ca * L * s, 0.05 * L * s * s, bz + sa * L * s + w * wk, bz + sa * L * s - w * wk]);
+          inWing(sheetGeo(st), i % 2 ? accent : body2, o);
+        }
+      } else {
+        // flit: three veins fan out from the root, and a dark mark sits near the tip
+        const cw = (u) => Math.sqrt(Math.max(0, 1 - u ** 4)) * (0.35 + 0.65 * Math.min(1, u * 3));
+        const lead = (u) => 0.3 * cw(u) - 0.15 * u;
+        const r0 = pt(0, lead(0) - cw(0) * 0.5, 0.004);
+        for (const [u, s] of [[0.96, 0.15], [0.86, 0.5], [0.64, 0.9]]) bone(r0, pt(u, lead(u) - cw(u) * s, 0.004), R * 0.022, R * 0.008);
+        inWing(sheetGeo([[0.74 * span, 0.005, lead(0.74) * chord, (lead(0.74) - 0.2) * chord], [0.84 * span, 0.005, lead(0.84) * chord, (lead(0.84) - 0.18) * chord]]), body2, { ...o, glow: 0.6 });
+      }
     }
   }
   if (G.loco === 'fins') {
+    const k = B.k, bladder = whaleHead(G) === 'bladder';
+    // Pectoral flippers: long, narrow, and swept back, with knobs along the leading edge. They
+    // droop below the flank and row slowly.
+    const zf = B.zAt(0.26), yf = yc - B.top * 0.5, span = 0.72 * k, chord = 0.24 * k;
+    const fl = coarse ? [[0, 0.5, -0.5], [1, -0.4, -0.5]]
+      : [[0, 0.5, -0.5], [0.15, 0.62, -0.46], [0.3, 0.5, -0.42], [0.45, 0.56, -0.36], [0.6, 0.38, -0.3],
+        [0.72, 0.4, -0.28], [0.84, 0.18, -0.3], [0.94, -0.1, -0.4], [1, -0.4, -0.5]];
+    const sweep = (u) => -0.3 * u * span;
     for (const sx of [-1, 1]) {
-      const root = [sx * R * 0.7, yc, B.front * 0.15];
-      P(spike(R * 0.9, R * 2, 4), accent, M4(sx * R * 1.8, yc, B.front * 0.15, 0.14, 1, 1, 0, -sx * 1.4), { glow: 0.3, rig: [RIG.WING, 0, 0.2, sx * R * 2.2], pivot: root });
+      const root = [sx * probe.hw(yf, zf) * 0.85, yf, zf];
+      const m = M4(...root, sx, 1, 1, 0, -sx * 0.5);
+      const o = { glow: 0.2, rig: [RIG.WING, 0, 0.22, sx * span], pivot: root };
+      P(sheetGeo(fl.map(([u, l, t]) => [u * span, 0, l * chord + sweep(u), t * chord + sweep(u)])), accent, m, o);
+      if (coarse) continue;
+      const s = seg([0, 0.004, 0.4 * chord], [0.85 * span, 0.004, 0.1 * chord + sweep(0.85)], 0.035 * k, body, 0.012 * k, 4);
+      P(s.geo, s.color, s.matrix.premultiply(m), { ...o, glow: 0 });
     }
-    // the gill beads and the belly glow are decoration on the flank: they do not carry the outline
+    // A small swept dorsal fin two thirds of the way back, unless a sail or the bladders stand there.
+    if (!bladder && !G.extras.includes('sail')) {
+      const zd = B.zAt(0.64), yd = (probe.top(0, zd) ?? yc + B.top) - 0.02 * k, h = 0.2 * k, c = 0.32 * k;
+      const st = coarse ? [[0, 0, 0.5 * c, -0.5 * c], [h, 0, -0.5 * c, -0.6 * c]]
+        : [[0, 0, 0.5 * c, -0.5 * c], [0.4 * h, 0, 0.15 * c, -0.45 * c], [0.75 * h, 0, -0.15 * c, -0.42 * c], [h, 0, -0.5 * c, -0.56 * c]];
+      P(sheetGeo(st), body, M4(0, yd, zd, 1, 1, 1, 0, Math.PI / 2), { rig: [RIG.SWAY, 0, 0.02, 1], pivot: [0, yd, zd] });
+    }
+    // the eyes, the throat grooves, and a row of lamps down each flank of the belly: decoration
+    // that does not carry the outline
     if (!coarse) {
-      for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) {
-        const y = yc - R * 0.15, z = B.front * 0.55 + i * R * 0.3;
-        P(ico(R * 0.1), body2, M4(sx * probe.hw(y, z) * 0.97, y, z, 0.6, 1, 1));
+      const onHull = (t, a, lift = 1) => {
+        const z = B.zAt(t), i = WHALE_PROFILE.findIndex((p) => p[0] >= t);
+        const [t0, r0, y0] = WHALE_PROFILE[Math.max(0, i - 1)], [t1, r1, y1] = WHALE_PROFILE[i];
+        const f = t1 > t0 ? (t - t0) / (t1 - t0) : 0, r = (r0 + (r1 - r0) * f) * 0.3 * k * lift;
+        return [Math.sin(a) * r, yc + (y0 + (y1 - y0) * f) * k + Math.cos(a) * r * WHALE_FLAT, z];
+      };
+      for (const sx of [-1, 1]) {
+        P(ico(0.03 * k), glow, M4(...onHull(bladder ? 0.2 : 0.1, sx * 1.75)), { glow: 0.8 });
+        for (let i = 0; i < 5; i++) {
+          const p = onHull(0.2 + i * 0.1, sx * 2.25, 0.98);
+          P(oct(0.022 * k), glow, M4(...p), { glow: 0.9, rig: [RIG.PULSE, i * 0.7 + sx, 0.3, 1], pivot: p });
+        }
+        if (bladder) continue;
+        for (const a of [2.75, 2.95]) {
+          const pts = [0.04, 0.2, 0.38].map((t) => onHull(t, sx * a, 1.01));
+          for (let j = 0; j < 2; j++) PS(seg(pts[j], pts[j + 1], 0.008 * k, body, 0.008 * k, 3));
+        }
       }
-      P(ico(R * 0.65, 1), glow, M4(0, yc - R * 0.65, B.front * 0.2, 0.7, 0.35, 1.9), { glow: 0.8 });
     }
   }
   if (G.loco === 'sac') {
@@ -581,7 +779,7 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   for (const e of G.extras) {
     // A coarse creature keeps only the sail and the plates. Every other extra is a bead, a spike,
     // a feeler, or a mound of a few centimetres, and none of them reaches the outline at distance.
-    if (coarse && e !== 'sail' && e !== 'plates') continue;
+    if (coarse && e !== 'sail' && e !== 'plates' && e !== 'flukes') continue;
     // ---- roller (issue 28) ----
     // Anything the hull carries rides the tread, so it rings the body about the spin axis. Placed
     // along the body, as every other locomotion places it, one of these would stand on the ground
@@ -612,13 +810,37 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     }
     switch (e) {
       case 'sail': {
-        const bz = B.back * 0.15 + B.front * 0.1, base = [0, (probe.top(0, bz) ?? top) - 0.02, bz], sh = 0.35 + R;
-        P(spike(R * 1.1, sh, 4), accent, M4(base[0], base[1] + sh * 0.45, base[2], 0.1, 1, 1.5, -0.25, 0), { glow: 0.45, rig: [RIG.SWAY, 0, 0.04, 1], pivot: base });
-        if (coarse) break;      // the ribs sit inside the sheet of the sail
-        for (const zk of [0.3, -0.05, -0.4]) {
-          const z = base[2] + zk * R * 1.5, s = seg([0, base[1], z], [0, base[1] + sh * 0.85 * (1 - Math.abs(zk) * 0.5), z * 1.2 - 0.05], 0.008, body2, 0.006);
-          P(s.geo, s.color, s.matrix, { rig: [RIG.SWAY, 0, 0.04, 1], pivot: base });
+        // A membrane on a row of spines along the back. The spines rake back, the tallest stands
+        // ahead of the middle, and the membrane sags between two spines. It shows three bands:
+        // the accent near the back, the second body colour above it, and a lit rim at the edge.
+        const n = coarse ? 3 : 7, zA = B.front * 0.45, zB = B.back * 0.6, sh = 0.15 + R * 1.2;
+        const lerp = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+        const sp = [];
+        for (let i = 0; i < n; i++) {
+          const u = i / (n - 1), z = zA + (zB - zA) * u;
+          const h = sh * (0.3 + 0.7 * Math.sin(Math.PI * u ** 0.75) ** 0.8);
+          const yb = (probe.top(0, z) ?? top) - 0.015;
+          sp.push({ b: [0, yb, z], t: [0, yb + h, z - h * 0.25], h });
         }
+        const rig = { rig: [RIG.SWAY, 0, 0.04, 1], pivot: [0, top, (zA + zB) / 2] };
+        // one band of the membrane, from f0 to f1 of the way from the back to the edge
+        const band = (f0, f1) => {
+          const tris = [];
+          for (let i = 0; i < n - 1; i++) {
+            const A = sp[i], C = sp[i + 1], bm = lerp(A.b, C.b, 0.5), mid = lerp(A.t, C.t, 0.5);
+            mid[1] -= coarse ? 0 : 0.28 * (A.h + C.h) * 0.5;
+            const a0 = lerp(A.b, A.t, f0), a1 = lerp(A.b, A.t, f1), m0 = lerp(bm, mid, f0), m1 = lerp(bm, mid, f1);
+            const c0 = lerp(C.b, C.t, f0), c1 = lerp(C.b, C.t, f1);
+            if (coarse) tris.push([a0, a1, c1], [a0, c1, c0]);
+            else tris.push([a0, a1, m1], [a0, m1, m0], [m0, m1, c1], [m0, c1, c0]);
+          }
+          return trisGeo(tris);
+        };
+        if (coarse) { P(band(0, 1), accent, M4(0, 0, 0), { glow: 0.35, ...rig }); break; }
+        P(band(0, 0.55), accent, M4(0, 0, 0), { glow: 0.3, ...rig });
+        P(band(0.55, 0.9), body2, M4(0, 0, 0), { glow: 0.1, ...rig });
+        P(band(0.9, 1), glow, M4(0, 0, 0), { glow: 0.7, ...rig });
+        for (const S of sp) PS(seg(S.b, lerp(S.b, S.t, 1.06), 0.014, body2, 0.004, 4), rig);
         break;
       }
       case 'spikes': {
@@ -698,13 +920,73 @@ export function buildCreature(G, pal, flora, detail = 'full') {
         P(dodeca(R * 0.65), body, M4(0, yc + B.top * 0.55, B.back * 0.3, 1, 0.4, 0.85));
         break;
       case 'tail': {
-        const tl = 0.35 + R * 1.2, tz = B.back * 0.8, root = [0, yc + B.top * 0.2, tz];
-        P(cone(R * 0.25, tl, 4), air ? accent : body2, M4(0, root[1], tz - tl * 0.45, 1, 1, 1, -1.5, 0), { glow: air ? 0.3 : 0, rig: [RIG.SWAY, 0, 0.1, 1.5], pivot: root });
+        const root = [0, yc + B.top * 0.2, B.back * 0.8];
+        const rig = { rig: [RIG.SWAY, 0, 0.1, 1.5], pivot: root };
+        const tl = 0.45 + R * 1.6;
+        if (air) {
+          if (style === 'glide') {
+            // a fan of feathers, flat to the ground, on a short stock
+            PS(seg(root, add(root, [0, 0, -tl * 0.18]), R * 0.16, body2, R * 0.1, 4), rig);
+            for (let i = 0; i < 7; i++) {
+              const a = (i / 6 - 0.5) * 1.1, L = tl * (0.55 - 0.08 * Math.abs(i / 6 - 0.5) * 2), w = R * 0.14;
+              const b = add(root, [0, 0.004 * i, -tl * 0.12]), sa = Math.sin(a), ca = Math.cos(a);
+              const tip = add(b, [sa * L, 0, -ca * L]), mid = add(b, [sa * L * 0.6, 0, -ca * L * 0.6]);
+              const side = [ca * w, 0, sa * w];
+              P(trisGeo([[b, add(mid, side), tip], [b, tip, add(mid, side.map((v) => -v))]]), i % 2 ? accent : body2, M4(0, 0, 0), { glow: 0.2, ...rig });
+            }
+            break;
+          }
+          // a whip that ends in a vane (a flapper), or two streamers that end in paddles
+          const whips = style === 'flap' ? [0] : [-1, 1];
+          for (const sx of whips) {
+            const pts = [];
+            for (let i = 0; i <= 4; i++) {
+              const u = i / 4;
+              pts.push(add(root, [sx * R * 0.25 * u, -0.1 * tl * Math.sin(u * 2.4), -tl * 1.2 * u]));
+            }
+            for (let i = 0; i < 4; i++) PS(seg(pts[i], pts[i + 1], R * 0.09 * (1 - i / 5), i % 2 ? body : body2, R * 0.09 * (1 - (i + 1) / 5), 4), rig);
+            const e = pts[4], vw = R * (style === 'flap' ? 0.34 : 0.2), vl = R * (style === 'flap' ? 0.6 : 0.45);
+            const v = [e, add(e, [vw, 0, -vl * 0.45]), add(e, [0, 0, -vl]), add(e, [-vw, 0, -vl * 0.45])];
+            P(trisGeo([[v[0], v[1], v[2]], [v[0], v[2], v[3]]]), accent, M4(0, 0, 0), { glow: 0.45, ...rig });
+          }
+          break;
+        }
+        // A walker's tail: a banded taper of six bones that droops from the hip and lifts at the tip,
+        // with a club of spikes on a spiked animal and a tuft on the rest.
+        const hr = root[1], drop = Math.min(hr * 0.45, tl * 0.35), n = 6;
+        const pts = [], rs = [];
+        for (let i = 0; i <= n; i++) {
+          const u = i / n;
+          pts.push([0, hr - drop * Math.sin(u * Math.PI * 0.6) + tl * 0.18 * u ** 3, root[2] - tl * u]);
+          rs.push(R * 0.3 * (1 - u) ** 0.9 + 0.012);
+        }
+        for (let i = 0; i < n; i++) {
+          PS(seg(pts[i], pts[i + 1], rs[i], i % 2 ? body : body2, rs[i + 1], 5), rig);
+          if (i > 0) P(ico(rs[i]), i % 2 ? body2 : body, M4(...pts[i]), rig);
+        }
+        const tip = pts[n];
+        if (G.extras.includes('spikes')) {
+          for (const [dx, dy] of [[1, 0.4], [-1, 0.4], [0.7, -0.3], [-0.7, -0.3]]) {
+            const s = seg(tip, add(tip, [dx * R * 0.35, dy * R * 0.35, -R * 0.12]), R * 0.06, accent, 0.002, 4);
+            P(s.geo, s.color, s.matrix, { ...rig, glow: 0.4 });
+          }
+        } else {
+          for (const [dx, dy] of [[0, 0.3], [0.25, -0.1], [-0.25, -0.1]]) {
+            const s = seg(add(pts[n - 1], [0, 0, -0.01]), add(tip, [dx * R * 0.4, dy * R * 0.4, -R * 0.5]), R * 0.05, accent, 0.004, 3);
+            P(s.geo, s.color, s.matrix, { ...rig, glow: 0.3 });
+          }
+        }
         break;
       }
       case 'flukes': {
-        const root = [0, yc, B.back * 0.85];
-        for (const sx of [-1, 1]) P(cone(R * 0.75, R * 1.7, 4), accent, M4(sx * R * 0.6, yc + B.top * 0.2, B.back * 0.85 - R * 0.45, 1, 1, 0.12, 1.2, sx * 0.7), { glow: 0.3, rig: [RIG.FLUKE, 0, 0.25, 1], pivot: root });
+        // A crescent flat to the ground on the end of the stock, with a notch in the middle of the
+        // trailing edge. It pitches on the beat.
+        const k = B.k || R / 0.3, end = B.rings ? B.rings[B.rings.length - 1] : [B.back * 0.85, 0];
+        const root = [0, yc + end[1], end[0] + 0.02 * k], hs = 0.45 * k;
+        const st = coarse ? [[0, 0, -0.3], [1, -0.64, -0.65]]
+          : [[0, 0, -0.3], [0.25, -0.08, -0.4], [0.5, -0.2, -0.46], [0.75, -0.36, -0.52], [0.92, -0.52, -0.58], [1, -0.64, -0.65]];
+        const geo = () => sheetGeo(st.map(([x, l, t]) => [x * hs, 0, l * hs, t * hs]));
+        for (const sx of [-1, 1]) P(geo(), accent, M4(...root, sx, 1, 1), { glow: 0.3, rig: [RIG.FLUKE, 0, 0.25, 1], pivot: root });
         break;
       }
       case 'antennae':
@@ -747,7 +1029,9 @@ const RIG_GLSL = `
   // body-wide clocks (no part phase), so the carriage moves every part of one animal together
   float gb = gc + aPhase * 7.0, fb = uTime * FLAP + aPhase * 7.0, sb = uTime * SLOW + aPhase * 7.0;
   float mv = aMove;
-  float gl = max(GLIDE, smoothstep(-0.25, 0.25, sin(sb * 0.33 + 1.0))); // 1 = wings beat, 0 = wings held out
+  // 1 = wings beat, 0 = wings held out. GLO is the gate: a glider holds its wings out for most of
+  // the cycle, and a flapper holds them out only now and then.
+  float gl = max(GLIDE, smoothstep(GLO - 0.25, GLO + 0.25, sin(sb * 0.33 + 1.0)));
   vec3 d = transformed - aPivot;
   float c, sn, th;
   // ---- slinger (issue 28) ----
@@ -792,8 +1076,20 @@ const RIG_GLSL = `
   } else if (mode == 2.0) {     // WING: roll about the root; the tip trails the root and bends further
     float span = abs(w), side = w < 0.0 ? -1.0 : 1.0;
     float u = clamp(length(d.xz) / span, 0.0, 1.0);
-    float beat = sin(f - u * 1.1) * amp * (0.5 + 0.9 * u);
-    th = mix(0.2 + 0.25 * u, beat, gl) * side; c = cos(th); sn = sin(th);
+    float beat = sin(f - u * LAG) * amp * (0.5 + 0.9 * u);
+    // The outer wing folds about the wrist on the upstroke: it droops and sweeps back, so the
+    // downstroke pushes with the whole wing and the upstroke drags only the arm.
+    float wk = smoothstep(ELB - 0.08, ELB + 0.08, abs(d.x) / span) * max(0.0, cos(f)) * gl * FOLD;
+    if (wk > 0.0) {
+      float ex = side * ELB * span;
+      vec2 fq = vec2(d.x - ex, d.y);
+      th = -wk * side; c = cos(th); sn = sin(th);
+      fq = vec2(fq.x * c - fq.y * sn, fq.x * sn + fq.y * c);
+      th = 0.8 * wk * side; c = cos(th); sn = sin(th);
+      vec2 fz = vec2(fq.x * c + d.z * sn, -fq.x * sn + d.z * c);
+      d = vec3(ex + fz.x, fq.y, fz.y);
+    }
+    th = mix(HOLDA + HOLDB * u, beat, gl) * side; c = cos(th); sn = sin(th);
     d.xy = vec2(d.x * c - d.y * sn, d.x * sn + d.y * c);
     transformed = aPivot + d;
   } else if (mode == 3.0) {     // SWAY: drift that grows with distance from the root
@@ -873,7 +1169,9 @@ const RIG_GLSL = `
     transformed.y += BOB * 0.2 * max(0.0, sin(gb + zc * WAVEK + 1.2)) * u * mv;
   #elif CARRY == 3
     transformed.y += BOB * sin(sb * 0.8) + HEAVE * sin(fb - 1.0) * gl;
-    transformed.x += WAVE * sin(fb - transformed.z * WAVEK) * clamp(-transformed.z, 0.0, 2.0);
+    // A whale swims with an up-and-down wave, as a whale on Earth does; any other flyer sways.
+    float wv = WAVE * sin(fb - transformed.z * WAVEK) * clamp(-transformed.z, 0.0, 2.0);
+    if (WAVEV > 0.5) transformed.y += wv; else transformed.x += wv;
     // a flyer banks into its turn: the whole body rolls, wings and all
     th = -aTurn * LEAN; c = cos(th); sn = sin(th);
     vec2 rb = vec2(transformed.x, transformed.y - ROLLY);
@@ -1029,6 +1327,8 @@ function rigConstants(G) {
   const sink = G.loco === 'plough' ? -0.97 : -0.3; // the plough dives only now and then; the periscope hides half the time
   const heave = G.loco === 'wings' ? 0.03 : 0; // body lift on each wing beat
   const glide = G.loco === 'wings' ? 0 : 1; // only true wings hold still and glide now and then
+  // the form of the wing; a swarm and every other flyer take the numbers of the old paddle
+  const WF = WING_FORM[wingStyle(G) || 'flit'];
   const legged = (LEG_SWING[G.loco] || 0) > 0;
   const duty = LEG_DUTY[G.loco] || 0.6;
   // the roll axis: the hip line of a walker, the body centre of a flyer
@@ -1042,12 +1342,13 @@ function rigConstants(G) {
   const crawlZ = len * 0.05, crawlY = Math.max(0.01, G.bodyR * 0.12);
   const fx = (v) => Number(v).toFixed(4);
   const ints = new Set(['CARRY', 'LOCK']);
-  const rows = [['CARRY', carry], ['LOCK', gaitLocked(G) ? 1 : 0], ['GAIT', gait], ['FLAP', G.flap], ['SLOW', G.slow],
+  const rows = [['CARRY', carry], ['LOCK', gaitLocked(G) ? 1 : 0], ['GAIT', gait], ['FLAP', G.flap * (wingStyle(G) ? WF.rate : 1)], ['SLOW', G.slow],
     ['BOB', bob], ['BOBN', BOB_BEATS[G.loco] || 2], ['ROCK', (ROCK_K[G.loco] || 0) * G.bodyR], ['DUTY', duty],
     ['SKEW', legged ? 0.35 : 0], ['LEAN', LEAN_K[G.loco] ?? (legged ? 0.1 : 0)], ['ROLLY', rolly],
     ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
     ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
-    ['HEAVE', heave], ['GLIDE', glide], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext]];
+    ['HEAVE', heave], ['GLIDE', glide], ['GLO', WF.glo], ['LAG', WF.lag], ['ELB', WF.elb], ['FOLD', WF.fold],
+    ['HOLDA', WF.hold[0]], ['HOLDB', WF.hold[1]], ['WAVEV', G.loco === 'fins' ? 1 : 0], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext]];
   // ---- roller (issue 28) ----
   // The ball the animal rolls on: its radius, the height of its centre while the animal stands on
   // its legs, and the drop that puts it on the ground when the legs go in. The radius is the one
