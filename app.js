@@ -1430,7 +1430,7 @@ function cyclePlant(dir) {
   inspectPlant(kind);
   if (mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
 }
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && cardOpen()) closeCard(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && cardOpen() && !$('#about').open) closeCard(); });
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
@@ -1564,7 +1564,14 @@ addEventListener('hashchange', () => {
   else if (fromHash) { pendingSite = null; pendingView = view; placeCameraOverSite(fromHash); descend(fromHash); }
   else { pendingSite = null; pendingView = null; placeCameraAtView(view); }
 });
+// The about dialog. It is modal, so the page keys wait while it is open.
+const aboutDlg = $('#about');
+$('#about-open').addEventListener('click', () => aboutDlg.showModal());
+aboutDlg.addEventListener('click', (e) => { if (e.target === aboutDlg) aboutDlg.close(); });
+aboutDlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') aboutDlg.close(); });
+
 addEventListener('keydown', (e) => {
+  if (aboutDlg.open) return;
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
   if (e.key !== 'Escape') return;
   if (!creatureCard.hidden) closeCard();

@@ -72,6 +72,7 @@
     <footer>
       <label class="music" for="vol"><span>Music</span><input id="vol" type="range" min="0" max="100" step="1" aria-label="Music volume"></label>
       <p class="help" id="help">Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife</p>
+      <button type="button" id="about-open" class="about-link">About</button>
     </footer>
   </aside>
 
@@ -90,6 +91,22 @@
       </div>
     </div>
   </section>
+
+  <dialog id="about" aria-labelledby="about-title">
+    <form method="dialog" class="about-card">
+      <button type="submit" class="cclose" aria-label="Close">×</button>
+      <div class="about-orb" aria-hidden="true"></div>
+      <h2 id="about-title">My Worlds</h2>
+      <p class="about-kicker">Every name hides a planet</p>
+      <p>Somewhere in the maths, there is a whole universe, and every name opens a door into it. The name of your world is the seed of everything: the star it circles, its moons, the kind of planet it is, its seas and storms, and every creature and plant that lives there.</p>
+      <p>It is all procedurally generated. No artist draws these worlds and no server keeps them. The name, some maths and a sprinkle of code is all it takes, so the same name always brings back the same world, and no two worlds are alike.</p>
+      <p>Explore from orbit, or send a probe down for a closer look at the locals.</p>
+      <nav class="about-links">
+        <a href="https://github.com/tadast/myworlds" target="_blank" rel="noopener">Source code ↗</a>
+        <a href="https://www.codeme.lt" target="_blank" rel="noopener">codeme.lt ↗</a>
+      </nav>
+    </form>
+  </dialog>
 
   <p id="aim" role="status" hidden>Select the area to send a probe</p>
   <button type="button" id="probe-float" class="floatbtn">Recall the probe</button>

@@ -91,6 +91,12 @@ body {
 .music input { flex: 1; min-width: 0; accent-color: var(--accent); cursor: pointer; }
 .music input:disabled { opacity: 0.4; cursor: default; }
 .help { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.4; opacity: 0.8; }
+/* The about link. It is quiet on purpose: small, muted, and under the help line. */
+.about-link {
+  display: block; margin: 6px 0 0; padding: 0; background: none; border: 0;
+  color: var(--muted); font: inherit; font-size: 11px; opacity: 0.6; cursor: pointer;
+}
+.about-link:hover, .about-link:focus-visible { opacity: 1; color: var(--accent); }
 
 /* ---------- create */
 #seed-form { display: flex; gap: 6px; }
@@ -284,3 +290,43 @@ button.probe[hidden] { display: none; }
   .cname { font-size: 19px; }
   .cstory { font-size: 13px; }
 }
+
+/* ---------- about
+   A native <dialog>. The browser gives the focus trap, the Escape key, and the top layer. */
+#about {
+  width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0;
+  background: transparent; border: 0; color: var(--text); overflow: visible;
+}
+#about::backdrop { background: rgba(7, 10, 22, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+#about[open] { animation: about-in 0.28s ease-out; }
+@keyframes about-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+.about-card {
+  position: relative; margin: 0; padding: 28px 26px 22px; text-align: center;
+  max-height: calc(100dvh - 32px); overflow: auto;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 22px;
+  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+.about-orb {
+  width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 50%;
+  background: conic-gradient(from 0deg, #7cc4ff, #6fbf5a, #ffb86b, #b783d0, #7cc4ff);
+  box-shadow: 0 0 34px rgba(124, 196, 255, 0.4), inset -10px -8px 20px rgba(0, 0, 0, 0.45);
+  animation: spin 24s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { #about[open], .about-orb { animation: none; } }
+#about h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.3px; }
+.about-card .about-kicker {
+  margin: 4px 0 18px; color: var(--accent-2);
+  font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase;
+}
+.about-card p { margin: 0 0 12px; color: #dfe4ff; font-size: 14px; line-height: 1.55; }
+.about-links {
+  display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line);
+}
+.about-links a {
+  color: var(--text); text-decoration: none; font-size: 13px;
+  padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--glass-2);
+  transition: border-color 0.15s, color 0.15s;
+}
+.about-links a:hover, .about-links a:focus-visible { border-color: var(--accent); color: var(--accent); }
