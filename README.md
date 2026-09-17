@@ -115,21 +115,21 @@ The species of one world also know about each other. After every animal has a na
 
 ### The fauna lab
 
-`tools/fauna-lab.html` shows creature parts without a world roll. It builds hand-written genomes with the real `buildCreature()` and `faunaMaterial()` from `fauna.js`, and it draws each one in its own animated cell with its triangle count. Serve the directory and open <http://localhost:5555/tools/fauna-lab.html>.
+`tools/fauna-lab.html` shows creatures without a world roll. It builds genomes with the real `buildCreature()` and `faunaMaterial()` from `fauna.js`, and it draws each one in its own animated cell with its triangle count. Serve the directory and open <http://localhost:5555/tools/fauna-lab.html>.
 
-| Parameter | Values | Effect |
-|---|---|---|
-| `set` | `wings`, `whales`, `sails`, `tails`, `all` | The group of genomes to show. The default is `all` |
-| `t` | seconds | Freezes the clock at that time, so two screenshots show the same pose |
-| `view` | `side`, `top`, `front` | Fixes the camera. Without it, the camera turns about each creature |
-| `lod` | `coarse` | Shows the far build that the ground draws past the LOD distance |
+The page has a form on the left and a grid on the right:
 
-Example: `tools/fauna-lab.html?set=whales&t=1.3&view=side`.
+- **Creature**: the locomotion, the body plan, the head, the extras, the wing form, and the whale head. Point to a value to see what it is.
+- **Numbers**: the body radius, the legs, the segments, and the rates of the animation. An empty field takes the middle of the range that `species.js` draws from.
+- **Compare**: the `Rows` and `Columns` fields each select one value to change across the grid. Set both to "—" to see one creature in one large cell.
+- **View**: the colours, the detail (`coarse` is the far body of the ground), the camera, and a time that stops the clock.
 
-To add a case, add a row to `SETS` in the page. A row takes the genome fields that matter (`loco`, `plan`, `head`, `extras`, `wingStyle`, `whaleHead`), and the page fills in the rest. The page adds the parts that a locomotion always has, as `species.js` does. Headless Chrome can save a still for a review:
+The lists come from `Species.CATALOGUE` in `species.js`, so a new locomotion, plan, head, or extra shows in the lab with no edit to the page. When "Only forms a world can roll" is set, a dashed cell shows a combination that no world can make. Clear it to build every combination. Click a cell to copy its creature to the form. A gold border marks the creature of the form.
+
+Each field that is not at its default is a URL parameter, so the address shares the view. For example, `tools/fauna-lab.html?loco=wings&rows=wingStyle&cols=extra&t=1.3` compares the three wing forms with each extra. Headless Chrome can save a still for a review:
 
 ```sh
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --use-angle=swiftshader --enable-unsafe-swiftshader --window-size=1000,600 --virtual-time-budget=4000 --screenshot=wings.png "http://localhost:5555/tools/fauna-lab.html?set=wings&t=1.3"
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --use-angle=swiftshader --enable-unsafe-swiftshader --window-size=1300,900 --virtual-time-budget=5000 --screenshot=wings.png "http://localhost:5555/tools/fauna-lab.html?loco=wings&rows=wingStyle&cols=extra&t=1.3"
 ```
 
 A browser can keep an old `fauna.js` in its module cache after an edit. Do a hard reload before you trust a triangle count.

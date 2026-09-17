@@ -293,7 +293,7 @@ The build order is:
 - A **tail** on a walker is six banded bones that droop from the hip and lift at the tip, with a club of spikes on a spiked animal and a tuft on the rest. A glider carries a fan of seven feathers. A flapper carries a whip with a vane, and any other flyer carries two streamers with paddles.
 - **Flukes** are a crescent flat to the ground, with a notch in the trailing edge.
 
-`tools/fauna-lab.html` builds hand-written genomes with the real builder, so a change to a part shows without a world roll. The README section "The fauna lab" lists its parameters.
+`tools/fauna-lab.html` builds any genome of the catalogue with the real builder, so a change to a part shows without a world roll. The README section "The fauna lab" tells how to use it.
 
 Add a new extra by adding a `case` in the extras loop and its name to `EXTRAS`, `ADJ`, `EPITHET`, and `FEATURE` in `species.js`. Use the probe for its root.
 

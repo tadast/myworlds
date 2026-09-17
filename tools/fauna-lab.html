@@ -5,43 +5,81 @@
 <title>Fauna lab</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  :root { --bg: #0b1020; --fg: #e8ecff; --dim: #8e97bd; --line: #243056; }
+  :root { --bg: #0b1020; --fg: #e8ecff; --dim: #8e97bd; --line: #243056; --on: #6f86d6; --gold: #e0b24a; --cell: 200px; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.35 system-ui, sans-serif; }
-  header { padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  header a { color: var(--dim); text-decoration: none; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; }
-  header a.on { color: var(--fg); border-color: #6f86d6; }
-  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; padding: 0 16px 16px; }
-  .cell { position: relative; height: 260px; border: 1px solid var(--line); border-radius: 8px; }
-  .cell b { position: absolute; left: 8px; top: 6px; font-weight: 600; }
-  .cell i { position: absolute; left: 8px; bottom: 6px; color: var(--dim); font-style: normal; }
+  header { padding: 10px 16px 6px; }
+  header p { margin: 2px 0 0; color: var(--dim); max-width: 70em; }
   canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+  main { display: flex; gap: 16px; padding: 0 16px 16px; align-items: flex-start; }
+
+  #form { position: sticky; top: 8px; flex: 0 0 270px; max-height: calc(100vh - 16px); overflow: auto;
+    border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px 10px; box-sizing: border-box; }
+  #form section { border-top: 1px solid var(--line); padding: 6px 0 4px; }
+  #form section:first-child { border-top: 0; }
+  #form h3 { margin: 4px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--on); }
+  #form .row { margin: 6px 0; }
+  #form .row > label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #form .row.fixed > label { color: var(--dim); }
+  #form small { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
+  #form .row.fixed small { color: var(--gold); }
+  #form select, #form input[type=number] { width: 130px; background: #121a33; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
+  #form select:disabled, #form input:disabled { opacity: 0.5; }
+  #form .chks { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 2px; }
+  #form .chks label { display: inline-flex; gap: 3px; align-items: center; }
+  #form .chks input:disabled + span { color: var(--dim); }
+  #form button { background: #121a33; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+  #form details { margin-top: 6px; }
+  #form summary { cursor: pointer; color: var(--dim); }
+  #form pre { white-space: pre-wrap; word-break: break-all; font-size: 11px; color: var(--dim); margin: 4px 0 0; }
+
+  #note { color: var(--gold); margin: 0 0 6px; min-height: 1.35em; }
+  #matrix { display: grid; gap: 6px; align-items: stretch; }
+  .cell { position: relative; height: var(--cell); width: var(--cell); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  .cell:hover { border-color: var(--on); }
+  .cell.base { border-color: var(--gold); }
+  .cell b { position: absolute; left: 8px; top: 6px; right: 8px; font-weight: 600; }
+  .cell i { position: absolute; left: 8px; bottom: 6px; color: var(--dim); font-style: normal; }
+  .cell.na { border-style: dashed; opacity: 0.45; cursor: default; }
+  .cell.na i, .cell.err i { top: 45%; bottom: auto; right: 8px; }
+  .cell.err { border-color: #b04a4a; }
+  .ax { color: var(--dim); display: flex; align-items: center; justify-content: center; text-align: center; padding: 2px 4px; }
+  .ax.row { justify-content: flex-end; }
+  .ax.corner { font-size: 11px; text-align: left; justify-content: flex-start; }
+  .ax.row { max-width: 110px; }
+  @media (max-width: 700px) {
+    main { flex-direction: column; }
+    #form { position: static; flex: none; width: 100%; max-height: none; }
+    #grid-wrap { overflow-x: auto; max-width: 100%; }
+  }
 </style>
 <script type="importmap">
   { "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }
 </script>
+<!-- species.js gives the catalogue of forms (Species.CATALOGUE). It reads self.Lore when it loads. -->
+<script src="../lore.js"></script>
+<script src="../species.js"></script>
 </head>
 <body>
 <header>
   <strong>Fauna lab</strong>
-  <span id="sets"></span>
-  <span style="color:var(--dim)">?set=wings|whales|sails|tails|all · &amp;t=seconds freezes the clock · &amp;view=side|top|front · &amp;lod=coarse</span>
+  <p>The form on the left makes one creature. The two "Compare" fields put a different value on each
+    row and each column, so the grid shows that creature with each combination. Click a cell to copy
+    its creature to the form. A gold border marks the creature of the form. The address bar keeps the view.</p>
 </header>
-<div id="grid"></div>
+<main>
+  <form id="form" onsubmit="return false"></form>
+  <div id="grid-wrap"><p id="note"></p><div id="matrix"></div></div>
+</main>
 <canvas id="c"></canvas>
 <script type="module">
-// A preview page for the creature builder. It builds hand-written genomes with the real
-// buildCreature() and faunaMaterial(), so a change to fauna.js shows here without a world roll.
+// A preview page for the creature builder. It builds genomes with the real buildCreature() and
+// faunaMaterial(), so a change to fauna.js shows here without a world roll.
 import * as THREE from 'three';
 import { buildCreature, faunaMaterial } from '../fauna.js';
 
 const q = new URLSearchParams(location.search);
-const SET = q.get('set') || 'all';
-const FREEZE = q.has('t') ? Number(q.get('t')) : null;
-const VIEW = q.get('view') || 'three';
-const LOD = q.get('lod') || 'full';
-
-// the parts a locomotion always has, as species.js adds them
-const ALWAYS = { sac: ['tendrils'], fins: ['flukes'], arch: ['mounds'], periscope: ['mounds'], plough: ['mounds'] };
+const CAT = self.Species.CATALOGUE;
+const ALWAYS = CAT.ALWAYS;
 const PAL = { fauna: { sand: '#c8b27f' }, flora: { canopy: '#4f9a52', trunk: '#6b4a2f' } };
 const SKINS = [
   { body: '#5d7fae', body2: '#39506f', accent: '#e59a5b', glow: '#9ff5ff' },
@@ -51,64 +89,149 @@ const SKINS = [
   { body: '#7d8c9c', body2: '#dfe6ee', accent: '#5aa0c8', glow: '#b8f0ff' },
 ];
 
-// A genome with every field the builder and the rig read. The fields the lab does not set take
+// ---------------------------------------------------------------- the catalogue
+const uniq = (a) => [...new Set(a)];
+const CLASS_OF = Object.fromEntries(Object.entries(CAT.LOCO).flatMap(([c, ls]) => ls.map((l) => [l, c])));
+const ALL = {
+  loco: Object.values(CAT.LOCO).flat(),
+  plan: uniq(Object.values(CAT.PLAN).flat()),
+  head: uniq(['none', ...Object.values(CAT.HEAD).flat()]),
+  extra: uniq([...Object.values(CAT.EXTRAS).flat(), ...Object.values(ALWAYS).flat()]),
+};
+const LEGGED = ['monopod', 'biped', 'tripod', 'quad', 'hexapod', 'roller'];
+// the middle of each range species.js draws from
+const MID = {
+  bodyR: (l) => ({ fins: 0.3, tripod: 0.105, hexapod: 0.29 }[l] ?? 0.23),
+  legLen: (l) => ({ monopod: 0.47, biped: 0.62, tripod: 0.52, quad: 0.38, hexapod: 0.2, roller: 0.16 }[l] ?? 0),
+  gait: (l) => ({ monopod: 1.8, biped: 2.7, tripod: 2.4, quad: 2.0, hexapod: 4.75, serpent: 3, roller: 1.5, slinger: 1.3, flow: 0.7 }[l] ?? 1.5),
+  flap: (l, bodyR) => ({ wings: 4.4 * Math.sqrt(0.3 / bodyR), fins: 1.4, sac: 1 }[l] ?? 2),
+  segs: (plan) => (plan === 'chain' ? 6 : 1),
+};
+
+// Words for the tooltips. A value with no entry shows its name only.
+const INFO = {
+  class: { land: 'walks on the ground', air: 'flies or floats', sub: 'lives under the ground' },
+  loco: {
+    monopod: 'hops on one leg', biped: 'walks on two legs', tripod: 'a small body on three long legs',
+    quad: 'walks on four legs', hexapod: 'six short legs', serpent: 'a chain of segments that slides',
+    flow: 'a stack of rings that melts into a sheet and hops', roller: 'folds into its hull and rolls',
+    slinger: 'hooks a cord on a plant and throws itself', sac: 'a gas bag that floats and never lands',
+    wings: 'flies on wings', fins: 'a whale that swims in the air', arch: 'a loop that rises out of the ground',
+    periscope: 'lifts a neck out of a hole', plough: 'travels under the surface',
+  },
+  plan: { blob: 'one round body', dome: 'a low, wide shell', spindle: 'a long body with tapered ends',
+    chain: 'a row of segments', disc: 'a flat, round body', swarm: 'a wheel of many small shards' },
+  head: { none: 'no head part', beak: 'a pointed beak', mandibles: 'a pair of pincers', stalks: 'eyes on two stalks',
+    lure: 'a glowing lamp on a stalk', crest: 'a fan of plates on the head', tusks: 'two tusks' },
+  extra: { sail: 'a membrane on spines along the back', spikes: 'spikes on the back', beads: 'glowing lamps in the skin',
+    tendrils: 'feelers that hang below', garden: 'plants that grow on the back', plates: 'armour plates',
+    tail: 'a tail (its form follows the locomotion)', flukes: 'the tail flukes of a whale', antennae: 'two antennae',
+    mounds: 'mounds of soil at the holes' },
+  wingStyle: { flit: 'veined paddles, fast beats', flap: 'skin on an arm and three fingers, folds on the upstroke',
+    glide: 'long narrow wings, beats only to climb' },
+  whaleHead: { hull: 'one smooth hull with the head in it', bladder: 'the head is a cluster of gas bladders' },
+  lod: { full: 'the body near the camera', coarse: 'the far body: under 80 triangles' },
+  view: { three: 'the camera turns about the creature', side: 'from the side', top: 'from above', front: 'from the front' },
+};
+
+// A genome with every field the builder and the rig read. A field the caller does not set takes
 // the middle of the range species.js draws from.
-function genome(o, i) {
-  const loco = o.loco;
-  const cls = ['sac', 'wings', 'fins'].includes(loco) ? 'air' : ['arch', 'periscope', 'plough'].includes(loco) ? 'sub' : 'land';
+function genome(o, skin) {
+  const loco = o.loco, cls = CLASS_OF[loco], plan = o.plan || 'blob';
+  const bodyR = o.bodyR ?? MID.bodyR(loco);
+  const extras = new Set([...(ALWAYS[loco] || []), ...(o.extras || [])]);
+  if (plan === 'swarm') { extras.delete('tail'); extras.delete('sail'); extras.delete('tendrils'); }
   const G = {
-    cls, niche: 'meadow', loco, plan: o.plan || 'blob', head: o.head || 'none', extras: [...new Set([...(ALWAYS[loco] || []), ...(o.extras || [])])],
-    segs: o.segs || (o.plan === 'chain' ? 6 : 1), bodyR: o.bodyR ?? (loco === 'fins' ? 0.3 : 0.22),
-    stretch: o.plan === 'spindle' && cls === 'land' ? 0.6 : 1,
-    legLen: o.legLen ?? ({ monopod: 0.5, biped: 0.62, tripod: 0.5, quad: 0.38, hexapod: 0.2, roller: 0.16 }[loco] || 0),
-    jointed: o.jointed ?? true, gait: o.gait || 2, flap: o.flap || (loco === 'fins' ? 1.4 : 4.4), slow: o.slow ?? 1.0,
-    size: 1, hover: 0, rings: 6, gravity: 1,
-    move: { leash: 0, speed: 0, turn: 0, pause: 0, flies: cls === 'air', shadow: true, mode: 'wander', loco },
-    colors: SKINS[(o.skin ?? i) % SKINS.length],
+    cls, niche: 'meadow', loco, plan, head: o.head || 'none', extras: [...extras],
+    segs: o.segs ?? MID.segs(plan), bodyR,
+    stretch: plan === 'spindle' && cls === 'land' ? 0.6 : 1,
+    legLen: o.legLen ?? MID.legLen(loco),
+    jointed: o.jointed ?? true, gait: o.gait ?? MID.gait(loco), flap: o.flap ?? MID.flap(loco, bodyR), slow: o.slow ?? 1.05,
+    size: 1, hover: 0, rings: o.rings ?? 6, gravity: o.gravity ?? 1,
+    move: { leash: 0, speed: 0, turn: 0, pause: 0, flies: cls === 'air', shadow: plan !== 'swarm', mode: 'wander', loco },
+    colors: SKINS[(skin ?? 0) % SKINS.length],
   };
+  if (loco === 'fins') Object.assign(G, { density: 0.0025, fsign: 1, fcut: 0.3 });
   for (const k of ['wingStyle', 'whaleHead']) if (o[k]) G[k] = o[k];
   return G;
 }
 
-const SETS = {
-  wings: [
-    { label: 'flapper · blob', loco: 'wings', plan: 'blob', head: 'beak', wingStyle: 'flap' },
-    { label: 'flapper · crest + tail', loco: 'wings', plan: 'blob', head: 'crest', extras: ['tail'], wingStyle: 'flap' },
-    { label: 'glider · blob', loco: 'wings', plan: 'blob', head: 'beak', wingStyle: 'glide', extras: ['tail'] },
-    { label: 'glider · spindle', loco: 'wings', plan: 'spindle', head: 'none', wingStyle: 'glide' },
-    { label: 'flitter · spindle (4 wings)', loco: 'wings', plan: 'spindle', head: 'mandibles', wingStyle: 'flit', extras: ['tendrils'] },
-    { label: 'flitter · blob', loco: 'wings', plan: 'blob', head: 'mandibles', wingStyle: 'flit', extras: ['beads'] },
-  ],
-  whales: [
-    { label: 'whale · plain', loco: 'fins', plan: 'spindle', whaleHead: 'hull' },
-    { label: 'whale · beak + beads', loco: 'fins', plan: 'spindle', head: 'beak', extras: ['beads'], whaleHead: 'hull' },
-    { label: 'whale · crest + sail', loco: 'fins', plan: 'spindle', head: 'crest', extras: ['sail'], whaleHead: 'hull' },
-    { label: 'bladder-head · plain', loco: 'fins', plan: 'spindle', whaleHead: 'bladder' },
-    { label: 'bladder-head · tendrils', loco: 'fins', plan: 'spindle', extras: ['tendrils'], whaleHead: 'bladder' },
-    { label: 'bladder-head · spikes', loco: 'fins', plan: 'spindle', extras: ['spikes'], whaleHead: 'bladder' },
-  ],
-  sails: [
-    { label: 'quad · sail', loco: 'quad', plan: 'blob', head: 'tusks', extras: ['sail'] },
-    { label: 'quad spindle · sail', loco: 'quad', plan: 'spindle', head: 'beak', extras: ['sail'] },
-    { label: 'biped · sail', loco: 'biped', plan: 'blob', head: 'crest', extras: ['sail'] },
-    { label: 'serpent · sail', loco: 'serpent', plan: 'chain', head: 'mandibles', extras: ['sail'] },
-    { label: 'monopod · sail', loco: 'monopod', plan: 'dome', head: 'beak', extras: ['sail'] },
-    { label: 'wings · sail', loco: 'wings', plan: 'blob', head: 'beak', extras: ['sail'], wingStyle: 'glide' },
-  ],
-  tails: [
-    { label: 'quad · tail', loco: 'quad', plan: 'blob', head: 'tusks', extras: ['tail'] },
-    { label: 'biped · tail', loco: 'biped', plan: 'spindle', head: 'beak', extras: ['tail'] },
-    { label: 'monopod · tail', loco: 'monopod', plan: 'blob', head: 'stalks', extras: ['tail'] },
-    { label: 'slinger · tail', loco: 'slinger', plan: 'spindle', head: 'beak', extras: ['tail'] },
-    { label: 'sac · tail', loco: 'sac', plan: 'blob', head: 'lure', extras: ['tendrils', 'tail'] },
-    { label: 'flapper · tail', loco: 'wings', plan: 'blob', head: 'crest', extras: ['tail'], wingStyle: 'flap' },
-  ],
+// ---------------------------------------------------------------- state
+// Every control is one URL parameter, so a view can be shared as a link.
+const DEFAULTS = {
+  loco: 'quad', plan: 'blob', head: 'tusks', extras: [], wingStyle: 'flap', whaleHead: 'hull',
+  bodyR: '', legLen: '', segs: '', gait: '', flap: '', slow: '', rings: '', gravity: '', jointed: true,
+  skin: 0, rows: 'loco', cols: 'plan', strict: true, size: 200,
+  view: 'three', t: '', lod: 'full',
 };
-SETS.all = [...SETS.wings, ...SETS.whales, ...SETS.sails, ...SETS.tails];
+const S = structuredClone(DEFAULTS);
+const NUMS = ['bodyR', 'legLen', 'segs', 'gait', 'flap', 'slow', 'rings', 'gravity'];
+for (const k of Object.keys(S)) {
+  if (!q.has(k)) continue;
+  const v = q.get(k);
+  S[k] = k === 'extras' ? v.split(',').filter(Boolean) : typeof S[k] === 'boolean' ? v !== '0' : k === 'skin' || k === 'size' ? Number(v) : v;
+}
 
-document.getElementById('sets').innerHTML = Object.keys(SETS)
-  .map((k) => `<a href="?set=${k}${FREEZE !== null ? `&t=${FREEZE}` : ''}${VIEW !== 'three' ? `&view=${VIEW}` : ''}" class="${k === SET ? 'on' : ''}">${k}</a>`).join(' ');
+// An axis is a list of values, and each value is a patch on the creature of the form. `field` is
+// the form control that the axis sets, and `check` says if the catalogue allows the value.
+const allowed = (kind, loco, v) => ({ plan: CAT.PLAN, head: CAT.HEAD, extra: CAT.EXTRAS }[kind][loco] || []).includes(v) || (kind === 'extra' && (ALWAYS[loco] || []).includes(v));
+const AXES = {
+  none: { name: '— (nothing)', values: [null], patch: () => ({}) },
+  loco: { name: 'locomotion', field: 'loco', values: ALL.loco, patch: (v) => ({ loco: v }) },
+  plan: { name: 'body plan', field: 'plan', values: ALL.plan, patch: (v) => ({ plan: v }), check: (g, v) => allowed('plan', g.loco, v) },
+  head: { name: 'head', field: 'head', values: ALL.head, patch: (v) => ({ head: v }), check: (g, v) => v === 'none' || allowed('head', g.loco, v) },
+  extra: {
+    name: 'one more extra', values: ['(base)', ...ALL.extra], label: (v) => (v === '(base)' ? 'form extras only' : '+ ' + v),
+    patch: (v, g) => (v === '(base)' ? {} : { extras: [...g.extras, v] }),
+    check: (g, v) => v === '(base)' || allowed('extra', g.loco, v),
+  },
+  wingStyle: { name: 'wing form (wings)', field: 'wingStyle', values: ['flit', 'flap', 'glide'], patch: (v) => ({ wingStyle: v }), check: (g) => g.loco === 'wings' && g.plan !== 'swarm' },
+  whaleHead: { name: 'whale head (fins)', field: 'whaleHead', values: ['hull', 'bladder'], patch: (v) => ({ whaleHead: v }), check: (g) => g.loco === 'fins' },
+  bodyR: { name: 'body radius', field: 'bodyR', values: [0.1, 0.16, 0.22, 0.28, 0.34], label: (v) => 'radius ' + v, patch: (v) => ({ bodyR: v }) },
+  legLen: { name: 'leg length (legs)', field: 'legLen', values: [0.12, 0.25, 0.4, 0.55, 0.8], label: (v) => 'legs ' + v, patch: (v) => ({ legLen: v }), check: (g) => LEGGED.includes(g.loco) },
+  jointed: { name: 'knees (legs)', field: 'jointed', values: [true, false], label: (v) => (v ? 'knees' : 'straight legs'), patch: (v) => ({ jointed: v }), check: (g) => LEGGED.includes(g.loco) },
+  segs: { name: 'segments (chain)', field: 'segs', values: [4, 5, 6, 7], label: (v) => v + ' segments', patch: (v) => ({ segs: v }), check: (g) => g.plan === 'chain' },
+  rings: { name: 'rings (flow)', field: 'rings', values: [5, 6, 7, 8], label: (v) => v + ' rings', patch: (v) => ({ rings: v }), check: (g) => g.loco === 'flow' },
+  lod: { name: 'detail', field: 'lod', values: ['full', 'coarse'], label: (v) => v + ' detail', patch: (v) => ({ lod: v }) },
+  skin: { name: 'colours', field: 'skin', values: SKINS.map((_, i) => i), label: (v) => 'colours ' + (v + 1), patch: (v) => ({ skin: v }) },
+};
+const axisOf = (field) => [S.rows, S.cols].find((a) => AXES[a].field === field);
 
+// The creature of the form. With "catalogue only" set, a plan, a head, or an extra that the
+// locomotion cannot have changes to the first one that it can have.
+function basePatch() {
+  const o = { loco: S.loco, plan: S.plan, head: S.head, extras: S.extras, wingStyle: S.wingStyle, whaleHead: S.whaleHead,
+    jointed: S.jointed, skin: S.skin, lod: S.lod };
+  for (const k of NUMS) if (S[k] !== '') o[k] = Number(S[k]);
+  return o;
+}
+function fit(o) {
+  const g = { ...o };
+  if (!S.strict) return g;
+  if (!CAT.PLAN[g.loco].includes(g.plan)) g.plan = CAT.PLAN[g.loco][0];
+  if (g.head !== 'none' && !CAT.HEAD[g.loco].includes(g.head)) g.head = CAT.HEAD[g.loco][0];
+  g.extras = g.extras.filter((e) => allowed('extra', g.loco, e));
+  return g;
+}
+// One cell: the form, then the row value, then the column value. A value that the catalogue does
+// not allow gives an empty cell, and the cell says why.
+function cellGenome(rv, cv) {
+  let g = fit(basePatch());
+  for (const [ax, v] of [[S.rows, rv], [S.cols, cv]]) {
+    g = { ...g, ...AXES[ax].patch(v, g) };
+    if (ax === 'loco') g = fit(g);
+  }
+  for (const [ax, v] of [[S.rows, rv], [S.cols, cv]]) {
+    const A = AXES[ax];
+    if (S.strict && A.check && !A.check(g, v)) {
+      const what = ax === 'extra' ? v : ax === 'plan' || ax === 'head' ? `${v} ${ax}` : A.name.replace(/ \(.*/, '');
+      return { g, na: `${g.plan === 'swarm' ? 'A swarm' : `A ${g.loco} creature`} has no ${what}.` };
+    }
+  }
+  return { g };
+}
+
+// ---------------------------------------------------------------- the renderer
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -116,15 +239,18 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setScissorTest(true);
 
-const grid = document.getElementById('grid');
-const cells = SETS[SET].map((o, i) => {
-  const el = document.createElement('div');
-  el.className = 'cell';
-  grid.appendChild(el);
-  const G = genome(o, i);
-  const geo = buildCreature(G, PAL, PAL.flora, LOD);
+let cells = [];
+function makeCell(el, G, lod, label, phase) {
+  let geo;
+  try { geo = buildCreature(G, PAL, PAL.flora, lod); }
+  catch (e) {
+    el.classList.add('err');
+    el.innerHTML = `<b>${label}</b><i>${e.message}</i>`;
+    console.error(label, e);
+    return null;
+  }
   const tris = geo.attributes.position.count / 3;
-  el.innerHTML = `<b>${o.label}</b><i>${tris} triangles</i>`;
+  el.innerHTML = `<b>${label}</b><i>${tris} triangles</i>`;
   geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(new Float32Array([0]), 1));
   geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(new Float32Array([1, 0, 0, 0]), 4));
   geo.setAttribute('aAnchor', new THREE.InstancedBufferAttribute(new Float32Array([0, 0, 0]), 3));
@@ -132,37 +258,42 @@ const cells = SETS[SET].map((o, i) => {
   mesh.frustumCulled = false;
   const box = new THREE.Box3().setFromBufferAttribute(geo.attributes.position);
   const size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
-  const fit = 1.3 / Math.max(size.x, size.y, size.z);
-  mesh.scale.setScalar(fit);
-  mesh.position.set(-mid.x * fit, -mid.y * fit, -mid.z * fit);
+  const k = 1.3 / Math.max(size.x, size.y, size.z);
+  mesh.scale.setScalar(k);
+  mesh.position.set(-mid.x * k, -mid.y * k, -mid.z * k);
   const scene = new THREE.Scene();
   scene.add(mesh);
   const sun = new THREE.DirectionalLight('#fff4e0', 2.6); sun.position.set(2.5, 4, 3);
   scene.add(sun, new THREE.HemisphereLight('#9fbfff', '#3a2a1a', 0.8));
   const fill = new THREE.DirectionalLight('#6a86d8', 0.5); fill.position.set(-3, 1, -2); scene.add(fill);
   const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
-  return { el, G, mesh, scene, camera, phase: i * 0.37 };
-});
+  return { el, G, mesh, scene, camera, phase };
+}
+function clearCells() {
+  for (const c of cells) { c.mesh.geometry.dispose(); c.mesh.material.dispose(); }
+  cells = [];
+}
 
+const freeze = () => (S.t !== '' && !Number.isNaN(Number(S.t)) ? Number(S.t) : null);
 function place(cam, t, phase) {
   const r = 3.4;
-  if (VIEW === 'side') cam.position.set(r, 0.25, 0);
-  else if (VIEW === 'top') cam.position.set(0.001, r, 0);
-  else if (VIEW === 'front') cam.position.set(0, 0.35, r);
-  else if (FREEZE !== null) cam.position.set(r * 0.78, r * 0.42, r * 0.5);
+  if (S.view === 'side') cam.position.set(r, 0.25, 0);
+  else if (S.view === 'top') cam.position.set(0.001, r, 0);
+  else if (S.view === 'front') cam.position.set(0, 0.35, r);
+  else if (freeze() !== null) cam.position.set(r * 0.78, r * 0.42, r * 0.5);
   else { const a = t * 0.25 + phase; cam.position.set(Math.sin(a) * r, r * 0.38, Math.cos(a) * r); }
   cam.lookAt(0, 0, 0);
 }
 
 const clock = new THREE.Clock();
 function frame() {
-  const t = FREEZE ?? clock.getElapsedTime();
+  const t = freeze() ?? clock.getElapsedTime();
   const w = canvas.clientWidth, h = canvas.clientHeight, pr = renderer.getPixelRatio();
   if (canvas.width !== Math.floor(w * pr) || canvas.height !== Math.floor(h * pr)) renderer.setSize(w, h, false);
   renderer.setScissor(0, 0, w, h); renderer.setViewport(0, 0, w, h); renderer.clear();
   for (const c of cells) {
     const r = c.el.getBoundingClientRect();
-    if (r.bottom < 0 || r.top > h) continue;
+    if (r.bottom < 0 || r.top > h || r.right < 0 || r.left > w) continue;
     const sh = c.mesh.material.userData.shader;
     if (sh) sh.uniforms.uTime.value = t;
     const a = c.mesh.geometry.attributes.aAnim;
@@ -176,6 +307,182 @@ function frame() {
   }
   requestAnimationFrame(frame);
 }
+
+// ---------------------------------------------------------------- the form
+const form = document.getElementById('form');
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) + '.' : '');
+const esc = (s) => String(s).replace(/"/g, '&quot;');
+const r2 = (x) => Math.round(x * 100) / 100;
+const opts = (vals, cur, lab = (v) => v, info = {}) => vals.map((v) =>
+  `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}${info[v] ? ` title="${esc(info[v])}"` : ''}>${lab(v)}</option>`).join('');
+
+// One control with its label and a hint below it. A control that a Compare axis sets is disabled,
+// and its hint says so.
+function row(field, title, control, hint) {
+  const ax = axisOf(field);
+  const by = ax ? `The ${ax === S.rows ? 'rows' : 'columns'} set this value.` : '';
+  if (ax) control = control.replace(/<(select|input)/g, '<$1 disabled');
+  return `<div class="row${ax ? ' fixed' : ''}"><label>${title}${control}</label><small>${by || hint}</small></div>`;
+}
+const select = (field, vals, lab, info, cur = S[field]) => `<select name="${field}">${opts(vals, cur, lab, info)}</select>`;
+const number = (field, auto, step) => `<input type="number" name="${field}" step="${step}" value="${S[field]}" placeholder="auto: ${auto}">`;
+
+function drawForm() {
+  const g = fit(basePatch()), l = g.loco;
+  const plans = S.strict ? CAT.PLAN[l] : ALL.plan;
+  const heads = S.strict ? uniq(['none', ...CAT.HEAD[l]]) : ALL.head;
+  const pool = S.strict ? uniq([...(ALWAYS[l] || []), ...CAT.EXTRAS[l]]) : ALL.extra;
+  const locos = Object.entries(CAT.LOCO).map(([c, ls]) =>
+    `<optgroup label="${c}: ${INFO.class[c]}">${opts(ls, l, undefined, INFO.loco)}</optgroup>`).join('');
+  const axes = Object.keys(AXES), axName = (a) => AXES[a].name;
+  const extraAxis = [S.rows, S.cols].includes('extra');
+  const extras = pool.map((e) => {
+    const fixed = (ALWAYS[l] || []).includes(e);
+    return `<label title="${esc(INFO.extra[e] || e)}${fixed ? ' (this locomotion always has it)' : ''}"><input type="checkbox" name="extras" value="${e}"${fixed || g.extras.includes(e) ? ' checked' : ''}${fixed ? ' disabled' : ''}><span>${e}</span></label>`;
+  }).join('');
+  const legs = LEGGED.includes(l);
+  const bodyR = S.bodyR !== '' ? Number(S.bodyR) : MID.bodyR(l);
+  const shown = genome(g, S.skin);
+
+  form.innerHTML = `
+    <section>
+      <h3>Compare</h3>
+      ${row('', 'Rows', select('rows', axes, axName), 'The value that changes from one row to the next.')}
+      ${row('', 'Columns', select('cols', axes, axName), 'The value that changes from one column to the next.')}
+      ${row('', 'Cell size', `<input type="number" name="size" step="20" min="100" max="700" value="${S.size}">`, 'The width of one cell, in pixels.')}
+      <div class="row"><label style="justify-content:flex-start;gap:6px"><input type="checkbox" name="strict"${S.strict ? ' checked' : ''}>Only forms a world can roll</label>
+        <small>${S.strict
+          ? 'A form that no world can make shows as a dashed cell. The lists below show only the forms of this locomotion.'
+          : 'The lab builds every combination, also forms that no world can make.'}</small></div>
+    </section>
+    <section>
+      <h3>Creature</h3>
+      ${row('loco', 'Locomotion', `<select name="loco">${locos}</select>`, `How it moves. ${cap(INFO.loco[l])}`)}
+      ${row('plan', 'Body plan', select('plan', plans, undefined, INFO.plan, g.plan), `The shape of the body. ${cap(INFO.plan[g.plan])}`)}
+      ${row('head', 'Head', select('head', heads, undefined, INFO.head, g.head), `The part at the front. ${cap(INFO.head[g.head])}`)}
+      ${l === 'wings' ? row('wingStyle', 'Wing form', select('wingStyle', AXES.wingStyle.values, undefined, INFO.wingStyle),
+        g.plan === 'swarm' ? 'A swarm has no wing form: each shard is a stiff blade.' : cap(INFO.wingStyle[S.wingStyle])) : ''}
+      ${l === 'fins' ? row('whaleHead', 'Whale head', select('whaleHead', AXES.whaleHead.values, undefined, INFO.whaleHead), cap(INFO.whaleHead[S.whaleHead])) : ''}
+      <div class="row"><label>Extras</label>
+        <div class="chks">${extras}</div>
+        <small>${extraAxis ? 'Each column or row adds one more extra to these.' : 'Parts on the body. Point to a name to see what it is. A grey name is a part that this locomotion always has.'}</small></div>
+    </section>
+    <section>
+      <h3>Numbers</h3>
+      <small>An empty field takes the middle of the range that a world roll draws from.</small>
+      ${row('bodyR', 'Body radius', number('bodyR', r2(MID.bodyR(l)), 0.02), 'The size of the body. A bigger body beats its wings slower.')}
+      ${legs ? row('legLen', 'Leg length', number('legLen', r2(MID.legLen(l)), 0.05), 'In the same units as the body radius.') : ''}
+      ${legs ? row('jointed', 'Knees', `<input type="checkbox" name="jointed"${S.jointed ? ' checked' : ''}>`, 'Knees fold the leg in the swing. Clear it for straight legs.') : ''}
+      ${g.plan === 'chain' ? row('segs', 'Segments', number('segs', MID.segs('chain'), 1), 'The number of body parts in the chain.') : ''}
+      ${l === 'flow' ? row('rings', 'Rings', number('rings', 6, 1), 'The number of rings in the stack.') : ''}
+      ${row('gait', 'Step rate', number('gait', r2(MID.gait(l)), 0.1), 'How fast the legs, the body wave, or the hop cycle runs.')}
+      ${['wings', 'fins', 'sac'].includes(l) ? row('flap', 'Beat rate', number('flap', r2(MID.flap(l, bodyR)), 0.1), 'How fast the wings or the fins beat.') : ''}
+      ${row('slow', 'Sway rate', number('slow', 1.05, 0.05), 'How fast the slow parts move: the tail, the tendrils, the nod of the head.')}
+      ${row('gravity', 'Gravity', number('gravity', 1, 0.1), 'The gravity of the world. A high gravity gives a low, fast hop.')}
+    </section>
+    <section>
+      <h3>View</h3>
+      ${row('skin', 'Colours', select('skin', SKINS.map((_, i) => i), (v) => 'set ' + (v + 1)), 'A colour set. A world roll makes its own colours.')}
+      ${row('lod', 'Detail', select('lod', ['full', 'coarse'], undefined, INFO.lod), `${cap(INFO.lod[S.lod])} The ground shows the coarse body far from the camera.`)}
+      ${row('view', 'Camera', select('view', ['three', 'side', 'top', 'front'], (v) => (v === 'three' ? 'turning' : v)), cap(INFO.view[S.view]))}
+      ${row('t', 'Stop the clock at', `<input type="number" name="t" step="0.1" min="0" value="${S.t}" placeholder="live">`, 'A time in seconds. All cells then show one pose. Empty: the animation runs.')}
+    </section>
+    <section>
+      <button type="button" id="reset">Reset all</button>
+      <details><summary>Genome of the form</summary>
+        <pre>${esc(JSON.stringify(shown, (k, v) => (k === 'move' || k === 'colors' ? undefined : typeof v === 'number' ? r2(v) : v), 1))}</pre></details>
+    </section>`;
+  form.querySelector('#reset').onclick = () => { Object.assign(S, structuredClone(DEFAULTS)); update(); };
+}
+
+function readForm() {
+  const fd = new FormData(form);
+  // a disabled control is not in the form data, so its value stays as it was
+  for (const k of ['loco', 'plan', 'head', 'wingStyle', 'whaleHead', 'rows', 'cols', 'lod', 'view', ...NUMS, 't']) if (fd.has(k)) S[k] = fd.get(k);
+  if (fd.has('skin')) S.skin = Number(fd.get('skin'));
+  S.size = Number(fd.get('size')) || 200;
+  S.strict = fd.has('strict');
+  if (form.elements.jointed && !form.elements.jointed.disabled) S.jointed = fd.has('jointed');
+  const fixed = ALWAYS[S.loco] || [];
+  S.extras = fd.getAll('extras').filter((e) => !fixed.includes(e));
+  // keep the form in step with what the lab builds
+  if (S.strict) { const g = fit(basePatch()); S.plan = g.plan; S.head = g.head; S.extras = g.extras; }
+}
+
+function saveUrl() {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(S)) {
+    if (k === 'extras') { if (v.length) p.set(k, v.join(',')); continue; }
+    if (typeof v === 'boolean') { if (v !== DEFAULTS[k]) p.set(k, v ? '1' : '0'); continue; }
+    if (v === '' || String(DEFAULTS[k]) === String(v)) continue;
+    p.set(k, v);
+  }
+  history.replaceState(null, '', location.pathname + (p.size ? '?' + p : ''));
+}
+
+// ---------------------------------------------------------------- the grid
+const MAX_CELLS = 240;
+function drawMatrix() {
+  clearCells();
+  const M = document.getElementById('matrix'), note = document.getElementById('note');
+  document.documentElement.style.setProperty('--cell', S.size + 'px');
+  const R = AXES[S.rows], C = AXES[S.cols];
+  const lab = (A, v) => (A.label ? A.label(v) : String(v));
+  const rows = R.values, cols = C.values;
+  M.style.gridTemplateColumns = `${S.rows === 'none' ? '' : 'auto '}repeat(${cols.length}, var(--cell))`;
+  M.innerHTML = '';
+  const add = (cls, text, title) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; if (title) d.title = title; M.appendChild(d); return d; };
+  const tip = (ax, v) => INFO[ax === 'extra' ? 'extra' : ax]?.[v];
+  if (S.cols !== 'none') {
+    if (S.rows !== 'none') add('ax corner', `↓ ${R.name}\n→ ${C.name}`).style.whiteSpace = 'pre-line';
+    for (const cv of cols) add('ax', lab(C, cv), tip(S.cols, cv));
+  }
+  const base = JSON.stringify(fit(basePatch()));
+  let n = 0, na = 0;
+  rows.forEach((rv, ri) => {
+    if (S.rows !== 'none') add('ax row', lab(R, rv), tip(S.rows, rv));
+    cols.forEach((cv, ci) => {
+      const el = add('cell', '');
+      const { g, na: why } = cellGenome(rv, cv);
+      const parts = [S.rows !== 'none' && lab(R, rv), S.cols !== 'none' && lab(C, cv)].filter(Boolean);
+      const label = parts.length ? parts.join(' · ') : `${g.loco} · ${g.plan} · ${g.head}`;
+      if (why) { el.classList.add('na'); el.innerHTML = `<b>${label}</b><i>${why}</i>`; na++; return; }
+      if (JSON.stringify(g) === base) el.classList.add('base');
+      el.title = `${g.loco} · ${g.plan} · head: ${g.head}${g.extras.length ? ' · ' + g.extras.join(', ') : ''}\nClick to copy this creature to the form.`;
+      el.onclick = () => { Object.assign(S, pick(g)); update(); };
+      if (++n > MAX_CELLS) { el.innerHTML = `<b>${label}</b><i>not drawn: over ${MAX_CELLS} cells</i>`; return; }
+      const c = makeCell(el, genome(g, g.skin), g.lod, label, (ri * cols.length + ci) * 0.37);
+      if (c) cells.push(c);
+    });
+  });
+  const msg = [];
+  if (S.rows !== 'none' && S.rows === S.cols) msg.push('The rows and the columns compare the same value.');
+  if (n > MAX_CELLS) msg.push(`The grid has ${n} cells. The lab draws the first ${MAX_CELLS}.`);
+  if (na) msg.push(`${na} dashed cells show forms that no world can roll. Clear "Only forms a world can roll" to build them.`);
+  note.textContent = msg.join(' ');
+}
+// the fields of a cell that go back into the form
+function pick(g) {
+  const o = { loco: g.loco, plan: g.plan, head: g.head, extras: g.extras.filter((e) => !(ALWAYS[g.loco] || []).includes(e)), skin: g.skin, lod: g.lod, jointed: g.jointed };
+  if (g.wingStyle) o.wingStyle = g.wingStyle;
+  if (g.whaleHead) o.whaleHead = g.whaleHead;
+  for (const k of NUMS) if (g[k] !== undefined) o[k] = String(g[k]);
+  return o;
+}
+
+function update() {
+  drawForm();
+  saveUrl();
+  drawMatrix();
+}
+
+// A change to the camera or the clock needs no new geometry, so it skips the rebuild.
+form.addEventListener('change', (e) => {
+  const light = ['view', 't'].includes(e.target.name);
+  readForm();
+  if (light) { drawForm(); saveUrl(); } else update();
+});
+update();
 frame();
 </script>
 </body>
