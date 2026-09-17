@@ -555,6 +555,10 @@ function fieldFrom(ctx, x, y, z, c, px, py, pz, out) {
   const lat = Math.abs(y);
   const tnoise = noise.fbm(x * 2.2 + o5[0], y * 2.2 + o5[1], z * 2.2 + o5[2], 2) * 0.12;
   out.h = h;
+  // How mountainous the ground is here, 0 to 1. It is the ridge term of the globe without the
+  // height that term earns, so a patch can ask for rough ground where the globe builds a range
+  // and for smooth ground on a plain. See detailAt().
+  out.rg = m * m * onLand;
   out.t = clamp(1 - Math.pow(lat, 1.6) * 1.1 + ctx.tempBias + tnoise - Math.max(h, 0) * 0.55, -0.3, 1.3);
   out.m = noise.fbm(x * 1.7 + o4[0] * 0.7, y * 1.7 + o4[1] * 0.7, z * 1.7 + o4[2] * 0.7, 3);
   out.fm = noise.fbm(x * 6 + o2[0], y * 6 + o2[1], z * 6 + o2[2], 2);
@@ -569,6 +573,104 @@ function fieldFrom(ctx, x, y, z, c, px, py, pz, out) {
 function fieldAt(ctx, x, y, z, out) {
   const c = contAt(ctx, x, y, z, _warped);
   return fieldFrom(ctx, x, y, z, c, _warped[0], _warped[1], _warped[2], out);
+}
+
+// ---------------------------------------------------------------- the relief under the globe
+// Issue 30. The globe field holds nothing under about a fortieth of the radius: its finest octave
+// runs at 36 turns over the sphere, so a cell of 60 km carries a third of one wave. Measured over
+// 300 land cells of Auralis, the field inside a cell stands within 7% of a plane. A patch that
+// took only that field therefore read as a tilted sheet, and it read the same on a peak and on a
+// plain. This field carries the relief on down from the cell to the metre.
+//
+// It reads the direction on the sphere and nothing else. Two patches that share an edge read one
+// height along it, so a stream could stitch them. Nothing here comes from the seed of the patch.
+const DETAIL_WAVE = 1800;     // units of the box: the longest wave, the range itself
+const DETAIL_OCT = 5;         // octaves; the last runs at about 97 units
+// A rim cell is 50 units wide on the wide tier and 100 on the narrow one, so it can carry a wave
+// of about 400 units and no shorter one. The patch fades every octave past this one out at its
+// edge and the rim leaves them out, so the two meet on one shape instead of on a line the reader
+// sees from the ceiling.
+const DETAIL_RIM_OCT = 3;     // octaves the rim carries; the third runs at about 420 units
+const DETAIL_LAC = 2.07;      // the step between two octaves, off a whole number so no wave lines up
+const DETAIL_GAIN = 0.52;     // what each octave takes of the one above
+const DETAIL_AMP = 170;       // units: the height of the ridged stack at full ruggedness
+const DETAIL_FLOOR = 0.28;    // the value of the stack that reads as the floor of a valley
+const DETAIL_HANG = 2.6;      // how hard an octave hangs on the crest of the one above
+const FINE_WAVE = 70;         // units: the longest wave of the fine stack, the ground at the feet
+const FINE_OCT = 3;           // octaves; the last runs at about 17 units
+const FINE_AMP = 10;           // units
+const FINE_BASE = 0.35;       // the part of the fine stack a flat plain still keeps
+// Ruggedness: how much of the ridged stack the ground takes. It comes from the mountain term of
+// the globe and from the height over the sea. Over land of Auralis the mountain term reads 0.13
+// at the median and 0.42 at the ninth decile, so these numbers put an ordinary plain near 0.5 and
+// a range at the cap.
+const RUG_BASE = 0.15, RUG_RIDGE = 1.9, RUG_HIGH = 0.45;
+const RUG_MIN = 0.5, RUG_MAX = 1.7;
+
+// A ridged multifractal at one direction, 0 at the floor of a valley and 1 at a crest. Each
+// octave hangs on the crest of the one above, so a range grows spurs and a valley floor stays
+// smooth. One octave of plain noise gives rounded blobs instead, which is what the patch drew
+// before this issue.
+// `fade` scales the octaves a rim cell is too wide to carry. The patch runs it from 1 in the
+// middle to 0 at its edge, and the rim runs it at 0, so the two hold one shape at the join.
+function ridgeMF(noise, x, y, z, f0, off, fade) {
+  let f = f0, a = 1, w = 1, sum = 0, norm = 0;
+  for (let o = 0; o < DETAIL_OCT; o++) {
+    let v = 1 - Math.abs(noise.n3(x * f + off[0], y * f + off[1], z * f + off[2]));
+    v *= v * w;
+    w = clamp(v * DETAIL_HANG, 0, 1);
+    sum += v * a * (o < DETAIL_RIM_OCT ? 1 : fade); norm += a;
+    f *= DETAIL_LAC; a *= DETAIL_GAIN;
+  }
+  return sum / norm;
+}
+
+// The constants of the detail field for one world and one box. `perUnit` is the metres of the
+// globe across one unit of the box, so a wave named in units of the box lands on the sphere at
+// the right size whatever the radius of the planet.
+function detailFor(ctx, perUnit) {
+  const radiusM = ctx.radiusKm * 1000;
+  return {
+    f0: radiusM / (DETAIL_WAVE * perUnit),
+    ff: radiusM / (FINE_WAVE * perUnit),
+    off: [ctx.o2[0] * 1.7 + 31, ctx.o2[1] * 1.7 + 17, ctx.o2[2] * 1.7 + 53],
+    off2: [ctx.o3[0] * 2.3 + 71, ctx.o3[1] * 2.3 + 11, ctx.o3[2] * 2.3 + 97],
+  };
+}
+
+// The relief under the globe field at one direction, in units of the box. `rug` is the ruggedness
+// of the ground there and ruggedAt() rolls it from the globe. `fade` is 1 inside the patch and 0
+// on the rim.
+function detailAt(ctx, d, x, y, z, rug, fade) {
+  const r = ridgeMF(ctx.noise, x, y, z, d.f0, d.off, fade);
+  const fine = ctx.noise.fbm(x * d.ff + d.off2[0], y * d.ff + d.off2[1], z * d.ff + d.off2[2], FINE_OCT);
+  return (r - DETAIL_FLOOR) * DETAIL_AMP * rug
+    + fine * FINE_AMP * (FINE_BASE + (1 - FINE_BASE) * Math.min(rug, 1)) * fade;
+}
+
+// The ruggedness at one point of the globe field, from the mountain term and the height.
+function ruggedAt(rg, h, hRef) {
+  return clamp(RUG_BASE + RUG_RIDGE * rg + RUG_HIGH * clamp(h / hRef, 0, 1), RUG_MIN, RUG_MAX);
+}
+
+// The height of the highest land of a world, in globe elevation units. One vertical scale comes
+// from it, and every patch of the world shares that scale, so two patches that share an edge hold
+// one height along it. A patch used to set its own scale from the relief of its own cell, which
+// flattened a range and lifted a plain until the two read alike, and which made the two sides of
+// a shared edge disagree. A quantile and not the maximum, because one freak point must not
+// flatten every patch of the world. The value is cached on the context, so it runs once a world.
+function worldReliefH(ctx) {
+  if (ctx.reliefRefH > 0) return ctx.reliefRefH;
+  const N = 16000, ga = Math.PI * (3 - Math.sqrt(5)), fld = { h: 0 }, hs = [];
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (i + 0.5) * (2 / N), r = Math.sqrt(Math.max(0, 1 - y * y)), a = ga * i;
+    fieldAt(ctx, Math.cos(a) * r, y, Math.sin(a) * r, fld);
+    if (fld.h > 0) hs.push(fld.h);
+  }
+  hs.sort((p, q) => p - q);
+  const h = hs.length ? hs[Math.min(hs.length - 1, Math.floor(0.995 * hs.length))] : 0.2;
+  ctx.reliefRefH = Math.max(h, 0.05);
+  return ctx.reliefRefH;
 }
 
 // ---------------------------------------------------------------- generation
@@ -1224,10 +1326,11 @@ function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
 // The globe draws its relief 40 times too tall, so a peak of 0.06 units reads as 10 km and not
 // as 390 km. The ground divides by the same number, and it works in metres.
 const EXAGGERATION = 40;
-const HILL_M = 25, HILL_WAVE = 400;    // metres: the hills that carry the shape of the site
-const KNOLL_M = 6, KNOLL_WAVE = 90;    // metres: the knolls a walker sees
-const ROCK_M = 1.2, ROCK_WAVE = 14;    // metres: the rock the ground shows at the feet
-const SHORE_DAMP = 45;                 // metres: the band where the patch noise fades at the shore
+// Issue 30 took the three noise octaves of the patch out. They ran off the seed of the patch, so
+// two patches side by side grew different hills and no stream could join them, and one smooth
+// octave gave rounded blobs and no ridge. detailAt() carries all of that relief now, from the
+// direction on the sphere alone.
+const SHORE_DAMP = 45;                 // units: the band where the patch relief fades at the shore
 // The patch covers a square of the globe that the reader can see and aim at. That square is far
 // wider than the ground box it draws into, so the ground box holds an artificial scale: one unit
 // is K metres across and V metres up. See "The patch cell" in docs/issues/README.md.
@@ -1242,12 +1345,12 @@ const RIM_CELL = 25;                   // patch grid steps per rim cell
 const RIM_FIELD_CELLS = 2;             // rim cells per sample of the globe field over the rim
 const RIM_FIELD_MAX = 65;              // the most samples the rim field takes, per side
 const EDGE_CELLS = 2;                  // rim cells the patch fades its knolls and its rock over
-// The relief a patch shows is TARGET_RELIEF units from its lowest point to its highest, whatever
-// the cell holds, because V below divides the true relief down to it. That number is in units of
-// the box, so the gradient the reader walks is TARGET_RELIEF / size. It must move with the size or
-// a wider box gets a flatter world per step. Issue 25 doubled the size from 1,500 to 3,000 and
-// doubled this with it, which holds the gradient at 0.08 units of rise per unit of walk.
-const TARGET_RELIEF = 240;             // units: how much large-scale relief a patch aims to show
+// The vertical scale of the box, issue 30. The highest land of the world stands WORLD_RELIEF units
+// over the sea, and every patch of that world divides its true metres by the same number. So a
+// cell that holds a range reads tall, a cell on a plain reads flat, and two patches that share an
+// edge hold one height along it. Until issue 30 each patch scaled its own cell to a fixed 240
+// units, which made a peak and a plain read alike and made a shared edge disagree.
+const WORLD_RELIEF = 800;              // units: the box height of the highest land of a world
 const SLOPE_ROCK = [0.55, 1.15];       // the slope band where the ground turns to bare rock
 const BIOME_NAME = ['ocean', 'shallows', 'beach', 'tundra', 'snow', 'rock', 'forest', 'grass', 'dry', 'desert'];
 // The shore, in metres. The globe paints its beach over a band of the elevation field that stands
@@ -1256,6 +1359,53 @@ const BIOME_NAME = ['ocean', 'shallows', 'beach', 'tundra', 'snow', 'rock', 'for
 // strip is 1.5 m of elevation, and the sea bed reaches the deep colour 12 m under the water line.
 const BEACH_M = 1.5;
 const DEEP_M = 12;
+
+// ---------------------------------------------------------------- the cell grid, issue 30
+// A landing cell is a quad of a cube grid and no longer a square of a band of latitude. A band
+// grid changes its step of longitude at every band, so two cells in two bands do not share an
+// edge and no stream could ever stitch them. A cube grid tiles the whole globe with quads that
+// share their edges exactly, and it holds no pole.
+//
+// Each face carries `n` by `n` cells. The grid coordinate w runs from -1 to 1 across a face, and
+// the gnomonic coordinate of the cube is tan(w * PI / 4). The tangent holds the arc of a cell
+// nearly equal from the middle of a face to its corner; the plain gnomonic grid would make a
+// corner cell half the arc of a middle one. A coordinate past the face is legal and the map stays
+// true there, which is what the rim of a patch needs.
+//
+// site.js holds the same map for the marker and for the snap. Keep the two in step.
+// Each row is the face normal, then the u axis, then the v axis, and u cross v is the normal.
+const FACES = [
+  [1, 0, 0, 0, 0, -1, 0, 1, 0],
+  [-1, 0, 0, 0, 0, 1, 0, 1, 0],
+  [0, 1, 0, 1, 0, 0, 0, 0, -1],
+  [0, -1, 0, 1, 0, 0, 0, 0, 1],
+  [0, 0, 1, 1, 0, 0, 0, 1, 0],
+  [0, 0, -1, -1, 0, 0, 0, 1, 0],
+];
+
+// The unit direction at (u, v) inside a cell. u and v run 0 to 1 across the cell and may run past
+// it. Writes x, y, z into out.
+function cellDir(cell, u, v, out) {
+  return cellDirT(cell, cellTan(cell.i, u, cell.n), cellTan(cell.j, v, cell.n), out);
+}
+
+// The gnomonic coordinate of a cell coordinate. A row of the patch grid holds one of these for
+// every column and one for the whole row, so the build takes two tangents a row and not two a
+// vertex. A tangent costs more than the rest of the map together.
+function cellTan(ci, u, n) {
+  return Math.tan(((ci + u) * 2 / n - 1) * Math.PI / 4);
+}
+
+// The unit direction at two gnomonic coordinates of a face.
+function cellDirT(cell, a, b, out) {
+  const F = FACES[cell.face];
+  const x = F[0] + F[3] * a + F[6] * b;
+  const y = F[1] + F[4] * a + F[7] * b;
+  const z = F[2] + F[5] * a + F[8] * b;
+  const l = Math.sqrt(x * x + y * y + z * z) || 1;
+  out[0] = x / l; out[1] = y / l; out[2] = z / l;
+  return out;
+}
 
 // The biome of one point, by the rules the globe paints with. beachW carries the width of the
 // beach band, so the patch can ask for a strip in metres where the globe asks for its own band.
@@ -2107,26 +2257,47 @@ function patch(seed, lat, lon, opts) {
   // the box. A patch with no span keeps the old behaviour, where one unit is one metre.
   const span = opts.span > 0 ? opts.span : size;
   const K = span / size;
-  const spanHalf = span / 2;
+  // The metres of the globe across one unit of the box that the detail field works in. It is the
+  // nominal cell of the world and not the true width of this cell: a cube cell is a little wider
+  // in the middle of a face than at a corner, and a frequency that followed that width would put
+  // the fine waves of two neighbours out of phase and no stream could join them.
+  const detailK = (opts.cell && opts.cell.n > 0
+    ? Math.PI / 2 / opts.cell.n * radiusM : span) / size;
 
-  // the frame of the site on the globe: up, east, and south
+  // The direction on the globe under a point of the box, in units of the box from the site. With
+  // a cell the box lands exactly on the quad of the cube grid, so the patch next door reads the
+  // same direction along the edge the two share. Without one the patch keeps the tangent frame of
+  // the site, which is what a caller that knows no cell gets.
+  const cell = opts.cell && opts.cell.n > 0 ? opts.cell : null;
   const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
   const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
   const ux = cla * clo, uy = sla, uz = cla * slo;
   const ex = -slo, ez = clo;                       // east has no y part
   const sx = sla * clo, sy = -cla, sz = sla * slo; // south is the opposite of north
+  const _d = [0, 0, 0];
+  // The two gnomonic coordinates of a point of the box, one per axis. A loop that walks a row
+  // takes the second one once for the whole row. See cellTan().
+  const tanX = cell ? (xu) => cellTan(cell.i, xu / size + 0.5, cell.n) : null;
+  const tanZ = cell ? (zu) => cellTan(cell.j, zu / size + 0.5, cell.n) : null;
+  const dirOn = cell
+    ? (xu, zu) => cellDirT(cell, tanX(xu), tanZ(zu), _d)
+    : (xu, zu) => {
+      const ax = xu * K / radiusM, az = zu * K / radiusM;
+      const dx = ux + ex * ax + sx * az, dy = uy + sy * az, dz = uz + ez * ax + sz * az;
+      const l = Math.hypot(dx, dy, dz) || 1;
+      _d[0] = dx / l; _d[1] = dy / l; _d[2] = dz / l;
+      return _d;
+    };
 
-  const fld = { h: 0, t: 0, m: 0, fm: 0, r: 0 };
-  // The globe field at a point of the patch, in metres from the site.
-  const fieldOn = (xm, zm) => {
-    const ax = xm / radiusM, az = zm / radiusM;
-    const dx = ux + ex * ax + sx * az, dy = uy + sy * az, dz = uz + ez * ax + sz * az;
-    const l = Math.hypot(dx, dy, dz) || 1;
-    return fieldAt(ctx, dx / l, dy / l, dz / l, fld);
+  const fld = { h: 0, t: 0, m: 0, fm: 0, r: 0, rg: 0 };
+  // The globe field at a point of the patch, in units of the box from the site.
+  const fieldOn = (xu, zu) => {
+    const d = dirOn(xu, zu);
+    return fieldAt(ctx, d[0], d[1], d[2], fld);
   };
 
   fieldOn(0, 0);
-  const siteH = fld.h, siteT = fld.t, siteM = fld.m, siteFM = fld.fm;
+  const siteH = fld.h, siteT = fld.t, siteM = fld.m;
   const elevation = siteH * M_PER_H;
 
   // The globe field across the patch. The patch used to take one linear tilt, because over
@@ -2138,31 +2309,32 @@ function patch(seed, lat, lon, opts) {
   const fT = new Float32Array(FN * FN);
   const fM = new Float32Array(FN * FN);
   const fF = new Float32Array(FN * FN);
+  const fR = new Float32Array(FN * FN);    // the mountain term, which drives the ruggedness
   let reliefLo = Infinity, reliefHi = -Infinity;
   for (let b = 0; b < FN; b++) {
-    const zc = (-spanHalf + b * (span / FN1));
+    const zc = -half + b * (size / FN1);
     for (let a = 0; a < FN; a++) {
-      fieldOn(-spanHalf + a * (span / FN1), zc);
+      fieldOn(-half + a * (size / FN1), zc);
       const q = b * FN + a, hm = fld.h * M_PER_H;
-      fH[q] = hm; fT[q] = fld.t; fM[q] = fld.m; fF[q] = fld.fm;
+      fH[q] = hm; fT[q] = fld.t; fM[q] = fld.m; fF[q] = fld.fm; fR[q] = fld.rg;
       if (hm < reliefLo) reliefLo = hm;
       if (hm > reliefHi) reliefHi = hm;
     }
     if ((b & 7) === 0) post(8 + (b / FN) * 10, 'Reading the site');
   }
 
-  // V: metres of the globe up one unit of the ground box. A cell that holds a mountain range
-  // would fill the box from floor to ceiling at true height, and a cell on a plain would be a
-  // flat sheet. So the relief of the cell sets V, and every patch shows about TARGET_RELIEF
-  // units of large-scale shape, with the metre-scale hills below as the texture on it. A cell
-  // flatter than TARGET_RELIEF keeps V = 1 and stays at true height.
+  // V: metres of the globe up one unit of the ground box. One number for the whole world, so the
+  // cell the reader picks decides how tall the patch reads and the patch next door agrees with it
+  // along the edge the two share. The highest land of the world stands WORLD_RELIEF units up.
   const reliefM = Math.max(0, reliefHi - reliefLo);
-  const V = Math.max(1, reliefM / TARGET_RELIEF);
+  const hRef = worldReliefH(ctx);
+  const V = Math.max(1, hRef * M_PER_H / WORLD_RELIEF);
   const hPerU = H_PER_M * V;       // one unit of the ground box in globe elevation units
+  const detail = detailFor(ctx, detailK);
 
   // The globe field at a point of the ground box, bilinear over the coarse grid.
   const fInv = FN1 / size;
-  const gf = { h: 0, t: 0, m: 0, fm: 0 };
+  const gf = { h: 0, t: 0, m: 0, fm: 0, rg: 0 };
   const fieldUnit = (xm, zm) => {
     const u = clamp((xm + half) * fInv, 0, FN1 - 1e-4), w = clamp((zm + half) * fInv, 0, FN1 - 1e-4);
     const a = u | 0, b = w | 0, du = u - a, dw = w - b;
@@ -2172,13 +2344,9 @@ function patch(seed, lat, lon, opts) {
     gf.t = fT[q] * w00 + fT[q + 1] * w10 + fT[q2] * w01 + fT[q2 + 1] * w11;
     gf.m = fM[q] * w00 + fM[q + 1] * w10 + fM[q2] * w01 + fM[q2 + 1] * w11;
     gf.fm = fF[q] * w00 + fF[q + 1] * w10 + fF[q2] * w01 + fF[q2 + 1] * w11;
+    gf.rg = fR[q] * w00 + fR[q + 1] * w10 + fR[q2] * w01 + fR[q2 + 1] * w11;
     return gf;
   };
-
-  // A site high on the globe stands in a mountain range, so its hills are tall. A lowland site
-  // gets gentle hills. Without this the patch would look the same on a peak and on a plain.
-  const relief = clamp(siteH / Math.max(ctx.snowLine, 0.2), 0, 1.4);
-  const hillAmp = HILL_M * ctx.mountain * clamp(0.35 + 1.25 * relief, 0.2, 1.8);
 
   // The frame of the rim. The patch reads it too, because it fades its own fine noise out over
   // the last EDGE_CELLS rim cells: the rim cannot carry the knolls and the rock, so a patch that
@@ -2196,8 +2364,6 @@ function patch(seed, lat, lon, opts) {
   const pseed = `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}`;
   const prng = makeRng(pseed);
   const pnoise = new Noise(makeRng(pseed));
-  const oh0 = prng() * 90, oh1 = prng() * 90, ok0 = prng() * 90, ok1 = prng() * 90;
-  const or0 = prng() * 90, or1 = prng() * 90;
 
   post(20, 'Raising the ground');
   const heights = new Float32Array(n * n);
@@ -2205,33 +2371,37 @@ function patch(seed, lat, lon, opts) {
   const cellT = new Float32Array(n * n);    // the globe temperature and moisture bend across a
   const cellM = new Float32Array(n * n);    // cell too, so the colour and the plants read them
   const cellF = new Float32Array(n * n);    // per cell and not once at the site
-  const fh = 1 / HILL_WAVE, fk = 1 / KNOLL_WAVE, fr = 1 / ROCK_WAVE;
   let hasSea = false, hasLand = false;
   // Far from the sea the damping is 1 everywhere, so the whole patch skips the test.
   const inland = Math.min(Math.abs(reliefLo), Math.abs(reliefHi)) / V > SHORE_DAMP
     && (reliefLo > 0 || reliefHi < 0);
+  // the gnomonic coordinate of every column, so a row takes one tangent and not n of them
+  const colTan = cell ? new Float64Array(n) : null;
+  if (cell) for (let i = 0; i < n; i++) colTan[i] = tanX(-half + i * grid);
   for (let j = 0; j < n; j++) {
     const zm = -half + j * grid;
     const ez = half - Math.abs(zm);
+    const rowTan = cell ? tanZ(zm) : 0;
     for (let i = 0; i < n; i++) {
       const xm = -half + i * grid;
       const f = fieldUnit(xm, zm);
       const base = f.h;
-      const hn = pnoise.n3(xm * fh + oh0, zm * fh + oh1, 0.5);
-      // The knolls and the rock fade out over the last cells of the rim, where the rim takes the
-      // ground over. Both waves are shorter than a rim cell, so the rim cannot carry them, and a
-      // patch that held them to its last row would draw a line the reader sees from the ceiling.
+      // The short octaves fade out over the last cells of the rim, where the rim takes the ground
+      // over. A rim cell cannot carry them, and a patch that held them to its last row would draw
+      // a line the reader sees from the ceiling.
       const e = Math.min(ez, half - Math.abs(xm));
       const fade = e >= edgeFade ? 1 : smoothstep(0, edgeFade, e);
-      const knolls = pnoise.n3(xm * fk + ok0, zm * fk + ok1, 11.5) * KNOLL_M * fade;
-      const rock = pnoise.n3(xm * fr + or0, zm * fr + or1, 23.5) * ROCK_M * fade;
+      const d = cell ? cellDirT(cell, colTan[i], rowTan, _d) : dirOn(xm, zm);
+      const rug = ruggedAt(f.rg, f.h * hPerU, hRef);
+      const det = detailAt(ctx, detail, d[0], d[1], d[2], rug, fade);
       // The globe flattens its fine relief at the coast. The patch does the same, so the shore
       // of issue 05 meets the water on a gentle slope and not on a field of specks.
       const damp = inland ? 1 : smoothstep(0, SHORE_DAMP, Math.abs(base));
-      const h = base + (hn * hillAmp + knolls) * (0.25 + 0.75 * damp) + rock * (0.4 + 0.6 * damp);
+      const h = base + det * (0.25 + 0.75 * damp);
       const k = j * n + i;
       heights[k] = h;
-      vary[k] = hn;   // the hill field also varies the moisture: a hollow is wetter than a crest
+      // the relief also varies the moisture: a hollow is wetter than a crest
+      vary[k] = clamp(det / DETAIL_AMP, -1, 1);
       // the globe lapse rate: cellT holds the temperature the patch height earns, not the
       // temperature of the globe surface the field read
       cellT[k] = f.t + (Math.max(base, 0) - Math.max(h, 0)) * hPerU * 0.55;
@@ -2319,21 +2489,21 @@ function patch(seed, lat, lon, opts) {
   const rTf = new Float32Array(RN * RN);
   const rMf = new Float32Array(RN * RN);
   const rFf = new Float32Array(RN * RN);
-  const rimM = rimOut * K;                 // metres of the globe from the site to the rim edge
-  const rimStepM = 2 * rimM / RN1;
+  const rRf = new Float32Array(RN * RN);
+  const rimFieldStep = 2 * rimOut / RN1;
   for (let b = 0; b < RN; b++) {
-    const zc = -rimM + b * rimStepM;
+    const zc = -rimOut + b * rimFieldStep;
     for (let a = 0; a < RN; a++) {
-      fieldOn(-rimM + a * rimStepM, zc);
+      fieldOn(-rimOut + a * rimFieldStep, zc);
       const q = b * RN + a;
-      rHf[q] = fld.h * M_PER_H; rTf[q] = fld.t; rMf[q] = fld.m; rFf[q] = fld.fm;
+      rHf[q] = fld.h * M_PER_H; rTf[q] = fld.t; rMf[q] = fld.m; rFf[q] = fld.fm; rRf[q] = fld.rg;
     }
   }
 
   // The globe field at a point of the rim, bilinear over the coarse grid. It divides by the same
   // V the patch uses, so the rim meets the patch at the join instead of standing over or under it.
   const rInv = RN1 / (2 * rimOut);
-  const rf = { h: 0, t: 0, m: 0, fm: 0 };
+  const rf = { h: 0, t: 0, m: 0, fm: 0, rg: 0 };
   const rimFieldAt = (xm, zm) => {
     const u = clamp((xm + rimOut) * rInv, 0, RN1 - 1e-4), w = clamp((zm + rimOut) * rInv, 0, RN1 - 1e-4);
     const a = u | 0, b = w | 0, du = u - a, dw = w - b;
@@ -2343,6 +2513,7 @@ function patch(seed, lat, lon, opts) {
     rf.t = rTf[q] * w00 + rTf[q + 1] * w10 + rTf[q2] * w01 + rTf[q2 + 1] * w11;
     rf.m = rMf[q] * w00 + rMf[q + 1] * w10 + rMf[q2] * w01 + rMf[q2 + 1] * w11;
     rf.fm = rFf[q] * w00 + rFf[q + 1] * w10 + rFf[q2] * w01 + rFf[q2 + 1] * w11;
+    rf.rg = rRf[q] * w00 + rRf[q + 1] * w10 + rRf[q2] * w01 + rRf[q2 + 1] * w11;
     return rf;
   };
 
@@ -2352,18 +2523,23 @@ function patch(seed, lat, lon, opts) {
   const rimMo = new Float32Array(rimN * rimN);
   const rimFm = new Float32Array(rimN * rimN);
   let rimSea = false;
+  const rimColTan = cell ? new Float64Array(rimN) : null;
+  if (cell) for (let i = 0; i < rimN; i++) rimColTan[i] = tanX(-rimOut + i * rimStep);
   for (let j = 0; j < rimN; j++) {
     const zm = -rimOut + j * rimStep;
+    const rowTan = cell ? tanZ(zm) : 0;
     for (let i = 0; i < rimN; i++) {
       const xm = -rimOut + i * rimStep;
       const f = rimFieldAt(xm, zm);
       const base = f.h;
-      const hn = pnoise.n3(xm * fh + oh0, zm * fh + oh1, 0.5);
+      const d = cell ? cellDirT(cell, rimColTan[i], rowTan, _d) : dirOn(xm, zm);
+      const rug = ruggedAt(f.rg, f.h * hPerU, hRef);
+      const det = detailAt(ctx, detail, d[0], d[1], d[2], rug, 0);
       const damp = smoothstep(0, SHORE_DAMP, Math.abs(base));
-      const h = base + hn * hillAmp * (0.25 + 0.75 * damp);
+      const h = base + det * (0.25 + 0.75 * damp);
       const k = j * rimN + i;
       rimHeights[k] = h;
-      rimVary[k] = hn;
+      rimVary[k] = clamp(det / DETAIL_AMP, -1, 1);
       rimT[k] = f.t + (Math.max(base, 0) - Math.max(h, 0)) * hPerU * 0.55;
       rimMo[k] = f.m; rimFm[k] = f.fm;
       if (h < 0) rimSea = true;
@@ -2424,7 +2600,7 @@ function patch(seed, lat, lon, opts) {
   const result = {
     patch: {
       seed, patchSeed: pseed, lat, lon, size, grid, n,
-      span, metresAcross: K, metresUp: V,
+      span, metresAcross: K, metresUp: V, cell, reliefM,
       // the band the plants thin out over at the edge of the box. ground.js reads it to place the
       // clamp of the camera target, so the two cannot drift apart. See TARGET_REACH there.
       floraEdge: FLORA_EDGE,

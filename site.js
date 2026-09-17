@@ -14,11 +14,86 @@ export const PULL_REACH = 0.5;       // parts of a cell: how far the pull to lif
 // detail 100, which puts about 0.011 units between two vertices, so a square under CELL would
 // sit inside one facet and the coast the reader aims at would not be where the field puts it.
 //
-// The cell is far wider than the 1,500 unit box it draws into, so the ground holds an
-// artificial scale. worker.js gives the two numbers back as patch.metresAcross and
-// patch.metresUp. A plant and a creature keep their lore size in units, so they read as normal
-// against the ground and they are no longer the metres the lore text says.
+// The cell is far wider than the box it draws into, so the ground holds an artificial scale.
+// worker.js gives the two numbers back as patch.metresAcross and patch.metresUp. A plant and a
+// creature keep their lore size in units, so they read as normal against the ground and they are
+// no longer the metres the lore text says.
+//
+// CELL is the nominal arc: the cell grid below divides a face of a cube into whole cells, so a
+// true cell stands a little under it.
 export const CELL = 0.01;
+
+// ---------------------------------------------------------------- the cell grid, issue 30
+// A cell is a quad of a cube grid and no longer a square of a band of latitude. A band grid
+// changes its step of longitude at every band, so two cells in two bands do not share an edge,
+// and their two patches could never be stitched. A cube grid tiles the whole globe with quads
+// that share their edges exactly, and it holds no pole.
+//
+// Each face carries FACE_CELLS by FACE_CELLS cells. The grid coordinate w runs -1 to 1 across a
+// face, and the gnomonic coordinate of the cube is tan(w * PI / 4). The tangent holds the arc of
+// a cell nearly equal from the middle of a face to its corner; a plain gnomonic grid would leave
+// a corner cell at about half the arc of a middle one. A coordinate past the face is legal and
+// the map stays true there, which is what the rim of a patch needs.
+//
+// worker.js holds the same map, because a Web Worker cannot import a module. Keep the two in step.
+// Each row is the face normal, then the u axis, then the v axis, and u cross v is the normal.
+const FACES = [
+  [1, 0, 0, 0, 0, -1, 0, 1, 0],
+  [-1, 0, 0, 0, 0, 1, 0, 1, 0],
+  [0, 1, 0, 1, 0, 0, 0, 0, -1],
+  [0, -1, 0, 1, 0, 0, 0, 0, 1],
+  [0, 0, 1, 1, 0, 0, 0, 1, 0],
+  [0, 0, -1, -1, 0, 0, 0, 1, 0],
+];
+// The arc of a face is PI / 2, so this many cells hold the arc of CELL each. The reader sees the
+// same square at the same size on every planet, which is what issue 19 asked for.
+export const FACE_CELLS = Math.round(Math.PI / 2 / CELL);
+
+// The unit direction at (u, v) inside a cell. u and v run 0 to 1 across the cell and may run
+// past it.
+export function cellDir(cell, u, v, out = new THREE.Vector3()) {
+  const F = FACES[cell.face];
+  const a = Math.tan(((cell.i + u) * 2 / cell.n - 1) * Math.PI / 4);
+  const b = Math.tan(((cell.j + v) * 2 / cell.n - 1) * Math.PI / 4);
+  return out.set(
+    F[0] + F[3] * a + F[6] * b,
+    F[1] + F[4] * a + F[7] * b,
+    F[2] + F[5] * a + F[8] * b,
+  ).normalize();
+}
+
+// The cell a unit direction falls in.
+export function dirCell(x, y, z) {
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  const face = ax >= ay && ax >= az ? (x >= 0 ? 0 : 1) : ay >= az ? (y >= 0 ? 2 : 3) : (z >= 0 ? 4 : 5);
+  const F = FACES[face];
+  const d = x * F[0] + y * F[1] + z * F[2];
+  const wa = Math.atan((x * F[3] + y * F[4] + z * F[5]) / d) * 4 / Math.PI;
+  const wb = Math.atan((x * F[6] + y * F[7] + z * F[8]) / d) * 4 / Math.PI;
+  const n = FACE_CELLS;
+  const q = (w) => THREE.MathUtils.clamp(Math.floor((w + 1) * 0.5 * n), 0, n - 1);
+  return { face, i: q(wa), j: q(wb), n };
+}
+
+// The cell a site falls in. The worker takes it as patch.cell and lays its box on the quad.
+export function siteCell(site) {
+  const d = siteDir(site.lat, site.lon, _local);
+  return dirCell(d.x, d.y, d.z);
+}
+
+// The turn from the frame of the site, x east and z south, to the frame of the cell. The box of
+// the patch runs along the axes of the cell, so the sky must take the same turn or the sun stands
+// in the wrong quarter of it. See groundBasis() in ground-sky.js.
+export function cellTwist(site) {
+  const cell = siteCell(site);
+  const mid = cellDir(cell, 0.5, 0.5, _corner);
+  const along = cellDir(cell, 1, 0.5, _dir).sub(mid);      // the u axis of the cell, at the middle
+  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
+  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
+  _east.set(-slo, 0, clo);
+  _north.set(-sla * clo, cla, -sla * slo);
+  return Math.atan2(-along.dot(_north), along.dot(_east));  // south is the opposite of north
+}
 
 const CENTRE = new THREE.Vector2(0, 0);
 const _ray = new THREE.Raycaster();
@@ -32,23 +107,22 @@ const _corner = new THREE.Vector3();
 
 const round2 = (v) => Math.round(v * 100) / 100;
 
-// The cell that holds a site. The cells tile the globe: a band of latitude CELL wide, and inside
-// the band a step of longitude that keeps the cell square in metres. Near a pole that step would
-// pass a half turn, so it stops there and the top cell is the whole cap.
+// The site at the middle of the cell that holds a site. The URL keeps a lat and a lon, so the
+// middle of the cell carries the cell: it stands half a cell from every edge, and two decimals of
+// a degree cannot move it into the cell next door.
 export function snapSite(site) {
   if (!site) return site;
-  const latStep = THREE.MathUtils.radToDeg(CELL);
-  const lat = THREE.MathUtils.clamp(Math.round(site.lat / latStep) * latStep, -90, 90);
-  const lonStep = Math.min(180, latStep / Math.max(Math.cos(THREE.MathUtils.degToRad(lat)), 1e-3));
-  let lon = Math.round(site.lon / lonStep) * lonStep;
-  if (lon > 180) lon -= 360;
-  if (lon < -180) lon += 360;
-  return { lat: round2(lat), lon: round2(lon), kind: site.kind };
+  const d = cellDir(siteCell(site), 0.5, 0.5, _local);
+  return dirToSite(d, site.kind);
 }
 
-// The metres of the globe one cell covers. The worker takes this as patch.span.
-export function cellSpan(world) {
-  return CELL * radiusKm(world) * 1000;
+// The metres of the globe across one cell, at its middle. The worker takes this as patch.span.
+// A cell of the cube grid is not exactly CELL of arc, so the width comes from the cell itself.
+export function cellSpan(world, site) {
+  if (!site) return CELL * radiusKm(world) * 1000;
+  const cell = siteCell(site);
+  const a = cellDir(cell, 0, 0.5, _corner), b = cellDir(cell, 1, 0.5, _dir);
+  return 2 * Math.asin(THREE.MathUtils.clamp(a.distanceTo(b) / 2, 0, 1)) * radiusKm(world) * 1000;
 }
 
 // The ground radius under a unit direction in planet space, from the worker's lat/lon height map.
@@ -294,23 +368,15 @@ export function showMarker(site, current) {
   const pal = current.world.palette;
   marker.material.color.set(pal.fauna?.accent || '#ffffff');
 
-  // the frame of the site: up, east, and north
-  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
-  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
-  const dir = _local.set(cla * clo, sla, cla * slo);
-  _east.set(-slo, 0, clo);
-  _north.set(-sla * clo, cla, -sla * slo);
-
+  // The corners come from the cell of the cube grid, so the square the reader aims at is the quad
+  // the patch draws and it shares its edges with the cell next door.
+  const cell = siteCell(site);
   const sea = current.world.seaRadius || 0;
   const pos = marker.geometry.attributes.position;
-  const half = CELL / 2;
   for (let ring = 0; ring < 2; ring++) {
-    const w = ring === 0 ? half : half * RING_IN;
+    const w = ring === 0 ? 0.5 : 0.5 * RING_IN;
     for (let c = 0; c < 4; c++) {
-      _corner.copy(dir)
-        .addScaledVector(_east, CORNERS[c][0] * w)
-        .addScaledVector(_north, CORNERS[c][1] * w)
-        .normalize();
+      cellDir(cell, 0.5 + CORNERS[c][0] * w, 0.5 + CORNERS[c][1] * w, _corner);
       const r = Math.max(groundRadius(current.world, current.heightMap, _corner), sea) + LIFT;
       pos.setXYZ(ring * 4 + c, _corner.x * r, _corner.y * r, _corner.z * r);
     }

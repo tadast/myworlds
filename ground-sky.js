@@ -53,12 +53,18 @@ function hashSeed(s) {
 // East is the direction the planet turns to. A positive planet.rotation.y takes +x toward -z, and
 // lon counts from +x toward +z, so east is the direction of falling lon. South is east cross up.
 // The three axes then make a right-handed frame, and the sky is not mirrored.
-export function groundBasis(planet, site) {
+// `twist` turns the frame about the up axis. Since issue 30 the box of the patch runs along the
+// axes of its cell of the cube grid and not along east and south, so the sky takes the same turn
+// or the sun stands in the wrong quarter of it. See cellTwist() in site.js.
+export function groundBasis(planet, site, twist = 0) {
   const lat = site.lat * DEG, lon = site.lon * DEG;
   const cl = Math.cos(lat), sl = Math.sin(lat), co = Math.cos(lon), so = Math.sin(lon);
   const up = new THREE.Vector3(cl * co, sl, cl * so);
-  const east = new THREE.Vector3(so, 0, -co);
-  const south = new THREE.Vector3().crossVectors(east, up).normalize();
+  const east0 = new THREE.Vector3(so, 0, -co);
+  const south0 = new THREE.Vector3().crossVectors(east0, up).normalize();
+  const ct = Math.cos(twist), st = Math.sin(twist);
+  const east = east0.clone().multiplyScalar(ct).addScaledVector(south0, st).normalize();
+  const south = south0.clone().multiplyScalar(ct).addScaledVector(east0, -st).normalize();
   const b = new THREE.Matrix4().set(
     east.x, east.y, east.z, 0,
     up.x, up.y, up.z, 0,
@@ -73,8 +79,8 @@ export function groundBasis(planet, site) {
 
 // The sky of the globe, read in the frame of the site. The app calls this once per landing.
 // current is the built world of app.js. sunDir is the globe sun in globe space.
-export function skyView(current, site, sunDir) {
-  const basis = groundBasis(current.planet, site);
+export function skyView(current, site, sunDir, twist = 0) {
+  const basis = groundBasis(current.planet, site, twist);
   const view = {
     basis,
     sunDir: sunDir.clone().applyMatrix4(basis).normalize(),

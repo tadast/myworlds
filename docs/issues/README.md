@@ -39,12 +39,16 @@ Conventions:
 
 Globe: radius 1 unit. Lore radius 3,200 to 9,800 km. Terrain relief 0.06 units. Terrain edge 0.0105 units. Flora 0.011 units. Fauna 0.012 to 0.02 units. Camera minimum `CAM_MIN = 1.11`, home 3.3, maximum 8.
 
-Ground: the box is 1,500 units square. Since issue 19 one unit is not one metre: the reader picks
-a cell of the globe 0.01 units of arc wide, about 74 km on a 7,352 km planet, and the whole cell
-draws into that box. `patch.metresAcross` and `patch.metresUp` give the two scales, and
-`patch.span` gives the width of the cell in metres. A plant and a creature keep their lore size
-in units, so they read as normal against the ground and they are no longer the metres the lore
-says. A patch built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 3,150 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the reveal and from the ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Since issue 20 the camera ceiling is 500 m and the reveal is 450 m up and 884 m south, so the detail of the patch never reads as a rectangle. Camera floor 2 m above the terrain. Since issue 17 the polar angle runs to 2.09 rad near the ground, which is 30 deg over the horizon, and the floor is a clamp on the position of the camera and no longer a cap on that angle. An up-view lifts the target into the sky and holds the eye on the floor.
+Ground: the box is 3,000 units square on the wide tier and 1,500 on the narrow one. Since issue 19
+one unit is not one metre: the reader picks a cell of the globe about 0.01 units of arc wide, about
+74 km on a 7,352 km planet, and the whole cell draws into that box. Since issue 30 the cell is a
+quad of a cube grid, `patch.cell` names it, and the box lands on the quad, so the cells tile the
+globe and share their edges. `patch.metresAcross` and `patch.metresUp` give the two scales, and
+`patch.span` gives the width of the cell in metres. `metresUp` is one number for the whole world,
+so the highest land of the world stands 800 units up and a flat cell reads flat. A plant and a
+creature keep their lore size in units, so they read as normal against the ground and they are no
+longer the metres the lore says. A patch built with no `cell` keeps the tangent frame of the site,
+and one built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 4,000 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the reveal and from the ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Since issue 20 the camera ceiling is 500 m and the reveal is 450 m up and 884 m south, so the detail of the patch never reads as a rectangle. Camera floor 2 m above the terrain. Since issue 17 the polar angle runs to 2.09 rad near the ground, which is 30 deg over the horizon, and the floor is a clamp on the position of the camera and no longer a cap on that angle. An up-view lifts the target into the sky and holds the eye on the floor.
 
 Budgets:
 
@@ -64,13 +68,27 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 
 ### The patch cell
 
-- `CELL = 0.01` globe units of arc, in `site.js`. It is the width of the square the reader picks
-  and the width of the ground the probe brings back. It is the same size on the screen for every
+- `CELL = 0.01` globe units of arc, in `site.js`. It is the nominal width of the square the reader
+  picks and of the ground the probe brings back. It is the same size on the screen for every
   planet, about 62 px at `CAM_MIN`.
-- `snapSite(site)` puts a site on the cell grid: latitude to steps of `CELL`, and longitude to a
-  step that keeps the cell square in metres. It is idempotent and it keeps `kind`.
-- `cellSpan(world)` gives the width of the cell in metres. `app.js` passes it as `opts.span` on
-  the patch message.
+- Since issue 30 the cells are the quads of a cube grid: six faces of `FACE_CELLS` by `FACE_CELLS`,
+  where `FACE_CELLS = round(PI / 2 / CELL)`, with the gnomonic coordinate warped through a tangent
+  so a corner quad holds about the arc of a middle one. The cells tile the whole globe, they share
+  their edges exactly, and the grid holds no pole. A band of latitude carried the cells before, and
+  its step of longitude changed at every band, so no two bands lined up.
+- `siteCell(site)` gives that quad as `{face, i, j, n}`. `cellDir(cell, u, v)` gives the unit
+  direction at `(u, v)` inside it; `u` and `v` run 0 to 1 and may run past the cell, which is what
+  the rim needs. `app.js` passes the quad as `opts.cell` on the patch message, and `worker.js`
+  holds the same map, because a Web Worker cannot import a module. Keep the two in step.
+- `snapSite(site)` puts a site on the cell grid: it takes the middle of the quad the site falls in.
+  It is idempotent and it keeps `kind`. The middle stands half a cell from every edge, so two
+  decimals of a degree cannot move it into the cell next door.
+- `cellSpan(world, site)` gives the width of that cell in metres. `app.js` passes it as `opts.span`
+  on the patch message. The worker uses it for the scale it reports and not for the frequencies of
+  the relief field; those come from the nominal cell, so two neighbours stay in phase.
+- `cellTwist(site)` gives the turn from the frame of the site, x east and z south, to the axes of
+  the cell. The box runs along the axes of the cell, so `groundBasis()` takes the same turn and the
+  sky stands in the right quarter.
 - The pull to life runs before the snap and reaches half a cell, so a creature that lives in the
   cell claims the patch and the snap then puts the site back on the grid.
 - Since issue 14 the phenomenon of the world pulls over the same reach, and it wins over a creature
@@ -85,17 +103,17 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 
 ### The rim
 
-- The rim is the ground outside the box. It reaches `RIM = 3150` units from the site, which is set by
+- The rim is the ground outside the box. It reaches `RIM = 4000` units from the site, which is set by
   the fog: at the ceiling the camera stands at most 1,420 units from the site and the fog is solid
   at `FOG_MAX` of 2,100 units, so a ray from the ceiling meets the ground 1,723 units out. The reader
   therefore never sees the outer edge of the rim.
 - The worker builds it. A rim cell is 25 patch steps, 50 units on HIGH and 100 on LOW, and it
   divides the box, so the edge of the patch lands on a rim grid line and every rim node there sits
   on a patch vertex. `ground.js` copies the height and the colour of those nodes from the patch.
-- The rim reads the globe field on its own grid, one sample per two rim cells. It carries the
-  hills of the patch but not the knolls and the rock, which are shorter than one rim cell. The
-  patch fades its knolls and its rock out over the last two rim cells, so the two grids meet on
-  one surface and the reader sees no line.
+- The rim reads the globe field on its own grid, one sample per two rim cells. Since issue 30 it
+  carries the first `DETAIL_RIM_OCT` octaves of the relief field, which is every wave a rim cell
+  can hold, and none of the fine stack. The patch fades the rest out over the last two rim cells,
+  so the two grids meet on one surface and the reader sees no line.
 - The sea reaches 2,700 units from the camera target, which covers the fog and stays inside the
   rim. A patch with no water still gets a sea when the rim holds water.
 - The rim carries no plant. Since issue 20 the patch thins its plants away over its last 300
@@ -265,3 +283,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 27 | The flora of a wet world is one continuous thicket, and the ground holds no landmark | HITL | 21, 25, 26 | CLOSED |
 | 28 | Impulse fauna: the roller, the flow, and the slinger | HITL, manager agent | 09, 10, 27 | CLOSED |
 | 29 | The flow slides where it should be still, and its run reads as a walk | HITL | 28 | CLOSED |
+| 30 | The ground reads flat on a peak and on a plain, and no two cells share an edge | AFK | 19, 25 | CLOSED |

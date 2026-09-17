@@ -5,7 +5,7 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, activitySite } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite } from './site.js';
 import { PlantInspector } from './flora-card.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
@@ -861,7 +861,9 @@ function requestPatch(target) {
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
     opts: {
-      grid: Q.ground.grid, size: Q.ground.size, span: cellSpan(current.world), rim: RIM,
+      grid: Q.ground.grid, size: Q.ground.size, span: cellSpan(current.world, target), rim: RIM,
+      // the quad of the cube grid the box lands on. See "the cell grid" in site.js.
+      cell: siteCell(target),
       maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1,
       activity: activityHere(target),
     },
@@ -960,7 +962,7 @@ function enterGround() {
   renderInfo(current.world);   // the sidebar gains its flora row
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
-  const view = skyView(current, lockedSite, sunDir);
+  const view = skyView(current, lockedSite, sunDir, cellTwist(lockedSite));
   view.starLight = stars.lightColor();   // the ground sun takes the colour of the star
   const t0 = performance.now();
   ground.load(patchState.result, { sunDir: view.sunDir, view });
