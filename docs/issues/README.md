@@ -24,6 +24,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
 | `music.js` | Chip-tune per world. Not touched by this issue set. |
+| `probe-hud.js` | The instrument of the probe over the ground: the air, the height, the hour of the star, the uplink, and the noise at the edge of the reach. Reads `Ground.telemetry()`. |
 | `index.html`, `style.css` | The page and the sidebar. |
 
 Conventions:
@@ -284,3 +285,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 28 | Impulse fauna: the roller, the flow, and the slinger | HITL, manager agent | 09, 10, 27 | CLOSED |
 | 29 | The flow slides where it should be still, and its run reads as a walk | HITL | 28 | CLOSED |
 | 30 | The ground reads flat on a peak and on a plain, and no two cells share an edge | AFK | 19, 25 | CLOSED |
+| 31 | The probe carries no instrument, and the edge of its reach reads as a fault | AFK | 23, 25, 30 | CLOSED |

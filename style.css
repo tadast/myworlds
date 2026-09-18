@@ -330,3 +330,142 @@ button.probe[hidden] { display: none; }
   transition: border-color 0.15s, color 0.15s;
 }
 .about-links a:hover, .about-links a:focus-visible { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- the probe overlay, issue 31
+   The instrument of the probe over the ground: the air, the height, the hour of the star, and the
+   uplink that says why the probe stops where it does. It takes no pointer event, because every
+   gesture on the screen belongs to the ground under it.
+
+   The frame starts right of the sidebar. --panel-w is the width the sidebar holds, and app.js
+   writes it beside --panel-h; on a phone the sidebar docks at the bottom instead, so there the
+   frame keeps the full width and lifts its foot over the sheet. */
+#probe-hud {
+  position: fixed; inset: 0; z-index: 4; pointer-events: none;
+  --hud-in: 22px;
+  --hud-left: calc(var(--gap) + var(--panel-w, 320px) + var(--hud-in));
+  --hud-top: var(--hud-in);
+  --hud-bottom: var(--hud-in);
+  font-size: 11px; letter-spacing: 0.12em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+#probe-hud[hidden] { display: none; }
+#probe-noise { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* The two washes that hold the readings against a bright sky. They belong to the screen and not to
+   the frame: a wash that starts where the frame starts leaves a band of clear sky over it and shows
+   its own three straight edges, which reads as a panel laid on the picture. These run from the top
+   and the bottom edges of the screen, the whole width, and every stop is a step smaller than the one
+   over it, so the dark comes on the way it does on a lens and no edge of it can be found. */
+#probe-hud::before, #probe-hud::after {
+  content: ''; position: absolute; left: 0; right: 0; pointer-events: none;
+  /* under the noise and under every reading: the wash carries the readings, it never covers one */
+  z-index: -1;
+}
+#probe-hud::before {
+  top: 0; height: calc(var(--hud-top) + 104px);
+  background: linear-gradient(180deg,
+    rgba(7, 10, 22, 0.5) 0%, rgba(7, 10, 22, 0.42) 22%, rgba(7, 10, 22, 0.28) 45%,
+    rgba(7, 10, 22, 0.13) 68%, rgba(7, 10, 22, 0.04) 86%, rgba(7, 10, 22, 0) 100%);
+}
+#probe-hud::after {
+  bottom: 0; height: calc(var(--hud-bottom) + 118px);
+  background: linear-gradient(0deg,
+    rgba(7, 10, 22, 0.42) 0%, rgba(7, 10, 22, 0.34) 22%, rgba(7, 10, 22, 0.22) 45%,
+    rgba(7, 10, 22, 0.1) 68%, rgba(7, 10, 22, 0.03) 86%, rgba(7, 10, 22, 0) 100%);
+}
+
+/* The bracket. It is a thin line with two corners, so the frame reads as an instrument and the
+   world keeps the middle of the screen. */
+.hud-frame {
+  position: absolute; top: var(--hud-top); right: var(--hud-in);
+  bottom: var(--hud-bottom); left: var(--hud-left);
+  border: 1px solid rgba(124, 196, 255, 0.18); border-radius: 6px;
+}
+.hud-frame::before, .hud-frame::after {
+  content: ''; position: absolute; width: 26px; height: 26px;
+  border: 2px solid var(--accent); opacity: 0.7;
+}
+.hud-frame::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.hud-frame::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
+
+/* The overlay stands over a lit sky as often as over a dark one, so the labels carry their own
+   contrast: a lighter grey than the sidebar uses, and a shadow under every line. */
+#probe-hud .k {
+  display: block; color: rgba(226, 232, 255, 0.72); font-size: 9px;
+  letter-spacing: 0.2em; text-transform: uppercase;
+}
+#probe-hud b {
+  font-weight: 500; font-size: 15px; letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* the strip along the top of the frame: the air, the hour, and the link */
+.hud-bar {
+  position: absolute; top: calc(var(--hud-top) + 10px); left: calc(var(--hud-left) + 16px);
+  right: calc(var(--hud-in) + 16px); display: flex; gap: 26px; align-items: flex-start;
+}
+.hud-bar .hud-right { margin-left: auto; text-align: right; }
+
+/* the altitude ladder, on the inside of the right edge */
+.hud-ladder {
+  position: absolute; right: calc(var(--hud-in) + 18px); bottom: calc(var(--hud-bottom) + 90px);
+  width: 92px; height: 190px; text-align: right;
+}
+.hud-ladder .rung {
+  position: absolute; right: 0; width: 14px; height: 1px; background: rgba(255, 255, 255, 0.22);
+}
+.hud-ladder .rung:nth-child(1) { top: 0; width: 22px; }
+.hud-ladder .rung:nth-child(2) { top: 25%; }
+.hud-ladder .rung:nth-child(3) { top: 50%; width: 22px; }
+.hud-ladder .rung:nth-child(4) { top: 75%; }
+.hud-ladder .rung:nth-child(5) { top: 100%; width: 22px; }
+.hud-ladder b {
+  position: absolute; right: 28px; bottom: 0; transform: translateY(50%);
+  color: var(--accent); text-shadow: 0 0 10px rgba(124, 196, 255, 0.45);
+  transition: bottom 0.12s linear;
+}
+.hud-ladder .k { position: absolute; right: 0; bottom: -18px; }
+
+/* the uplink block, inside the bottom left corner of the frame, clear of the floating buttons */
+.hud-link {
+  position: absolute; left: calc(var(--hud-left) + 16px); bottom: calc(var(--hud-bottom) + 14px);
+}
+.hud-bars { display: flex; gap: 4px; align-items: flex-end; height: 19px; margin-bottom: 6px; }
+.hud-bars i { display: block; width: 6px; border-radius: 1px; background: rgba(255, 255, 255, 0.16); }
+.hud-bars i.lit { background: var(--accent); }
+.hud-bars i.lit.hot { background: #ff7a6b; }
+#hud-link.weak { color: #ff7a6b; }
+
+/* the one line the reader gets when the relay runs out. It says what the world does, not what the
+   reader did wrong. */
+.hud-warn {
+  position: absolute; left: 50%; bottom: calc(var(--hud-bottom) + 84px); transform: translateX(-50%);
+  margin: 0; padding: 7px 16px; white-space: nowrap;
+  border: 1px solid #ff7a6b; border-radius: 999px; background: rgba(7, 10, 22, 0.55);
+  color: #ff7a6b; font-size: 11px; letter-spacing: 0.1em;
+  opacity: 0; transition: opacity 0.3s;
+}
+.hud-warn.show { opacity: 1; }
+
+/* A folded sidebar on a wide screen is a strip along the top, and it holds nothing under it. The
+   frame then takes the whole width and starts under the strip, so the reader keeps the view.
+   app.js writes the class on the root element beside the two panel variables. */
+@media (min-width: 601px) {
+  :root.panel-folded #probe-hud {
+    --hud-left: var(--gap);
+    --hud-top: calc(var(--gap) + var(--panel-h, 56px) + 14px);
+  }
+}
+@media (max-width: 600px) {
+  /* the sidebar docks at the bottom here, so the frame takes the full width and stands over it */
+  #probe-hud {
+    --hud-in: 12px;
+    --hud-left: var(--hud-in);
+    --hud-bottom: calc(var(--panel-h, 0px) + 12px);
+  }
+  .hud-ladder { height: 150px; bottom: calc(var(--hud-bottom) + 74px); }
+  .hud-warn { white-space: normal; text-align: center; max-width: calc(100vw - 48px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-ladder b, .hud-warn { transition: none; }
+}

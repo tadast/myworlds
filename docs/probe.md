@@ -25,6 +25,8 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 8. **Globe fixes.** Wave period from 3.9 s to about 14 s, spatial frequency halved, vertical wobble halved. Flora scaled down 40% and count raised 1.5x on HIGH. Fauna scaled down 30%, count unchanged. Minimum camera distance unchanged. The lore numbers stay, because they become true on the ground.
 9. **Ground camera.** OrbitControls with pan. Target clamped to the fog start. Camera height clamped between 2 m above the terrain and a ceiling of 500 m. The ceiling was 1.2 km until issue 20. A click on a creature or the ground glides the target there. The creature inspector opens from the same click after the glide. LOW devices get the probe with 6,000 flora, 100 fauna, and no shadows.
 
+11. **The probe overlay, 2026-09-18.** The probe carries an instrument, and the instrument states four facts: the temperature of the air at the camera, the height of the camera over the ground, the time to the next sunset or sunrise, and the strength of the uplink to the relay. The uplink is the reason the probe stops. The reach is a rule about the plants, and a reader cannot see a rule; a link that thins over the last 420 units and a picture that breaks up over the last 150 is a cause the reader can read. The noise stays inside that narrow band on purpose, because static away from the edge reads as a fault of the app. See `docs/issues/31-probe-overlay.md`.
+
 ## Implementation notes
 
 Added with issue 04, the patch terrain. These notes record the constants and the two decisions the issue text did not fix.

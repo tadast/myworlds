@@ -2612,6 +2612,10 @@ function patch(seed, lat, lon, opts) {
       marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big, mega: grown.mega },
       activity: act ? act.info : null,
       biome,
+      // The temperature at the site, in degrees Celsius. The stats card of the world states the
+      // mean of the planet, and a patch is not the mean. The probe overlay reads this one and
+      // drops it with the height of the camera. See siteTempC().
+      tempC: siteTempC(ctx, siteT, biome),
       // The lore of every plant kind this patch grows, tallest first. See describePatchFlora().
       plants,
       palette: ctx.world.palette,

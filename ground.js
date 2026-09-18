@@ -46,6 +46,15 @@ export const SKY_RADIUS = 5000;      // metres, the sky dome
 // 530 units to 176, and the far ground then reads as a hard band with a straight edge against the
 // sky. So the fog keeps 450 and the reader gets his own number.
 const REACH_FADE = 100;              // units, the fallback for the plant fade of the worker
+// ---------------------------------------------------------------- the uplink, issue 31
+// The probe overlay states how strong the link to the probe is, and the link is what explains the
+// reach to the reader: the probe stops because the relay cannot hold it any further out, not
+// because a wall stands there. Two bands run inward from the reach. The uplink falls over the
+// wide one, so the reader sees the number drop long before anything stops. The picture only
+// breaks up over the narrow one, because static that arrives early reads as a fault of the app
+// and not as a fact of the world.
+const SIGNAL_BAND = 420;    // units inside the reach where the uplink starts to thin
+const NOISE_BAND = 150;     // units inside the reach where the picture starts to break up
 const reachOf = (half, fade) => half - (fade >= 0 ? fade : REACH_FADE);
 // The ceiling and the tilt hold the edge of the box out of sight. See "the rectangle" below.
 export const CEILING = 500;          // metres, the camera ceiling above the site
@@ -199,6 +208,14 @@ const PICK_GRACE = 2;
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM. The
 // ceiling of issue 20 keeps the fog under 1,325 m, so FOG_MAX no longer binds.
+// The floor of the camera follows the ground, and the ground of issue 26 carries ridges. A floor
+// that answers every one of them to the millimetre shivers under a moving camera. See update().
+const FLOOR_EASE = 1;       // metres: a lift under this one is spread over time
+const FLOOR_RATE = 14;      // 1/s: how fast a spread lift arrives
+// The lapse rate of an atmosphere, in degrees Celsius per metre of height. The overlay drops the
+// temperature of the site by it, so the reader who climbs reads a colder probe. It is the rate of
+// the standard atmosphere of Earth, 6.5 degrees per kilometre.
+const LAPSE_C_PER_M = 0.0065;
 const FOG_LIFT = 1.15;      // metres of fog distance per metre of height
 const FOG_MAX = 2100;       // metres, the widest the fog opens
 
@@ -218,6 +235,7 @@ const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
 const _sph = new THREE.Spherical();
 const _fw = new THREE.Vector3(), _rt = new THREE.Vector3();   // the walk basis of the frame
+const _seat = new THREE.Vector3();   // the candidate pivot of _seatTarget()
 const _UP = new THREE.Vector3(0, 1, 0);
 const _tint = [0, 0, 0];   // scratch colour for the rim rows
 
@@ -804,9 +822,75 @@ export class Ground {
     return out3;
   }
 
+  // The brake at the reach, issue 31. The drag of the controls carries the pair outward with no
+  // limit of its own, and the backstop in update() used to answer it by putting the pair back
+  // where it was. That reads as a stutter: the reader drags, the frame moves, the frame snaps
+  // back. The brake takes the outward part of the step the controls just made and fades it out
+  // over the same band the walk uses, so a drag slows to nothing at the reach and a drag along
+  // the edge or back toward the site keeps its full speed.
+  _brakeEdge(x0, z0) {
+    const tg = this.controls.target, p = this.camera.position;
+    const dx = tg.x - x0, dz = tg.z - z0;
+    if (dx === 0 && dz === 0) return;
+    const r0 = Math.hypot(x0, z0);
+    if (r0 < 1e-6 || r0 < this.reach - WALK_EDGE) return;
+    const ux = x0 / r0, uz = z0 / r0;
+    const out = dx * ux + dz * uz;
+    if (out <= 0) return;                    // inward or along the edge: the reader keeps it all
+    const cut = out * THREE.MathUtils.smoothstep(r0, this.reach - WALK_EDGE, this.reach);
+    tg.x -= ux * cut; tg.z -= uz * cut;
+    p.x -= ux * cut; p.z -= uz * cut;
+  }
+
+  // ---------------------------------------------------------------- the probe overlay, issue 31
+  // What the overlay states, read fresh every frame. Four facts and one ramp:
+  //
+  //   tempC     the temperature at the site, dropped by the height the camera stands at
+  //   agl       the height of the camera over the ground or the water under it
+  //   sun       the seconds to the next sunset, or to the next sunrise when the star is down
+  //   signal    the strength of the uplink, 0 to 1, which falls over the last SIGNAL_BAND units
+  //   near      0 inside the reach and 1 at it, over the last NOISE_BAND units: the noise ramp
+  //
+  // The temperature falls with the height at the lapse rate of a real atmosphere, and it reads
+  // the same height the ladder states. The box holds a vertical scale of its own, so one unit of
+  // it stands for tens of metres of the globe; the overlay does not use that scale, because the
+  // reader would then see a temperature that does not follow the altitude beside it.
+  telemetry() {
+    const p = this.camera.position;
+    const patch = this.result && this.result.patch;
+    const surface = this._surfaceAt(p.x, p.z);
+    const agl = Math.max(0, p.y - surface);
+    const site = patch && patch.tempC != null ? patch.tempC : null;
+    const tempC = site == null ? null : site - (p.y - this.base) * LAPSE_C_PER_M;
+    const r = Math.hypot(this.controls.target.x, this.controls.target.z);
+    const signal = 1 - THREE.MathUtils.smoothstep(r, this.reach - SIGNAL_BAND, this.reach) * 0.94;
+    const near = THREE.MathUtils.smoothstep(r, this.reach - NOISE_BAND, this.reach);
+    return { tempC, agl, signal, near, sun: this._sunCountdown() };
+  }
+
+  // The seconds to the next sunset, or to the next sunrise when the star is under the horizon.
+  // The sun of a landing does not move: the app reads the globe once and the sky holds that hour.
+  // So the countdown is geometry and not a clock. The star stands sunElev radians over the
+  // horizon, the planet turns a full circle in dayHours, and the angle over the turn is the time
+  // that is left. The path of a star runs at an angle to the horizon away from the equator, so a
+  // high latitude holds its light a little longer than this states; the reader is told hours, not
+  // minutes, and the error stays inside the last digit.
+  _sunCountdown() {
+    const day = this.world && this.world.env ? this.world.env.dayHours : null;
+    if (!day || !this.sky) return null;
+    const elev = this.sky.sunElev || 0;
+    const perRad = day * 3600 / (Math.PI * 2);
+    return elev >= 0
+      ? { rise: false, seconds: elev * perRad }
+      : { rise: true, seconds: -elev * perRad };
+  }
+
   update(t, dt) {
     this._drive();               // the speeds and the tilt, both from the height of the camera
+    // Where the pair stands before the controls move it. The brake below reads the two numbers.
+    const bx = this.controls.target.x, bz = this.controls.target.z;
     this.controls.update();
+    this._brakeEdge(bx, bz);     // the drag eases to a stop at the reach, it does not hit a wall
     if (this.glide) this._stepGlide(dt);
     // Issue 23: a press that holds still, and does not move, becomes a walk.
     const tap = this._tap;
@@ -814,9 +898,11 @@ export class Ground {
     this._stepMove(dt);
     const p = this.camera.position, tg = this.controls.target;
 
-    // The target stays inside the reach, so the view always holds ground that carries plants. The
-    // camera takes the same step, so a pan that reaches the limit stops the whole view there
-    // instead of sliding the camera on over a target that cannot follow.
+    // The backstop. The brake above and the cut in _stepMove() take the outward part of every
+    // step the reader asks for, so the pair reaches the reach and stops there. A glide or a link
+    // can still put the target outside it in one jump, and this pulls it back. It used to run on
+    // every frame against a walk that was still pushing, and the snap it made was the jitter the
+    // reader felt at the edge.
     const tr = Math.hypot(tg.x, tg.z);
     if (tr > this.reach) {
       const k = this.reach / tr - 1;
@@ -834,7 +920,13 @@ export class Ground {
     // the distance hold and only the height changes.
     const floor = this._floorAt(p.x, p.z);
     const ceiling = this.ceiling;
-    const step = THREE.MathUtils.clamp(p.y, floor, Math.max(floor, ceiling)) - p.y;
+    let step = THREE.MathUtils.clamp(p.y, floor, Math.max(floor, ceiling)) - p.y;
+    // The ground under a moving camera rises and falls a few centimetres every frame, and a floor
+    // that answers each of them to the millimetre shivers. A lift under FLOOR_EASE is therefore
+    // spread over FLOOR_RATE, which leaves the eye at most FLOOR_EASE under the floor for a few
+    // frames and the floor stands FLOOR over the ground, so nothing shows through. A lift over
+    // that is a real step in the ground and it still arrives at once.
+    if (step > 0 && step < FLOOR_EASE) step *= 1 - Math.exp(-FLOOR_RATE * dt);
     if (step !== 0) { p.y += step; tg.y += step; }
     this.atCeiling = p.y >= ceiling - 1;
 
@@ -1098,7 +1190,15 @@ export class Ground {
       const y = p.y + _dir.y * t;
       if (y <= this._surfaceAt(p.x + _dir.x * t, p.z + _dir.z * t)) {
         const d = Math.max(this.controls.minDistance, t);
-        if (d < d0) tg.copy(p).addScaledVector(_dir, d);
+        if (d >= d0) return;
+        // The seat runs every frame, and a camera that stands outside the reach seats its target
+        // outward, toward itself. The backstop of update() then read that as a reader pushing at
+        // the edge and pulled the whole pair in, one frame after another. So a seat that would
+        // put the target outside the reach is dropped: the pivot stays where it is and nothing
+        // moves the camera behind the reader's back.
+        _seat.copy(p).addScaledVector(_dir, d);
+        if (Math.hypot(_seat.x, _seat.z) > this.reach) return;
+        tg.copy(_seat);
         return;
       }
     }
@@ -1187,26 +1287,38 @@ export class Ground {
       const way = this._pointerWay(_rt);
       if (way) { wx = way.x; wz = way.z; }
     }
+    // The step the view asks for, as one unit vector. The lift keys are not in it yet: the cut at
+    // the edge takes the whole of this step, and a reader who asks for height by name keeps it.
+    const len = Math.hypot(wx, wy, wz);
+    if (len > 1e-6) {
+      wx /= len; wy /= len; wz /= len;
+      // The pan of the reader stops at the reach and so does the walk. It slows over the last
+      // WALK_EDGE units instead of meeting a wall, and only the part of the step that goes outward
+      // slows, so the reader still walks along the edge and back in at full speed.
+      const tr = Math.hypot(tg.x, tg.z);
+      const out = tr > 1e-6 ? (wx * tg.x + wz * tg.z) / tr : 0;
+      if (out > 0 && tr > this.reach - WALK_EDGE) {
+        const k = THREE.MathUtils.smoothstep(tr, this.reach - WALK_EDGE, this.reach);
+        wx -= (tg.x / tr) * k * out; wz -= (tg.z / tr) * k * out;
+        // The step of the flight keys follows the view, so it carries a vertical part. The cut
+        // used to take the flat part alone, and a reader who held the key at the edge flew
+        // straight up instead of stopping: the ground stood still and the camera climbed. The
+        // same cut now takes the whole step, so a walk into the edge slows to a stop on every
+        // axis.
+        wy *= 1 - k;
+      }
+    } else { wx = 0; wy = 0; wz = 0; }
     wy += lift;
     // The floor and the ceiling take the vertical part before the ease reads it, so a key held
     // against a limit winds up no speed that the clamp of update() then throws away.
     const h = Math.max(0, p.y - this._floorAt(p.x, p.z));
     if (wy < 0 && h <= 0.05) wy = 0;
     if (wy > 0 && p.y >= this.ceiling - 0.05) wy = 0;
-    const len = Math.hypot(wx, wy, wz);
-    if (len > 1e-6) {
-      wx /= len; wy /= len; wz /= len;
-      this.glide = null;
-      // The pan of the reader stops at the fog and so does the walk. It slows over the last
-      // WALK_EDGE units instead of meeting a wall, and only the part of the step that goes outward
-      // slows, so the reader still walks along the edge and back in at full speed.
-      const tr = Math.hypot(tg.x, tg.z);
-      const out = tr > 1e-6 ? (wx * tg.x + wz * tg.z) / tr : 0;
-      if (out > 0 && tr > this.reach - WALK_EDGE) {
-        const cut = THREE.MathUtils.smoothstep(tr, this.reach - WALK_EDGE, this.reach) * out;
-        wx -= (tg.x / tr) * cut; wz -= (tg.z / tr) * cut;
-      }
-    } else { wx = 0; wy = 0; wz = 0; }
+    // A step longer than one unit would run faster than the speed below states, which a diagonal
+    // of a walk key and a lift key can reach.
+    const len2 = Math.hypot(wx, wy, wz);
+    if (len2 > 1) { wx /= len2; wy /= len2; wz /= len2; }
+    if (len2 > 1e-6) this.glide = null;   // a key of the reader ends the glide of a tap
 
     // The height sets the speed, as it sets the speed of a wheel step: a walk near the ground is a
     // walk, and at the ceiling one second carries the reader over a third of the patch.

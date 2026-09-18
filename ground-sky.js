@@ -133,6 +133,10 @@ export class Sky {
     // A sun under the horizon leaves the ground black. Keep it 8 degrees up and darken the sky
     // instead, so the hills still read and the world still says the hour.
     const elev = Math.asin(THREE.MathUtils.clamp(this.sunDir.y, -1, 1));
+    // The true elevation of the sun, in radians, before the floor below lifts it. The probe
+    // overlay reads it for the countdown to the next sunset or sunrise, so it must be the angle
+    // the star really stands at and not the angle the light takes.
+    this.sunElev = elev;
     this.night = THREE.MathUtils.clamp(-elev / NIGHT_ANGLE, 0, 1);
     if (elev < SUN_FLOOR) {
       const flat = Math.hypot(this.sunDir.x, this.sunDir.z) || 1;

@@ -9,6 +9,7 @@ import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToS
 import { PlantInspector } from './flora-card.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
+import { ProbeHud } from './probe-hud.js';
 import { perf, Hud } from './perf.js';
 import { rollStar, StarSystem } from './star.js';
 
@@ -95,6 +96,9 @@ const shareBtn = $('#share');
 const probeBtn = $('#probe');
 const probeIconBtn = $('#probe-icon');
 const probeFloat = $('#probe-float');
+// The instrument of the probe, issue 31. It shows while the probe is down and it reads one
+// telemetry object per frame from the ground. See probe-hud.js.
+const probeHud = new ProbeHud($('#probe-hud'));
 const creatureFloat = $('#creature-float');
 const aimEl = $('#aim');
 const helpEl = $('#help');
@@ -578,6 +582,7 @@ function step(now) {
   if (mode === 'ground') {          // the globe stays in memory, but none of its work runs
     ground.update(t, dt);
     ground.render();
+    probeHud.update(ground.telemetry(), now);
     if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows the ground camera
     return;
   }
@@ -970,6 +975,8 @@ function enterGround() {
   if (pendingView) ground.setView(pendingView);   // a shared link brings its own camera
   pendingView = null;
   ground.resize(innerWidth, innerHeight);
+  probeHud.resize(innerWidth, innerHeight, Q.dpr);
+  probeHud.show();
   perf.reset();       // the orbit frames say nothing about the ground
   showMarker(null, current);
   writeHash();
@@ -978,6 +985,7 @@ function enterGround() {
 // The switch back to the globe, under an opaque overlay. Also the straight cut for a new world.
 function leaveGround() {
   if (plantInspector.open) closeCard();   // the plant of a patch cannot be studied from orbit
+  probeHud.hide();
   if (ground) { ground.dispose(); ground = null; }
   markedKind = null; markedPlant = null;  // the marks belong to the patch, and the patch is gone
   perf.reset();       // the ground frames say nothing about the globe
@@ -993,6 +1001,7 @@ function abortProbe() {
   stopAim();
   if (mode === 'orbit' && !dive) return;
   if (plantInspector.open) closeCard();
+  probeHud.hide();
   if (ground) { ground.dispose(); ground = null; }
   markedKind = null; markedPlant = null;
   groundPlants = []; groundVariant = 0;
@@ -1438,6 +1447,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   if (ground) ground.resize(innerWidth, innerHeight);
+  probeHud.resize(innerWidth, innerHeight, Q.dpr);
   if (inspector.open) inspector.resize();
   if (plantInspector.open) plantInspector.resize();
 });
@@ -1510,6 +1520,9 @@ function showProbeBtn() {
 }
 function setCollapsed(on) {
   panel.classList.toggle('collapsed', on);
+  // The probe overlay reads this: a folded sidebar on a wide screen leaves the whole width, so
+  // the frame starts at the left edge and drops under the strip. See #probe-hud in style.css.
+  document.documentElement.classList.toggle('panel-folded', on);
   toggleBtn.setAttribute('aria-expanded', String(!on));
   toggleBtn.setAttribute('aria-label', on ? 'Expand sidebar' : 'Collapse sidebar');
   if (!on) showProbeBtn();
@@ -1521,6 +1534,9 @@ toggleBtn.addEventListener('click', () => setCollapsed(!panel.classList.contains
 if (window.ResizeObserver) {
   new ResizeObserver(() => {
     document.documentElement.style.setProperty('--panel-h', `${panel.offsetHeight}px`);
+    // The probe overlay starts right of the sidebar, so the frame of issue 31 holds no text
+    // under the panel. A folded panel is narrow and the frame follows it out.
+    document.documentElement.style.setProperty('--panel-w', `${panel.offsetWidth}px`);
   }).observe(panel);
 }
 panel.querySelector('header').addEventListener('click', (e) => {
