@@ -1459,6 +1459,20 @@ function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   // The upper cloud deck, which app.js lays over the banded body. It draws no numbers, so no world
   // changes: it takes the light bands for its tops and a dark band for its gaps.
   world.deck = { top: toHex(mix(bands[3], [1, 1, 1], 0.2)), gap: toHex(mix(bands[1], bands[0], 0.5)), freq: bandFreq };
+  // The weather of the lower deck, which app.js turns in a shader: the small storms, and the
+  // polygon the jet at each pole draws. It takes a stream of its own, so no world changes.
+  const vr = makeRng(world.seed + '|vortices');
+  const vortices = [], nv = 3 + Math.floor(vr() * 4), sd = world.storm.dir;
+  for (let tries = 0; vortices.length < nv && tries < 40; tries++) {
+    const y = rrange(vr, -0.7, 0.7), lon = vr() * Math.PI * 2, s = Math.sqrt(1 - y * y);
+    const dir = [s * Math.cos(lon), y, s * Math.sin(lon)], size = rrange(vr, 0.03, 0.065);
+    const far = (a, r) => Math.acos(Math.min(1, dir[0] * a[0] + dir[1] * a[1] + dir[2] * a[2])) > r + size * 1.5;
+    if (far(sd, stormSize * 1.3) && vortices.every((v) => far(v, v[3]))) vortices.push([...dir, size]);
+  }
+  Object.assign(world.deck, {
+    vortices, storm: toHex(P.storm), dark: toHex(mix(bands[2], [0, 0, 0], 0.3)),
+    sides: [pick(vr, [5, 6, 6, 7, 8]), pick(vr, [5, 6, 7, 8, 9])],
+  });
   makeActivity(makeRng(world.seed + '|activity'), 'gas', world, P);
   world.rings = rng() < 0.65 ? makeRings(rng, mix(bands[0], [1, 1, 1], 0.2), 1) : null;
   world.moons = makeMoons(rng, "gas", !!world.rings);

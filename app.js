@@ -106,7 +106,7 @@ const helpEl = $('#help');
 // ground carries the reader over it, so the first gesture does a different thing in each, and the
 // line has to say which. See updateHelp().
 const HELP_ORBIT = 'Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife';
-const HELP_GROUND = 'Drag or hold to move · Arrows and WASD fly, Space up, Ctrl down, Shift runs · two fingers or right-drag to look · Q E R F turn and tilt';
+const HELP_GROUND = 'Drag or hold to move · WASD fly level, Space up, Ctrl down, Shift runs · arrows, Q E, two fingers, or right-drag to look';
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
 const muteBtn = $('#mute');
@@ -532,7 +532,10 @@ const SLOPE_STEP = 0.02;
 
   // the upper cloud deck of a gas giant
   const deckMat = world.type === 'gas' && world.deck ? gasDeck(world, planet) : null;
-  if (deckMat) tm.color.setScalar(0.72);   // the banded body is the lower deck, so it lies in shade
+  if (deckMat) {
+    tm.color.setScalar(0.72);   // the banded body is the lower deck, so it lies in shade
+    gasWeather(world, tm);
+  }
 
   // atmosphere
   if (deckMat) {
@@ -603,7 +606,7 @@ const SLOPE_STEP = 0.02;
 
   scene.add(group);
   const homes = faunaHomes(fauna, world.faunaCount || 0);   // the pull to life reads these every frame
-  current = { group, planet, cloudGroup, oceanMat, deckMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity, homes };
+  current = { group, planet, cloudGroup, oceanMat, deckMat, bodyMat: deckMat ? tm : null, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity, homes };
 }
 
 // ---------------------------------------------------------------- the decks of a gas giant
@@ -615,6 +618,100 @@ const SLOPE_STEP = 0.02;
 const DECK_R = 1.036;            // the radius of the upper deck
 const DECK_LOW = 1.012;          // the lowest hover of a whale, over the lower deck
 const DECK_HIGH = 1.058;         // the highest hover of a whale, over the upper deck
+// The noise both decks share: a value noise, streaks that run along the bands, and a turn about
+// the axis of the world.
+const DECK_GLSL = `
+  float dHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+  float dNoise(vec3 x) {
+    vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(dHash(i), dHash(i + vec3(1,0,0)), f.x), mix(dHash(i + vec3(0,1,0)), dHash(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(dHash(i + vec3(0,0,1)), dHash(i + vec3(1,0,1)), f.x), mix(dHash(i + vec3(0,1,1)), dHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+  // streaks: slow along the bands, fast across them
+  float dStreak(vec3 p) {
+    vec3 q = p * vec3(2.6, 24.0, 2.6);
+    return dNoise(q) * 0.55 + dNoise(q * 2.1 + 7.3) * 0.3 + dNoise(q * 4.3 + 1.7) * 0.15;
+  }
+  vec3 dTurn(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x * c - p.z * s, p.y, p.x * s + p.z * c); }`;
+
+// The weather of the lower deck. The worker paints the bands once, and this shader moves over
+// them. Every pattern turns as a whole, and no pattern turns faster at one latitude than at the
+// next, because a flow that shears a pattern tears it into noise in a few minutes.
+// - The jets: the bands streak east and west, and a fast jet runs along the equator.
+// - The poles: the jet round each pole bends into a polygon, as the hexagon on Saturn does, and a
+//   spiral turns in its eye.
+// - The storms: the great storm and a few small ones turn their spiral arms, each the way its
+//   hemisphere turns it.
+const MAX_VORTICES = 6;
+function gasWeather(world, mat) {
+  const d = world.deck;
+  if (!d.vortices) return;
+  const vort = [];
+  for (let i = 0; i < MAX_VORTICES; i++) vort.push(new THREE.Vector4(...(d.vortices[i] || [0, 1, 0, 0])));
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, {
+      uTime: { value: 0 }, uLight: { value: new THREE.Color(d.top) }, uDark: { value: new THREE.Color(d.dark) },
+      uStormCol: { value: new THREE.Color(d.storm) }, uStorm: { value: new THREE.Vector4(...world.storm.dir, world.storm.size) },
+      uVort: { value: vort },
+    });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBody;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBody = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vBody;
+        uniform float uTime; uniform vec3 uLight, uDark, uStormCol; uniform vec4 uStorm; uniform vec4 uVort[${MAX_VORTICES}];
+        ${DECK_GLSL}
+        // The polygon jet round one pole: a bright line where the polygon runs, a darker eye inside
+        // it, and a spiral that turns in the eye.
+        vec3 dPole(vec3 p, vec3 col, float s, float sides, float t) {
+          float r = acos(clamp(p.y * s, -1.0, 1.0));
+          if (r > 0.55) return col;
+          float th = atan(p.z, p.x) * s + t * 0.012;
+          float seg = 6.28318 / sides;
+          float hx = r * cos(3.14159 / sides) / cos(mod(th, seg) - seg * 0.5);
+          float wob = (dNoise(p * 18.0 + t * 0.03) - 0.5) * 0.01;
+          float line = exp(-pow((hx + wob - 0.3) / 0.02, 2.0));
+          float eye = 1.0 - smoothstep(0.27, 0.31, hx);
+          float spiral = 0.5 + 0.5 * sin(3.0 * th - 26.0 * r - t * 0.06 * s);
+          col = mix(col, uDark, eye * (0.3 + 0.25 * spiral * smoothstep(0.3, 0.02, r)));
+          col = mix(col, uLight, line * 0.85);
+          return mix(col, uLight, smoothstep(0.03, 0.0, r) * 0.5);
+        }
+        // One storm: an oval, wide along the bands, with arms that wind in to a dark eye.
+        vec3 dStorm(vec3 p, vec3 col, vec4 c, vec3 tint, float t) {
+          if (c.w <= 0.0 || dot(p, c.xyz) < cos(c.w * 2.0)) return col;
+          vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), c.xyz)), nn = cross(c.xyz, e);
+          vec3 q = p - c.xyz;
+          vec2 o = vec2(dot(q, e) * 0.6, dot(q, nn) * 1.4) / c.w;
+          float dd = length(o), phi = atan(o.y, o.x), spin = c.y >= 0.0 ? 1.0 : -1.0;
+          float arms = 0.5 + 0.5 * sin(2.0 * phi - 11.0 * dd * spin + t * 0.15 * spin);
+          float body = smoothstep(1.0, 0.45, dd);
+          // light crests and dark troughs, so the arms read against bands of any colour
+          col = mix(col, mix(uDark, uLight, arms), body * 0.55);
+          col = mix(col, tint, smoothstep(0.7, 0.2, dd) * 0.45);
+          return mix(col, uDark, smoothstep(0.14, 0.04, dd) * 0.6);
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        vec3 p = normalize(vBody);
+        float t = uTime;
+        vec3 col = diffuseColor.rgb;
+        // the bands streak, and the streaks drift. Two layers turn the opposite ways.
+        float band = smoothstep(-0.3, 0.3, sin(p.y * ${(d.freq * 0.5).toFixed(3)} * 3.14159));
+        float sk = mix(dStreak(dTurn(p, t * 0.006) * 1.3 + 5.0), dStreak(dTurn(p, -t * 0.005) * 1.3 + 9.0), band);
+        col *= 0.82 + 0.36 * sk;
+        // the equatorial jet: thin light streaks that run fast along the equator
+        float jet = smoothstep(0.62, 0.9, dNoise(dTurn(p, t * 0.025) * vec3(5.0, 70.0, 5.0)));
+        col = mix(col, uLight, jet * exp(-p.y * p.y * 60.0) * 0.55);
+        col = dPole(p, col, 1.0, ${d.sides[0].toFixed(1)}, t);
+        col = dPole(p, col, -1.0, ${d.sides[1].toFixed(1)}, t);
+        col = dStorm(p, col, uStorm, uStormCol, t);
+        for (int i = 0; i < ${MAX_VORTICES}; i++) col = dStorm(p, col, uVort[i], uLight, t);
+        diffuseColor.rgb = col;`);
+    mat.userData.shader = sh;
+  };
+}
+
 function gasDeck(world, planet) {
   const d = world.deck;
   const mat = new THREE.MeshStandardMaterial({
@@ -633,18 +730,7 @@ function gasDeck(world, planet) {
       .replace('#include <common>', `#include <common>
         varying vec3 vDeck;
         uniform float uTime, uStormSize; uniform vec3 uTop, uGap, uStorm;
-        float dHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-        float dNoise(vec3 x) {
-          vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(mix(dHash(i), dHash(i + vec3(1,0,0)), f.x), mix(dHash(i + vec3(0,1,0)), dHash(i + vec3(1,1,0)), f.x), f.y),
-                     mix(mix(dHash(i + vec3(0,0,1)), dHash(i + vec3(1,0,1)), f.x), mix(dHash(i + vec3(0,1,1)), dHash(i + vec3(1,1,1)), f.x), f.y), f.z);
-        }
-        // streaks: slow along the bands, fast across them
-        float dStreak(vec3 p) {
-          vec3 q = p * vec3(2.6, 24.0, 2.6);
-          return dNoise(q) * 0.55 + dNoise(q * 2.1 + 7.3) * 0.3 + dNoise(q * 4.3 + 1.7) * 0.15;
-        }
-        vec3 dTurn(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x * c - p.z * s, p.y, p.x * s + p.z * c); }`)
+        ${DECK_GLSL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 p = normalize(vDeck);
         // Alternate bands flow east and west. Two layers turn the opposite ways, and the band
@@ -743,6 +829,7 @@ function step(now) {
     current.cloudGroup.rotation.y += spin * 1.25 * dt;
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
     if (current.deckMat?.userData.shader) current.deckMat.userData.shader.uniforms.uTime.value = t;
+    if (current.bodyMat?.userData.shader) current.bodyMat.userData.shader.uniforms.uTime.value = t;
     for (const fm of current.faunaMats) if (fm.userData.shader) fm.userData.shader.uniforms.uTime.value = t;
     updateMovers(t, dt);
     if (current.activity) current.activity.update(t, innerHeight * Q.dpr * 0.5 / Math.tan(camera.fov * Math.PI / 360));
