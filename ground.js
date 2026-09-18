@@ -527,7 +527,10 @@ export class Ground {
     this.sun = sun;
     this.content.add(sun);
     this.content.add(sun.target);
-    this.content.add(new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night));
+    // The sky light of the hour. _followSun() moves it with the sun, so the ground of a dusk
+    // landing loses its blue as the star goes down.
+    this.hemi = new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night);
+    this.content.add(this.hemi);
 
     // The reveal: the camera starts CAM_START up and south of the site by the same tilt the
     // ceiling holds, and it looks at the site. The reader sees the patch from over the fog and
@@ -868,21 +871,25 @@ export class Ground {
     return { tempC, agl, signal, near, sun: this._sunCountdown() };
   }
 
-  // The seconds to the next sunset, or to the next sunrise when the star is under the horizon.
-  // The sun of a landing does not move: the app reads the globe once and the sky holds that hour.
-  // So the countdown is geometry and not a clock. The star stands sunElev radians over the
-  // horizon, the planet turns a full circle in dayHours, and the angle over the turn is the time
-  // that is left. The path of a star runs at an angle to the horizon away from the equator, so a
-  // high latitude holds its light a little longer than this states; the reader is told hours, not
-  // minutes, and the error stays inside the last digit.
+  // The time to the next sunset, or to the next sunrise when the star is under the horizon.
+  //
+  // The sky turns, so the countdown is the turn the star still has to make before it meets the
+  // horizon. Sky.toHorizon() solves that turn against the real path of the star at this site, and
+  // the hours it states are the hours of the world: the planet makes one turn in dayHours, so one
+  // radian of the turn is dayHours over two pi. A site where the star never sets holds no
+  // countdown and the overlay states none.
+  //
+  // The clock of the landing runs faster than the clock of the reader. One turn of the planet
+  // takes GROUND_DAY seconds of real time, whatever the world says its day is, so the hours the
+  // overlay counts down run at dayHours * 3600 / GROUND_DAY of real time. On a world with a day of
+  // 24.8 h that is 50 hours of the world in one hour of the reader, and a sunset an hour away
+  // arrives while the reader watches. See GROUND_DAY in ground-sky.js.
   _sunCountdown() {
     const day = this.world && this.world.env ? this.world.env.dayHours : null;
     if (!day || !this.sky) return null;
-    const elev = this.sky.sunElev || 0;
-    const perRad = day * 3600 / (Math.PI * 2);
-    return elev >= 0
-      ? { rise: false, seconds: elev * perRad }
-      : { rise: true, seconds: -elev * perRad };
+    const turn = this.sky.toHorizon();
+    if (turn == null) return null;
+    return { rise: this.sky.sunElev < 0, seconds: turn * day * 3600 / (Math.PI * 2) };
   }
 
   update(t, dt) {
@@ -953,7 +960,7 @@ export class Ground {
     this._driveShadow();
     if (this.fauna) this.fauna.update(t, dt);
     // the sky follows the camera, so it must move after every clamp
-    if (this.sky) this.sky.update(t, dt, this.camera);
+    if (this.sky) { this.sky.update(t, dt, this.camera); this._followSun(); }
     // the phenomenon reads the field of view of the camera for its point sizes
     if (this.phenomena) this.phenomena.update(t, dt, this.camera);
     // the sea follows the target, so it must move after the target clamp
@@ -962,6 +969,39 @@ export class Ground {
     // the LOD walk reads the camera, so it runs after the clamps too
     if (this.flora) this.flora.update(this.camera, t);
     if (this.grass) this.grass.update(this.camera, t);
+  }
+
+  // ---------------------------------------------------------------- the hour, issue 32
+  // The sky turns, so the light of the ground turns with it. Every frame the sun light takes the
+  // place, the colour, and the strength the sky reports, and the fog and the sky light take the
+  // colour of the horizon. The parts that were baked at the landing take what they can: the cards
+  // of the plants keep the picture they were baked with and turn the side they dim by, and the
+  // shadow of a flyer takes the new slant.
+  //
+  // The sky only rebuilds its colours when the star has moved RELIGHT_STEP, and this follows that
+  // same flag, so a frame that changes nothing costs one test.
+  _followSun() {
+    const sky = this.sky;
+    this.sunDir.copy(sky.sunDir);
+    if (this.sun) this.sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6).add(this.sun.target.position);
+    if (!sky.lightMoved) return;
+    if (this.sun) {
+      this.sun.color.copy(sky.sunColor);
+      this.sun.intensity = sky.sunIntensity;
+    }
+    if (this.hemi) {
+      this.hemi.color.copy(sky.horizon);
+      this.hemi.intensity = 0.7 - 0.35 * sky.night;
+    }
+    this.skyColor.copy(sky.horizon);
+    if (this.scene.background) this.scene.background.copy(sky.horizon);
+    if (this.scene.fog) {
+      this.scene.fog.color.copy(sky.horizon);
+      // the sea tints the fog with its own colour, and the tint must go back on the new horizon
+      if (this.sea) this.sea.tintFog(this.scene);
+    }
+    if (this.flora) this.flora.setSun(this.sunDir);
+    if (this.fauna) this.fauna.setSun(this.sunDir, sky.night);
   }
 
   // The LOD controller: one knob, from the frame time. Every LOD_PERIOD it reads the rolling

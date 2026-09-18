@@ -823,6 +823,13 @@ export class GroundFauna {
   }
 
   // One shadow disc. The flyer is `lift` metres over the ground at (nx, nz), and the sun stands at
+  // The sun of the hour. ground.js calls it while the sky turns, so the shadow of a flyer swings
+  // with the star and goes out as the night comes on.
+  setSun(sunDir, night) {
+    this._sun.copy(sunDir).normalize();
+    this._night = night || 0;
+  }
+
   // this._sun, so the shadow falls that far the other way. A low sun throws it a long way out, and
   // the cap holds it near enough that the reader can still tie the two together.
   //

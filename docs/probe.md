@@ -27,6 +27,8 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 
 11. **The probe overlay, 2026-09-18.** The probe carries an instrument, and the instrument states four facts: the temperature of the air at the camera, the height of the camera over the ground, the time to the next sunset or sunrise, and the strength of the uplink to the relay. The uplink is the reason the probe stops. The reach is a rule about the plants, and a reader cannot see a rule; a link that thins over the last 420 units and a picture that breaks up over the last 150 is a cause the reader can read. The noise stays inside that narrow band on purpose, because static away from the edge reads as a fault of the app. See `docs/issues/31-probe-overlay.md`.
 
+12. **The sky turns, 2026-09-18.** A landing keeps a clock: one turn of the planet takes 1,800 s of real time, whatever the day of the world is. The star turns about the axis of the planet, so it rises and sets the way it does at that latitude, and the light, the colours of the sky, the fog, and the countdown of the overlay all follow it. The hours of the world therefore run about fifty times the hours of the reader, which is what makes a sunset something a reader can sit through. The moons keep the order the globe rolled and lose its speed: a moon crosses the sky in tens of minutes and no longer in tens of seconds. See `docs/issues/32-the-sky-turns.md`.
+
 ## Implementation notes
 
 Added with issue 04, the patch terrain. These notes record the constants and the two decisions the issue text did not fix.

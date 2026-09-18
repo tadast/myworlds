@@ -18,12 +18,34 @@ export const SUN_FLOOR = 8 * DEG;     // a sun below the horizon rises to here, 
 export const SUN_GLOW = 20 * DEG;     // the warm tint reaches this far from the sun
 export const SUN_DISC = 1.2 * DEG;    // the disc is larger than the true sun, so it reads
 export const NIGHT_ANGLE = 12 * DEG;  // the sun this far below the horizon gives full night
+// ---------------------------------------------------------------- the clock of a landing
+// The sky of a landing used to hold one hour for ever. It reads as a picture, and a reader who
+// waits for the sunset the overlay states waits for nothing.
+//
+// So the ground keeps a clock. One turn of the planet takes GROUND_DAY seconds of real time,
+// whatever the day of the world is, and the sun, the moons, and the countdown of the overlay all
+// read that one clock. At 1,800 s the sun turns 12 degrees a minute: it covers its own disc in
+// about twelve seconds, which a reader who watches sees and a reader who walks does not, and a sun
+// 30 degrees up sets in about two minutes and a half.
+export const GROUND_DAY = 1800;       // seconds of real time for one turn of the planet
+// How many turns of the sky a moon makes over one of those days. The globe runs its moons fast,
+// because a miniature must show an orbit while the reader looks at it: a moon there takes 21 to
+// 52 s against 125 s for the turn of the planet, which on the ground threw the moon across the sky
+// in under a minute. The ground keeps the order the globe rolled and divides it by MOON_SLOW, so a
+// world with a fast moon still has the faster one and no moon crosses the sky in a hurry.
+const MOON_SLOW = 4;
+const MOON_TURNS = [0.25, 2];         // the band a moon must stay inside, in turns per day
 export const MOON_DIST = 4000;        // metres, the draw distance of a moon on the dome
 export const MOON_GAIN = 3;           // the true angular size is too small to read, so it grows 3x
 export const RING_REACH = 4250;       // metres, the far edge of the ring band
 export const CLOUD_LOW = 900;         // metres, the floor of the cloud deck
 export const CLOUD_HIGH = 1100;       // metres, the roof of the cloud deck
 export const CLOUD_SPAN = 1800;       // metres, the half width of the field the clouds drift in
+
+// How far the star must move before the colours of the sky are built again. A degree of the sky
+// takes under a second of the clock, and the colours cost more than the turn does.
+const RELIGHT_STEP = 0.25 * DEG;
+const _turn = new THREE.Vector3();   // scratch for the turn of the sky
 
 const NIGHT_COLOR = new THREE.Color('#070a16');   // the colour of the orbit sky, the darker end
 const SUN_TINT = new THREE.Color('#fff2cf');
@@ -81,8 +103,17 @@ export function groundBasis(planet, site, twist = 0) {
 // current is the built world of app.js. sunDir is the globe sun in globe space.
 export function skyView(current, site, sunDir, twist = 0) {
   const basis = groundBasis(current.planet, site, twist);
+  // The axis the planet turns about, in the ground frame. The sky of the site turns about it, so
+  // the sun rises and sets the way it does at that latitude: straight up at the equator, and along
+  // a low slant near a pole. The axis of the globe carries the tilt of the world, because it is
+  // read from the world matrix of the planet.
+  const north = new THREE.Vector3(0, 1, 0)
+    .applyMatrix4(new THREE.Matrix4().extractRotation(current.planet.matrixWorld))
+    .applyMatrix4(basis).normalize();
+  const spin = Math.abs(current.spin) || 0.05;
   const view = {
     basis,
+    axis: north,
     sunDir: sunDir.clone().applyMatrix4(basis).normalize(),
     moons: [],
     ring: null,
@@ -91,7 +122,11 @@ export function skyView(current, site, sunDir, twist = 0) {
     m.pivot.updateWorldMatrix(true, false);
     // the orbit plane of the moon, turned into the ground frame; the moon runs a circle in it
     const orbit = new THREE.Matrix4().extractRotation(m.pivot.matrixWorld).premultiply(basis);
-    view.moons.push({ orbit, angle: m.angle, speed: m.speed, dist: m.dist, size: m.size, color: m.color, seed: m.seed });
+    // the turns of the sky this moon makes over one turn of the planet, from the pair the globe
+    // rolled, held inside the band the ground can show
+    const turns = Math.min(MOON_TURNS[1], Math.max(MOON_TURNS[0], Math.abs(m.speed) / spin / MOON_SLOW))
+      * (m.speed < 0 ? -1 : 1);
+    view.moons.push({ orbit, angle: m.angle, turns, dist: m.dist, size: m.size, color: m.color, seed: m.seed });
   }
   const rm = current.ringMesh;
   if (rm && current.world.rings) {
@@ -128,30 +163,33 @@ export class Sky {
     this._s = new THREE.Vector3();
 
     const pal = world.palette || {};
-    this.sunDir = (view?.sunDir || sunDir || new THREE.Vector3(1, 0.55, 0.8)).clone().normalize();
-
-    // A sun under the horizon leaves the ground black. Keep it 8 degrees up and darken the sky
-    // instead, so the hills still read and the world still says the hour.
-    const elev = Math.asin(THREE.MathUtils.clamp(this.sunDir.y, -1, 1));
-    // The true elevation of the sun, in radians, before the floor below lifts it. The probe
-    // overlay reads it for the countdown to the next sunset or sunrise, so it must be the angle
-    // the star really stands at and not the angle the light takes.
-    this.sunElev = elev;
-    this.night = THREE.MathUtils.clamp(-elev / NIGHT_ANGLE, 0, 1);
-    if (elev < SUN_FLOOR) {
-      const flat = Math.hypot(this.sunDir.x, this.sunDir.z) || 1;
-      const k = Math.cos(SUN_FLOOR) / flat;
-      this.sunDir.set(this.sunDir.x * k, Math.sin(SUN_FLOOR), this.sunDir.z * k).normalize();
-    }
-
-    // the colours: the horizon takes the atmosphere colour, the zenith is 30% darker
-    const atmo = new THREE.Color(pal.atmo || '#8fb7ff');
-    this.horizon = atmo.clone().lerp(NIGHT_COLOR, this.night * 0.88);
-    this.zenith = this.horizon.clone().multiplyScalar(0.7);
-    const starLight = view?.starLight || SUN_LIGHT;
-    this.sunColor = starLight.clone().lerp(MOON_LIGHT, this.night);
-    this.sunIntensity = 2.6 - 2.0 * this.night;
-    this.discColor = (view?.starLight ? SUN_TINT.clone().multiply(view.starLight) : SUN_TINT.clone()).lerp(MOON_LIGHT, this.night).multiplyScalar(1 - 0.5 * this.night);
+    // Two suns, and only one of them is a star. sunTrue is where the star stands, and it turns
+    // with the clock. sunDir is where the light comes from, which is sunTrue held at SUN_FLOOR
+    // when the star is down: a sun under the horizon leaves the ground black, so it keeps 8
+    // degrees and the sky darkens instead. Every part that lights the ground reads sunDir, and
+    // every part that draws the star reads sunTrue.
+    this.sunTrue = (view?.sunDir || sunDir || new THREE.Vector3(1, 0.55, 0.8)).clone().normalize();
+    this.sunDir = this.sunTrue.clone();
+    this.atmo = new THREE.Color(pal.atmo || '#8fb7ff');
+    this.starLight = (view?.starLight || SUN_LIGHT).clone();
+    this.starTint = view?.starLight ? SUN_TINT.clone().multiply(view.starLight) : SUN_TINT.clone();
+    this.horizon = new THREE.Color();
+    this.zenith = new THREE.Color();
+    this.sunColor = new THREE.Color();
+    this.discColor = new THREE.Color();
+    this.glowColor = new THREE.Color();
+    this.sunIntensity = 2.6;
+    this.night = 0;
+    this.sunElev = 0;
+    // The axis of the turn, and how fast the sky turns about it. The sign is picked once: the
+    // countdown of the overlay states the time to the next sunset while the star is up, and to the
+    // next sunrise while it is down, so the turn must take the star that way. A landing therefore
+    // always runs toward the event the overlay names.
+    this.axis = (view?.axis || new THREE.Vector3(0, 1, 0)).clone().normalize();
+    this.rate = (Math.PI * 2) / GROUND_DAY;
+    this.turnSign = this._turnSign();
+    this._lit = 99;             // the elevation the colours were last built at, in radians
+    this._relight(true);
 
     this._addDome();
     if (view) {
@@ -159,6 +197,84 @@ export class Sky {
       if (view.ring) this._addRing(view.ring);
     }
     if (world.hasClouds) this._addClouds(site);
+  }
+
+  // Which way the sky turns. A turn about the axis takes the star up on one side and down on the
+  // other, and nothing in a landing says which half of the day it is. The overlay already answered
+  // that: it states the time to the next sunset while the star is up. So the sign is the one that
+  // lowers a star that stands over the horizon, and raises one that stands under it.
+  _turnSign() {
+    const up = this.sunTrue.y >= 0 ? -1 : 1;
+    _turn.copy(this.sunTrue).applyAxisAngle(this.axis, 0.01);
+    return (_turn.y - this.sunTrue.y) * up > 0 ? 1 : -1;
+  }
+
+  // How far the sky must turn before the star meets the horizon, in radians, or null when it
+  // never does. The overlay states the time that turn takes.
+  //
+  // The star runs a circle about the axis, and the circle meets the plane of the horizon twice or
+  // not at all. Write the height of the star after a turn of theta with the rotation formula:
+  //
+  //     y(theta) = A cos(theta) + B sin(theta) + C
+  //     A = s.y - a.y * k,   B = (a cross s).y,   C = a.y * k,   k = a dot s
+  //
+  // Set y to zero and the solution is theta = phi +/- acos(-C / R), with R the length of (A, B)
+  // and phi the angle of it. The turn goes one way, so the answer is the first of the two the sky
+  // reaches. A circle that holds no solution is a star that never sets or never rises, which a
+  // high latitude really has, and the overlay then states nothing instead of a wrong hour.
+  toHorizon() {
+    const s0 = this.sunTrue, a = this.axis;
+    const k = a.dot(s0);
+    _turn.crossVectors(a, s0);
+    const A = s0.y - a.y * k, B = _turn.y, C = a.y * k;
+    const R = Math.hypot(A, B);
+    if (R < 1e-6) return null;
+    const c = -C / R;
+    if (c < -1 || c > 1) return null;          // the star never meets the horizon at this site
+    const phi = Math.atan2(B, A), d = Math.acos(c);
+    const TAU = Math.PI * 2;
+    let best = null;
+    for (const raw of [phi + d, phi - d]) {
+      // the turn runs one way, so read every solution in the direction it goes
+      let th = (raw * this.turnSign) % TAU;
+      if (th < 0) th += TAU;
+      if (th < 1e-4) th += TAU;                // the star stands on the horizon now: take the next
+      if (best === null || th < best) best = th;
+    }
+    return best;
+  }
+
+  // The light of the hour, from the elevation of the star. The constructor and every step of the
+  // clock run the same lines, so a sky built at dusk and a sky that walked into dusk hold the same
+  // colours. `force` builds them whatever the elevation says, which the constructor needs.
+  _relight(force) {
+    const elev = Math.asin(THREE.MathUtils.clamp(this.sunTrue.y, -1, 1));
+    this.sunElev = elev;
+    // A degree of the sky is under a second of the clock, and the colours cost more than the turn.
+    if (!force && Math.abs(elev - this._lit) < RELIGHT_STEP) { this.lightMoved = false; return; }
+    this._lit = elev;
+    this.lightMoved = true;
+    this.night = THREE.MathUtils.clamp(-elev / NIGHT_ANGLE, 0, 1);
+    this.sunDir.copy(this.sunTrue);
+    if (elev < SUN_FLOOR) {
+      const flat = Math.hypot(this.sunDir.x, this.sunDir.z) || 1;
+      const k = Math.cos(SUN_FLOOR) / flat;
+      this.sunDir.set(this.sunDir.x * k, Math.sin(SUN_FLOOR), this.sunDir.z * k).normalize();
+    }
+    // the colours: the horizon takes the atmosphere colour, the zenith is 30% darker
+    this.horizon.copy(this.atmo).lerp(NIGHT_COLOR, this.night * 0.88);
+    this.zenith.copy(this.horizon).multiplyScalar(0.7);
+    this.sunColor.copy(this.starLight).lerp(MOON_LIGHT, this.night);
+    this.sunIntensity = 2.6 - 2.0 * this.night;
+    this.discColor.copy(this.starTint).lerp(MOON_LIGHT, this.night).multiplyScalar(1 - 0.5 * this.night);
+    this.glowColor.copy(this.discColor).lerp(this.horizon, 0.35);
+    this.glowGain = 0.55 * (1 - 0.7 * this.night);
+    const sh = this.domeMat && this.domeMat.userData.shader;
+    if (sh) sh.uniforms.uGlowGain.value = this.glowGain;
+    if (this.domeMat) this.domeMat.color.copy(this.horizon);
+    if (this.cloudMat) {
+      this.cloudMat.color.copy(this.cloudColor).lerp(this.horizon, 0.15 + 0.6 * this.night);
+    }
   }
 
   // The dome: a vertical gradient from the horizon colour to the zenith colour, a warm tint within
@@ -178,10 +294,12 @@ export class Sky {
     const glow = 2 - 2 * Math.cos(SUN_GLOW), disc = 2 - 2 * Math.cos(SUN_DISC);
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uZenith = { value: this.zenith };
-      sh.uniforms.uSunColor = { value: this.discColor.clone().lerp(this.horizon, 0.35) };
+      sh.uniforms.uSunColor = { value: this.glowColor };
       sh.uniforms.uDiscColor = { value: this.discColor };
-      sh.uniforms.uSunDir = { value: this.sunDir };
-      sh.uniforms.uGlowGain = { value: 0.55 * (1 - 0.7 * this.night) };
+      // the disc stands where the star stands, and not where the light comes from: the star sets
+      // and the light stays at the floor, so the two part company at dusk
+      sh.uniforms.uSunDir = { value: this.sunTrue };
+      sh.uniforms.uGlowGain = { value: this.glowGain };
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vSky;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSky = normalize(position);');
@@ -197,15 +315,19 @@ export class Sky {
           // horizon holds no step, even with the sun low over it
           float low = smoothstep(0.0, 0.2, sky.y);
           diffuseColor.rgb = mix(diffuseColor.rgb, uSunColor, smoothstep(${glow.toFixed(6)}, 0.0, a2) * uGlowGain * low);
-          diffuseColor.rgb = mix(diffuseColor.rgb, uDiscColor, smoothstep(${disc.toFixed(6)}, ${(disc * 0.35).toFixed(6)}, a2));`);
+          // the disc fades out over the last degrees, so the star sets into the haze and leaves
+          // no lit spot hanging under the eye line
+          diffuseColor.rgb = mix(diffuseColor.rgb, uDiscColor, smoothstep(${disc.toFixed(6)}, ${(disc * 0.35).toFixed(6)}, a2) * low);`);
       mat.userData.shader = sh;
     };
     return mat;
   }
 
   _addDome() {
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(this.radius, 48, 24), this._domeMaterial());
+    this.domeMat = this._domeMaterial();
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(this.radius, 48, 24), this.domeMat);
     dome.renderOrder = -1;
+    this.domeMat.color.copy(this.horizon);
     this.far.add(dome);
   }
 
@@ -291,10 +413,12 @@ export class Sky {
     const rng = mulberry32(hashSeed(`${this.world.seed}|sky|${(site?.lat ?? 0).toFixed(2)}|${(site?.lon ?? 0).toFixed(2)}`));
     const n = this.tier.shadows ? 12 : 6;
     const geo = cloudGeometry(rng);
+    this.cloudColor = new THREE.Color(this.world.palette?.cloud || '#ffffff');
     const mat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(this.world.palette?.cloud || '#ffffff').lerp(this.horizon, 0.15 + 0.6 * this.night),
+      color: this.cloudColor.clone().lerp(this.horizon, 0.15 + 0.6 * this.night),
       transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false, fog: false,
     });
+    this.cloudMat = mat;
     const inst = new THREE.InstancedMesh(geo, mat, n);
     inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     inst.renderOrder = 2;
@@ -330,9 +454,18 @@ export class Sky {
       this.far.position.copy(camera.position);
       this.clip.constant = -camera.position.y;   // the eye line is the horizon of the sky
     }
+    // The sky turns. The star moves first, because the colours of the hour come from where it
+    // stands, and every other part of the sky and of the ground reads those colours.
+    const step = this.rate * this.turnSign * dt;
+    if (step) {
+      this.sunTrue.applyAxisAngle(this.axis, step).normalize();
+      this._relight(false);
+    }
+    // A moon keeps the turns of the sky per day the globe gave it, so it crosses the sky in tens
+    // of minutes and no longer in tens of seconds.
     for (const m of this.moons) {
-      m.angle += m.speed * dt;
-      m.mesh.rotation.y += dt * 0.3;
+      m.angle += (m.turns || 0) * this.rate * dt;
+      m.mesh.rotation.y += dt * 0.02;
       this._placeMoon(m);
     }
     if (this.cloudMesh) {

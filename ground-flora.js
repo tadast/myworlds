@@ -226,6 +226,12 @@ export class Flora {
     const reach = sd ? Math.min(SHADOW_REACH, 1 / Math.max(Math.abs(sd.y), 1e-3)) : 0;
     this.shadowX = sd ? -sd.x * reach : 0;
     this.shadowZ = sd ? -sd.z * reach : 0;
+    // The side the cards dim by. Every card material holds this one vector, so setSun() turns all
+    // of them at once when the sky turns. The picture on a card was baked with the sun of the
+    // landing and cannot turn, but the side the card is bright on can, and that is the cue the
+    // reader reads against the near mesh beside it.
+    this.sunXZ = new THREE.Vector2(0, 1);
+    if (sd) this.setSun(sd);
     this.casts = !!tier.shadows;
     this.kinds = [];
     this.targets = [];
@@ -404,8 +410,18 @@ export class Flora {
     const cardMat = billboard(new THREE.MeshBasicMaterial({
       map: target.texture, alphaTest: CARD_ALPHA, transparent: false,
       side: THREE.DoubleSide, fog: true, vertexColors: true,
-    }), new THREE.Vector2(light.sunDir.x / (light.flat || 1), light.sunDir.z / (light.flat || 1)), light.back);
+    }), this.sunXZ, light.back);
     return { material: cardMat, target };
+  }
+
+  // The sun of the hour. ground.js calls it while the sky turns. It writes the one vector every
+  // card material reads, and the step the shadow of a plant takes over the ground.
+  setSun(sunDir) {
+    const flat = Math.hypot(sunDir.x, sunDir.z) || 1;
+    this.sunXZ.set(sunDir.x / flat, sunDir.z / flat);
+    const reach = Math.min(SHADOW_REACH, 1 / Math.max(Math.abs(sunDir.y), 1e-3));
+    this.shadowX = -sunDir.x * reach;
+    this.shadowZ = -sunDir.z * reach;
   }
 
   // The walk: every plant goes to the near mesh or to the card mesh by its distance to the
