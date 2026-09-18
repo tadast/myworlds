@@ -114,6 +114,10 @@ export function skyView(current, site, sunDir, twist = 0) {
   const view = {
     basis,
     axis: north,
+    // Which way the sky turns over the site. The planet turns about its own north, so the sky
+    // turns the other way, and a world tipped past 90 degrees turns back and its star rises where
+    // another star sets. See Sky.turnSign.
+    turnSign: current.spin < 0 ? 1 : -1,
     sunDir: sunDir.clone().applyMatrix4(basis).normalize(),
     moons: [],
     ring: null,
@@ -181,13 +185,13 @@ export class Sky {
     this.sunIntensity = 2.6;
     this.night = 0;
     this.sunElev = 0;
-    // The axis of the turn, and how fast the sky turns about it. The sign is picked once: the
-    // countdown of the overlay states the time to the next sunset while the star is up, and to the
-    // next sunrise while it is down, so the turn must take the star that way. A landing therefore
-    // always runs toward the event the overlay names.
+    // The axis of the turn, and how fast and which way the sky turns about it. The sign is the
+    // turn of the planet, reversed: the ground stands on the planet, so the sky runs the other way.
+    // A landing can therefore begin in the morning as easily as in the afternoon, and toHorizon()
+    // answers for the star that is climbing as well as for the one that is falling.
     this.axis = (view?.axis || new THREE.Vector3(0, 1, 0)).clone().normalize();
     this.rate = (Math.PI * 2) / GROUND_DAY;
-    this.turnSign = this._turnSign();
+    this.turnSign = view?.turnSign || -1;
     this._lit = 99;             // the elevation the colours were last built at, in radians
     this._relight(true);
 
@@ -197,16 +201,6 @@ export class Sky {
       if (view.ring) this._addRing(view.ring);
     }
     if (world.hasClouds) this._addClouds(site);
-  }
-
-  // Which way the sky turns. A turn about the axis takes the star up on one side and down on the
-  // other, and nothing in a landing says which half of the day it is. The overlay already answered
-  // that: it states the time to the next sunset while the star is up. So the sign is the one that
-  // lowers a star that stands over the horizon, and raises one that stands under it.
-  _turnSign() {
-    const up = this.sunTrue.y >= 0 ? -1 : 1;
-    _turn.copy(this.sunTrue).applyAxisAngle(this.axis, 0.01);
-    return (_turn.y - this.sunTrue.y) * up > 0 ? 1 : -1;
   }
 
   // How far the sky must turn before the star meets the horizon, in radians, or null when it
@@ -369,7 +363,8 @@ export class Sky {
   // the site sits inside its hole, so the same annulus, moved to the site and grown, gives the band.
   // A site in the ring plane sees the band as a line through the zenith. A site away from that plane
   // sees it open into a wide arc. The plane is not the planet equator: the ring of the globe keeps
-  // its normal near world +y, while the planet axis carries world.tilt. The band reads the world
+  // its normal near world +y, while the planet axis carries the obliquity of the world. The band
+  // reads the world
   // matrix of the globe ring, so the ground always shows what orbit shows.
   //
   // The band takes the band colours and the band alpha of the globe ring, but not its lit material:

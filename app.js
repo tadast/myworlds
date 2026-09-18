@@ -139,6 +139,32 @@ controls.addEventListener('start', () => { userActive = true; lastInteract = per
 controls.addEventListener('end', () => { userActive = false; lastInteract = performance.now(); });
 
 const sunDir = new THREE.Vector3(1, 0.55, 0.8).normalize();
+// ---------------------------------------------------------------- the axis of a world, issue 33
+// The star of the scene stands in one place, so the world turns to meet it. The worker rolled the
+// obliquity of the axis and the season the world stands in, and the two give the declination: the
+// latitude the star stands over. The axis must therefore make an angle of 90 degrees less the
+// declination with the direction of the star, and that one rule fixes the light:
+//
+//   * an upright world at an equinox takes the star over its equator, and both poles stand at the
+//     terminator, half lit;
+//   * a world on its side at a solstice takes the star over a pole, and one whole hemisphere is
+//     lit while the other stands in the dark;
+//   * the same world half a year later shows the other pole.
+//
+// The turn about the star is free, and it goes to the axis that leans in the plane of the screen,
+// so the reader sees the tilt as a lean and not as a planet pointing away. The spin of the world
+// runs about that axis, so the terminator, the tilt, and the climate the worker painted all agree.
+const _axisUp = new THREE.Vector3(0, 1, 0);
+const _axisE1 = new THREE.Vector3();
+const _axisV = new THREE.Vector3();
+function axisQuat(world) {
+  const decl = world.axis ? world.axis.decl : 0;
+  _axisE1.copy(_axisUp).addScaledVector(sunDir, -sunDir.dot(_axisUp));
+  if (_axisE1.lengthSq() < 1e-8) _axisE1.set(1, 0, 0).cross(sunDir);
+  _axisE1.normalize();
+  _axisV.copy(sunDir).multiplyScalar(Math.sin(decl)).addScaledVector(_axisE1, Math.cos(decl)).normalize();
+  return new THREE.Quaternion().setFromUnitVectors(_axisUp, _axisV);
+}
 const sun = new THREE.DirectionalLight('#fff4e0', 3.2);
 sun.position.copy(sunDir).multiplyScalar(6);
 if (Q.shadows) {
@@ -237,9 +263,16 @@ function buildWorld(res) {
   stars.set(world.star);
   sun.color.copy(stars.lightColor());
   sun.intensity = SUN_INTENSITY * stars.lightScale();
-  const planet = new THREE.Group();          // spins
-  planet.rotation.z = world.tilt;
-  group.add(planet);
+  // The axis of the world holds the planet, the cloud deck, and the ring, and the planet spins
+  // inside it. The two jobs must not share one object: a spin written into the y of an Euler that
+  // already carries the tilt turns the world about the vertical of the scene and not about its own
+  // axis, which walks the pole around the sky and moves the light on the ground under it. The
+  // parent carries the tilt and the child carries the turn.
+  const axisGroup = new THREE.Group();
+  axisGroup.setRotationFromQuaternion(axisQuat(world));
+  group.add(axisGroup);
+  const planet = new THREE.Group();          // spins about the axis of its parent
+  axisGroup.add(planet);
 
   // terrain
   const tg = new THREE.BufferGeometry();
@@ -465,7 +498,6 @@ const SLOPE_STEP = 0.02;
   // clouds
   let cloudMat = null, cloudInst = null;
   const cloudGroup = new THREE.Group();
-  cloudGroup.rotation.z = world.tilt;
   if (world.hasClouds && clouds.length) {
     const n = clouds.length / 6;
     const geo = new THREE.IcosahedronGeometry(1, 1);
@@ -487,7 +519,7 @@ const SLOPE_STEP = 0.02;
     cloudGroup.add(inst);
     cloudMat = mat; cloudInst = inst;
   }
-  group.add(cloudGroup);
+  axisGroup.add(cloudGroup);
 
   // natural activity: at most one per world
   const activity = buildActivity(world, planet, cloudGroup, cloudInst, (dir) => groundRadius(world, heightMap, dir));
@@ -520,11 +552,13 @@ const SLOPE_STEP = 0.02;
     rg.setAttribute('color', new THREE.BufferAttribute(col, 4));
     const rm = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, side: THREE.DoubleSide, roughness: 0.9, flatShading: true, depthWrite: false });
     ringMesh = new THREE.Mesh(rg, rm);
+    // A ring lies in the plane of the equator, so it rides the axis of the world and holds its own
+    // small lean inside it. The lean keeps world.tilt, which is what that number is now for.
     ringMesh.rotation.x = -Math.PI / 2 + r.tilt;
-    ringMesh.rotation.z = world.tilt;
+    ringMesh.rotation.z = world.tilt * 0.4;
     ringMesh.receiveShadow = Q.shadows;
     ringMesh.renderOrder = 2;
-    group.add(ringMesh);
+    axisGroup.add(ringMesh);
   }
 
   // moons
@@ -1346,6 +1380,7 @@ function renderInfo(w) {
       <dt>Radius</dt><dd>${s.radius}</dd>
       <dt>Gravity</dt><dd>${s.gravity}</dd>
       <dt>Day</dt><dd>${s.day}</dd>
+      ${s.tilt ? `<dt>Tilt</dt><dd>${s.tilt}</dd>` : ''}
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}

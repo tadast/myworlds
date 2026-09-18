@@ -145,6 +145,7 @@ class Noise {
 
 // ---------------------------------------------------------------- helpers
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const DEG_RAD = Math.PI / 180;
 const lerp = (a, b, t) => a + (b - a) * t;
 const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
@@ -406,6 +407,130 @@ function rollPlanet(frng, type) {
   return { type, radiusKm, gravity, dayHours, tempC: Math.round(rrange(frng, tLo, tHi)) };
 }
 
+// ---------------------------------------------------------------- the axis of a world, issue 33
+// The angle between the spin axis of a planet and the normal of its orbit. It decides where the
+// star stands over the world through the year, so it decides the climate: a world with no tilt
+// holds one season for ever, and a world tipped past 54 degrees gives its poles more light over a
+// year than its equator.
+//
+// The roll follows what is known of real planets. Accretion from a swarm of bodies leaves an axis
+// that points anywhere, which gives a chance that runs with the sine of the angle and a mean near
+// 90 degrees. Tides, and accretion from an ordered disc, pull an axis back toward the normal. The
+// eight planets of the Sun show both: six of them stand under 30 degrees, Uranus lies on its side
+// at 98, and Venus is turned over at 177. So the roll holds four classes:
+//
+//   damped    18%   under 4 degrees. Mercury and Jupiter.
+//   ordered   52%   a half normal of 14 degrees, cut at 45. Earth, Mars, Saturn, Neptune.
+//   tipped    23%   45 to 135 degrees, drawn so the axis points anywhere in that band. Uranus.
+//   turned     7%   135 to 180 degrees. The world turns the other way. Venus.
+//
+// The season is where the world stands in its orbit, and it does not move during a visit: a year
+// is long and a landing is minutes. The star stands over the latitude the declination names:
+//
+//     sin(declination) = sin(obliquity) * sin(season)
+//
+// The draw takes its own stream, as the flora signature does, so no world that existed before this
+// issue changes its terrain. See worldContext().
+function rollAxis(seed) {
+  const rng = makeRng(seed + '|axis');
+  const u = rng();
+  let obliquity;
+  if (u < 0.18) obliquity = rrange(rng, 0, 4) * DEG_RAD;
+  else if (u < 0.70) {
+    // a half normal of 14 degrees, from two draws, cut at 45
+    const g = Math.abs(Math.sqrt(-2 * Math.log(1 - rng() * 0.9999)) * Math.cos(Math.PI * 2 * rng()));
+    obliquity = Math.min(45, g * 14) * DEG_RAD;
+  } else if (u < 0.93) {
+    // an axis that points anywhere inside the band: the cosine is flat, not the angle
+    const lo = Math.cos(135 * DEG_RAD), hi = Math.cos(45 * DEG_RAD);
+    obliquity = Math.acos(rrange(rng, lo, hi));
+  } else {
+    const lo = Math.cos(180 * DEG_RAD), hi = Math.cos(135 * DEG_RAD);
+    obliquity = Math.acos(rrange(rng, lo, hi));
+  }
+  const season = rng() * Math.PI * 2;
+  const decl = Math.asin(clamp(Math.sin(obliquity) * Math.sin(season), -1, 1));
+  return { obliquity, season, decl };
+}
+
+// ---------------------------------------------------------------- the light of a latitude
+// How much light a latitude takes over one turn of the planet, from 0 in the dark to 1 at the
+// most any latitude takes. The formula is the standard one for the mean of a day:
+//
+//     cos(H0) = -tan(latitude) * tan(declination)      the hour angle the star sets at
+//     Q = (H0 sin(lat) sin(decl) + cos(lat) cos(decl) sin(H0)) / pi
+//
+// A latitude where cos(H0) falls under -1 stands in the light for the whole turn, and one where it
+// climbs over 1 never sees the star at all. That second case is what the reader asked for: ground
+// that stays in the dark through the day, and is cold because of it.
+function dayLight(sinLat, decl) {
+  const lat = Math.asin(clamp(sinLat, -1, 1));
+  const cosLat = Math.cos(lat), sinD = Math.sin(decl), cosD = Math.cos(decl);
+  const c = cosLat < 1e-6 || Math.abs(cosD) < 1e-6 ? -sinLat * sinD * 1e6 : -(sinLat / cosLat) * (sinD / cosD);
+  const h0 = c <= -1 ? Math.PI : c >= 1 ? 0 : Math.acos(c);
+  return Math.max(0, (h0 * sinLat * sinD + cosLat * cosD * Math.sin(h0)) / Math.PI) * Math.PI;
+}
+
+// The same over a whole year, at one obliquity. The declination walks the orbit and the samples
+// take the mean. This is the number the biomes stand on: ice sits where the year is cold, and one
+// season cannot build or melt a cap.
+function yearLight(sinLat, obliquity) {
+  let sum = 0;
+  const N = 24;
+  for (let i = 0; i < N; i++) {
+    const lam = (i + 0.5) / N * Math.PI * 2;
+    sum += dayLight(sinLat, Math.asin(clamp(Math.sin(obliquity) * Math.sin(lam), -1, 1)));
+  }
+  return sum / N;
+}
+
+// The table the field reads: one entry per step of the sine of the latitude, which is also one
+// entry per equal band of area, so the mean of the table is the mean over the globe.
+//
+// SEASON_W is how much of the day the ground shows against the year. Rock and water hold the heat
+// of the season before, so a hemisphere in its winter does not fall to the light it takes today.
+// The field is scaled to the range the old latitude term held, so the biome rules of every other
+// part of the worker still mean what they meant.
+const CLIMATE_N = 129;
+const SEASON_W = 0.4;
+// The two ends of the scale: the equator and the pole of a world with the axis of the Earth,
+// 23.4 degrees, standing at an equinox. The same blend of the year and the day runs on them as on
+// every other world, so a world that holds that axis and that season reads 1 at the equator and
+// -0.1 at the poles, which is where the old latitude term ran from and to. See climateTable().
+const REF_OBL = 23.4 * DEG_RAD;
+const refMix = (sinLat) => yearLight(sinLat, REF_OBL) * (1 - SEASON_W) + dayLight(sinLat, 0) * SEASON_W;
+const REF_HI = refMix(0), REF_LO = refMix(1);
+function climateTable(obliquity, decl) {
+  const t = new Float32Array(CLIMATE_N);
+  for (let i = 0; i < CLIMATE_N; i++) {
+    const sinLat = (i / (CLIMATE_N - 1)) * 2 - 1;
+    t[i] = yearLight(sinLat, obliquity) * (1 - SEASON_W) + dayLight(sinLat, decl) * SEASON_W;
+  }
+  // One scale for every world, and not the span this world happens to hold. A per-world stretch
+  // was the other way to do it and it is wrong: the light over a world on its side is nearly even
+  // over a year, and a stretch would pull that even light apart and paint a season as a climate.
+  //
+  // The scale stands on a world with the axis of the Earth: the light its equator takes over a
+  // year goes to 1, and the light its pole takes goes to -0.1, which is where the old latitude
+  // term ran from and to. So every world that holds that axis reads as it always did, a world with
+  // no tilt holds poles colder than that, and a pole that carries a summer of its own runs hotter
+  // than any equator. The field clamps what runs past its ends.
+  let mean = 0;
+  for (let i = 0; i < CLIMATE_N; i++) {
+    t[i] = 1.1 * (t[i] - REF_LO) / (REF_HI - REF_LO) - 0.1;
+    mean += t[i];
+  }
+  return { t, mean: mean / CLIMATE_N };
+}
+
+// The climate term at a direction: the y of the direction is the sine of the latitude.
+function climateAt(ctx, y) {
+  const u = (clamp(y, -1, 1) + 1) * 0.5 * (CLIMATE_N - 1);
+  const i = Math.min(CLIMATE_N - 2, Math.floor(u)), f = u - i;
+  const T = ctx.climate;
+  return T[i] * (1 - f) + T[i + 1] * f;
+}
+
 // ---------------------------------------------------------------- the world context
 // The last context the worker built. A patch reuses it, so the ground sits at the sea level of
 // the globe the reader looked at, and no globe work runs twice.
@@ -428,7 +553,13 @@ function worldContext(seed) {
     // own hash and not a draw from `rng`, because the draw order of the seed stream must not move.
     floraVariant: cyrb128(seed + '|flora-shape')[0] >>> 0,
     designation: designation(frng, seed),
+    // The lean of the ring and of the cloud deck. It is not the axis of the world: see `axis` below.
     tilt: rrange(rng, -0.45, 0.45),
+    // The spin axis of this world, issue 33: the obliquity, the season it stands in, and the
+    // latitude the star stands over. It takes a stream of its own, so no world built before this
+    // issue moves a coastline. app.js turns the planet by it and worldContext() builds the climate
+    // of the world from it.
+    axis: rollAxis(seed),
     spin: (type === 'gas' ? 0.12 : 0.05) * rrange(rng, 0.7, 1.4),
     palette: {
       ocean: P.ocean ? toHex(P.ocean) : null, oceanOpacity: P.oceanOpacity || 0,
@@ -444,10 +575,14 @@ function worldContext(seed) {
   // The planet numbers, and the facts the lore reads. `env` fills up as the world is built: the
   // moons, the rings, and the activity are added in generate(), which then writes the lore again.
   // See "The environment" in docs/fauna.md.
+  // A world tipped past 90 degrees turns the other way, and the globe shows it: the spin runs
+  // back. The ground reads its own turn from the sky, so a landing there still holds together.
+  if (world.axis.obliquity > Math.PI / 2) world.spin = -world.spin;
   const planet = rollPlanet(frng, type);
   world.gravity = planet.gravity;
   world.env = {
     type, tempC: planet.tempC, gravity: planet.gravity, dayHours: planet.dayHours,
+    obliquityDeg: world.axis.obliquity * 180 / Math.PI,
     radiusKm: planet.radiusKm, land: type === 'gas' ? null : 1,
     floraTags: floraLore(P.flora).map((f) => f.tag),
     plantWord: (floraLore(P.flora)[0] || {}).word || null,
@@ -483,9 +618,13 @@ function worldContext(seed) {
   const mFreq = rrange(rng, 2.6, 4.2);
   const warp = rrange(rng, 0.15, 0.45);
 
+  // The climate of this world, from its axis: one term per band of equal area. The field reads it
+  // for every direction, and siteTempC() reads its mean. See climateTable().
+  const climate = climateTable(world.axis.obliquity, world.axis.decl);
   Object.assign(ctx, {
     land, amp, mountain, contFreq, islands, tempBias, snowLine, beachW, floraDensity, cloudCount,
     o1, o2, o3, o4, o5, o6, mFreq, warp,
+    climate: climate.t, climateMean: climate.mean,
   });
   world.env.land = land;
   world.env.floraDensity = floraDensity;
@@ -552,14 +691,16 @@ function fieldFrom(ctx, x, y, z, c, px, py, pz, out) {
   let h;
   if (hl >= 0) h = Math.pow(hl, 0.75) * 0.3 + ridge + d * smoothstep(0, 0.08, hl);
   else h = hl + (ridge + d * 0.5) * smoothstep(0, -0.2, hl);
-  const lat = Math.abs(y);
   const tnoise = noise.fbm(x * 2.2 + o5[0], y * 2.2 + o5[1], z * 2.2 + o5[2], 2) * 0.12;
   out.h = h;
   // How mountainous the ground is here, 0 to 1. It is the ridge term of the globe without the
   // height that term earns, so a patch can ask for rough ground where the globe builds a range
   // and for smooth ground on a plain. See detailAt().
   out.rg = m * m * onLand;
-  out.t = clamp(1 - Math.pow(lat, 1.6) * 1.1 + ctx.tempBias + tnoise - Math.max(h, 0) * 0.55, -0.3, 1.3);
+  // The climate of the latitude, which since issue 33 is the light the axis of this world gives
+  // it: the mean over the year, plus a part of the day of the season it stands in. The term used
+  // to be the latitude alone, which held every world upright and every pole cold.
+  out.t = clamp(climateAt(ctx, y) + ctx.tempBias + tnoise - Math.max(h, 0) * 0.55, -0.3, 1.3);
   out.m = noise.fbm(x * 1.7 + o4[0] * 0.7, y * 1.7 + o4[1] * 0.7, z * 1.7 + o4[2] * 0.7, 3);
   out.fm = noise.fbm(x * 6 + o2[0], y * 6 + o2[1], z * 6 + o2[2], 2);
   // displacement: land pushed up, sea floor gently down and clamped
@@ -1016,6 +1157,7 @@ function makeGasFauna(rng, maxFauna, world) {
 // the order it has always had: designation, radius, gravity, day, temperature, life.
 function makeStats(rng, type, world, floraCount) {
   const { radiusKm: km, gravity: g, dayHours: day, tempC: temp } = world.env;
+  const obl = world.axis ? world.axis.obliquity * 180 / Math.PI : null;
   let life;
   switch (type) {
     case 'terran': life = pick(rng, ['Forests and grazing herds', 'Dense woodland, birdsong', 'Rolling meadows, shy fauna', 'Old forests, quiet rivers']); break;
@@ -1030,6 +1172,9 @@ function makeStats(rng, type, world, floraCount) {
   const faunaText = fauna.length ? fauna.slice(0, 3).join(", ") : "none seen";
   return {
     radius: `${km.toLocaleString()} km`, gravity: `${g.toFixed(2)} g`, day: `${day.toFixed(1)} h`,
+    // The tilt of the axis, and what it does to the world. Over 54 degrees a pole takes more light
+    // over a year than the equator, and past 90 the world turns the other way.
+    tilt: obl == null ? null : `${obl.toFixed(0)}°${obl > 135 ? ' retrograde' : obl > 54 ? ' on its side' : ''}`,
     land: type === 'gas' ? null : `${Math.round(world.land * 100)}%`,
     activity: world.activity ? world.activity.label : null,
     temp: `${temp} °C`, moons: world.moons.length, life, fauna: faunaText[0].toUpperCase() + faunaText.slice(1), floraCount,
@@ -1990,12 +2135,15 @@ function patchFlora(ctx, s) {
 // The biome then caps it. biomeIndex() paints snow above the snow line whatever the temperature
 // field says, so a very high site on a hot world comes back as a snow field at 34 °C. Ice on the
 // ground is the stronger fact, so a snow site is at or below freezing and a tundra site is cool.
-const T_SPAN = 55, T_LAT_MEAN = 0.42;
+// T_SPAN turns one unit of the temperature field into degrees. The mean of the field over the
+// globe used to be a constant, because the latitude term was the same on every world. Since issue
+// 33 the term follows the axis, so the mean comes from the world: ctx.climateMean.
+const T_SPAN = 55;
 const BIOME_TEMP_CAP = { snow: 0, tundra: 8 };
 function siteTempC(ctx, siteT, biome) {
   const mean = ctx.world.env.tempC;
   if (mean == null) return mean;
-  const t = Math.round(mean + (siteT - (1 - T_LAT_MEAN + ctx.tempBias)) * T_SPAN);
+  const t = Math.round(mean + (siteT - (ctx.climateMean + ctx.tempBias)) * T_SPAN);
   const capC = BIOME_TEMP_CAP[biome];
   return capC == null ? t : Math.min(t, capC);
 }
