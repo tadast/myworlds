@@ -18,6 +18,9 @@ export const SUN_FLOOR = 8 * DEG;     // a sun below the horizon rises to here, 
 export const SUN_GLOW = 20 * DEG;     // the warm tint reaches this far from the sun
 export const SUN_DISC = 1.2 * DEG;    // the disc is larger than the true sun, so it reads
 export const NIGHT_ANGLE = 12 * DEG;  // the sun this far below the horizon gives full night
+// Under this elevation the day light thins: the light of a low star goes through more air, so it
+// is weaker and redder. Over it the light is the full light of the star.
+export const DAY_ANGLE = 30 * DEG;
 // ---------------------------------------------------------------- the clock of a landing
 // The sky of a landing used to hold one hour for ever. It reads as a picture, and a reader who
 // waits for the sunset the overlay states waits for nothing.
@@ -45,12 +48,15 @@ export const CLOUD_SPAN = 1800;       // metres, the half width of the field the
 // How far the star must move before the colours of the sky are built again. A degree of the sky
 // takes under a second of the clock, and the colours cost more than the turn does.
 const RELIGHT_STEP = 0.25 * DEG;
+const RELIGHT_COS = Math.cos(RELIGHT_STEP);
 const _turn = new THREE.Vector3();   // scratch for the turn of the sky
 
 const NIGHT_COLOR = new THREE.Color('#070a16');   // the colour of the orbit sky, the darker end
 const SUN_TINT = new THREE.Color('#fff2cf');
 const SUN_LIGHT = new THREE.Color('#fff4e0');
 const MOON_LIGHT = new THREE.Color('#b9c8e8');
+const LOW_LIGHT = new THREE.Color('#ff9a58');     // the light of a star on the horizon
+const DUSK_TINT = new THREE.Color('#e08a64');     // the warm part of a dusk horizon
 
 // The same generator the globe uses for a moon. Every file that needs it keeps a copy.
 function mulberry32(a) {
@@ -183,7 +189,10 @@ export class Sky {
     this.discColor = new THREE.Color();
     this.glowColor = new THREE.Color();
     this.sunIntensity = 2.6;
+    this.hemiIntensity = 0.7;
     this.night = 0;
+    this.low = 0;               // 0 over DAY_ANGLE, 1 with the star on the horizon
+    this._dusk = new THREE.Color();
     this.sunElev = 0;
     // The axis of the turn, and how fast and which way the sky turns about it. The sign is the
     // turn of the planet, reversed: the ground stands on the planet, so the sky runs the other way.
@@ -192,7 +201,7 @@ export class Sky {
     this.axis = (view?.axis || new THREE.Vector3(0, 1, 0)).clone().normalize();
     this.rate = (Math.PI * 2) / GROUND_DAY;
     this.turnSign = view?.turnSign || -1;
-    this._lit = 99;             // the elevation the colours were last built at, in radians
+    this._litDir = new THREE.Vector3(0, -2, 0);   // where the star stood at the last build
     this._relight(true);
 
     this._addDome();
@@ -241,25 +250,38 @@ export class Sky {
   // The light of the hour, from the elevation of the star. The constructor and every step of the
   // clock run the same lines, so a sky built at dusk and a sky that walked into dusk hold the same
   // colours. `force` builds them whatever the elevation says, which the constructor needs.
+  //
+  // The direction of the light follows the star every frame, because a shadow that moves in steps
+  // jumps: at 10 degrees a step of 0.25 degrees moves the tip of the shadow of a 20 m tree by 3 m.
+  // Only the colours wait for RELIGHT_STEP, and they measure the whole turn of the star, not only
+  // its height. Near noon the star moves along the horizon and its height hardly changes.
   _relight(force) {
     const elev = Math.asin(THREE.MathUtils.clamp(this.sunTrue.y, -1, 1));
     this.sunElev = elev;
-    // A degree of the sky is under a second of the clock, and the colours cost more than the turn.
-    if (!force && Math.abs(elev - this._lit) < RELIGHT_STEP) { this.lightMoved = false; return; }
-    this._lit = elev;
-    this.lightMoved = true;
-    this.night = THREE.MathUtils.clamp(-elev / NIGHT_ANGLE, 0, 1);
     this.sunDir.copy(this.sunTrue);
     if (elev < SUN_FLOOR) {
       const flat = Math.hypot(this.sunDir.x, this.sunDir.z) || 1;
       const k = Math.cos(SUN_FLOOR) / flat;
       this.sunDir.set(this.sunDir.x * k, Math.sin(SUN_FLOOR), this.sunDir.z * k).normalize();
     }
-    // the colours: the horizon takes the atmosphere colour, the zenith is 30% darker
-    this.horizon.copy(this.atmo).lerp(NIGHT_COLOR, this.night * 0.88);
+    // A degree of the sky is under a second of the clock, and the colours cost more than the turn.
+    if (!force && this._litDir.dot(this.sunTrue) > RELIGHT_COS) { this.lightMoved = false; return; }
+    this._litDir.copy(this.sunTrue);
+    this.lightMoved = true;
+    this.night = THREE.MathUtils.clamp(-elev / NIGHT_ANGLE, 0, 1);
+    const day = THREE.MathUtils.clamp(elev / DAY_ANGLE, 0, 1);
+    this.low = (1 - day) * (1 - day);
+    const dusk = this.low * (1 - this.night);
+    // the colours: the horizon takes the atmosphere colour, warms at dusk, and goes dark at night.
+    // The zenith is 30% darker.
+    this._dusk.copy(this.atmo).multiplyScalar(0.75).lerp(DUSK_TINT, 0.4);
+    this.horizon.copy(this.atmo).lerp(this._dusk, 0.45 * dusk).lerp(NIGHT_COLOR, this.night * 0.88);
     this.zenith.copy(this.horizon).multiplyScalar(0.7);
-    this.sunColor.copy(this.starLight).lerp(MOON_LIGHT, this.night);
-    this.sunIntensity = 2.6 - 2.0 * this.night;
+    // The light of a low star is weaker and redder. It then fades to the light of the night.
+    this.sunColor.copy(this.starLight).lerp(this._dusk.copy(this.starLight).multiply(LOW_LIGHT), 0.8 * dusk)
+      .lerp(MOON_LIGHT, this.night);
+    this.sunIntensity = (2.6 - 1.4 * this.low) * (1 - this.night) + 0.6 * this.night;
+    this.hemiIntensity = 0.7 - 0.15 * dusk - 0.35 * this.night;
     this.discColor.copy(this.starTint).lerp(MOON_LIGHT, this.night).multiplyScalar(1 - 0.5 * this.night);
     this.glowColor.copy(this.discColor).lerp(this.horizon, 0.35);
     this.glowGain = 0.55 * (1 - 0.7 * this.night);
@@ -452,10 +474,8 @@ export class Sky {
     // The sky turns. The star moves first, because the colours of the hour come from where it
     // stands, and every other part of the sky and of the ground reads those colours.
     const step = this.rate * this.turnSign * dt;
-    if (step) {
-      this.sunTrue.applyAxisAngle(this.axis, step).normalize();
-      this._relight(false);
-    }
+    if (step) this.sunTrue.applyAxisAngle(this.axis, step).normalize();
+    this._relight(false);
     // A moon keeps the turns of the sky per day the globe gave it, so it crosses the sky in tens
     // of minutes and no longer in tens of seconds.
     for (const m of this.moons) {

@@ -529,7 +529,7 @@ export class Ground {
     this.content.add(sun.target);
     // The sky light of the hour. _followSun() moves it with the sun, so the ground of a dusk
     // landing loses its blue as the star goes down.
-    this.hemi = new THREE.HemisphereLight(this.skyColor, this.groundColor, 0.7 - 0.35 * this.sky.night);
+    this.hemi = new THREE.HemisphereLight(this.skyColor, this.groundColor, this.sky.hemiIntensity);
     this.content.add(this.hemi);
 
     // The reveal: the camera starts CAM_START up and south of the site by the same tilt the
@@ -550,6 +550,13 @@ export class Ground {
   _buildTerrain() {
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     mat.color.setScalar(GROUND_GAIN);
+    // The grid carries no normals: flatShading takes the normal of a facet from the derivatives.
+    // The shadow lookup still reads the vertex normal for its normal bias, and a zero normal
+    // normalises to NaN, so the ground never received a shadow. Up is close enough for a bias.
+    mat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3( 0.0, 1.0, 0.0 );');
+    };
+    mat.customProgramCacheKey = () => 'terrain-up-normal';
     this.terrainMat = mat;
     this._addBlocks(0, this.n - 1, 0, this.n - 1, mat);
     // The rim carries the ground out past the fog, in one mesh with the same material.
@@ -978,12 +985,15 @@ export class Ground {
   // of the plants keep the picture they were baked with and turn the side they dim by, and the
   // shadow of a flyer takes the new slant.
   //
-  // The sky only rebuilds its colours when the star has moved RELIGHT_STEP, and this follows that
-  // same flag, so a frame that changes nothing costs one test.
+  // The direction goes to the light, the plants, and the animals every frame, so no shadow moves in
+  // steps. The sky only rebuilds its colours when the star has moved RELIGHT_STEP, and the colours
+  // here follow that same flag.
   _followSun() {
     const sky = this.sky;
     this.sunDir.copy(sky.sunDir);
     if (this.sun) this.sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6).add(this.sun.target.position);
+    if (this.flora) this.flora.setSun(this.sunDir);
+    if (this.fauna) this.fauna.setSun(this.sunDir, sky.night);
     if (!sky.lightMoved) return;
     if (this.sun) {
       this.sun.color.copy(sky.sunColor);
@@ -991,7 +1001,7 @@ export class Ground {
     }
     if (this.hemi) {
       this.hemi.color.copy(sky.horizon);
-      this.hemi.intensity = 0.7 - 0.35 * sky.night;
+      this.hemi.intensity = sky.hemiIntensity;
     }
     this.skyColor.copy(sky.horizon);
     if (this.scene.background) this.scene.background.copy(sky.horizon);
@@ -1000,8 +1010,6 @@ export class Ground {
       // the sea tints the fog with its own colour, and the tint must go back on the new horizon
       if (this.sea) this.sea.tintFog(this.scene);
     }
-    if (this.flora) this.flora.setSun(this.sunDir);
-    if (this.fauna) this.fauna.setSun(this.sunDir, sky.night);
   }
 
   // The LOD controller: one knob, from the frame time. Every LOD_PERIOD it reads the rolling
