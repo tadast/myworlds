@@ -486,6 +486,12 @@ const SLOPE_STEP = 0.02;
           st.gait = gaitLocked(G) ? makeGait(G, sc, st.speed, geo.userData.hipY) : null;
           const g0 = groundRadius(world, heightMap, nrm);
           st.hover = pos.length() - g0;
+          // A flyer on a gas giant swims between the decks and dives through the upper one. The
+          // clock comes from its phase and draws no numbers, so the wander of every animal stays.
+          if (world.type === 'gas' && st.flies) {
+            const ph = fauna[o + 8], fr = (x) => x - Math.floor(x);
+            st.dip = { ph, w: (Math.PI * 2) / (55 + 55 * fr(ph * 7.13)), base: DECK_LOW - 1 + 0.01 * fr(ph * 3.71) };
+          }
           st.dry = !world.seaRadius || g0 > world.seaRadius + 0.0005;
           movers.push(st);
         }
@@ -524,8 +530,16 @@ const SLOPE_STEP = 0.02;
   // natural activity: at most one per world
   const activity = buildActivity(world, planet, cloudGroup, cloudInst, (dir) => groundRadius(world, heightMap, dir));
 
+  // the upper cloud deck of a gas giant
+  const deckMat = world.type === 'gas' && world.deck ? gasDeck(world, planet) : null;
+  if (deckMat) tm.color.setScalar(0.72);   // the banded body is the lower deck, so it lies in shade
+
   // atmosphere
-  if (world.hasAtmosphere) {
+  if (deckMat) {
+    const haze = new THREE.Mesh(new THREE.SphereGeometry(HAZE_R, 96, 64), gasHazeMat(world.palette.atmo));
+    haze.renderOrder = 3;
+    group.add(haze);
+  } else if (world.hasAtmosphere) {
     const outer = new THREE.Mesh(new THREE.IcosahedronGeometry(1.17, 5), atmoOuterMat(world.palette.atmo, world.atmoStrength));
     outer.renderOrder = 3;
     const inner = new THREE.Mesh(new THREE.IcosahedronGeometry(1.115, 5), atmoInnerMat(world.palette.atmo, world.atmoStrength));
@@ -589,7 +603,105 @@ const SLOPE_STEP = 0.02;
 
   scene.add(group);
   const homes = faunaHomes(fauna, world.faunaCount || 0);   // the pull to life reads these every frame
-  current = { group, planet, cloudGroup, oceanMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity, homes };
+  current = { group, planet, cloudGroup, oceanMat, deckMat, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity, homes };
+}
+
+// ---------------------------------------------------------------- the decks of a gas giant
+// A gas giant has no surface. The gas gets thicker with depth, and the clouds condense in decks at
+// fixed pressures. The banded body at radius 1 is the lower deck. This shell is the upper deck: a
+// thin, streaked layer with gaps, so the reader sees down to the lower deck through it. The whales
+// live in the clear gas between the two decks and rise through the upper deck from time to time.
+// See whaleDip().
+const DECK_R = 1.036;            // the radius of the upper deck
+const DECK_LOW = 1.012;          // the lowest hover of a whale, over the lower deck
+const DECK_HIGH = 1.058;         // the highest hover of a whale, over the upper deck
+function gasDeck(world, planet) {
+  const d = world.deck;
+  const mat = new THREE.MeshStandardMaterial({
+    color: '#ffffff', roughness: 0.95, metalness: 0, transparent: true, depthWrite: false,
+  });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = { value: 0 };
+    sh.uniforms.uTop = { value: new THREE.Color(d.top) };
+    sh.uniforms.uGap = { value: new THREE.Color(d.gap) };
+    sh.uniforms.uStorm = { value: new THREE.Vector3(...world.storm.dir) };
+    sh.uniforms.uStormSize = { value: world.storm.size };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDeck;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDeck = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vDeck;
+        uniform float uTime, uStormSize; uniform vec3 uTop, uGap, uStorm;
+        float dHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float dNoise(vec3 x) {
+          vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(dHash(i), dHash(i + vec3(1,0,0)), f.x), mix(dHash(i + vec3(0,1,0)), dHash(i + vec3(1,1,0)), f.x), f.y),
+                     mix(mix(dHash(i + vec3(0,0,1)), dHash(i + vec3(1,0,1)), f.x), mix(dHash(i + vec3(0,1,1)), dHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+        }
+        // streaks: slow along the bands, fast across them
+        float dStreak(vec3 p) {
+          vec3 q = p * vec3(2.6, 24.0, 2.6);
+          return dNoise(q) * 0.55 + dNoise(q * 2.1 + 7.3) * 0.3 + dNoise(q * 4.3 + 1.7) * 0.15;
+        }
+        vec3 dTurn(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x * c - p.z * s, p.y, p.x * s + p.z * c); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        vec3 p = normalize(vDeck);
+        // Alternate bands flow east and west. Two layers turn the opposite ways, and the band
+        // picks between them, so the flow never shears the pattern into noise.
+        float east = dStreak(dTurn(p, uTime * 0.004)), west = dStreak(dTurn(p, -uTime * 0.003) + 3.1);
+        float z = sin(p.y * ${(d.freq * 0.5).toFixed(3)} * 3.14159 + (east - 0.5) * 2.4);
+        float n = mix(east, west, smoothstep(-0.35, 0.35, z));
+        // The zones hold the clouds and the belts between them are clear, so the lower deck shows
+        // through a belt. The streaks tear the edge of each zone.
+        float cover = smoothstep(-0.15, 0.55, z + (n - 0.5) * 0.9);
+        // A belt is not empty: it keeps a thin haze, so a whale under the deck is veiled.
+        float a = 0.3 + cover * (0.2 + 0.45 * smoothstep(0.35, 0.7, n));
+        // the great storm stands up through the deck, so the deck opens over it
+        float st = acos(clamp(dot(p, uStorm), -1.0, 1.0)) / uStormSize;
+        a *= smoothstep(0.55, 1.25, st);
+        diffuseColor.rgb = mix(uGap, uTop, smoothstep(0.3, 0.8, n));
+        diffuseColor.a = a;`)
+      // A shell seen edge on draws a hard ring around the planet. The deck thins to nothing at the
+      // limb, so the edge of the world is soft, as the edge of a gas is.
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        diffuseColor.a *= smoothstep(0.05, 0.45, abs(dot(normal, normalize(vViewPosition))));`);
+    mat.userData.shader = sh;
+  };
+  const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(DECK_R, LOW ? 24 : 40), mat);
+  mesh.renderOrder = 1;
+  planet.add(mesh);
+  return mat;
+}
+
+// The air over the upper deck. A shell with a hard edge reads as a skin, so this one has none: each
+// pixel takes the height the view ray passes closest to the centre, and the haze thins by e for
+// each HAZE_H of that height. Over the disc the body hides the back of the shell, so the haze only
+// shows past the edge of the world, and at the horizon when the camera is low.
+const HAZE_R = 1.16, HAZE_H = 0.03;
+const gasHazeMat = (color) => new THREE.ShaderMaterial({
+  uniforms: { color: { value: new THREE.Color(color) }, uSun: { value: sunDir.clone().normalize() } },
+  vertexShader: `varying vec3 vW;
+    void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform vec3 color; uniform vec3 uSun; varying vec3 vW;
+    void main(){
+      vec3 d = normalize(vW - cameraPosition);
+      float s = max(-dot(cameraPosition, d), 0.0);
+      vec3 c = cameraPosition + d * s;          // the point of the ray closest to the centre
+      float b = length(c);
+      float i = exp(-max(b - 1.0, 0.0) / ${HAZE_H.toFixed(3)}) * (1.0 - smoothstep(${(HAZE_R - 0.03).toFixed(3)}, ${HAZE_R.toFixed(3)}, b));
+      float lit = 0.2 + 0.8 * smoothstep(-0.35, 0.45, dot(c / max(b, 1e-4), uSun));
+      i *= lit;
+      gl_FragColor = vec4(color * i, i); }`,
+  side: THREE.BackSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+
+// The dive of a whale on a gas giant: most of the time it swims in the clear gas between the
+// decks, and now and then it rises through the upper deck and sinks back. Each whale keeps its own
+// slow clock, so the herd does not rise as one.
+function whaleDip(mv, t) {
+  const s = Math.sin(t * mv.dip.w + mv.dip.ph);
+  return mv.dip.base + (DECK_HIGH - 1 - mv.dip.base) * THREE.MathUtils.smoothstep(s, 0.2, 1);
 }
 
 // ---------------------------------------------------------------- render loop
@@ -630,6 +742,7 @@ function step(now) {
     current.planet.rotation.y += spin * dt;
     current.cloudGroup.rotation.y += spin * 1.25 * dt;
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
+    if (current.deckMat?.userData.shader) current.deckMat.userData.shader.uniforms.uTime.value = t;
     for (const fm of current.faunaMats) if (fm.userData.shader) fm.userData.shader.uniforms.uTime.value = t;
     updateMovers(t, dt);
     if (current.activity) current.activity.update(t, innerHeight * Q.dpr * 0.5 / Math.tan(camera.fov * Math.PI / 360));
@@ -1156,7 +1269,7 @@ if (creatureFloat) {
 }
 
 // creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
-const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _m = new THREE.Matrix4();
+const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _up = new THREE.Vector3(), _m = new THREE.Matrix4();
 let moverFrame = 0;
 function updateMovers(t, dt) {
   const { movers, world, heightMap } = current;
@@ -1182,10 +1295,26 @@ function updateMovers(t, dt) {
       ground = groundRadius(world, heightMap, _u);
     }
     if (mv.flies) ground = Math.max(ground, seaR);
+    let pitch = 0;
+    if (mv.dip) {
+      // The nose follows the dive: the pitch is the climb against the ground the whale covers.
+      const h = whaleDip(mv, t), run = Math.hypot(mv.u - pu, mv.v - pv);
+      if (mv.hover !== undefined && dt > 0) pitch = THREE.MathUtils.clamp(Math.atan2(h - mv.hover, run + 1e-6), -0.5, 0.5);
+      mv.pitch = THREE.MathUtils.lerp(mv.pitch || 0, pitch, Math.min(1, dt * 1.5));
+      pitch = mv.pitch;
+      mv.hover = h;
+    }
     _p.copy(_u).multiplyScalar(ground + mv.hover);
     _f.copy(mv.t1).multiplyScalar(Math.cos(mv.heading)).addScaledVector(mv.t2, Math.sin(mv.heading));
     _f.addScaledVector(_u, -_f.dot(_u)).normalize();
     _r.crossVectors(_u, _f).normalize();
+    if (pitch) {
+      // turn the forward and the up about the right axis, so the body tips into the dive
+      const c = Math.cos(pitch), s = Math.sin(pitch);
+      _up.copy(_u).multiplyScalar(c).addScaledVector(_f, -s);
+      _f.multiplyScalar(c).addScaledVector(_u, s);
+      _u.copy(_up);
+    }
     _m.makeBasis(_r.multiplyScalar(mv.sc), _u.multiplyScalar(mv.sc), _f.multiplyScalar(mv.sc));
     _m.setPosition(_p);
     mv.inst.setMatrixAt(mv.j, _m);

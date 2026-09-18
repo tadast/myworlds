@@ -1456,6 +1456,9 @@ function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   world.atmoStrength = 0.9;
   const sr = Math.sqrt(1 - stormLat * stormLat);
   world.storm = { dir: [sr * Math.cos(stormLon), stormLat, sr * Math.sin(stormLon)], size: stormSize };
+  // The upper cloud deck, which app.js lays over the banded body. It draws no numbers, so no world
+  // changes: it takes the light bands for its tops and a dark band for its gaps.
+  world.deck = { top: toHex(mix(bands[3], [1, 1, 1], 0.2)), gap: toHex(mix(bands[1], bands[0], 0.5)), freq: bandFreq };
   makeActivity(makeRng(world.seed + '|activity'), 'gas', world, P);
   world.rings = rng() < 0.65 ? makeRings(rng, mix(bands[0], [1, 1, 1], 0.2), 1) : null;
   world.moons = makeMoons(rng, "gas", !!world.rings);
