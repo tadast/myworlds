@@ -5,7 +5,9 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox } from './site.js';
+import { loadFixes, addFix, markFound, clearFixes, foundSeeds } from './carrier-store.js';
+import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
@@ -72,6 +74,9 @@ const PICK_RANGE = CAM_MIN + 0.1;   // the globe holds still inside this camera 
 // `?perf` shows the frame time, the LOD knob, and the counts of the frame. Without the flag the
 // page builds no element and does no work for it.
 const PERF = new URLSearchParams(location.search).has('perf');
+// `?source` puts a dot on the globe where the source of issue 34 stands. It is the eye check on
+// the bearing math: three wedges from three continents must cross over it. It stays out of the UI.
+const SOURCE_DOT = new URLSearchParams(location.search).has('source');
 const HUD_MS = 500;       // ms, the overlay reads twice a second
 const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
 const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
@@ -243,10 +248,21 @@ const atmoInnerMat = (color, strength) => new THREE.ShaderMaterial({
 // ---------------------------------------------------------------- world building
 let current = null; // { group, spin, oceanMat, cloudGroup, moons, ringMesh, data }
 
+// The carrier of issue 34. The record is the search of this world, as carrier-store.js keeps it,
+// and the group is the wedges of that search under current.planet. A world with no source, which
+// is every gas giant, holds null in both.
+let carrierRecord = null;
+let carrierGroup = null;
+let pendingFix = null;    // the fix of the last landing, waiting for the ascent to end
+
 function disposeWorld() {
   if (!current) return;
   showMarker(null);                 // the ring is shared between worlds, so it must not be disposed
   site = null;
+  // The wedges go first, because they own their buffers and the walk below would only reach the
+  // geometry. See disposeCarrierGroup() in carrier-globe.js.
+  disposeCarrierGroup(carrierGroup);
+  carrierGroup = null; carrierRecord = null; pendingFix = null;
   current.group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
@@ -529,6 +545,27 @@ const SLOPE_STEP = 0.02;
 
   // natural activity: at most one per world
   const activity = buildActivity(world, planet, cloudGroup, cloudInst, (dir) => groundRadius(world, heightMap, dir));
+
+  // `?source`: the dot of issue 34. It rides under the planet, so it turns with the world, and it
+  // goes away with the world, because the whole group is disposed.
+  if (SOURCE_DOT && world.source) {
+    const d = new THREE.Vector3(...world.source.dir);
+    const dot = new THREE.Mesh(
+      new THREE.SphereGeometry(0.012, 12, 8),
+      new THREE.MeshBasicMaterial({ color: '#ff3ba7', toneMapped: false, depthTest: false }),
+    );
+    dot.position.copy(d).multiplyScalar(Math.max(groundRadius(world, heightMap, d), world.seaRadius || 0) + 0.01);
+    dot.renderOrder = 4;
+    planet.add(dot);
+  }
+
+  // The wedges of the search, from the store. They ride under the planet too, so they turn with
+  // the world, and the far side of the globe hides the part of a wedge that runs behind it. A gas
+  // giant gets no probe and a world where makeSource() found no cell has nothing to hear, so both
+  // give null here and the sidebar hides the Carrier row. Issue 34, slice 2.
+  carrierRecord = loadFixes(world.seed);
+  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, carrierRecord);
+  if (carrierGroup) planet.add(carrierGroup);
 
   // the upper cloud deck of a gas giant
   const deckMat = world.type === 'gas' && world.deck ? gasDeck(world, planet) : null;
@@ -841,6 +878,7 @@ function step(now) {
       current.cloudGroup.visible = op > 0.02;
     }
     stars.update(t, camera);
+    updateCarrierGroup(carrierGroup, dt);   // the fade of a new wedge, and nothing else
     for (const m of current.moons) {
       m.angle += m.speed * dt;
       m.mesh.position.set(Math.cos(m.angle) * m.dist, 0, Math.sin(m.angle) * m.dist);
@@ -1074,6 +1112,7 @@ function aimAt(x, y) {
 let mode = 'orbit';
 let ground = null;        // the Ground instance while the probe is down
 let lockedSite = null;    // the site the probe dives to, fixed at the start of the descent
+const carrierSeen = new Set();   // the seeds whose carrier row has flashed once. Issue 34.
 let dive = null;          // { kind, phase, t0, dur, from, to, look }
 let patchState = { done: true, result: null };   // the patch the worker builds during the dive
 
@@ -1179,8 +1218,14 @@ function stepDive(now) {
   diveEl.style.opacity = String(1 - e);
   if (k < 1) return;
   diveEl.style.opacity = '0';
-  if (dive.kind === 'ascend') { mode = 'orbit'; controls.enabled = true; }
-  else if (ground) ground.controls.enabled = true;
+  if (dive.kind === 'ascend') {
+    mode = 'orbit'; controls.enabled = true;
+    // The ascent ends over the site, so the new wedge arrives where the reader is already looking.
+    // It fades in over 1.2 s. Risk 4 of issue 34: a reader who never reads the fifth block still
+    // sees the globe answer the landing.
+    if (pendingFix && carrierGroup) addWedge(carrierGroup, pendingFix, { fade: true });
+    pendingFix = null;
+  } else if (ground) ground.controls.enabled = true;
   dive = null;
   updateProbeBtn();
 }
@@ -1193,24 +1238,57 @@ function enterGround() {
     onSelect: (kind) => { markedKind = kind; markedPlant = null; },
     onSelectPlant: (kind) => { markedPlant = kind; markedKind = null; },
     onDeselect: () => { markedKind = null; markedPlant = null; },
+    // Slice 3 of issue 34 calls this when the log card of the wreck first opens. Today's ground.js
+    // does not read it; window.__mw.onSourceFound is the other way in.
+    onSourceFound,
   });
   // The plant lore of this patch. It arrives with the patch, because it reads the biome of the
   // site, and it goes away with the patch. See describePatchFlora() in worker.js.
   groundPlants = (patchState.result && patchState.result.patch.plants) || [];
   groundVariant = (patchState.result && patchState.result.patch.floraVariant) || 0;
-  renderInfo(current.world);   // the sidebar gains its flora row
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
   const view = skyView(current, lockedSite, sunDir, cellTwist(lockedSite));
   view.starLight = stars.lightColor();   // the ground sun takes the colour of the star
+  // The carrier of issue 34: the bearing from this cell to the source, with its error. The three
+  // digits keep the bearing of the globe, because the wedge of a fix is drawn on the globe. The
+  // needle takes the frame of the box instead, which carrierBox() reads off the axes of the cell:
+  // the box is the mirror of the frame the sky stands in, and the reader walks the terrain, so the
+  // needle has to agree with the terrain and with the wreck slice 3 puts on it. The vector holds
+  // the error of the wedge, so the needle and the three digits say one thing.
+  const carrier = carrierAt(current.world, lockedSite);
+  if (carrier) {
+    const v = carrierBox(current.world, lockedSite, carrier);
+    carrier.dir = v ? [v.x, v.z] : null;
+  }
+  // Decision 9 of issue 34: a landing takes the fix on its own, and no button asks for it. A
+  // landing that comes from a URL with a site takes one too, because the probe stood on that cell
+  // and heard the carrier there. A shared URL carries no fix of its own; see carrier-store.js.
+  //
+  // The fix keeps the bearing the instrument STATES and not the true one, so the wedge and the
+  // three digits say one thing. The wedge waits for the ascent: the reader is on the ground now
+  // and the globe is not drawn. See stepDive().
+  if (carrier && carrierGroup) {
+    const at = snapSite(lockedSite);
+    pendingFix = { lat: at.lat, lon: at.lon, brg: carrier.brg, err: carrier.err };
+    carrierRecord = addFix(current.world.seed, pendingFix);
+  }
+  renderInfo(current.world);   // the sidebar gains its flora row, and the Carrier row counts the fix
   const t0 = performance.now();
-  ground.load(patchState.result, { sunDir: view.sunDir, view });
+  ground.load(patchState.result, { sunDir: view.sunDir, view, carrier });
   if (patchState.result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
   if (pendingView) ground.setView(pendingView);   // a shared link brings its own camera
   pendingView = null;
   ground.resize(innerWidth, innerHeight);
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
   probeHud.show();
+  // Risk 4 of issue 34: a reader may never look at the fifth block. The row flashes once on the
+  // first landing of each world, and no text says a word. Slice 2 keeps the fixes of a world in
+  // localStorage; until then the set holds the worlds of this session.
+  if (carrier && !carrierSeen.has(current.world.seed)) {
+    carrierSeen.add(current.world.seed);
+    probeHud.flashCarrier();
+  }
   perf.reset();       // the orbit frames say nothing about the ground
   showMarker(null, current);
   writeHash();
@@ -1241,6 +1319,7 @@ function abortProbe() {
   groundPlants = []; groundVariant = 0;
   perf.reset();
   dive = null;
+  pendingFix = null;        // the wedge of that landing waited for an ascent that will not come
   lockedSite = null;
   pendingView = null;
   patchJob = null;
@@ -1542,6 +1621,9 @@ function makeThumb() {
 function loadWorlds() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; }
 }
+// The saved worlds. This writes STORE_KEY and nothing else, so the quota fallback below can never
+// drop the search of a world: the fixes of the carrier live under a key of their own. Decision 10
+// of issue 34, and carrier-store.js.
 function persist(list) {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(list)); }
   catch (e) {
@@ -1566,6 +1648,7 @@ function deleteWorld(seed) {
 
 function renderWorlds() {
   const list = loadWorlds().slice().reverse();
+  const found = foundSeeds();   // one read of the carrier store answers the whole list
   worldsEl.innerHTML = '';
   if (!list.length) {
     worldsEl.innerHTML = '<p class="empty">No worlds yet. Type a name above.</p>';
@@ -1576,7 +1659,8 @@ function renderWorlds() {
     el.type = 'button';
     el.className = 'world' + (current && current.world.seed === w.seed ? ' active' : '');
     el.title = `${w.seed} · ${w.typeLabel}`;
-    el.innerHTML = `<img alt="" src="${w.thumb || ''}"><span class="wname">${escapeHtml(w.seed)}</span><span class="wtype">${escapeHtml(w.typeLabel || w.type)}</span><i class="del" title="Forget this world">×</i>`;
+    // A world whose source the reader has found carries a mark on its thumb. Issue 34, slice 2.
+    el.innerHTML = `<img alt="" src="${w.thumb || ''}"><span class="wname">${escapeHtml(w.seed)}</span><span class="wtype">${escapeHtml(w.typeLabel || w.type)}</span>${found.has(w.seed) ? '<i class="found" title="The source of this world is found">✦</i>' : ''}<i class="del" title="Forget this world">×</i>`;
     el.querySelector('img').addEventListener('error', (e) => { e.target.style.visibility = 'hidden'; });
     el.addEventListener('click', (e) => {
       if (e.target.classList.contains('del')) { e.stopPropagation(); deleteWorld(w.seed); return; }
@@ -1587,8 +1671,45 @@ function renderWorlds() {
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+// ---------------------------------------------------------------- the Carrier row, issue 34
+// The row states the search of this world: nothing heard, the fixes it holds, or the find. A gas
+// giant gets no probe and a world where makeSource() found no cell has nothing to hear, so both
+// hide the row. The button drops the wedges and keeps the find, because a reader who has found the
+// wreck has earned the mark and no button takes it back.
+function carrierState(w) {
+  if (!w || !w.source || w.type === 'gas') return null;
+  const rec = carrierRecord && current && current.world.seed === w.seed ? carrierRecord : loadFixes(w.seed);
+  const n = rec.fixes.length;
+  return { n, found: rec.found, text: rec.found ? 'Found' : n === 0 ? 'Not heard' : n === 1 ? '1 fix' : `${n} fixes` };
+}
+
+// Drop the fixes of the world on the screen. The globe loses its wedges in the same breath.
+function clearCarrier(seed) {
+  carrierRecord = clearFixes(seed);
+  pendingFix = null;
+  if (current && current.world.seed === seed) {
+    disposeCarrierGroup(carrierGroup);
+    carrierGroup = makeCarrierGroup(current.world, carrierRecord);
+    if (carrierGroup) current.planet.add(carrierGroup);
+    renderInfo(current.world);
+  }
+}
+
+// The reader has found the source. Slice 3 calls this when the log card of the wreck first opens.
+// The find stands in the store, the wedges give way to one ring at the source, and the sidebar
+// states it in two places: the Carrier row of this world and the thumb of the saved one.
+export function onSourceFound() {
+  if (!current || !current.world.source) return;
+  carrierRecord = markFound(current.world.seed);
+  setFound(carrierGroup, current.world);
+  pendingFix = null;
+  renderInfo(current.world);
+  renderWorlds();
+}
+
 function renderInfo(w) {
   const s = w.stats;
+  const carrier = carrierState(w);
   infoBody.innerHTML = `
     <div class="iname">${escapeHtml(w.seed)}</div>
     <div class="itype">${escapeHtml(w.designation)} · ${escapeHtml(w.typeLabel)}</div>
@@ -1600,12 +1721,15 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
+      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrier.text}${carrier.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this world">Clear</button>' : ''}</dd>` : ''}
       ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
       ${groundPlants.length ? `<dt>Flora</dt><dd class="chips">${groundPlants.map((p) => `<button type="button" class="chip" data-plant="${p.kind}">${escapeHtml(p.lore.name)}</button>`).join('')}</dd>` : ''}
     </dl>`;
+  const clearBtn = infoBody.querySelector('.carrier-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => clearCarrier(w.seed));
   // The flora row only exists while the probe is down, because the plants belong to the patch.
   infoBody.querySelectorAll('.chip[data-kind]').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
   infoBody.querySelectorAll('.chip[data-plant]').forEach((b) => b.addEventListener('click', () => {
@@ -1871,4 +1995,7 @@ window.__mw = {
   get ground() { return ground; },
   get plants() { return groundPlants; },
   get marked() { return { animal: markedKind, plant: markedPlant }; },
+  // the search of this world: the record of the store and the group of wedges under the planet
+  get carrier() { return { record: carrierRecord, group: carrierGroup, pending: pendingFix }; },
+  onSourceFound,
 };

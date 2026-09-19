@@ -290,6 +290,7 @@ export class Ground {
     this.site = site;
     this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true, lodMax: LOD_MAX };
     this.result = null;
+    this.carrier = null;    // the reading of issue 34, from the app. See load().
     this.sky = null;
     this.flora = null;
     this.grass = null;
@@ -406,9 +407,12 @@ export class Ground {
   // The worker's patch result, or null for the placeholder ground of issue 03.
   // The sun direction comes from the app, because only the app knows planet.rotation.y. The view
   // comes from the app for the same reason: it holds the sun, the moons, and the ring of the globe
-  // in the frame of the site. See ground-sky.js.
-  load(result, { sunDir, view } = {}) {
+  // in the frame of the site. See ground-sky.js. The carrier of issue 34 comes from the app for
+  // the same reason again: carrierAt() in site.js reads the globe and the app turns the direction
+  // of the source into this frame.
+  load(result, { sunDir, view, carrier } = {}) {
     this.result = result;
+    this.carrier = carrier || null;
     if (sunDir) this.sunDir.copy(sunDir).normalize();
     this._clear();
     this._shadowOn = false;      // the camera arrives 800 m up, where nothing casts
@@ -860,6 +864,7 @@ export class Ground {
   //   sun       the seconds to the next sunset, or to the next sunrise when the star is down
   //   signal    the strength of the uplink, 0 to 1, which falls over the last SIGNAL_BAND units
   //   near      0 inside the reach and 1 at it, over the last NOISE_BAND units: the noise ramp
+  //   carrier   the bearing to the source of issue 34, or null on a world that holds none
   //
   // The temperature falls with the height at the lapse rate of a real atmosphere, and it reads
   // the same height the ladder states. The box holds a vertical scale of its own, so one unit of
@@ -875,7 +880,40 @@ export class Ground {
     const r = Math.hypot(this.controls.target.x, this.controls.target.z);
     const signal = 1 - THREE.MathUtils.smoothstep(r, this.reach - SIGNAL_BAND, this.reach) * 0.94;
     const near = THREE.MathUtils.smoothstep(r, this.reach - NOISE_BAND, this.reach);
-    return { tempC, agl, signal, near, sun: this._sunCountdown() };
+    return { tempC, agl, signal, near, sun: this._sunCountdown(), carrier: this._carrier() };
+  }
+
+  // The carrier of issue 34, or null. The app hands over the reading of the cell in load():
+  //
+  //   brg       the bearing the instrument states, 0 to 360 degrees from north, east positive
+  //   err       the error of that bearing in degrees. The true bearing lies inside brg plus or
+  //             minus err, and the wedge on the globe is that band. Decision 3.
+  //   arc       radians from the site to the source. The overlay reads the strength off it.
+  //   rel       degrees from the way the view points to the way the needle points, -180 to 180.
+  //             A positive rel puts the needle to the right of the screen, so it turns with the
+  //             view. See below: it is an angle in the box and not the bearing less an azimuth.
+  //   rangeKm   kilometres to the source inside CARRIER_RANGE cells of arc, else null. Decision 7.
+  //   range     units to the wreck on this patch. Slice 3 builds the wreck and fills this; until
+  //             then no patch holds one and the overlay states no range in units.
+  _carrier() {
+    const c = this.carrier;
+    if (!c) return null;
+    // The camera looks from its own position at the target, so the flat part of that step is the
+    // way the reader faces. carrier.dir is the way the needle points as (x, z) in the frame of the
+    // box, which the app reads off the axes of the cell; see carrierBox() in site.js. The box is
+    // the mirror of the frame x east, y up, z south, so the sense of a bearing is turned over in
+    // it and rel may not come from the three digits less an azimuth. It is the angle from the
+    // forward of the view to the needle, and the right of the view on the ground is (-fz, fx).
+    const p = this.camera.position, tg = this.controls.target;
+    let fx = tg.x - p.x, fz = tg.z - p.z;
+    const fl = Math.hypot(fx, fz);
+    const d = c.dir;
+    let rel = 0;
+    if (d && fl > 1e-9) {
+      fx /= fl; fz /= fl;
+      rel = THREE.MathUtils.radToDeg(Math.atan2(d[1] * fx - d[0] * fz, d[0] * fx + d[1] * fz));
+    }
+    return { brg: c.brg, err: c.err, arc: c.arc, rel, rangeKm: c.rangeKm, range: null };
   }
 
   // The time to the next sunset, or to the next sunrise when the star is under the horizon.

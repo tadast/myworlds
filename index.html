@@ -126,6 +126,18 @@
       <b id="hud-alt">—</b>
       <span class="k">Above ground</span>
     </div>
+    <!-- The fifth block, issue 34: the carrier. A needle that turns with the view, the bearing as
+         three digits, the error of that bearing, one word for the strength, and the range once the
+         probe stands near the source. probe-hud.js hides the block on a world with no source. -->
+    <div class="hud-carrier" id="hud-carrier" hidden>
+      <div class="hud-dial"><i id="hud-needle"></i></div>
+      <div class="hud-read">
+        <span class="k">Carrier</span>
+        <b id="hud-brg">—</b>
+        <div class="hud-sub"><span class="k" id="hud-err">±0°</span><span class="k" id="hud-strength">Faint</span></div>
+        <span class="k" id="hud-range" hidden></span>
+      </div>
+    </div>
     <div class="hud-link">
       <div class="hud-bars" id="hud-bars"></div>
       <div class="k" id="hud-link">Uplink nominal</div>

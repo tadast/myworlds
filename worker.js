@@ -6,6 +6,7 @@
 importScripts('./lore.js');       // the lore engine, shared with the flora (self.Lore)
 importScripts('./species.js');    // species genomes and lore (self.Species)
 importScripts('./flora-lore.js'); // the plant vocabulary, written per patch (self.FloraLore)
+importScripts('./source-lore.js'); // the log of the source, written per world (self.SourceLore)
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -571,6 +572,9 @@ function worldContext(seed) {
     },
     hasAtmosphere: true, atmoStrength: 1, seaLevel: 0, hasOcean: false, amp: 0,
     rings: null, moons: [], stats: {},
+    // Issue 34: the thing that transmits, one per world with a surface. makeSource() fills it in
+    // generate(). A gas giant keeps the null, because it takes no probe.
+    source: null,
   };
   // The planet numbers, and the facts the lore reads. `env` fills up as the world is built: the
   // moons, the rings, and the activity are added in generate(), which then writes the lore again.
@@ -869,6 +873,9 @@ function generate(seed, opts) {
   const act = makeActivity(makeRng(seed + '|activity'), type, world, P, pos, vCount, H, T, R, amp, beachW);
   const paintAct = act ? act.paint : null;
   const blockV = act ? act.block : null;
+  // Issue 34. The source stands after the activity, because a volcano raises the ground it must
+  // keep away from. Its stream is its own, so no world built before this issue changes.
+  makeSource(makeRng(seed + '|source'), ctx, world, pos, vCount, H, beachW);
 
   post(62, 'Painting biomes');
   // per-face colouring, expanded to non-indexed triangles
@@ -983,6 +990,13 @@ function generate(seed, opts) {
   // with the moons, the rings, and the activity in hand. Same stream, same seed, same text.
   describeLife(ctx);
   world.stats = makeStats(frng, type, world, fc);
+  // Issue 34, slice 4. The log of the source stands last, because it names a species of this world
+  // and it reads the moons, the rings, and the activity that the lines above have only now settled.
+  // It rolls from a stream of its own, so no other stream draws one number more. A tool that
+  // evaluates this file without source-lore.js gets a source with no log; see tools/lore-audit.
+  if (world.source && self.SourceLore) {
+    world.source.log = self.SourceLore.writeLog({ world, rng: makeRng(seed + '|source-lore') });
+  }
 
   post(98, 'Almost there');
   const result = { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna, heightMap, floraGrid };
@@ -1413,6 +1427,96 @@ function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW) {
   return act;
 }
 
+// ---------------------------------------------------------------- the source, issue 34
+// One thing on every world with a surface transmits, and the instrument of the probe reads a
+// bearing to it. The reader hears the carrier on one landing, takes a second bearing from another
+// site, and crosses the two. So the source has to stand where a probe can reach it and where the
+// reader can believe it: on dry ground over the beach band, off a cliff, off the poles, and clear
+// of the cell of the activity, which already owns its landing.
+//
+// The stream is makeRng(seed + '|source') and no other stream draws one number more, so every
+// world the app built before this issue is unchanged. tools/world-checksum.mjs proves it. The
+// motif of the source is not rolled here: music.js rolls it from a stream of its own, so the
+// worker takes no number that the tune needs. See slice 5 of issue 34.
+const SOURCE_SLOPE = 0.5;      // the steepest ground the source takes: the rise of the globe over the arc
+const SOURCE_LAT = 80;         // degrees: the source stays inside this latitude, off the poles
+const SOURCE_KEEP = 4;         // cells the source stands away from the cell of the activity
+const SOURCE_TRIES = 48;       // draws before the world gives up and takes no source
+const _srcDir = [0, 0, 0], _srcAct = [0, 0, 0];
+const _srcE = [0, 0, 0], _srcN = [0, 0, 0], _srcP = [0, 0, 0];
+const _srcFld = { h: 0, t: 0, m: 0, fm: 0, r: 0, rg: 0 };
+
+// Two tangent axes at a unit direction. Any pair does: the slope below is the length of the
+// gradient and it does not change with the pair.
+function tangentsAt(d, e, n) {
+  if (Math.abs(d[1]) < 0.9) { e[0] = d[2]; e[1] = 0; e[2] = -d[0]; }   // (0, 1, 0) cross d
+  else { e[0] = 0; e[1] = -d[2]; e[2] = d[1]; }                        // (1, 0, 0) cross d
+  const l = Math.hypot(e[0], e[1], e[2]) || 1;
+  e[0] /= l; e[1] /= l; e[2] /= l;
+  n[0] = d[1] * e[2] - d[2] * e[1];
+  n[1] = d[2] * e[0] - d[0] * e[2];
+  n[2] = d[0] * e[1] - d[1] * e[0];
+}
+
+// The elevation a step of s radians from d along the tangent t.
+function heightStep(ctx, d, t, s) {
+  const c = Math.cos(s), k = Math.sin(s);
+  _srcP[0] = d[0] * c + t[0] * k; _srcP[1] = d[1] * c + t[1] * k; _srcP[2] = d[2] * c + t[2] * k;
+  return fieldAt(ctx, _srcP[0], _srcP[1], _srcP[2], _srcFld).h;
+}
+
+// The slope of the globe at one direction: the rise of the drawn radius over the arc, read over
+// half a cell each way. The globe draws its relief EXAGGERATION times too tall, so this is the
+// slope the reader sees and not the true one. Over the dry land of five worlds the median stands
+// near 0.3 and the tenth part near 0.09, so SOURCE_SLOPE keeps two thirds of the land and drops
+// every cliff.
+function surfaceSlope(ctx, d) {
+  tangentsAt(d, _srcE, _srcN);
+  const s = CELL * 0.5;
+  const dx = heightStep(ctx, d, _srcE, s) - heightStep(ctx, d, _srcE, -s);
+  const dz = heightStep(ctx, d, _srcN, s) - heightStep(ctx, d, _srcN, -s);
+  return ctx.amp * Math.hypot(dx, dz) / (2 * s);
+}
+
+function makeSource(rng, ctx, world, pos, vCount, H, beachW) {
+  world.source = null;
+  const act = world.activity && world.activity.dir;
+  const actMid = act ? cellDir(dirCell(act[0], act[1], act[2]), 0.5, 0.5, _srcAct) : null;
+  const keep = Math.cos(SOURCE_KEEP * CELL);
+  const sinLat = Math.sin(SOURCE_LAT * Math.PI / 180);
+  const near = (d) => !!actMid && d[0] * actMid[0] + d[1] * actMid[1] + d[2] * actMid[2] > keep;
+
+  // A first pass over the vertices of the globe. It reads the arrays the passes above filled and
+  // it takes no noise, so it costs a few comparisons a vertex. The tests that cost run only on the
+  // handful of directions the draw below takes.
+  const list = [];
+  for (let v = 0; v < vCount; v++) {
+    if (H[v] <= beachW) continue;
+    const y = pos[v * 3 + 1];
+    if (y > sinLat || y < -sinLat) continue;
+    _srcDir[0] = pos[v * 3]; _srcDir[1] = y; _srcDir[2] = pos[v * 3 + 2];
+    if (near(_srcDir)) continue;
+    list.push(v);
+  }
+  if (!list.length) return null;
+
+  // The middle of the cell carries the cell, as snapSite() does in site.js: the reader lands on the
+  // middle of a cell, so the source stands there too or no landing could ever hold it. Every test
+  // runs again on the middle, because the snap moves the direction most of a cell and that is far
+  // enough to reach the sea, a cliff, or the cell of the activity.
+  for (let t = 0; t < SOURCE_TRIES; t++) {
+    const v = list[Math.floor(rng() * list.length)];
+    const d = cellDir(dirCell(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]), 0.5, 0.5, _srcDir);
+    if (d[1] > sinLat || d[1] < -sinLat) continue;
+    if (near(d)) continue;
+    if (fieldAt(ctx, d[0], d[1], d[2], _srcFld).h <= beachW) continue;
+    if (surfaceSlope(ctx, d) >= SOURCE_SLOPE) continue;
+    world.source = { kind: 'wreck', dir: [d[0], d[1], d[2]] };
+    return world.source;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- gas giant
 function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   const gdetail = Math.max(24, Math.round(detail * 0.6));
@@ -1545,10 +1649,31 @@ const FACES = [
   [0, 0, -1, -1, 0, 0, 0, 1, 0],
 ];
 
+// The nominal arc of a cell, and the cells one face carries. site.js exports the same two numbers
+// as CELL and FACE_CELLS. Keep the two in step. app.js sends the cell of a landing on the patch
+// message, so the patch path never needs them; the source of issue 34 does, because it picks a
+// cell of its own.
+const CELL = 0.01;
+const FACE_CELLS = Math.round(Math.PI / 2 / CELL);
+
 // The unit direction at (u, v) inside a cell. u and v run 0 to 1 across the cell and may run past
 // it. Writes x, y, z into out.
 function cellDir(cell, u, v, out) {
   return cellDirT(cell, cellTan(cell.i, u, cell.n), cellTan(cell.j, v, cell.n), out);
+}
+
+// The cell a unit direction falls in. The mirror of cellDir(), and the same map dirCell() holds in
+// site.js.
+function dirCell(x, y, z) {
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  const face = ax >= ay && ax >= az ? (x >= 0 ? 0 : 1) : ay >= az ? (y >= 0 ? 2 : 3) : (z >= 0 ? 4 : 5);
+  const F = FACES[face];
+  const d = x * F[0] + y * F[1] + z * F[2];
+  const wa = Math.atan((x * F[3] + y * F[4] + z * F[5]) / d) * 4 / Math.PI;
+  const wb = Math.atan((x * F[6] + y * F[7] + z * F[8]) / d) * 4 / Math.PI;
+  const n = FACE_CELLS;
+  const q = (w) => clamp(Math.floor((w + 1) * 0.5 * n), 0, n - 1);
+  return { face, i: q(wa), j: q(wb), n };
 }
 
 // The gnomonic coordinate of a cell coordinate. A row of the patch grid holds one of these for

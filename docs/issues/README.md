@@ -20,6 +20,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `species.js` | Classic script. Rolls two to four genomes per world with lore. No three.js. |
 | `flora-lore.js` | Classic script. The plant vocabulary. Writes the lore of every plant kind of a patch. No three.js. See `docs/flora.md`. |
+| `source-lore.js` | Classic script. The vocabulary of the wreck. Writes the four entries of `world.source.log`. No three.js. See `docs/source.md`. |
 | `fauna.js` | Creature geometry from a genome, rig shader, `makeMover`/`stepMover` steering, the inspector card. |
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
@@ -162,7 +163,7 @@ export class Ground {
 }
 ```
 
-Ground frame: x east, y up, z south. Origin at the site at sea level, so `heightAt` is the elevation above sea level in metres. The sun direction comes from the app, not the worker: `load(result, { sunDir })`, because only the app knows `planet.rotation.y`. Until issue 12 lands, pass `(1, 0.55, 0.8)` normalised like the globe.
+Ground frame: x east, y up, z south. Origin at the site at sea level, so `heightAt` is the elevation above sea level in metres. The sun direction comes from the app, not the worker: `load(result, { sunDir, view, carrier })`, because only the app knows `planet.rotation.y`. Until issue 12 lands, pass `(1, 0.55, 0.8)` normalised like the globe. `carrier` arrived with issue 34; see "The carrier" above.
 
 ### The patch protocol
 
@@ -195,6 +196,18 @@ Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or 
 ```
 
 Terrain colours use the globe rules for beach, snow line, and forest mask, evaluated at the site with the patch noise for local variation.
+
+### The carrier
+
+Issue 34. One thing on a world with a surface transmits, and the probe reads a bearing to it.
+
+- The world: `world.source = { kind, dir: [x, y, z], log } | null`. `kind` is `'wreck'` now; later kinds take the same search. `dir` is a unit direction in the planet's local frame, snapped to the middle of its cell of the cube grid. A gas giant and a world where no vertex passed the tests both give null. `makeSource()` in `worker.js` rolls it from `makeRng(seed + '|source')`, and no other stream draws one number more; `tools/world-checksum.mjs` holds the proof.
+- The log: `world.source.log = { probe, days, species, entries: [{ slot, title, day, text }, ...] }`. The four slots are `arrival`, `survey`, `trouble`, and `last`, in that order. `probe` is the name of the old probe, `days` is the day of the last entry, and `species` is the animal the survey names, or null. `source-lore.js` writes it in `generate()` from `makeRng(seed + '|source-lore')`. The page must not show the log before the reader finds the wreck. See `docs/source.md`.
+- `site.js` gives `sourceSite(world)`, `sourceHere(world, site)`, `bearingTo(site, dir)`, `arcTo(site, dir)`, `carrierAt(world, site)`, `carrierDir(world, site, carrier)`, `carrierBox(world, site, carrier)`, and `boxPoint(site, dir, size)`. `carrierAt` returns `{ brg, err, arc, rangeKm }`: the bearing in degrees from north with east positive, its error in degrees, the arc in radians, and the kilometres to the source inside `CARRIER_RANGE` cells of arc, else null.
+- The bearing is 3 degrees wrong at the source and 25 degrees wrong at its antipode, straight in the arc. The offset inside that band comes from a hash of the seed and the cell, so one cell always gives one fix and the true bearing always lies inside the wedge.
+- **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `worker.js` lays the box on the axes of the cell of the cube grid, and `(u, up, v)` is left-handed, so the box is the mirror of the frame `groundBasis()` builds. The sky therefore stands in the mirror of its terrain; that is older than issue 34 and issue 34 does not touch it.
+- `boxPoint(site, dir, size)` is the exact inverse of the map `patch()` builds the box with. It gives `{ x, z }` in units of the box, or null for a direction more than 80 degrees from the face of the cell. Slice 3 takes the range in units from it. `carrierBox()` gives the needle as a unit `{ x, z }` in the same frame, from the slope of that map at the site, so it holds at every arc.
+- `Ground.load(result, { sunDir, view, carrier })`. The app builds `carrier` from `carrierAt()` and adds `carrier.dir`, the `[x, z]` of `carrierBox()` **in the frame of the box**. `telemetry()` then returns `carrier: { brg, err, arc, rel, rangeKm, range } | null`. `rel` runs -180 to 180 degrees from the way the view points to the way the needle points, and a positive `rel` puts the needle to the right of the screen. Do not build `rel` from the digits less an azimuth: the box turns the sense of a bearing over. `range` is the units to the wreck on this patch, and slice 3 fills it.
 
 ### Metres for a creature
 

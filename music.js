@@ -60,6 +60,10 @@ const CADENCES = [[8, 8], [4, 4, 8], [12, -4], [2, 2, 12], [4, 12], [6, 2, 8]];
 const BASS_RHYTHMS = [[0, 4, 8, 12], [0, 6, 8, 14], [0, 8, 12], [0, 3, 6, 8, 11, 14], [0, 8], [0, 6, 8, 12, 14]];
 const BARS = 32; // intro 4, A 8, B 8, A' 8, outro 4
 const STEPS = BARS * 16;
+// The motif of the source: one bar of the same sixteen steps, heard on bar 1 of every four bars.
+const MOTIF_STEPS = 16, MOTIF_BARS = 4, MOTIF_PERIOD = MOTIF_STEPS * MOTIF_BARS;
+// The places a motif note may fall after step 0: the eighths and a few off-beats.
+const MOTIF_SLOTS = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14];
 
 const pickWith = (rng) => (arr) => arr[Math.floor(rng() * arr.length)];
 const gaussWith = (rng) => () => { let s = 0; for (let i = 0; i < 4; i++) s += rng(); return (s - 2) / 1.15; };
@@ -203,20 +207,52 @@ class Synth {
 }
 
 // ---------------------------------------------------------------- composition
+// The tempo comes from the world alone and draws no random number: slow days and heavy worlds turn
+// slowly, short days hurry. `compose()` and `motifOf()` both read it, so the lamp of the wreck and
+// the ear keep the same clock.
+function tempoOf(world) {
+  const w = world || {}, mood = MOOD[w.type] ? MOOD[w.type] : MOOD.terran;
+  const day = parseFloat((w.stats || {}).day) || 24, grav = w.gravity || 1;
+  const bpm = clamp(mood.tempo[0] + (mood.tempo[1] - mood.tempo[0]) * (1 - clamp((day - 8) / 40, 0, 1)) - (grav - 1) * 10, 72, 132);
+  return { mood, bpm, stepDur: 60 / bpm / 4 };
+}
+// The rhythm of the motif. It rolls from a stream of its own: `'music:' + seed + '|source-motif'`.
+// The song rolls from `'music:' + seed` and the worker rolls the source from `seed + '|source'`, so
+// the motif takes no number from either stream and no world changes.
+// The stream always draws the count first and the places second, so `motifOf()` reads the rhythm
+// with no audio and `compose()` reads the pitches after it from the same stream.
+function motifRoll(seed) {
+  const rng = mulberry32(cyrb32('music:' + seed + '|source-motif'));
+  const count = 4 + Math.floor(rng() * 4); // four to seven notes
+  const slots = MOTIF_SLOTS.slice();
+  for (let i = slots.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = slots[i]; slots[i] = slots[j]; slots[j] = t; }
+  const steps = [0, ...slots.slice(0, count - 1)].sort((a, b) => a - b); // the beacon always opens the bar
+  return { rng, steps };
+}
+// The rhythm of the motif from the seed alone, with no AudioContext. The lamp of the wreck blinks
+// it, so a reader with the sound off loses no fact. Pass the world object for the true tempo; a
+// bare seed string takes the tempo of a terran world.
+// `steps` are the step indices inside bar 1 that sound. `barSeconds` is one bar and `period` is the
+// four bars between two calls of the motif, both in seconds.
+export function motifOf(world) {
+  const w = typeof world === 'string' ? { seed: world } : (world || {});
+  const { stepDur } = tempoOf(w), { steps } = motifRoll(w.seed);
+  const barSeconds = stepDur * MOTIF_STEPS;
+  return { seed: w.seed, steps, stepsPerBar: MOTIF_STEPS, bars: MOTIF_BARS, stepDur, barSeconds, period: barSeconds * MOTIF_BARS };
+}
+
 // The song is a 32-bar loop of note events, written once from the seed, and played like a person:
 // timing jitter, accents by beat, a crescendo into each phrase, legato and staccato, a bass line that moves
-// against the lead, a soft pad under the chords, light percussion, and a motif that changes when it returns.
+// against the lead, a soft pad under the chords, light percussion, and a figure that changes when it returns.
+// "Motif" names one thing only: the short tune of the source. The song calls its own cell a figure.
 function compose(world) {
   const rng = mulberry32(cyrb32('music:' + world.seed)), pick = pickWith(rng), weighted = weightedWith(rng), gauss = gaussWith(rng);
-  const type = MOOD[world.type] ? world.type : 'terran', mood = MOOD[type];
+  const { mood, bpm, stepDur } = tempoOf(world); // stepDur is one sixteenth
   const s = world.stats || {};
-  const temp = parseFloat(s.temp) || 10, day = parseFloat(s.day) || 24, grav = world.gravity || 1;
+  const temp = parseFloat(s.temp) || 10, grav = world.gravity || 1;
   const windK = world.hasAtmosphere === false ? 0 : (world.atmoStrength ?? 1);
   const modeName = pick(mood.modes), scale = SCALES[modeName];
-  // slow days and heavy worlds turn slowly; short days hurry
-  const bpm = clamp(mood.tempo[0] + (mood.tempo[1] - mood.tempo[0]) * (1 - clamp((day - 8) / 40, 0, 1)) - (grav - 1) * 10, 72, 132);
   const swing = mood.swing[0] + rng() * (mood.swing[1] - mood.swing[0]);
-  const stepDur = 60 / bpm / 4; // one sixteenth
   const root = 57 + Math.floor(rng() * 5) - 2 - clamp(Math.round((grav - 1) * 4), -5, 3);
   const byStep = Array.from({ length: STEPS }, () => []);
   const song = { seed: world.seed, mood, stepDur, swing, bpm, modeName, root, byStep, nodes: [], t0: undefined,
@@ -287,7 +323,7 @@ function compose(world) {
     if (op === 'invert' && out.length > 1) { const p0 = out[0].m; for (let i = 1; i < out.length; i++) { const mirror = p0 - (out[i].m - p0); out[i].m = nearest(clamp(mirror, lo, hi), chordAt(b, out[i].step), out[i].step % 8 === 0 ? isChordTone : chordOrScale); } }
     return out;
   };
-  // A four-bar phrase: motif, motif over the next chord, a contrast bar that carries the peak, the cadence.
+  // A four-bar phrase: a figure, the figure over the next chord, a contrast bar that carries the peak, the cadence.
   const phrase = (b0, cells, answer, from) => {
     const m1 = bar(cells[0], b0, from), m2 = bar(cells[0], b0 + 1, m1[m1.length - 1].m), m3 = bar(cells[1], b0 + 2, m2[m2.length - 1].m);
     let k = 0; for (let i = 1; i < m3.length; i++) if (m3[i].m > m3[k].m) k = i;
@@ -350,6 +386,29 @@ function compose(world) {
     }
   }
 
+  // ---- the motif of the source
+  // The song is whole and the motif adds to it. It rolls after the song, from the stream of the
+  // source, so the notes above stay the same to the last one. Four to seven notes of the mode, all
+  // inside one octave over the root, on the step grid of the song: the motif is always in tune.
+  const motif = motifRoll(world.seed), motifWeighted = weightedWith(motif.rng);
+  const motifByStep = Array.from({ length: MOTIF_PERIOD }, () => null);
+  const motifNotes = motif.steps.map((step, i) => {
+    // Degree 7 is the octave over the root. The triad degrees weigh most, so the motif reads as a call.
+    const d = motifWeighted([[0, 4], [1, 1], [2, 3], [3, 2], [4, 4], [5, 2], [6, 1], [7, 2]]);
+    const next = motif.steps[i + 1] ?? MOTIF_STEPS;
+    const ev = { step, midi: root + degPc(d), len: next - step, level: i === 0 ? 0.24 : 0.2 };
+    motifByStep[step] = ev;
+    return ev;
+  });
+  song.motif = { steps: motif.steps, notes: motifNotes, stepsPerBar: MOTIF_STEPS, bars: MOTIF_BARS,
+    stepDur, barSeconds: stepDur * MOTIF_STEPS, period: stepDur * MOTIF_PERIOD };
+  // A plain sine with a short decay. Every voice of the song is a pulse, a triangle, or noise, so a
+  // sine is the one timbre the song never uses and the ear finds the beacon at once.
+  song.playMotif = (synth, ev, t) => {
+    synth.note({ wave: 'sine', midi: ev.midi, t, dur: Math.min(stepDur * ev.len, stepDur * 2), level: ev.level,
+      a: 0.004, d: 0.05, s: 0.12, r: 0.14, out: song.srcBus });
+  };
+
   // ---- playback
   // Swing delays the off-beat eighth of each pair: `swing` is where it lands in the pair (0.5 = straight).
   song.stepTime = (i) => {
@@ -381,6 +440,17 @@ function compose(world) {
       if (t >= t1) break;
       if (t < t0) continue;
       for (const ev of byStep[i % STEPS]) song.play(synth, ev, t, i);
+    }
+    // The motif keeps straight time while the song swings: a machine transmits on a clock. The lamp
+    // of the wreck can then blink the same steps from the seed with no audio. The song loop holds
+    // 32 bars, so the four-bar period of the motif never slips against it.
+    if (!song.srcBus) return;
+    for (let k = Math.max(0, Math.floor((t0 - song.t0) / stepDur) - 1); ; k++) {
+      const t = song.t0 + k * stepDur;
+      if (t >= t1) break;
+      if (t < t0) continue;
+      const ev = motifByStep[k % MOTIF_PERIOD];
+      if (ev) song.playMotif(synth, ev, t);
     }
   };
   return song;
@@ -415,6 +485,7 @@ export class Music {
     this.settings = loadSettings();
     this.ctx = null; this.master = null; this.comp = null; this.synth = null;
     this.song = null; this.pending = null;
+    this.carrier = 0; // the level of the source, 0 to 1. Kept while no song plays.
     this.timer = 0;
     this.onchange = null; // UI callback
     this._unlock = () => this.unlock();
@@ -498,6 +569,32 @@ export class Music {
     if (this.song && !this.song.stopping) this._startTimer();
     if (this.ctx.state !== 'running') this.unlock();
   }
+  // The level of the source, 0 to 1. On the ground it follows the distance to the wreck; in orbit
+  // it is 0 before the find and 0.6 after it. Safe with no song, with no audio, and while muted:
+  // the value waits, and the next song takes it when it starts.
+  setCarrier(k) {
+    this.carrier = clamp(+k || 0, 0, 1);
+    this._applyCarrier(0.4);
+  }
+  _applyCarrier(secs) {
+    const g = this.song?.srcBus;
+    if (!g || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    g.gain.cancelScheduledValues(now);
+    g.gain.setValueAtTime(g.gain.value, now);
+    g.gain.linearRampToValueAtTime(this.carrier * 0.5, now + secs);
+  }
+  // The rhythm and the clock of the motif from the seed alone. See `motifOf()`.
+  motif(world) { return motifOf(world); }
+  // The seconds inside the four-bar period of the motif, or null when no audio runs. The lamp of
+  // the wreck reads it, so the eye and the ear agree. With no sound the lamp takes the clock of the
+  // landing and the period of `motifOf()`.
+  barClock() {
+    const song = this.song;
+    if (!this.playing || song.stopping || song.t0 === undefined || !song.motif) return null;
+    const period = song.motif.period, t = this.ctx.currentTime - song.t0;
+    return ((t % period) + period) % period;
+  }
   // Play the song of a world. Muted: remember it and start on unmute.
   play(world) {
     if (this.settings.muted) { this.pending = world; return; }
@@ -524,10 +621,15 @@ export class Music {
     const echo = synth.echo({ time: song.stepDur * 6, feedback: 0.3, wet: 0.2, cutoff: 2000, out });
     lp.connect(verb.input); lp.connect(echo.input);
     const padBus = song.padBus = ctx.createGain(); padBus.connect(out); padBus.connect(verb.input);
-    song.nodes.push(bus, lp, padBus, out, ...verb.nodes, ...echo.nodes);
+    // The source has a bus of its own, silent until `setCarrier()` opens it. It passes the lowpass
+    // of the world by, so the beacon stays hard and far from the song, and it takes the same hall.
+    const srcBus = song.srcBus = ctx.createGain(); srcBus.gain.value = 0;
+    srcBus.connect(out); srcBus.connect(verb.input);
+    song.nodes.push(bus, lp, padBus, srcBus, out, ...verb.nodes, ...echo.nodes);
     const w = song.mood.wind, level = w.g * song.windK * 0.025;
     if (level > 0.001) song.nodes.push(...synth.noiseBed({ f: w.f * song.windPitch, q: w.q, type: w.low ? 'lowpass' : 'bandpass', level, lfo: w.lfo, out }));
     song.t0 = now + 0.05; song.cursor = song.t0;
+    this._applyCarrier(0.4); // the song takes the level the app set before it started
     this._startTimer();
   }
   _stopSong(song) {
