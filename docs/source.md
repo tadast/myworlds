@@ -9,8 +9,9 @@ the differences between them are the point of this file.
 ## What a source is
 
 Issue 34 puts one source on every world with a surface. A source transmits, the probe reads a
-bearing to it, and a landing in its cell shows it. The first kind of source is a wreck: an older
-survey probe that came down, worked, failed, and stopped. The wreck holds a log of four entries.
+bearing to it, and a landing in its cell shows it. The first kind of source is a wreck: a small
+crewed survey ship that came down, worked, failed, and stopped. The wreck holds the log of that
+crew.
 
 The plan and the terms are in `docs/issues/34-the-carrier.md`. Use the words of that table:
 carrier, source, bearing, fix, wedge, wreck, motif, log.
@@ -19,26 +20,35 @@ carrier, source, bearing, fix, wedge, wreck, motif, log.
 
 | Stage | File | Runs in | Output |
 |---|---|---|---|
-| 0. The lore engine | `lore.js` | Web Worker, page | `self.Lore`: tags, gated pools, story slots |
+| 0. The lore engine | `lore.js` | Web Worker, page | `self.Lore`: tags, gated pools, weights |
 | 1. Place the source | `worker.js`, `makeSource()` | Web Worker | `world.source = { kind, dir }` |
 | 2. Write the log | `source-lore.js` | Web Worker | `world.source.log` |
-| 3. Show the log | slice 3 of issue 34 | Main thread | the card of the wreck |
+| 3. Show the log | `ground-source.js`, `SourceInspector` | Main thread | the card of the wreck |
 
 `world.source.log` rides back with the world, as plain data:
 
 ```js
 {
-  probe: 'Tessera 5',          // the name of the old probe
-  days: 142,                   // the day of the last entry, counted in turns of this planet
-  species: 'Tendril whale',    // the animal the survey names, or null
+  probe: 'Lantern 10',                  // the name of the ship
+  days: 179,                            // the day of the last entry, in turns of this planet
+  species: 'Rime beaked strider',       // the animal the log names, or null
+  keeper: 'Bo',                         // the person who writes the log
+  crew: [{ name: 'Bo', role: 'navigator' }, ...],     // 3 to 5 people, one role each
+  lost: { name: 'Suri', how: 'gone', day: 173 },      // the person a thread took out, or null
   entries: [
-    { slot: 'arrival', title: 'Arrival',    day: 1,   text: '…' },
-    { slot: 'survey',  title: 'Survey',     day: 9,   text: '…' },
-    { slot: 'trouble', title: 'Trouble',    day: 96,  text: '…' },
-    { slot: 'last',    title: 'Last entry', day: 142, text: '…' },
+    { slot: 'landing',        title: 'Landing',    day: 1,   text: '…' },
+    { slot: 'world.cold',     title: '',           day: 12,  text: '…' },
+    { slot: 'fauna.walkbig',  title: '',           day: 32,  text: '…' },
+    …
+    { slot: 'end.ride',       title: 'Last entry', day: 179, text: '…' },
   ],
 }
 ```
+
+A log holds 8 to 20 entries. `slot` names the thread the entry came from, or the act: `landing`
+for the first entry and `end.<kind>` for the last one. A middle entry carries no title, and the
+card then shows the day alone. `lost` is the one field the card does not read; the audit reads it,
+to prove that no entry after that day names that person.
 
 The page must not show any of this before the reader finds the wreck. The log stands nowhere else
 on the world: no other field of `world` holds the text.
@@ -62,28 +72,200 @@ proves it: the hashes of `heightMap`, `flora`, and `fauna` must stay equal to th
 The place of the source, `world.source.dir`, comes from `makeRng(seed + '|source')`, which is a
 different stream. The motif of the source takes a third one in `music.js`. The three never mix.
 
-## The four slots
+## The shape of a log
 
-| Slot | Holds |
+A log is a story, and it has three parts.
+
+| Part | Entries | Holds |
+|---|---|---|
+| The landing | 1 | how the ship came down, and one real fact of this world |
+| The beats | 6 to 18 | the threads, interleaved, rising in force |
+| The ending | 1 | the last entry. Its kind follows what the threads did |
+
+### A thread, a beat, a wording
+
+A thread is an ordered list of 3 to 6 beats that intensify. **A beat is a list of three wordings
+or more**, and the writer takes one of them. That is what keeps two wrecks from reading alike: the
+busiest beats carry five or six wordings, and a wording is a different small event with a different
+detail, not the same sentence with one word changed. The audit fails a beat under three wordings.
+
+`writeLog()` takes one world thread, one or two crew threads, and the fauna thread when the world
+carries beasts. There are three kinds.
+
+| Kind | Gate | Holds |
+|---|---|---|
+| `world` | tags, and a **salience** | a real fact of the world |
+| `crew` | none | the people. It also carries a **coda** and a **lead** |
+| `fauna` | `beasts` and a **motion tag** | the one species the log names |
+
+A thread may run a prefix of its beats, never fewer than three, so a short log is a shorter subplot
+and not a cut one. The trim takes one beat at a time off whichever thread is longest. It used to
+shorten from the back, which always cut the crew threads, because they are chosen last, and the
+ending then stopped following them. A thread that retires a person is never shortened, because the
+beat that takes the person out is its last.
+
+### Salience: the world thread is the loudest true fact
+
+Every world thread carries `sal(env)`, which reads the numbers of the planet and returns roughly 0
+for a fact a crew would barely mention and 3 or more for one that decides the mission. The weight
+is `(0.15 + sal)` cubed, so the loudest fact wins nearly every time and the quieter facts still
+come up.
+
+```
+cold        (5 - tempC) / 25          at -72 °C this is 3.1, and nothing on that world beats it
+heat        (tempC - 32) / 30         at 437 °C it is 13
+heavy       (gravity - 1.35) / 0.45
+longnight   (dayHours - 36) / 22
+sea         (1 - land) * 1.7          an ocean world talks about the ocean
+volcano     2.1, geysers 1.9, storms 2.0, polarnight 2.7, dry 2.3
+mild        0.35, evenday 0.3, moon 0.5
+```
+
+**A mild thread is for a mild world only.** An easy day and a pleasant sea sit near 0.3, so they
+only win where nothing is loud. Before this rule a world of -72 °C opened on "the day is near
+enough to home that we sleep", which is true and is not what that crew would write about.
+
+### The land is five different facts
+
+`hasocean` alone does not say that a crew can walk to the water, and on a lava world it is not
+water at all. The five land threads partition the whole grid, so no log ever walks east to a sea
+that is not there.
+
+| Thread | Gate | The fact |
+|---|---|---|
+| `coast` | `mostlysea waterliquid` | the wreck stands on an island. The water line is a walk away |
+| `sea` | `hasocean waterliquid !mostlyland !lava !ice` | an ocean world. The wind and the salt reach the site |
+| `lavasea` | `hasocean lava` | the sea is molten rock. Nobody walks to it and nobody drinks it |
+| `icesea` | `hasocean ice` | the sea is a solid plain, and the crew drives a sledge on it |
+| `inland` | `mostlyland !dryworld` | there is water on this world and none of it is here |
+| `dry` | `dryworld` | no sea at all. The tank is the whole supply |
+
+A line that names a direction and a distance to the water sits under `mostlysea`, where the claim
+is safe. Everywhere else the text says that the sea is on the map and says no more.
+
+### How the animal moves
+
+This is the rule the first build did not have, and a 40 metre whale of the air stood at the foot of
+a mast. `motionOf(G)` reads `G.cls`, `G.loco`, and `G.plan` and returns one tag. Every fauna thread
+and every reckless ending is gated on it.
+
+| Tag | Genome | What the log may say |
+|---|---|---|
+| `mwalk` | land: monopod, biped, tripod, quad, hexapod | it walks a road past the mast, a person walks beside it, a flank, a back, a ride |
+| `mcrawl` | serpent | no legs. One clean line in the dust, a coil, the warm plate |
+| `mroll` | roller | it folds into its own hull and throws itself. It never walks |
+| `mflow` | flow | it holds no shape. It pours down a slope and gathers at the foot |
+| `msling` | slinger | a cord thrown at the standing growth, and a swing off the hold |
+| `mfly` | wings | it flies, it circles, it lands when it chooses, it comes to a lamp |
+| `mswarm` | wings, plan swarm | a wheel of shards, and no single body to name |
+| `mdrift` | sac | a bladder of warm gas. It never lands. The wind decides |
+| `mcruise` | fins | a whale of the air. It cruises, it dips, it sings, it never comes down |
+| `mdig` | plough | it travels a hand deep and pushes a mound. A raised line across the circle |
+| `manchor` | arch, periscope | it does not travel. The body stays under the ground |
+
+**There is no swimmer.** `LOCO` in `species.js` has no aquatic class: `fins` is `cls: 'air'`, and
+the `sea` niche reads "Open ocean air". A "sea whale" of this generator swims through air over the
+water, so it takes `mcruise` and never a boat. A reckless ending therefore rides a walker, takes a
+line from a flyer, walks under a cruiser, digs beside a burrower, or sits out a turn beside an
+anchored one. It never rows out to anything.
+
+`MOTION_LEXICON` in the audit fails a fauna line that claims a movement the body does not make. It
+is **subject scoped**: a fauna entry carries the crew as well as the animal, and the crew walks and
+stands on any world, so the rules only fire when the animal is the subject.
+
+### The name a crew gives one animal
+
+A fauna thread has one naming beat, and **every wording of that beat gives the name**. Before that
+rule one wording in three introduced `{pet}` and the others used it, so a log could print a name
+the reader had never met. The audit finds the first beat any wording of which holds `{pet}` and
+fails any wording of it that does not name the animal, and any earlier wording that uses `{pet}`.
+
+### How the beats interleave
+
+Every beat carries the force of its place in its thread: beat `i` of `n` takes `(i + 1) / n`, plus
+a small jitter. `writeLog()` sorts every beat of every thread by that force. So the whole log rises
+from the landing to the ending, and a thread never runs out of order, because the jitter is smaller
+than the step between two beats of one thread.
+
+### The days
+
+The days are turns of this planet, counted from the landing. The landing is day 1. `layDays()` lays
+the gaps on a hump: short at the start, widest in the middle of the mission, short again at the
+end. The last days of the story therefore crowd together, which a reader feels as speed. Every day
+is a whole number and the days rise strictly. The card shows `days`, the day of the last entry.
+
+A mission runs from 42 to 240 turns, so no beat may claim a span longer than the shortest mission.
+The audit fails "a hundred days", "a year", and the rest, because a log of 65 days would otherwise
+state that it had heard nothing for a hundred.
+
+### The crew
+
+`rollCrew()` draws 3 to 5 people from `NAMES`, which holds 74 short given names from many
+languages. A log never gives a surname. Each person takes one role from `ROLES`, and a pilot is
+always aboard. The first name on the list is the keeper, who writes the log as "I" and "we". The
+other people are the cast of the threads: `{one}` and `{two}` inside a thread always name the same
+two people, and `{onejob}` and `{twojob}` are their jobs.
+
+**No pronoun stands for a member of the crew.** The log says the name, or the job: "{one}", "the
+{onejob}", "our {twojob}". A pronoun would need a gender, and the names come from many languages,
+so the log would have to invent one for every name. Naming the job is also what keeps three
+sentences in a row from reading "Gil. Gil. Gil.": a wording alternates between the two.
+
+**A dead or absent person never acts again.** A thread that retires a person carries `retires`, and
+the beat that does it carries `out`. `writeLog()` gives that thread a person of its own, so no
+other thread and no ending can name that person. A log takes at most one retiring thread, and only
+when the crew holds three people besides the keeper.
+
+### The ending
+
+`ENDINGS` holds 12 kinds, and every kind holds three wordings or more.
+
+| Kind | Holds |
 |---|---|
-| `arrival` | how the probe came down, and on what ground |
-| `survey` | what it found: one species of this world and one fact of that genome |
-| `trouble` | what went wrong. It is always a real fact of the world |
-| `last` | the last entry. It closes the log |
+| `doom` | the known doom, faced calmly: the power, the air, the food, the cold, the heat, the night |
+| `ride` | the reckless plan: ride the animal. `mwalk` and 3 metres or more |
+| `catch` | the reckless plan: take hold of one. `mwalk` under 3 metres, or `mdig`, `manchor`, `mcrawl`, `mroll`, `mflow`, `msling` |
+| `follow` | the reckless plan: follow it to where it lives. `mfly`, `mcruise`, `mswarm`, `mdrift` |
+| `walk` | the walk out on foot, toward the sea, the vents, the geysers, or the north |
+| `launch` | the launch. The reader knows how it went, because the wreck is here |
+| `split` | some stay and some go |
+| `cut` | the entry that stops in the middle of a sentence |
+| `second` | the entry by a second hand, after the keeper dies |
+| `stay` | the quiet one: the crew decides to stay and live here |
+| `message` | the message to whoever finds the log |
+| `joke` | the last joke |
 
-Every slot is core: the card shows four entries and the writer fills all four.
+**The ending follows the threads.** A thread that points at one kind of ending carries `lead`, and
+`leadTags()` turns it into a tag the endings are gated on. A quarrel gives `leadsplit`, a food count
+and a cold world give `leaddoom`, a hurt keeper gives `leadsecond`, a big walker gives `leadride`.
+A lead-gated ending carries a weight of 2 to 6, so it outranks a line that fits any world. A thread
+that lost more than one beat to the trim never earns its lead: the log never reached the beat that
+would have earned it.
+
+Two more tags steer the roll. `harsh` marks a world that kills a crew on its own — lava, ice,
+frozen, molten, searing, crushing gravity, a polar night — and the calm doom belongs there. And the
+reckless endings are banned by `!leadsecond`: a keeper who cannot hold a tool does not lead an
+expedition.
+
+An ending that names a motion tag is the last beat of the fauna thread in all but name, so it takes
+the people of that thread. Every other ending takes the first two people who are still here.
+
+**The coda.** A crew thread that really ran contributes one sentence, which the ending adds when
+there is room for it inside five sentences. So the last entry is about these people and not only
+about the world. A `cut` ending takes no coda, because it stops in the middle of a sentence.
 
 ## The gates
 
-Every line names the tags it needs and the tags it forbids, in the gate syntax of `lore.js`. A
-line reads three tag sources at once:
+Every thread and every line names the tags it needs and the tags it forbids, in the gate syntax of
+`lore.js`. A gate reads five tag sources at once:
 
 | Source | Examples | Set by |
 |---|---|---|
 | the world | `frozen`, `crushgrav`, `longday`, `rainy`, `tides`, `volcanic`, `ringed` | `Lore.makeEnv()` |
 | the axis | `upright`, `tilted`, `sidetilt`, `retrograde` | `sourceTags()` |
-| the site | `polarnight` | `sourceTags()` |
-| the life | `beasts` | `sourceTags()` |
+| the site | `polarnight`, `harsh` | `sourceTags()` |
+| the life | `beasts`, and one of the eleven motion tags | `sourceTags()`, `motionOf()` |
+| the story | `leaddoom`, `leadride`, `leadsecond`, … | `leadTags()`, per log |
 
 `Lore.makeEnv()` does not read the lean of the axis, so `sourceTags()` adds it. The lean the
 climate feels is the smaller of the obliquity and its supplement: a world turned past 135 degrees
@@ -108,26 +290,17 @@ latitude comes from `world.source.dir`; `sourceLatDeg()` turns that direction in
 `polarnight` until the lean passes 15 degrees. `tilted` starts at a lean of 20, so the two tags are
 not the same set and the sweep has to vary both the lean and the latitude.
 
-Every line that claims a sun that does not rise, a sun that runs a flat circle, or a light that
-does not come back is gated on `polarnight`. A line about a strong season that claims no polar
-night keeps `tilted` or `sidetilt`. Two lines say why the season is strong and claim nothing about
-the sunrise: the `sidetilt` pair, which states that a world leaning past 54 degrees gives its poles
-more light over a year than its equator. That is the same limit `makeStats()` uses.
+### Two tags the log cannot reach
 
-Three rules hold the text honest.
+A source stands on a world with a surface, and two tags never appear there.
 
-1. **The trouble is a fact of the world.** A gated trouble names a fault the world carries: the
-   gravity, the cold, the heat, the length of the night, the lean of the axis and its polar night,
-   the activity, a tide that a moon raises, the rain, or the sea. A trouble with no gate still
-   names a fact, through a token that carries the real number of this planet: `{temp}`, `{grav}`,
-   `{day}`, or `{night}`. The seven plain lines take a weight under 1, so a world with a named
-   fault usually reports that fault.
-2. **The survey names a real animal and a real fact of its genome.** Every survey line is gated
-   on `beasts` or on `!beasts`. A line with an `if` reads the genome the way the fauna relations
-   read it, so the log and the fauna card cannot contradict each other. A world with no species
-   gets the `!beasts` lines, which report the absence and claim nothing more.
-3. **A line that names the animal is gated on `beasts`.** The writer fills the animal tokens only
-   when the world really carries a species, and the audit holds every such line to that gate.
+- **`shortday`.** `rollPlanet()` draws a day of 14 to 60 hours for a world with a surface, and
+  `shortday` starts under 12 hours. Only a gas giant turns that fast, and a gas giant takes no
+  source.
+- **`noflora`.** Every type with a surface grows at least one plant kind, so `world.env.floraTags`
+  is never empty. A thread gated on `noflora` is dead text, and the audit reports it.
+
+### The star
 
 The star of a world is **not** available here. `rollStar()` lives in `star.js`, which is a module
 of the main thread, and `app.js` puts `world.star` on the world after the worker replies. A
@@ -142,72 +315,143 @@ list. `BEAST_TOKENS` lists the ones that name the animal.
 | Token | Holds |
 |---|---|
 | `{world}` | the designation of the planet |
-| `{probe}` | the name of the old probe |
+| `{probe}` | the name of the ship |
 | `{lat}` | the latitude of the source, in words. Under `EQUATOR_DEG`, 3 degrees, the word is "the equator" |
 | `{day}`, `{night}` | the turn of the planet, and half of it |
 | `{temp}`, `{grav}`, `{tilt}` | the temperature, the gravity, and the lean of the axis |
 | `{days}` | the day of this entry |
+| `{since}` | the day the thread this entry belongs to first spoke |
 | `{moon}`, `{moons}` | the first moon, and the count of them |
 | `{plant}`, `{plants}` | the plant word of this world |
-| `{other}`, `{Other}`, `{others}`, `{Others}` | the animal the survey names |
+| `{one}`, `{two}` | the two people of this thread. Never the keeper |
+| `{onejob}`, `{twojob}` | their jobs, bare, so a line can write "our {onejob}" |
+| `{keeper}`, `{keeperjob}` | the person who keeps the log, and their job |
+| `{crew}` | the count of the crew, in words |
+| `{few}`, `{many}` | two counts of days, rolled once per log |
+| `{count}` | a count of animals, rolled once per log, in words |
+| `{other}`, `{Other}`, `{others}`, `{Others}` | the animal the log names |
 | `{size}`, `{n}`, `{diet}` | the size text, the group count, and the diet of that animal |
+| `{pet}` | the name the crew gives one animal |
 
 `{size}` and `{diet}` come straight off `G.lore`, so the log states the numbers the fauna card
-states. `{tilt}` comes from `world.env.obliquityDeg` and **not** from the result of
-`Lore.makeEnv()`, which keeps only the numbers its tags come from and drops the lean of the axis.
-A token that reads a dropped field prints "an unmeasured angle".
+states. **`{size}` already carries its unit and often its place** — "3.6 m, mostly under the sand",
+"2.9 m across" — so a line that adds one repeats it. `{tilt}` comes from `world.env.obliquityDeg`
+and **not** from the result of `Lore.makeEnv()`, which keeps only the numbers its tags come from and
+drops the lean of the axis. A token that reads a dropped field prints "an unmeasured angle".
 
-## The day count
-
-The days are turns of this planet, counted from the landing. The arrival is day 1, and `DAY_GAP`
-sets the three gaps that follow. The gaps rise, so the log reads as a mission and not as one week.
-The card shows `days`, the day of the last entry.
+**The first beat of a thread may not look back.** It is the day the reader meets that thread, so
+`{since}`, "in all this time", "we have never", and "every day since" are all false there. The audit
+fails them.
 
 ## The voice
 
-The log is the record of an older survey probe, or of its crew of machines. It is terse, it is in
-the first person plural or in the voice of an instrument, and the last entry ends the story without
-melodrama. The prose is normal literary English, because it is quoted material, as the species
-lore is. Comments and documents stay in Simplified Technical English.
+The log is the record of a small crewed survey ship. The prose is normal literary English, because
+it is quoted material, as the species lore is. Comments and documents stay in Simplified Technical
+English. Inside the log, these rules hold:
+
+1. **Short declarative sentences.** Most are under 12 words and none is over 20. Plain concrete
+   words a five year old can read aloud. Numbers are good: days, metres, degrees, counts.
+2. **No metaphor and no simile.** No "like a", no "as if", no "as … as", no "seemed", and nothing
+   the planet or the machine does on purpose. Say what happened. Let the facts carry the feeling,
+   and do not name the feeling unless a person says it aloud.
+3. **The devices that are allowed** are repetition, "and" chains, understatement, a person's exact
+   words reported plainly, the thing left unsaid, and the small physical detail.
+4. **Safe for a five year old and true for a ninety year old.** Death may happen and is stated in
+   one plain sentence. No gore, no cruelty to an animal, and nothing frightening in detail. Sad is
+   fine. Wonder is required.
+5. **One entry holds 1 to 5 sentences.** The whole log reads in under two minutes.
+6. **No pronoun for a member of the crew.** See "The crew" above.
 
 Do not name a place of the Earth or a species of the Earth. `PROBE_NAME` holds plain English nouns
-and a mark number, and it must stay that way. `docs/flora.md` states the same rule for the plants.
+and a mark number, `NAMES` holds given names only, and `PET_NAME` holds plain words. No word of
+`PET_NAME` is also a given name, so the audit can tell a crew name from an animal name.
+
+## The card
+
+`SourceInspector` in `ground-source.js` draws the card. The name of the ship takes `.cname`, the
+day count takes `.clatin`, the crew takes `.ccrew`, and the entries take `.clog`.
+
+A log may hold twenty entries, which is longer than a phone screen. So `.clog` scrolls inside the
+card and nothing else does: `#creature[data-subject="source"] .ccard` takes `overflow: hidden` and
+one grid row of `minmax(0, 1fr)`, and `.ctext` becomes a column that may shrink. The crew and the
+close button therefore stay on screen at 375 by 812 with twenty entries. A grid row is `auto` by
+default and grows to its content whatever the max height of the card says, which is why the row has
+to be told that it may shrink.
 
 ## The audit
 
-`node tools/lore-audit/audit.mjs` sweeps the four slots. The source pass runs five checks:
+`node tools/lore-audit/audit.mjs` sweeps the landing pool, the threads, and the endings. The source
+pass runs nine checks.
 
-1. **Coverage.** No slot is empty, for any world the source can stand on and for any animal.
-2. **Reachability**, in two halves. A line may carry a gate on the world and a test on the genome
+1. **Coverage.** Every world reaches the landing pool, at least three world threads, at least one
+   crew thread, at least one fauna thread for **every one of the eleven ways of moving** when it
+   carries beasts, and at least four endings.
+2. **Reachability**, in two halves. A thread may carry a gate on the world and a test on the genome
    at once, and the two are independent, so the sweep asks them separately: one world in the sweep
    must pass the gate, and one genome shape must pass the test.
 3. **The lexicon.** A word that claims a fact may only appear where the world has that fact. Issue
-   34 adds five rules: `aurora` needs `auroral`, `geyser` needs `geysers`, `lightning` needs
-   `stormy`, `the ring overhead` needs `ringed`, and one rule for the sun that does not rise. That
-   last rule names every phrasing the log gates on `polarnight` — "polar night", "stop rising",
-   "will not come back up", "under the horizon for", "flat circle", "round the horizon", and "not
-   come back inside" — so a new line cannot state the claim behind a weaker gate. Do not widen it
-   to "the long dark": the fauna pool already holds that phrase for the night of a long day.
-4. **The tokens.** A line may only use a token the writer fills, and a line that names the animal
-   must be gated on `beasts`.
-5. **Variety.** Every slot needs at least six lines that fit any world it can reach, and every
-   fault of the trouble needs at least two lines.
+   34 adds six rules: `aurora` needs `auroral`, `geyser` needs `geysers`, `lightning` needs
+   `stormy`, `the ring overhead` needs `ringed`, `the sea` and `the coast` need `hasocean`, and one
+   rule for the sun that does not rise. That last rule names every phrasing the log gates on
+   `polarnight`. Do not widen it to "the long dark": the fauna pool already holds that phrase.
+4. **The motion lexicon.** A fauna line may only claim a movement the animal really makes, and a
+   reckless ending may only propose a plan the animal allows. The rules are subject scoped, so the
+   crew may still walk and stand in a fauna entry. A denial is honest anywhere: "It never walks" is
+   a true line about a roller, and the rule steps over a `not` or a `never` on purpose.
+5. **The tokens.** A line may only use a token the writer fills, and a line that names the animal
+   must sit under a gate on `beasts`.
+6. **The style.** No simile, no hedge, no sentence over 20 words, and no entry over 5 sentences.
+7. **The state.** A thread of 3 to 6 beats. A `retires` thread must carry an `out` beat, and no beat
+   after it and no coda may name `{one}`. A first beat may not look back, with `{since}` or with a
+   phrase. A beat may not claim a span longer than the shortest mission. The naming beat of a fauna
+   thread must give the name in every one of its wordings.
+8. **Salience.** Every world thread must carry `sal()`, or the loudest fact of a world can lose.
+9. **Variety.** Three wordings per beat or more, no two wordings alike, no sentence in two pools,
+   ten ending kinds, three wordings per ending kind, six threads of each kind, 60 given names.
 
-Two facts of the sweep live in the audit:
+Four facts of the sweep live in the audit:
 
 - `SOURCE_SKY_TAGS` collapses the 11,616 worlds to the skies a source gate can tell apart, the way
   `FLORA_SKY_TAGS` does for the plants. A new gate on a new tag widens the sweep on its own.
-- `SOURCE_TILT` holds seven leans, covering every class `rollAxis()` draws: damped, ordered,
-  tipped, and turned. 17 degrees is in the list because a source at 79 degrees carries
-  `polarnight` at that lean while `tilted` only starts at 20, so the two tags must be swept apart.
-- `SOURCE_LATS` holds five latitudes of the source, 0 to 79 degrees. It stops at 79 because
-  `makeSource()` keeps the source inside 80. The sweep runs every world through every lean, every
-  latitude, and both states of `beasts`.
+- `SOURCE_TILT` holds seven leans, covering every class `rollAxis()` draws, and `SOURCE_LATS` holds
+  five latitudes of the source, 0 to 79 degrees. 17 degrees is in the lean list because a source at
+  79 degrees carries `polarnight` at that lean while `tilted` only starts at 20.
+- `SIZES` holds three body sizes, one under a metre and one over six, and `SOURCE_COVER` keys the
+  genome shapes by the way they move, so every fauna gate is swept against every motion, every
+  sociality, and both sides of the size limit.
+- `LEAD_SETS` holds three sets of lead tags: none of them, all of them, and all but one, for every
+  lead some gate bans. Without the third set a line gated on `!leadsecond leadride` would look
+  unreachable, because the sweep would never hold one lead without the other.
 
-`node tools/lore-audit/audit.mjs --seeds 40` runs real worlds through `generate()`. It reads the
-log of every source and checks that the four slots are there in order, that no entry is empty, that
-no token is left unfilled, that no entry claims a fact the world does not have, and that the
-species the survey names is a species of that world.
+### The consistency check
+
+`node tools/lore-audit/audit.mjs --seeds 200` runs 200 real worlds through `generate()` and reads
+the log of every source. It checks that:
+
+- the entry count lies between 8 and 20, the first entry is the landing on day 1, and the last one
+  is an ending kind;
+- the days rise strictly, and `log.days` is the day of the last entry;
+- the crew holds 3 to 5 people, the names are distinct, the roles are distinct, and the keeper is
+  one of them;
+- every given name in an entry belongs to the crew, once the ship, the moons, the species, and the
+  animal names are taken out of the text;
+- no entry after `log.lost.day` names the person who died or left;
+- no entry leaves a token unfilled, claims a fact the world does not have, or breaks the style lint
+  on the filled text;
+- the species the log names is a species of that world, and the genome test of the fauna thread and
+  of the ending is true of that animal.
+
+It then reports four spreads over the 200 worlds: the ending kinds, the threads, the ways of moving
+with one sample line each, and the repetition. Both of the repetition numbers matter:
+
+- **the share of logs that hold the commonest sentence.** Under 8 per cent.
+- **the count of neighbour pairs in seed order that share any sentence.** This one cannot be driven
+  to zero, because two wrecks in a row may honestly run the same thread on the same kind of world.
+  Report what it reaches and widen the busiest beats when it climbs.
+
+The motion lexicon does not run again here. The pool sweep already reads every wording against
+every way of moving, which is complete, and the filled text has lost the tokens the subject-scoped
+rules read.
 
 ## A tool that loads the worker by hand
 

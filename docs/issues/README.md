@@ -20,7 +20,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `species.js` | Classic script. Rolls two to four genomes per world with lore. No three.js. |
 | `flora-lore.js` | Classic script. The plant vocabulary. Writes the lore of every plant kind of a patch. No three.js. See `docs/flora.md`. |
-| `source-lore.js` | Classic script. The vocabulary of the wreck. Writes the four entries of `world.source.log`. No three.js. See `docs/source.md`. |
+| `source-lore.js` | Classic script. The vocabulary of the wreck. Writes the crew, the threads, and the 8 to 20 entries of `world.source.log`. Every world thread carries a salience and every fauna thread a way of moving. No three.js. See `docs/source.md`. |
 | `fauna.js` | Creature geometry from a genome, rig shader, `makeMover`/`stepMover` steering, the inspector card. |
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |

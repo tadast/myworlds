@@ -81,12 +81,15 @@
       <button type="button" class="cclose" aria-label="Close">×</button>
       <!-- One card, three subjects. A WebGLRenderer owns the canvas it draws to, so the animal
            preview, the plant preview, and the wreck of issue 34 keep one canvas each and the card
-           shows one of them. The log of the wreck takes .clog; the CSS hides the blocks the open
-           subject does not use, by the data-subject attribute app.js sets. -->
+           shows one of them. The crew of the wreck takes .ccrew and the log takes .clog; the CSS
+           hides the blocks the open subject does not use, by the data-subject attribute app.js
+           sets. The log may hold twenty entries, so .clog scrolls inside the card and the crew and
+           the close button stay where they are. -->
       <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas><canvas id="scv" hidden></canvas></div>
       <div class="ctext">
         <div class="cname"></div>
         <div class="clatin"></div>
+        <div class="ccrew"></div>
         <dl class="ctags"></dl>
         <p class="cstory"></p>
         <div class="clog"></div>

@@ -320,6 +320,7 @@ export class SourceInspector {
     this.card = card; this.canvas = canvas;
     this.nameEl = card.querySelector('.cname');
     this.latinEl = card.querySelector('.clatin');
+    this.crewEl = card.querySelector('.ccrew');
     this.logEl = card.querySelector('.clog');
     this.renderer = null; this.open = false;
     this.clock = new THREE.Clock();
@@ -386,10 +387,18 @@ export class SourceInspector {
     this.nameEl.textContent = log && log.probe ? log.probe : 'Unknown probe';
     this.latinEl.textContent = log && log.days
       ? `Survey wreck · ${log.days} days of log` : 'Survey wreck';
+    // The crew stands under the name of the ship, above the log, and it does not scroll with the
+    // entries. The person who kept the log is marked, because the log is written in that voice.
+    const crew = (log && log.crew) || [];
+    this.crewEl.innerHTML = crew.length
+      ? crew.map((c) => `<span${c.name === log.keeper ? ' class="ckeeper"' : ''}>${esc(c.name)}<i>${esc(c.role)}</i></span>`).join('')
+      : '';
+    // The log itself. A middle entry carries no title, and the header is then the day alone.
     const entries = (log && log.entries) || [];
     this.logEl.innerHTML = entries.length
-      ? entries.map((e) => `<div class="clog-entry"><h3>Day ${e.day} · ${esc(e.title)}</h3><p>${esc(e.text)}</p></div>`).join('')
+      ? entries.map((e) => `<div class="clog-entry"><h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p></div>`).join('')
       : '<div class="clog-entry"><p>The recorder is dead. Nothing can be read from it.</p></div>';
+    this.logEl.scrollTop = 0;
     this.card.hidden = false;
     requestAnimationFrame(() => this.card.classList.add('show'));
     if (!this.open) { this.open = true; this.clock.start(); this.loop(); }

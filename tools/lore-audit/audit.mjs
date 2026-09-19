@@ -114,6 +114,10 @@ const LEXICON = [
   [/\bgeysers?\b/i, 'geysers'],
   [/\blightning\b/i, 'stormy'],
   [/\bthe ring overhead\b/i, 'ringed'],
+  // A sea. The log of the source walks to one, watches a tide in one, and tastes the salt of one,
+  // so the word has to mean that this world really carries an ocean. `hasocean` says nothing about
+  // the state of that ocean, which is why a line about a liquid sea also takes `waterliquid`.
+  [/\bthe sea\b|\bthe coast\b/i, 'hasocean'],
   // A sun that does not rise. The lean of the axis is not enough on its own: the claim also needs
   // the latitude of the source, which is what `polarnight` carries. Every phrasing the log gates
   // on that tag is named here, so a new line cannot state the claim behind a weaker gate. The
@@ -440,14 +444,17 @@ function floraSkyTags() {
 // list is the same world to the log, whatever else it carries.
 function sourceSkyTags() {
   const out = new Set();
-  for (const list of Object.values(SourceLore.POOLS)) {
+  const eat = (list) => {
     for (const e of list) {
       if (!e.tags) continue;
       const g = Lore.parseGate(e.tags);
       for (const any of g.need) for (const t of any) out.add(t);
       for (const t of g.ban) out.add(t);
     }
-  }
+  };
+  eat(SourceLore.ARRIVAL);
+  eat(SourceLore.ENDINGS);
+  for (const list of Object.values(SourceLore.THREADS)) eat(list);
   for (const [, gate] of LEXICON) {
     const g = Lore.parseGate(gate);
     for (const any of g.need) for (const t of any) out.add(t);
@@ -594,132 +601,381 @@ for (const [skyKey, { env, f }] of skies) {
 const floraRelIssues = auditFloraRelations();
 
 // ---------------------------------------------------------------- pass 7: the log of the source
-// Issue 34, slice 4. Four slots, written once per world in generate() and carried on
-// world.source.log. The checks are the ones the other passes run, plus two of its own.
+// Issue 34, slice 4, rewritten on 2026-09-19. A log is a landing, the beats of two to four threads
+// interleaved, and an ending, and it holds 8 to 20 entries. A beat is a list of wordings, and the
+// writer takes one of them. See docs/source.md.
 //
-// Reachability splits in two here, because a line may carry a gate on the world and a test on the
-// genome at the same time. The two are independent, so the sweep asks them separately: one world
-// in the sweep must pass the gate, and one genome shape must pass the test. A line that fails
-// either half is dead text.
-const SP = SourceLore.POOLS;
-const SOURCE_POOLS = [['ARRIVAL', SP.ARRIVAL], ['SURVEY', SP.SURVEY], ['TROUBLE', SP.TROUBLE], ['LAST', SP.LAST]];
-const SOURCE_TOKENS = SourceLore.TOKENS;
-const BEAST_TOKENS = SourceLore.BEAST_TOKENS;
-// Every genome shape a test of the survey can tell apart: the locomotion, the head, the one part
-// the tests read, and the sociality, plus the swarm, which is a plan and not a locomotion.
+// Nine checks run over the landing pool, the threads and the endings.
+//
+//  1. Coverage. Every world reaches the landing pool, at least THREAD_MIN world threads, at least
+//     one fauna thread for EVERY way of moving when it carries beasts, and at least END_MIN
+//     endings.
+//  2. Reachability, in two halves. A thread may carry a gate on the world and a test on the genome
+//     at once, and the two are independent, so the sweep asks them separately.
+//  3. The lexicon. A line may only claim a fact the world has.
+//  4. The motion lexicon. A fauna line may only claim a movement the animal really makes. This is
+//     the check that keeps a whale of the air from standing at the foot of the mast.
+//  5. The tokens. A line may only use a token the writer fills, and a line that names the animal
+//     must sit under a gate on `beasts`.
+//  6. The style. No simile, no hedge, no sentence over 20 words, and no entry over 5 sentences.
+//  7. The state. A thread that retires a person may not name that person again after it, and a
+//     first beat may never look back at a day the reader has not read.
+//  8. Salience. Every world thread must say how loud its fact is, from the numbers of the planet.
+//  9. Variety. Three wordings per beat or more, ten ending kinds, six threads of each kind.
+const SOURCE_TILT_ANCHOR = 0;   // (the sweep constants stand above, with the flora)
+
+// Every genome shape a test of the log can tell apart: the locomotion, the head, the one part the
+// tests read, and the sociality, plus the swarm, which is a plan and not a locomotion.
+//
+// The body size matters too, because a thread about riding an animal reads bodyMetres(). SIZES
+// holds one gene under a metre for every locomotion, one near the middle, and one well over three
+// metres, so a test on the size of the body is swept on both sides of every limit the log names.
+const SIZES = [0.12, 1.4, 6];
 function* sourceShapes() {
   for (const loco of LOCOS) {
     for (const head of HEADS) {
       for (const extra of ['', ...EXTRAS]) {
-        for (const social of SOC) yield genome(loco, head, extra, NICHES[0], null, social);
+        for (const social of SOC) {
+          for (const size of SIZES) yield { ...genome(loco, head, extra, NICHES[0], null, social), size };
+        }
       }
     }
   }
-  yield genome('wings', 'beak', '', NICHES[0], 'swarm', 'herd');
+  for (const size of SIZES) yield { ...genome('wings', 'beak', '', NICHES[0], 'swarm', 'herd'), size };
 }
-// The shapes the coverage sweep carries. Coverage asks whether a slot is empty, and no slot may
-// be empty for any animal, so one walker, one flyer, and one burrower under each sociality is the
-// population it has to hold for.
-const SOURCE_COVER = [];
-for (const social of SOC) for (const loco of Object.values(CLS_LOCO)) SOURCE_COVER.push(genome(loco, 'beak', '', NICHES[0], null, social));
-SOURCE_COVER.push(genome('wings', 'beak', '', NICHES[0], 'swarm', 'herd'));
-
+// The shapes the coverage sweep carries, keyed by the way the animal moves. Coverage asks whether
+// a pool is empty, and no pool may be empty for any animal, so every way of moving is swept under
+// every sociality and on both sides of the size limit.
+const ST = SourceLore.THREADS;
+const MOTION = SourceLore.MOTION;
+const LEADS = SourceLore.LEADS;
+const SOURCE_COVER = new Map();      // motion tag -> the genomes that move that way
+for (const G of sourceShapes()) {
+  const m = SourceLore.motionOf(G);
+  if (!SOURCE_COVER.has(m)) SOURCE_COVER.set(m, []);
+  const list = SOURCE_COVER.get(m);
+  // one per (sociality, size) pair is enough: no thread reads the head or the parts
+  const key = G.social.kind + '|' + G.size;
+  if (!list.some((x) => x.social.kind + '|' + x.size === key)) list.push(G);
+}
 const sourceIssues = [];
-const srcReach = new Map();      // line -> { gate, cond }: the two halves of reachability
-const seenSource = new Map();    // line -> the lexicon contexts it has been read in
-let sourceChecked = 0;
-for (const [, list] of SOURCE_POOLS) for (const e of list) srcReach.set(e, { gate: false, cond: false });
+for (const m of MOTION) {
+  if (!SOURCE_COVER.has(m)) sourceIssues.push(`SOURCE motion "${m}": no genome shape in the sweep moves that way`);
+}
 
-for (const [label, list] of SOURCE_POOLS) {
-  for (const e of list) {
-    if (!e.if) { srcReach.get(e).cond = true; continue; }
-    for (const G of sourceShapes()) {
-      let ok;
-      try { ok = e.if({ G, env: null, tags: new Set(), world: null }); }
-      catch (err) { sourceIssues.push(`SOURCE ${label}: if() threw — ${err.message}\n    ${e.t}`); ok = true; }
-      if (ok) { srcReach.get(e).cond = true; break; }
+const SOURCE_TOKENS = SourceLore.TOKENS;
+const BEAST_TOKENS = SourceLore.BEAST_TOKENS;
+const THREAD_LISTS = [['world', ST.world], ['crew', ST.crew], ['fauna', ST.fauna]];
+const THREAD_MIN = 3;        // world threads every world must reach
+const END_MIN = 4;           // endings every world must reach
+const WORDING_MIN = 3;       // wordings every beat must hold
+const SENTENCE_MAX = 20;     // words
+const ENTRY_SENTENCES = 5;
+
+// A beat is a list of wordings, or an object with `say` and the person it takes out of the story.
+const sayOf = (b) => (Array.isArray(b) ? b : b.say);
+
+// Every text of the log, with the pool entry it sits under. A wording inherits the gate of its
+// thread, because the thread is what the writer picks.
+function sourceTexts() {
+  const out = [];
+  for (const e of SourceLore.ARRIVAL) out.push({ label: 'ARRIVAL', e, t: e.t, kind: 'arrival' });
+  for (const [kind, list] of THREAD_LISTS) {
+    for (const th of list) {
+      th.beats.forEach((b, i) => {
+        sayOf(b).forEach((t, j) => out.push({ label: `${kind.toUpperCase()}.${th.key}[${i}.${j}]`, e: th, t, kind }));
+      });
+      for (const t of th.coda || []) out.push({ label: `${kind.toUpperCase()}.${th.key}.coda`, e: th, t, kind });
     }
+  }
+  for (const e of SourceLore.ENDINGS) out.push({ label: 'END.' + e.kind, e, t: e.t, kind: 'end' });
+  return out;
+}
+const SOURCE_TEXTS = sourceTexts();
+// Every pool entry the sweep has to reach: the landing lines, the threads, and the endings.
+const SOURCE_ENTRIES = [];
+for (const e of SourceLore.ARRIVAL) SOURCE_ENTRIES.push(['ARRIVAL', e]);
+for (const [kind, list] of THREAD_LISTS) for (const th of list) SOURCE_ENTRIES.push([kind.toUpperCase() + '.' + th.key, th]);
+for (const e of SourceLore.ENDINGS) SOURCE_ENTRIES.push(['END.' + e.kind, e]);
+
+// ---- the style lint
+// The voice of the log is short, plain, and literal. These five patterns are the ones a writer
+// reaches for without noticing, and every one of them breaks the voice.
+const STYLE_BAD = [
+  [/ like an? /i, 'a simile'],
+  [/ as if /i, 'a simile'],
+  [/ as though /i, 'a simile'],
+  [/\bseem(s|ed|ing)?\b/i, 'a hedge'],
+  [/ as \w+ as /i, 'a comparison'],
+];
+function sentencesOf(text) {
+  return String(text).split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+}
+function styleCheck(text) {
+  const bad = [];
+  for (const [re, what] of STYLE_BAD) if (re.test(text)) bad.push(`${what}: /${re.source}/`);
+  const sents = sentencesOf(text);
+  if (sents.length > ENTRY_SENTENCES) bad.push(`${sents.length} sentences, over ${ENTRY_SENTENCES}`);
+  for (const s of sents) {
+    const n = s.split(/\s+/).filter(Boolean).length;
+    if (n > SENTENCE_MAX) bad.push(`a sentence of ${n} words: ${s}`);
+  }
+  return bad;
+}
+
+// ---- the motion lexicon
+// A fauna line claims how the animal gets about, and the claim has to match the body. This is the
+// rule the first build did not have, and a 40 metre whale of the air stood at the foot of a mast.
+//
+// Every rule is SUBJECT SCOPED. A fauna entry carries the crew as well as the animal, and the crew
+// walks and stands on any world, so a bare /walk/ would fail every honest line. SUBJ below is the
+// animal, in the words a pool line uses, and a verb only counts when the animal is what does it.
+// The rules run over the fauna threads and over the endings that carry a motion gate, and never
+// over the crew or the world threads. They run on the POOL text, where the animal is still a
+// token; the --seeds pass does not repeat them, because the pool sweep already reads every wording
+// against every way of moving.
+const SUBJ = '(?:\\{Other\\}|\\{Others\\}|\\{pet\\}|[Ii]t|[Tt]hey|[Oo]ne of them|[Tt]he band|[Tt]he wheel|[Tt]hree of them|[Tt]wo of them)';
+// A denial is honest anywhere: "It never walks" is a true line about a roller. So the prefix
+// allows only the tenses, and a 'not' or a 'never' between the subject and the verb breaks the
+// match on purpose.
+const verb = (v) => new RegExp('\\b' + SUBJ + '\\s+(?:has |have |had )?(?:' + v + ')\\b');
+const MOTION_LEXICON = [
+  [verb('walks?|walked|walking'), 'mwalk'],
+  [/\bwalk(?:s|ed)? (?:past|beside|with) (?:the mast|the ship|us|one|them)\b|\bwalked beside one\b/i, 'mwalk'],
+  [/\bits legs\b|\bits feet\b|\bon (?:four |six |three |two )?legs\b|\bthe same road\b|\bthe road\b/i, 'mwalk|mcrawl|mdig'],
+  [/\bflanks?\b|\bshoulder\b|\bon the back of\b|\bthe back of one\b|\bharness\b|\brid(?:e|ing)\b/i, 'mwalk'],
+  [verb('stood|stands?|standing'), 'mwalk|mcrawl|manchor|mroll|mflow'],
+  [/\bunder the ship\b|\bagainst the hull\b|\bagainst the legs\b|\bat the foot of the mast\b/i, 'mwalk|mcrawl|mroll|mflow|msling|mdig|manchor'],
+  [verb('flies|flew|flying|circled|beats?'), 'mfly|mdrift|mcruise|mswarm'],
+  [/\bwings?\b|\bcrossed the sky\b|\bin the sky\b|\bover the ship\b|\bover the mast\b|\bon the wind\b/i, 'mfly|mdrift|mcruise|mswarm'],
+  [verb('landed|lands?'), 'mfly|mdrift|mcruise|mswarm'],
+  [/\bnever lands\b|\bdoes not land\b|\bnever comes down\b|\blanded on the\b/i, 'mfly|mdrift|mcruise|mswarm'],
+  [verb('hangs?|hung|drifts?|hovers?'), 'mdrift|mcruise|mfly|mswarm'],
+  [/\bburrows?\b|\bunder the ground\b|\bunder the surface\b|\bthe mound\b|\ba mound\b|\bthe raised line\b/i, 'mdig|manchor'],
+  [verb('comes? up|came up'), 'mdig|manchor'],
+  [/\bpours?\b|\bpoured\b|\bno shape\b/i, 'mflow'],
+  [verb('gathers?|gathered'), 'mflow|mroll'],
+  [verb('folds?|folded'), 'mroll'],
+  [/\bthrows itself\b|\bone long throw\b|\bbetween throws\b/i, 'mroll'],
+  [/\ba cord\b|\bthe cord\b/i, 'msling'],
+  [verb('swings?|swung'), 'msling'],
+  [/\bthe wheel\b|\bthe swarm\b/i, 'mswarm'],
+  [/\bthe coil\b|\bcoiled\b|\bno legs\b/i, 'mcrawl'],
+];
+// True when a gate of this line names a way of moving. Only such a line is about the animal.
+function namesMotion(e) {
+  const gt = Lore.parseGate(e.tags);
+  for (const any of gt.need) for (const t of any) if (MOTION.includes(t)) return true;
+  return false;
+}
+function motionCheck(text, tags) {
+  const bad = [];
+  for (const [re, gate] of MOTION_LEXICON) {
+    if (!re.test(text)) continue;
+    if (!Lore.matchTags(Lore.parseGate(gate), tags)) bad.push({ word: re.source, gate });
+  }
+  return bad;
+}
+
+// ---- a first beat may never look back
+// The first beat of a thread is the day the reader meets it, so "in all this time" is false there.
+const BACKREF = /\bin all this time\b|\bsince day\b|\bwe have never\b|\bhas never\b|\bhave never\b|\bnever once\b|\bevery day since\b|\bby now\b|\bas always\b|\bany more\b|\bagain\b|\bfor a month\b|\bfor a week\b|\bstill\b/i;
+
+// The lead tags are not facts of the planet. A log sets them from its own threads, so the sweep
+// carries three sets: none of them, all of them, and all but one, for every lead some gate BANS.
+// Without the third set a line gated on "!leadsecond leadride" looks unreachable, because the
+// sweep would never hold one lead without the other.
+const BANNED_LEADS = new Set();
+for (const [, e] of SOURCE_ENTRIES) {
+  for (const t of Lore.parseGate(e.tags).ban) if (t.startsWith('lead')) BANNED_LEADS.add(t.slice(4));
+}
+const LEAD_SETS = [[], LEADS, ...[...BANNED_LEADS].map((L) => LEADS.filter((x) => x !== L))];
+
+const srcReach = new Map();      // pool entry -> { gate, cond }: the two halves of reachability
+const seenSource = new Map();    // pool entry -> the lexicon contexts it has been read in
+let sourceChecked = 0;
+for (const [, e] of SOURCE_ENTRIES) srcReach.set(e, { gate: false, cond: false });
+for (const [label, e] of SOURCE_ENTRIES) {
+  if (!e.if) { srcReach.get(e).cond = true; continue; }
+  for (const G of sourceShapes()) {
+    let ok;
+    try { ok = e.if({ G, env: null, tags: new Set(), world: null }); }
+    catch (err) { sourceIssues.push(`SOURCE ${label}: if() threw — ${err.message}`); ok = true; }
+    if (ok) { srcReach.get(e).cond = true; break; }
   }
 }
 
 for (const [, sky] of sourceSkies) {
-  const { env, f, tags, beasts } = sky;
-  // The lexicon reads only the tags its own rules name, so one line is read once per such context.
-  let lexKey = '';
-  for (const t of LEX_TAGS) if (tags.has(t)) lexKey += t + ',';
-  const base = { env, tags, world: fakeWorld(f) };
-  // A world with no species gives the writer no genome, so the sweep gives the pools none either.
-  const ctxs = beasts ? SOURCE_COVER.map((G) => ({ ...base, G })) : [{ ...base, G: null }];
-  for (const [label, list] of SOURCE_POOLS) {
+  const { env, f, tags: skyTags, beasts } = sky;
+  // Every way of moving, and every lead a thread can set. Neither is a fact of the planet, so the
+  // sweep adds them here rather than widening the sky key by a factor of a hundred.
+  const motions = beasts ? MOTION : [null];
+  for (const motion of motions) {
+  for (const leadSet of LEAD_SETS) {
+    const tags = new Set(skyTags);
+    if (motion) tags.add(motion);
+    for (const lead of leadSet) tags.add('lead' + lead);
+    let lexKey = '';
+    for (const t of LEX_TAGS) if (tags.has(t)) lexKey += t + ',';
+    lexKey += '|' + (motion || '');
+    const base = { env, tags, world: fakeWorld(f) };
+    const ctxs = beasts ? SOURCE_COVER.get(motion).map((G) => ({ ...base, G })) : [{ ...base, G: null }];
     for (const ctx of ctxs) {
-      sourceChecked++;
-      if (!Lore.candidates(list, ctx).length) {
-        holes.push(`SOURCE ${label} — ${f.type} [${[...tags].join(' ')}]`);
-      }
+      sourceChecked += 4;
+      if (!Lore.candidates(SourceLore.ARRIVAL, ctx).length) holes.push(`SOURCE ARRIVAL — ${f.type} [${[...tags].join(' ')}]`);
+      const w = Lore.candidates(ST.world, ctx).length;
+      if (w < THREAD_MIN) holes.push(`SOURCE world threads: only ${w} — ${f.type} [${[...skyTags].join(' ')}]`);
+      if (!Lore.candidates(ST.crew, ctx).length) holes.push(`SOURCE crew threads — ${f.type}`);
+      const fa = Lore.candidates(ST.fauna, ctx).length;
+      if (beasts && !fa) holes.push(`SOURCE fauna threads — ${motion} ${ctx.G.social.kind} ${ctx.G.size} m — ${f.type}`);
+      if (!beasts && fa) holes.push(`SOURCE fauna thread reaches a world with no beasts — ${f.type}`);
+      const en = Lore.candidates(SourceLore.ENDINGS, ctx).length;
+      if (en < END_MIN) holes.push(`SOURCE endings: only ${en} — ${f.type} [${[...tags].join(' ')}]`);
     }
-    for (const e of list) {
+    for (const [, e] of SOURCE_ENTRIES) {
       if (e.tags && !Lore.matchTags(Lore.gateOf(e), tags)) continue;
       srcReach.get(e).gate = true;
       let seen = seenSource.get(e);
       if (!seen) { seen = new Set(); seenSource.set(e, seen); }
       if (seen.has(lexKey)) continue;
       seen.add(lexKey);
-      for (const bad of lexCheck(e.t, tags)) {
-        lexHits.push(`SOURCE ${label}: /${bad.word}/ needs "${bad.gate}" — ${f.type} [${[...tags].join(' ')}]\n    ${e.t}`);
+      for (const x of SOURCE_TEXTS) {
+        if (x.e !== e) continue;
+        for (const bad of lexCheck(x.t, tags)) {
+          lexHits.push(`SOURCE ${x.label}: /${bad.word}/ needs "${bad.gate}" — ${f.type} [${[...tags].join(' ')}]\n    ${x.t}`);
+        }
+        // The motion rules bind the fauna threads and the endings that name a way of moving.
+        if (x.kind !== 'fauna' && !(x.kind === 'end' && namesMotion(e))) continue;
+        for (const bad of motionCheck(x.t, tags)) {
+          lexHits.push(`SOURCE MOTION ${x.label}: /${bad.word}/ needs "${bad.gate}" — [${motion}]\n    ${x.t}`);
+        }
       }
+    }
+  }
+  }
+}
+
+// the tokens and the style of every text, which do not depend on the world
+for (const x of SOURCE_TEXTS) {
+  const toks = Lore.tokensIn(x.t);
+  for (const tok of toks) {
+    if (!SOURCE_TOKENS.includes(tok)) tokenHits.push(`SOURCE ${x.label}: uses {${tok}}, which the log does not fill\n    ${x.t}`);
+  }
+  // A line that names the animal may only reach a world that carries one.
+  if (toks.some((t) => BEAST_TOKENS.includes(t))) {
+    const need = Lore.parseGate(x.e.tags).need;
+    if (!need.some((any) => any.length === 1 && any[0] === 'beasts')) {
+      sourceIssues.push(`SOURCE ${x.label}: names the animal but is not gated on "beasts"\n    ${x.t}`);
+    }
+  }
+  for (const bad of styleCheck(x.t)) sourceIssues.push(`SOURCE ${x.label}: ${bad}\n    ${x.t}`);
+}
+for (const [label, e] of SOURCE_ENTRIES) {
+  const r = srcReach.get(e);
+  const what = e.beats ? 'thread' : 'line';
+  if (!r.gate) sourceIssues.push(`SOURCE ${label}: no world in the sweep passes the gate of this ${what} [${e.tags || ''}]`);
+  else if (!r.cond) sourceIssues.push(`SOURCE ${label}: no genome shape passes the if() of this ${what}`);
+}
+
+// ---- the shape of a thread, and the state it carries
+for (const [kind, list] of THREAD_LISTS) {
+  for (const th of list) {
+    const n = th.beats.length;
+    if (n < 3 || n > 6) sourceIssues.push(`SOURCE ${kind}.${th.key}: ${n} beats, outside 3 to 6`);
+    // Every beat needs enough wordings that two logs on the same thread do not read alike.
+    th.beats.forEach((b, i) => {
+      const say = sayOf(b);
+      if (!say || say.length < WORDING_MIN) {
+        sourceIssues.push(`SOURCE ${kind}.${th.key}[${i}]: only ${say ? say.length : 0} wordings, and ${WORDING_MIN} is the floor`);
+      }
+      if (say && new Set(say).size !== say.length) sourceIssues.push(`SOURCE ${kind}.${th.key}[${i}]: two wordings are the same sentence`);
+    });
+    // A world thread has to say how loud its fact is, or the loudest fact of a world loses.
+    if (kind === 'world' && typeof th.sal !== 'function') {
+      sourceIssues.push(`SOURCE world.${th.key}: no sal(), so it cannot win on the world it belongs to`);
+    }
+    // The name of an animal has to be given before it is used. The first beat any wording of
+    // which names {pet} is the naming beat, and EVERY wording of it must give the name, or a log
+    // that rolls one of the others prints a name the reader has never met.
+    let petAt = -1;
+    th.beats.forEach((b, i) => { if (petAt < 0 && sayOf(b).some((t) => /\{pet\}/.test(t))) petAt = i; });
+    if (petAt >= 0) {
+      for (const t of sayOf(th.beats[petAt])) {
+        if (!(/\b(calls?|called|calling|names?|named|naming)\b/.test(t) && /\{pet\}/.test(t))) {
+          sourceIssues.push(`SOURCE ${kind}.${th.key}[${petAt}]: uses {pet} without giving the name, and it is the naming beat\n    ${t}`);
+        }
+      }
+      for (let i = 0; i < petAt; i++) {
+        for (const t of sayOf(th.beats[i])) {
+          if (/\{pet\}/.test(t)) sourceIssues.push(`SOURCE ${kind}.${th.key}[${i}]: names {pet} before the naming beat\n    ${t}`);
+        }
+      }
+    }
+    // A span longer than the shortest mission. A log may run 42 turns, so a beat that claims a
+    // hundred days or a year can stand in a log that is not that old.
+    for (const b of th.beats) {
+      for (const t of sayOf(b)) {
+        // "a year older" is an age and not a span of the mission, so the rule steps over it.
+        const m = t.match(/\b(?:a|two|three) hundred (?:days|nights|turns)\b|\b(?:a|two|three) years?\b(?! older)|\ba thousand (?:days|nights|turns)\b/i);
+        if (m) sourceIssues.push(`SOURCE ${kind}.${th.key}: claims "${m[0]}", which is longer than the shortest mission\n    ${t}`);
+      }
+    }
+    // The first beat is the day the reader meets this thread. It may not look back.
+    for (const t of sayOf(th.beats[0])) {
+      if (/\{since\}/.test(t)) sourceIssues.push(`SOURCE ${kind}.${th.key}[0]: refers back to {since}, which is its own day\n    ${t}`);
+      const m = t.match(BACKREF);
+      if (m) sourceIssues.push(`SOURCE ${kind}.${th.key}[0]: looks back with "${m[0]}" on the first day of the thread\n    ${t}`);
+    }
+    let out = -1;
+    th.beats.forEach((b, i) => { if (!Array.isArray(b) && b.out && out < 0) out = i; });
+    if (out < 0) {
+      if (th.retires) sourceIssues.push(`SOURCE ${kind}.${th.key}: marked retires but no beat carries out`);
+      continue;
+    }
+    if (!th.retires) sourceIssues.push(`SOURCE ${kind}.${th.key}: a beat carries out but the thread is not marked retires`);
+    for (let i = out + 1; i < n; i++) {
+      for (const t of sayOf(th.beats[i])) {
+        if (/\{one\}/.test(t)) sourceIssues.push(`SOURCE ${kind}.${th.key}[${i}]: names {one} after the person is gone\n    ${t}`);
+      }
+    }
+    for (const t of th.coda || []) {
+      if (/\{one\}/.test(t)) sourceIssues.push(`SOURCE ${kind}.${th.key}.coda: names {one}, who does not survive this thread\n    ${t}`);
     }
   }
 }
 
-// A line is wide when it fits any world the slot can reach: no ban, no test on the genome, and no
-// tag but `beasts`, which every survey line carries because the survey names an animal.
-const isWide = (e) => {
-  const g = Lore.parseGate(e.tags);
-  return !e.if && !g.ban.length && g.need.every((any) => any.length === 1 && any[0] === 'beasts');
-};
-const SOURCE_WIDE_MIN = 6;
-for (const [label, list] of SOURCE_POOLS) {
-  for (const e of list) {
-    const toks = Lore.tokensIn(e.t);
-    for (const tok of toks) {
-      if (!SOURCE_TOKENS.includes(tok)) tokenHits.push(`SOURCE ${label}: uses {${tok}}, which the log does not fill\n    ${e.t}`);
-    }
-    // A line that names the animal may only reach a world that carries one.
-    if (toks.some((t) => BEAST_TOKENS.includes(t))) {
-      const need = Lore.parseGate(e.tags).need;
-      if (!need.some((any) => any.length === 1 && any[0] === 'beasts')) {
-        sourceIssues.push(`SOURCE ${label}: names the animal but is not gated on "beasts"\n    ${e.t}`);
-      }
-    }
-    const r = srcReach.get(e);
-    if (!r.gate) sourceIssues.push(`SOURCE ${label}: no world in the sweep passes its gate [${e.tags || ''}]\n    ${e.t}`);
-    else if (!r.cond) sourceIssues.push(`SOURCE ${label}: no genome shape passes its if()\n    ${e.t}`);
-  }
-  const wide = list.filter(isWide).length;
-  if (wide < SOURCE_WIDE_MIN) {
-    sourceIssues.push(`SOURCE ${label}: only ${wide} lines fit any world, and five worlds in a row will repeat one`);
-  }
-  // Every gate of the trouble needs two lines, for the same reason.
-  if (label === 'TROUBLE') {
-    const byGate = new Map();
-    for (const e of list) {
-      if (!e.tags) continue;
-      byGate.set(e.tags, (byGate.get(e.tags) || 0) + 1);
-    }
-    // Two gates that name the same fact count together: "geysers" and "geysers waterliquid".
-    const byFirst = new Map();
-    for (const [gate, count] of byGate) {
-      const head = gate.split(/\s+/)[0];
-      byFirst.set(head, (byFirst.get(head) || 0) + count);
-    }
-    for (const [head, count] of byFirst) {
-      if (count < 2) sourceIssues.push(`SOURCE TROUBLE: the fault "${head}" carries only ${count} line`);
-    }
-  }
+// ---- variety
+// A reader who finds ten wrecks must meet at least six kinds of ending and at least six threads.
+if (SourceLore.ENDING_KINDS.length < 10) sourceIssues.push(`SOURCE endings: only ${SourceLore.ENDING_KINDS.length} kinds, and the plan asks for ten`);
+for (const [kind, list] of THREAD_LISTS) {
+  if (list.length < 6) sourceIssues.push(`SOURCE ${kind} threads: only ${list.length}, and ten wrecks will repeat one`);
+}
+const endByKind = new Map();
+for (const e of SourceLore.ENDINGS) endByKind.set(e.kind, (endByKind.get(e.kind) || 0) + 1);
+for (const [k, c] of endByKind) if (c < 3) sourceIssues.push(`SOURCE endings: the kind "${k}" carries only ${c} wordings`);
+if (SourceLore.NAMES.length < 60) sourceIssues.push(`SOURCE names: only ${SourceLore.NAMES.length}, and the plan asks for 60`);
+const nameSet = new Set(SourceLore.NAMES);
+for (const p of SourceLore.PET_NAME) if (nameSet.has(p)) sourceIssues.push(`SOURCE pet name "${p}" is also a crew name`);
+// Every wording of the whole log, once. A sentence that stands in two pools is a sentence a reader
+// will meet twice under two headings.
+const allSaid = new Map();
+for (const x of SOURCE_TEXTS) {
+  if (allSaid.has(x.t)) sourceIssues.push(`SOURCE ${x.label}: the same sentence stands in ${allSaid.get(x.t)}\n    ${x.t}`);
+  else allSaid.set(x.t, x.label);
 }
 
 // ---------------------------------------------------------------- pass 4: real worlds through the worker
 let storyStats = null;
+// What the consistency check counts over the real worlds, for the report at the end.
+let logsSeen = 0;
+const entryCounts = [], crewSizes = [];
+const endSpread = new Map(), threadSpread = new Map(), motionSpread = new Map();
+// One sample line per way of moving, so the report shows what a reader really gets.
+const motionSample = new Map();
+// The repetition report. Every sentence of every log, and the sentences of the log before it in
+// seed order, so the sweep can say how often two wrecks in a row read alike.
+const sentenceCount = new Map();
+let prevSentences = null, neighbourPairs = 0, neighbourShared = 0, sharedExample = '';
 if (SEEDS > 0) {
   const lens = [];
   for (let i = 0; i < SEEDS; i++) {
@@ -731,28 +987,111 @@ if (SEEDS > 0) {
     const env = Lore.makeEnv(world.env);
     // The log of the source, issue 34 slice 4. A world with no source carries no log, which is
     // the right answer for a gas giant and for a world where no vertex passed the tests.
+    //
+    // This is the CONSISTENCY check of the log. The pool sweep above proves that the words are
+    // honest; this one proves that the story holds together on a real world: the entry count, the
+    // days, the crew, the dead, and the ending.
     if (world.source) {
       const log = world.source.log;
       const live = (world.species || []).filter((G) => G.lore);
       if (!log) holes.push(`seed ${seed}: the source carries no log`);
       else {
-        const want = SourceLore.SLOTS.map((s) => s.key).join(',');
-        const got = log.entries.map((e) => e.slot).join(',');
-        if (got !== want) holes.push(`seed ${seed}: the log reads ${got}, not ${want}`);
+        logsSeen++;
+        const E = log.entries || [];
+        const { ENTRY_MIN, ENTRY_MAX, CREW_MIN, CREW_MAX } = SourceLore.LIMITS;
+        if (E.length < ENTRY_MIN || E.length > ENTRY_MAX) {
+          holes.push(`seed ${seed}: the log holds ${E.length} entries, outside ${ENTRY_MIN} to ${ENTRY_MAX}`);
+        }
+        entryCounts.push(E.length);
+        if (E[0].slot !== 'landing') holes.push(`seed ${seed}: the log opens on "${E[0].slot}" and not on the landing`);
+        const last = E[E.length - 1];
+        if (!/^end\./.test(last.slot) || !SourceLore.ENDING_KINDS.includes(last.slot.slice(4))) {
+          holes.push(`seed ${seed}: the log closes on "${last.slot}", which is not an ending kind`);
+        } else endSpread.set(last.slot.slice(4), (endSpread.get(last.slot.slice(4)) || 0) + 1);
+        for (const e of E) if (/^(world|crew|fauna)\./.test(e.slot)) threadSpread.set(e.slot, (threadSpread.get(e.slot) || 0) + 1);
+        // The crew, and the keeper who writes the log.
+        const crew = log.crew || [];
+        if (crew.length < CREW_MIN || crew.length > CREW_MAX) holes.push(`seed ${seed}: a crew of ${crew.length}`);
+        if (!crew.some((c) => c.name === log.keeper)) holes.push(`seed ${seed}: the keeper "${log.keeper}" is not of the crew`);
+        if (new Set(crew.map((c) => c.name)).size !== crew.length) holes.push(`seed ${seed}: two people of the crew share a name`);
+        if (new Set(crew.map((c) => c.role)).size !== crew.length) holes.push(`seed ${seed}: two people of the crew share a role`);
+        crewSizes.push(crew.length);
+        // The days rise strictly, and the first one is the landing.
+        if (E[0].day !== 1) holes.push(`seed ${seed}: the log opens on day ${E[0].day} and not on day 1`);
+        for (let j = 1; j < E.length; j++) {
+          if (E[j].day <= E[j - 1].day) holes.push(`seed ${seed}: day ${E[j].day} does not follow day ${E[j - 1].day}`);
+        }
+        if (log.days !== last.day) holes.push(`seed ${seed}: the log states ${log.days} days and its last entry is day ${last.day}`);
+        const named = live.find((G) => G.lore.name === log.species) || null;
+        const motion = SourceLore.motionOf(named);
         const stags = SourceLore.sourceTags(env, world.env.obliquityDeg, live.length > 0,
-          SourceLore.sourceLatDeg(world.source.dir));
-        for (const e of log.entries) {
-          if (!e.text) { holes.push(`seed ${seed}: the ${e.slot} entry of the log is empty`); continue; }
+          SourceLore.sourceLatDeg(world.source.dir), motion);
+        if (motion) {
+          motionSpread.set(motion, (motionSpread.get(motion) || 0) + 1);
+          const line = E.find((e) => /^fauna\./.test(e.slot));
+          if (line && !motionSample.has(motion)) motionSample.set(motion, line.text);
+        }
+        // The names that are not crew names: the ship, the moons, the animal, the animal's own
+        // name. The check below strips them before it looks for a person.
+        const strip = [log.probe, log.species || '', ...(world.env.moonNames || []), ...SourceLore.PET_NAME];
+        const crewNames = new Set(crew.map((c) => c.name));
+        const lost = log.lost;
+        E.forEach((e, j) => {
+          if (!e.text) { holes.push(`seed ${seed}: the ${e.slot} entry of the log is empty`); return; }
           for (const tok of Lore.tokensIn(e.text)) tokenHits.push(`seed ${seed} log ${e.slot}: unfilled {${tok}}`);
           for (const bad of lexCheck(e.text, stags)) {
             lexHits.push(`seed ${seed} log ${e.slot}: /${bad.word}/ needs "${bad.gate}" [${[...stags].join(' ')}]\n    ${e.text}`);
           }
-        }
-        // The survey names one animal of this world, so the log and the fauna card agree.
+          // The style, on the filled text, where a token has become a real phrase.
+          for (const bad of styleCheck(e.text)) holes.push(`seed ${seed} log ${e.slot}: ${bad}\n    ${e.text}`);
+          let bare = e.text;
+          for (const s of strip) if (s) bare = bare.split(s).join(' ');
+          for (const name of SourceLore.NAMES) {
+            if (!new RegExp(`\\b${name}\\b`).test(bare)) continue;
+            if (!crewNames.has(name)) holes.push(`seed ${seed} log ${e.slot}: names "${name}", who is not of the crew\n    ${e.text}`);
+            // A dead or absent person never acts or speaks again.
+            else if (lost && name === lost.name && e.day > lost.day) {
+              holes.push(`seed ${seed} log ${e.slot}: names "${name}", who was ${lost.how} on day ${lost.day}\n    ${e.text}`);
+            }
+          }
+        });
+        // The log names one animal of this world, so the log and the fauna card agree.
         if (log.species && !live.some((G) => G.lore.name === log.species)) {
           holes.push(`seed ${seed}: the log names "${log.species}", which is not a species of this world`);
         }
         if (!log.species && live.length) holes.push(`seed ${seed}: the world carries species and the log names none`);
+        if (!live.length && E.some((e) => /^fauna\./.test(e.slot))) {
+          holes.push(`seed ${seed}: the log runs a fauna thread on a world with no species`);
+        }
+        // The genome fact the fauna thread reports has to be true of the animal the log names. The
+        // thread carries the test; the sweep runs it against the real genome.
+        for (const e of E) {
+          if (!/^fauna\./.test(e.slot)) continue;
+          const th = ST.fauna.find((x) => x.key === e.slot.slice(6));
+          if (!th) { holes.push(`seed ${seed}: the log runs the unknown fauna thread "${e.slot}"`); continue; }
+          if (th.if && !th.if({ G: named, env, tags: stags, world })) {
+            holes.push(`seed ${seed}: the thread "${e.slot}" is not true of ${log.species}`);
+          }
+        }
+        // The same for the ending, which may also read the genome. One wording of that kind must
+        // pass both the gate of this world and the test on this animal.
+        const endCtx = { env, tags: stags, world, G: named };
+        const endKind = last.slot.slice(4);
+        if (!Lore.candidates(SourceLore.ENDINGS, endCtx).some((x) => x.kind === endKind)) {
+          holes.push(`seed ${seed}: the ending "${endKind}" does not fit this world`);
+        }
+        // The repetition report. A sentence is counted once per log, and a neighbour pair is two
+        // wrecks the reader could find one after the other.
+        const mine = new Set();
+        for (const e of E) for (const sent of sentencesOf(e.text)) mine.add(sent);
+        for (const sent of mine) sentenceCount.set(sent, (sentenceCount.get(sent) || 0) + 1);
+        if (prevSentences) {
+          neighbourPairs++;
+          let hit = '';
+          for (const sent of mine) if (prevSentences.has(sent)) { hit = sent; break; }
+          if (hit) { neighbourShared++; if (!sharedExample) sharedExample = hit; }
+        }
+        prevSentences = mine;
       }
     }
     for (const G of world.species) {
@@ -792,7 +1131,8 @@ const relIssues = auditRelations([sky(0), sky(4)]);
 console.log(`worlds tested        ${n}`);
 console.log(`pool lookups         ${checked}`);
 console.log(`flora lookups        ${floraChecked} over ${skies.size} skies x ${KIND_COUNT} kinds x ${BIOMES.length} biomes`);
-console.log(`source lookups       ${sourceChecked} over ${sourceSkies.size} skies x 4 slots`);
+console.log(`source lookups       ${sourceChecked} over ${sourceSkies.size} skies`);
+console.log(`source text          ${SOURCE_TEXTS.length} lines in ${SOURCE_ENTRIES.length} pool entries, ${SourceLore.ENDING_KINDS.length} ending kinds`);
 console.log(`distinct world tags  ${[...tagsSeen].sort().join(' ')}`);
 console.log('');
 const report = (title, map) => {
@@ -815,6 +1155,36 @@ for (const x of floraRelIssues) console.log('  - ' + x);
 console.log(`source log issues: ${sourceIssues.length}`);
 for (const x of sourceIssues) console.log('  - ' + x);
 if (storyStats) console.log(`\nstory length (characters): min ${storyStats.min}, median ${storyStats.median}, max ${storyStats.max}, over ${storyStats.n} species`);
+// The spread of the log over the real worlds. A reader who finds ten wrecks has to meet at least
+// six kinds of ending and at least six threads, so these two lists are the acceptance of issue 34
+// slice 4 in numbers.
+if (logsSeen) {
+  const stat = (a) => { const b = a.slice().sort((x, y) => x - y); return `min ${b[0]}, median ${b[b.length >> 1]}, max ${b[b.length - 1]}`; };
+  console.log(`\nlogs read            ${logsSeen}`);
+  console.log(`entries per log      ${stat(entryCounts)}`);
+  console.log(`crew per log         ${stat(crewSizes)}`);
+  const byN = (m) => [...m].sort((a, b) => b[1] - a[1]);
+  console.log(`ending kinds         ${endSpread.size} of ${SourceLore.ENDING_KINDS.length}`);
+  for (const [k, c] of byN(endSpread)) console.log(`  ${String(c).padStart(4)}  ${k}`);
+  console.log(`threads              ${threadSpread.size} distinct`);
+  for (const [k, c] of byN(threadSpread)) console.log(`  ${String(c).padStart(4)}  ${k}`);
+  // How the animal of each log gets about, with one line of that log, so the reader of the report
+  // can see that a whale of the air never stands at the foot of the mast.
+  console.log(`ways of moving       ${motionSpread.size} of ${SourceLore.MOTION.length}`);
+  for (const [k, c] of byN(motionSpread)) {
+    console.log(`  ${String(c).padStart(4)}  ${k}`);
+    if (motionSample.has(k)) console.log(`        ${motionSample.get(k)}`);
+  }
+  for (const m of SourceLore.MOTION) if (!motionSpread.has(m)) console.log(`     0  ${m}  (no world in this sweep rolled one)`);
+  // Repetition. Two wrecks in a row must not share a sentence, and no sentence should stand in
+  // many logs. Both numbers are reported, because neither can be driven to zero by a gate.
+  const top = [...sentenceCount].sort((a, b) => b[1] - a[1])[0];
+  console.log(`\nrepetition`);
+  console.log(`  distinct sentences  ${sentenceCount.size}`);
+  if (top) console.log(`  commonest sentence  ${(top[1] / logsSeen * 100).toFixed(1)}% of logs (${top[1]}/${logsSeen})\n    ${top[0]}`);
+  console.log(`  neighbour pairs that share a sentence  ${neighbourShared} of ${neighbourPairs}`);
+  if (sharedExample) console.log(`    ${sharedExample}`);
+}
 
 for (const { seed, world, G } of sampleStories) {
   const l = G.lore;

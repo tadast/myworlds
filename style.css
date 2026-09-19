@@ -295,9 +295,22 @@ button.probe[hidden] { display: none; }
 .cstory { font-size: 14px; line-height: 1.45; margin: 0 0 12px; color: #dfe4ff; }
 .cnav { display: flex; gap: 8px; }
 .cnav .ghost { padding: 7px 12px; font-size: 13px; }
-/* The log of the wreck, issue 34. Four entries, each under a "Day n" header, in the type of the
-   story above. The card shows one subject at a time, so each subject hides the blocks it does not
-   use. A world holds one source, so the log takes no arrows. */
+/* The log of the wreck, issue 34. Up to twenty entries, each under a "Day n" header, in the type
+   of the story above. The card shows one subject at a time, so each subject hides the blocks it
+   does not use. A world holds one source, so the log takes no arrows.
+
+   The log is the one block of this card that can run past the height of a phone, so it scrolls
+   inside itself. The card then holds its height, and the crew and the close button stay on screen
+   at 375 by 812 with twenty entries. The grid row has to be told it may shrink: a grid row is
+   `auto` by default and grows to its content, whatever the max-height of the card says. */
+#creature[data-subject="source"] .ccard { overflow: hidden; grid-template-rows: minmax(0, 1fr); }
+#creature[data-subject="source"] .ctext { display: flex; flex-direction: column; min-height: 0; }
+#creature[data-subject="source"] .clog { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* The crew, under the name of the ship. One row per person on a phone, and it does not scroll. */
+.ccrew { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+.ccrew span { white-space: nowrap; }
+.ccrew i { font-style: normal; opacity: 0.7; margin-left: 4px; }
+.ccrew .ckeeper { color: var(--text); }
 .clog-entry { margin: 0 0 12px; }
 .clog-entry h3 {
   margin: 0 0 3px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
@@ -307,13 +320,18 @@ button.probe[hidden] { display: none; }
 #creature[data-subject="source"] .ctags,
 #creature[data-subject="source"] .cstory,
 #creature[data-subject="source"] .cnav { display: none; }
-#creature:not([data-subject="source"]) .clog { display: none; }
+#creature:not([data-subject="source"]) .clog,
+#creature:not([data-subject="source"]) .ccrew { display: none; }
 @media (max-width: 720px) {
   .ccard { grid-template-columns: 1fr; gap: 12px; padding: 14px; }
   .cview { width: 100%; height: min(60vw, 300px); }
   .cname { font-size: 19px; }
   .cstory { font-size: 13px; }
   .clog-entry p { font-size: 13px; }
+  /* One column here, so the card has two rows: the preview, then the text. The text row is the
+     one that may shrink, and the log inside it is what scrolls. */
+  #creature[data-subject="source"] .ccard { grid-template-rows: auto minmax(0, 1fr); }
+  #creature[data-subject="source"] .cview { height: min(46vw, 200px); }
 }
 
 /* ---------- about
