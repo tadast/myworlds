@@ -5,9 +5,9 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere, sourceSite } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere, sourceSite } from './site.js';
 import { loadFixes, addFix, markFound, markBriefed, clearFixes, foundSeeds } from './carrier-store.js';
-import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour } from './carrier-globe.js';
+import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, showMarker } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
 import { Ground, RIM } from './ground.js';
@@ -282,7 +282,7 @@ function freshFixes(world, record) {
 
 function disposeWorld() {
   if (!current) return;
-  showMarker(null);                 // the ring is shared between worlds, so it must not be disposed
+  showMarker(null);                 // the aim square is paint in the shared uniforms
   site = null;
   // The marks of the carrier go first, because they own their buffers and the walk below would
   // only reach the geometry. The same call takes the wedges out of the uniforms of the shaders, so
@@ -594,7 +594,7 @@ const SLOPE_STEP = 0.02;
   // giant gets no probe and a world where makeSource() found no cell has nothing to hear, so both
   // give null here and the sidebar hides the Carrier row. Issue 34, slice 2.
   //
-  // The height map goes in because the ring of a find lies on the terrain. It comes off the same
+  // The height map goes in because the pin of a find stands on the terrain. It comes off the same
   // reply as `world`, so it stands here already; `current` does not, and it is written further
   // down this function.
   // The colour of the carrier comes off the colours of this terrain, so a wedge stands out on it.
@@ -607,9 +607,12 @@ const SLOPE_STEP = 0.02;
   // every fragment against the fixes in the uniforms, so a wedge lies on the ground it marks and it
   // holds no parallax against the relief at any camera. The patch extends the wobble patch of the
   // ocean above; it must run before gasWeather() below, which takes the whole onBeforeCompile of
-  // the terrain material for itself, and a gas giant gives no group here, so the two never meet.
-  patchCarrierMaterial(tm, carrierGroup);
-  patchCarrierMaterial(oceanMat, carrierGroup);
+  // the terrain material for itself, and a gas giant takes no patch here, so the two never meet.
+  // Every world with a surface takes the patch, because the aim square is paint too.
+  if (world.type !== 'gas') {
+    patchCarrierMaterial(tm);
+    patchCarrierMaterial(oceanMat);
+  }
 
   // the upper cloud deck of a gas giant
   const deckMat = world.type === 'gas' && world.deck ? gasDeck(world, planet) : null;
@@ -687,7 +690,7 @@ const SLOPE_STEP = 0.02;
 
   scene.add(group);
   const homes = faunaHomes(fauna, world.faunaCount || 0);   // the pull to life reads these every frame
-  current = { group, planet, cloudGroup, oceanMat, deckMat, bodyMat: deckMat ? tm : null, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity, homes };
+  current = { group, planet, terrainMesh: world.type === 'gas' ? null : terrainMesh, cloudGroup, oceanMat, deckMat, bodyMat: deckMat ? tm : null, moons, ringMesh, world, spin: world.spin, faunaMats, movers, cloudMat, faunaMeshes, heightMap, activity, homes };
 }
 
 // ---------------------------------------------------------------- the decks of a gas giant
@@ -943,7 +946,7 @@ function step(now) {
     if (pitch > 0) camera.rotateX(pitch);
     updateSite(t);                  // the square follows the pointer while the reader aims
   } else {
-    showMarker(lockedSite, current); // the ring stays on the fixed site through the transition
+    showMarker(lockedSite, current); // the square stays on the fixed site through the transition
   }
   if (!warming) renderer.render(scene, camera);   // see warmShaders()
 }

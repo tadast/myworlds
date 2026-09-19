@@ -187,8 +187,99 @@ export function pickDirs(camera, current, ndc = CENTRE) {
     current.planet.worldToLocal(_local).normalize();
     r = groundRadius(current.world, current.heightMap, _local);
   }
-  _dir.copy(_hit).sub(_centre).normalize();
+  // The height map is smoother than the facets of the globe, so the hit above can stand a cell or
+  // more off the ground the reader sees at a low camera. The facets and the sea take the last word.
+  if (current.terrainMesh) facetHit(current, _ray.ray, _local);
+  _dir.copy(_local).transformDirection(current.planet.matrixWorld);
   return { local: _local.clone(), world: _dir.clone() };
+}
+
+// ---------------------------------------------------------------- the pick on the facets
+// The paint of the carrier and of the aim square lies on the facets of the globe, so the pick must
+// meet the same facets. A walk over all 200,000 of them per pointer move costs too much, so the
+// facets go into buckets once per world: a bucket is BUCKET by BUCKET cells of the cube grid, and
+// a facet goes into the bucket of each of its three corners. The ray then tests only the facets in
+// the buckets it passes through inside the shell of the terrain.
+const BUCKET = 8;
+const BUCKET_N = Math.ceil(FACE_CELLS / BUCKET);
+const RAY_STEP = CELL / 2;           // globe units: the step of the walk along the ray
+const facetIndex = new WeakMap();
+const _lray = new THREE.Ray();
+const _inv = new THREE.Matrix4();
+const _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _pc = new THREE.Vector3();
+const _at = new THREE.Vector3(), _best = new THREE.Vector3();
+
+const bucketOf = (x, y, z) => {
+  const c = dirCell(x, y, z);
+  return (c.face * BUCKET_N + Math.floor(c.i / BUCKET)) * BUCKET_N + Math.floor(c.j / BUCKET);
+};
+
+function buildFacetIndex(geo) {
+  const pos = geo.attributes.position.array;
+  const idx = geo.index ? geo.index.array : null;
+  const tris = idx ? idx.length / 3 : pos.length / 9;
+  const corner = (t, k) => (idx ? idx[t * 3 + k] : t * 3 + k) * 3;
+  const lists = new Map();
+  let rLo = Infinity, rHi = 0;
+  for (let t = 0; t < tris; t++) {
+    const seen = [];
+    for (let k = 0; k < 3; k++) {
+      const v = corner(t, k);
+      const x = pos[v], y = pos[v + 1], z = pos[v + 2];
+      const r = Math.hypot(x, y, z);
+      if (r < rLo) rLo = r;
+      if (r > rHi) rHi = r;
+      const b = bucketOf(x, y, z);
+      if (seen.includes(b)) continue;
+      seen.push(b);
+      let l = lists.get(b);
+      if (!l) lists.set(b, l = []);
+      l.push(t);
+    }
+  }
+  return { pos, corner, lists, rLo, rHi };
+}
+
+// Meet the ray with the facets and with the sea, in the local frame of the planet. `out` holds the
+// estimate off the height map, and it takes the direction of the nearest hit. Without a hit it
+// keeps the estimate.
+function facetHit(current, worldRay, out) {
+  const geo = current.terrainMesh.geometry;
+  let fi = facetIndex.get(geo);
+  if (!fi) facetIndex.set(geo, fi = buildFacetIndex(geo));
+  _inv.copy(current.planet.matrixWorld).invert();
+  _lray.copy(worldRay).applyMatrix4(_inv);
+  _lray.direction.normalize();
+  const o = _lray.origin, d = _lray.direction;
+  // the part of the ray inside the shell of the terrain
+  const b = o.dot(d), cc = o.lengthSq();
+  const outer = b * b - (cc - fi.rHi * fi.rHi);
+  if (outer < 0) return out;
+  const t0 = Math.max(0, -b - Math.sqrt(outer));
+  const inner = b * b - (cc - fi.rLo * fi.rLo);
+  const t1 = inner >= 0 ? -b - Math.sqrt(inner) : -b + Math.sqrt(outer);
+  let bestT = Infinity;
+  const sea = current.world.seaRadius || 0;
+  if (sea) {
+    const disc = b * b - (cc - sea * sea);
+    if (disc >= 0 && -b - Math.sqrt(disc) > 0) { bestT = -b - Math.sqrt(disc); _best.copy(d).multiplyScalar(bestT).add(o); }
+  }
+  const tested = new Set();
+  for (let t = t0; t <= t1 + RAY_STEP && t < bestT; t += RAY_STEP) {
+    _at.copy(d).multiplyScalar(t).add(o);
+    const list = fi.lists.get(bucketOf(_at.x, _at.y, _at.z));
+    if (!list || tested.has(list)) continue;
+    tested.add(list);
+    for (const tri of list) {
+      const a = fi.corner(tri, 0), bb = fi.corner(tri, 1), c = fi.corner(tri, 2);
+      _pa.fromArray(fi.pos, a); _pb.fromArray(fi.pos, bb); _pc.fromArray(fi.pos, c);
+      if (!_lray.intersectTriangle(_pa, _pb, _pc, false, _at)) continue;
+      const hitT = _at.sub(o).dot(d);
+      if (hitT > 0 && hitT < bestT) { bestT = hitT; _best.copy(d).multiplyScalar(hitT).add(o); }
+    }
+  }
+  if (bestT < Infinity) out.copy(_best).normalize();
+  return out;
 }
 
 // The site under a point of the screen, or null. The point is the screen centre by default.
@@ -440,10 +531,14 @@ export function pullSite(site, current) {
   if (!site || !current) return site;
   const limit = CELL * PULL_REACH;                              // globe units, the radius is 1
   const dir = siteDir(site.lat, site.lon, _local);
+  // A home half a cell away can stand in the cell next door, and a pull there moved the landing off
+  // the square under the pointer. So a pull stays inside the cell of the pick.
+  const cell = dirCell(dir.x, dir.y, dir.z);
+  const inCell = (x, y, z) => { const c = dirCell(x, y, z); return c.face === cell.face && c.i === cell.i && c.j === cell.j; };
   const act = activityDir(current.world);
   if (act) {
     const dx = act[0] - dir.x, dy = act[1] - dir.y, dz = act[2] - dir.z;
-    if (Math.sqrt(dx * dx + dy * dy + dz * dz) < limit) return dirToSite(_dir.set(act[0], act[1], act[2]));
+    if (Math.sqrt(dx * dx + dy * dy + dz * dz) < limit && inCell(act[0], act[1], act[2])) return dirToSite(_dir.set(act[0], act[1], act[2]));
   }
   if (!current.homes || !current.homes.length) return site;
   const homes = current.homes;
@@ -451,7 +546,7 @@ export function pullSite(site, current) {
   for (let i = 0; i < homes.length; i += 4) {
     const dx = homes[i] - dir.x, dy = homes[i + 1] - dir.y, dz = homes[i + 2] - dir.z;
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (d < bestD) { bestD = d; best = i; }
+    if (d < bestD && inCell(homes[i], homes[i + 1], homes[i + 2])) { bestD = d; best = i; }
   }
   if (best < 0) return site;
   return dirToSite(_dir.set(homes[best], homes[best + 1], homes[best + 2]), homes[best + 3]);
@@ -541,120 +636,6 @@ function parseGroundView(text) {
 }
 
 // ---------------------------------------------------------------- the marker
-// The square of the cell the probe would land on. It is the true footprint of the patch, not a
-// symbol: what the square holds is what the ground shows. Each vertex sits at the ground radius
-// under it, so the square follows the relief instead of floating over a hill.
-//
-// Each side carries MARK_SEGS steps, so the outline holds 32 outer and 32 inner vertices. Four
-// corners alone gave four long chords, and a ridge inside the cell cut through the middle of a
-// side. The height map holds one texel every 0.016 units of arc and a cell is 0.01 units across,
-// so eight steps read every value the map holds along a side.
-//
-// Two meshes share the one geometry. The ghost pass draws first with depthTest off at a low
-// opacity, so the outline still reads where a ridge stands in front of it, and the solid pass
-// draws after it with depthTest on, so the square reads as a thing on the ground. The far side of
-// the globe never shows the ghost, because the marker follows the pointer: pickSite() takes the
-// near hit of the ray, and the pull stays inside the cell, so the square always stands on the half
-// of the globe that faces the camera.
-const RING_IN = 0.9;                 // the inner edge of the outline, as a part of the cell
-const MARK_SEGS = 8;                 // steps along one side of the square
-// globe units the outline floats, so it clears the facets of the globe.
-//
-// The square drapes on the height map, and the terrain draws from an icosphere. The two do not
-// agree: the map holds 384 by 192 texels, which is 0.016 units of arc, and a facet of the globe is
-// 0.013 units across, so the mesh carries detail the map has already smoothed away. A facet is also
-// a flat chord under a curve. Both together let a facet stand over the map at its own middle, and
-// the outline then sinks into the ground.
-//
-// Measured on five worlds, 184,320 facets each, as the radius of a facet at its middle less the map
-// under it:
-//
-//   world      p99      p99.9    worst
-//   Auralis    0.0012   0.0024   0.0049
-//   Vesper     0.0008   0.0027   0.0188
-//   Meridian   0.0033   0.0069   0.0165
-//   Tessaly    0.0036   0.0063   0.0140
-//   Orin       0.0040   0.0076   0.0350
-//
-// 0.006 clears about 999 facets in every 1,000 on the worst world, and it holds the everyday
-// mountain off the outline. The old 0.0008 cleared about 98 in 100, which is the defect. A lift
-// that cleared the last peak of a lava world would have to stand at 0.035, far over the 0.011 units
-// the flora of the globe stands, and the square would then float over a forest. The ghost pass
-// takes those last facets instead: the outline reads through a ridge at a low opacity.
-const LIFT = 0.006;
-// the four corners of the cell, in the order they go round it
-const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-
-let marker = null;
-
-function makeMarker() {
-  const n = MARK_SEGS * 4;           // vertices round one ring of the outline
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 2 * 3), 3));
-  // two triangles per step: the outer point, the next outer point, and the two inner ones
-  const idx = [];
-  for (let i = 0; i < n; i++) {
-    const a = i, b = (i + 1) % n, c = n + b, d = n + i;
-    idx.push(a, b, c, a, c, d);
-  }
-  geo.setIndex(idx);
-  const group = new THREE.Group();
-  group.name = 'site-marker';
-  // the ghost first, then the solid, so the solid stands over it where the ground faces the camera
-  for (const pass of [
-    { opacity: 0.25, depthTest: false, order: 3 },
-    { opacity: 0.9, depthTest: true, order: 4 },
-  ]) {
-    const mat = new THREE.MeshBasicMaterial({
-      color: '#ffffff', transparent: true, opacity: pass.opacity,
-      side: THREE.DoubleSide, depthWrite: false, depthTest: pass.depthTest,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.renderOrder = pass.order;
-    mesh.frustumCulled = false;
-    group.add(mesh);
-  }
-  group.userData.geo = geo;
-  return group;
-}
-
-// Show the square of the cell on the planet. A null site takes it off the scene. It gives the
-// group of the two passes back; no caller in app.js reads it today.
-export function showMarker(site, current) {
-  if (!site || !current) {
-    if (marker && marker.parent) marker.parent.remove(marker);
-    return marker;
-  }
-  if (!marker) marker = makeMarker();
-  if (marker.parent !== current.planet) {
-    if (marker.parent) marker.parent.remove(marker);
-    current.planet.add(marker);
-  }
-  const pal = current.world.palette;
-  for (const m of marker.children) m.material.color.set(pal.fauna?.accent || '#ffffff');
-
-  // The corners come from the cell of the cube grid, so the square the reader aims at is the quad
-  // the patch draws and it shares its edges with the cell next door. Each side then walks from one
-  // corner to the next in MARK_SEGS steps.
-  const cell = siteCell(site);
-  const sea = current.world.seaRadius || 0;
-  const pos = marker.userData.geo.attributes.position;
-  const n = MARK_SEGS * 4;
-  for (let ring = 0; ring < 2; ring++) {
-    const w = ring === 0 ? 0.5 : 0.5 * RING_IN;
-    for (let c = 0; c < 4; c++) {
-      const from = CORNERS[c], to = CORNERS[(c + 1) % 4];
-      for (let k = 0; k < MARK_SEGS; k++) {
-        const f = k / MARK_SEGS;
-        const u = from[0] + (to[0] - from[0]) * f, v = from[1] + (to[1] - from[1]) * f;
-        cellDir(cell, 0.5 + u * w, 0.5 + v * w, _corner);
-        const r = Math.max(groundRadius(current.world, current.heightMap, _corner), sea) + LIFT;
-        pos.setXYZ(ring * n + c * MARK_SEGS + k, _corner.x * r, _corner.y * r, _corner.z * r);
-      }
-    }
-  }
-  pos.needsUpdate = true;
-  marker.position.set(0, 0, 0);
-  marker.quaternion.identity();
-  return marker;
-}
+// The square of the cell the probe would land on is paint on the terrain, as the wedges are. See
+// showMarker() in carrier-globe.js. A square of geometry draped on the height map stood a cell or
+// more off the paint at a low camera, because the map is smoother than the facets.

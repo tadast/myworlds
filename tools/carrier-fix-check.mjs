@@ -26,8 +26,8 @@
 //
 // D. The marks on the ground. The cell of a fix is four edge planes the shader paints; the middle
 //    of the cell stands inside and each next cell outside. Three near fixes fill the cell of the
-//    source, and two fixes or three wide ones do not. A find takes the paint away and stands the mini wreck at the source, on the
-//    terrain of that cell, with its up axis along the surface normal and its height at WRECK_H.
+//    source, and two fixes or three wide ones do not. A find takes the wedges away, keeps the
+//    source cell filled, and stands a pin of PIN_H on it with a model of MODEL_H on top.
 //
 // site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
 // the browser. Node has no import map, so a resolve hook points the same name at vendor/, as
@@ -424,52 +424,50 @@ let markRow = '';
     markRow = `  cell    the middle of a cell stands ${(G.inCell(planes, mid) / S.CELL).toFixed(3)} cells from its nearest edge, the four next cells outside`;
   }
 
-  // The find takes the wedges and the dots away and stands the mini wreck at the source. Every
-  // vertex of that model is read back in the local frame of the planet, so the check measures the
-  // thing the reader sees and not the numbers that built it.
+  // The find takes the wedges away, keeps the cell of the source filled, and stands a pin there
+  // with a small model on top. Every vertex is read back in the local frame of the planet, so the
+  // check measures the thing the reader sees and not the numbers that built it.
   G.setFound(group, world, HM);
-  ok('found', G.carrierUniforms().uWedgeCount.value === 0, 'a found world still paints a wedge');
-  ok('found', G.carrierUniforms().uGoalK.value === 0, 'a found world still paints the goal');
-  ok('found', !!u.wreck, 'a found world stands no mini wreck at the source');
-  ok('found', u.wreck.obj.parent === group, 'the mini wreck stands outside the group of the carrier');
-
+  const uni = G.carrierUniforms();
+  ok('found', uni.uWedgeCount.value === 0, 'a found world still paints a wedge');
+  ok('found', uni.uGoalK.value > 0, 'a found world does not fill the cell of the source');
   const at = S.sourceSite(world);
   const up = S.siteDir(at.lat, at.lon, new THREE.Vector3());
-  u.wreck.obj.updateMatrixWorld(true);
-  const body = u.wreck.obj.children[0];
-  const pos = body.geometry.attributes.position;
-  let lo = Infinity, hi = 0;                 // globe units: the height of a vertex over the ground
-  let worstArc = 0;                          // cells of arc: how far the model spreads from the cell
-  const v = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i).applyMatrix4(body.matrixWorld);
-    const over = v.dot(up) - drapeR(world, up);
-    lo = Math.min(lo, over); hi = Math.max(hi, over);
-    worstArc = Math.max(worstArc, S.arcTo(at, v.clone().normalize()) / S.CELL);
-  }
-  ok('found', Math.abs(lo) < 1e-6, `the foot of the mini wreck stands ${lo.toExponential(2)} off the ground of its cell`);
-  ok('found', hi > 0 && hi <= G.WRECK_H + 1e-6, `the body of the mini wreck reaches ${hi.toFixed(5)} over the ground`);
-  // the lamp stands at the top, so the whole model reaches WRECK_H over the ground
-  u.wreck.lamp.updateMatrixWorld(true);
-  const lampTop = new THREE.Vector3().setFromMatrixPosition(u.wreck.lamp.matrixWorld).dot(up) - drapeR(world, up);
-  ok('found', Math.abs(lampTop - G.WRECK_H) < 1e-6, `the lamp of the mini wreck stands ${lampTop.toFixed(5)} over the ground and not ${G.WRECK_H}`);
-  // The model stands WRECK_H tall and the body is about half as wide as it is tall, so it covers a
-  // few cells. It must not grow into a landmark of its own: 5 cells is about half the width of the
-  // square the site marker draws at the home zoom.
-  ok('found', worstArc < 5, `the mini wreck spreads ${worstArc.toFixed(2)} cells from its own cell`);
-  // the up axis of the model is the surface normal of its cell: the mast runs along it
-  const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(u.wreck.obj.quaternion).normalize();
-  ok('found', axis.angleTo(up) < 1e-6, `the up axis of the mini wreck stands ${axis.angleTo(up).toFixed(6)} rad off the surface normal`);
-  // the lamp blinks: one call of updateCarrierGroup() moves it and nothing else
-  const before = u.wreck.lampMat.opacity;
-  G.updateCarrierGroup(group, 0.9);
-  ok('found', u.wreck.lampMat.opacity !== before, 'the lamp of the mini wreck does not blink');
-  // neither mesh answers a ray, so the pick of the globe still names the cell under the model
-  const stock = THREE.Mesh.prototype.raycast;
-  ok('found', body.raycast !== stock && u.wreck.lamp.raycast !== stock, 'the mini wreck answers a ray');
+  ok('found', G.inCell(uni.uGoalN.value, up) > 0, 'the filled cell is not the cell of the source');
+  ok('found', !!u.wreck && u.wreck.obj.parent === group, 'a found world stands no pin at the source');
 
-  markRow += `\n  wreck   the mini wreck stands ${lampTop.toFixed(4)} globe radii tall on the ground of its cell,`
-    + ` reaching ${worstArc.toFixed(2)} cells from the middle of it, ${pos.count} vertices`;
+  const ground = drapeR(world, up) - G.DRAPE_LIFT;
+  const reach = (mesh) => {
+    mesh.updateMatrixWorld(true);
+    const pos = mesh.geometry.attributes.position, v = new THREE.Vector3();
+    let lo = Infinity, hi = -Infinity, arc = 0;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      const over = v.dot(up) - ground;
+      lo = Math.min(lo, over); hi = Math.max(hi, over);
+      arc = Math.max(arc, S.arcTo(at, v.clone().normalize()) / S.CELL);
+    }
+    return { lo, hi, arc };
+  };
+  u.wreck.obj.updateMatrixWorld(true);
+  const pin = reach(u.wreck.pin);
+  ok('found', Math.abs(pin.lo) < 1e-6 && Math.abs(pin.hi - G.PIN_H) < 1e-6, `the pin runs ${pin.lo.toFixed(5)} to ${pin.hi.toFixed(5)} over the ground`);
+  const model = reach(u.wreck.body);
+  ok('found', Math.abs(model.lo - G.PIN_H) < 1e-4, `the model stands ${model.lo.toFixed(5)} over the ground and not on the pin`);
+  ok('found', model.hi - model.lo <= G.MODEL_H + 1e-6, `the model stands ${(model.hi - model.lo).toFixed(5)} tall`);
+  // The first build stood a wreck 0.06 radii tall that spread 4 cells. The model stays inside about
+  // one cell of the pin.
+  ok('found', model.arc < 1.5, `the model spreads ${model.arc.toFixed(2)} cells from the cell`);
+  const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(u.wreck.obj.quaternion).normalize();
+  ok('found', axis.angleTo(up) < 1e-6, `the pin stands ${axis.angleTo(up).toFixed(6)} rad off the surface normal`);
+  const turn = u.wreck.float.rotation.y;
+  G.updateCarrierGroup(group, 0.9);
+  ok('found', u.wreck.float.rotation.y !== turn, 'the model does not turn');
+  const stock = THREE.Mesh.prototype.raycast;
+  ok('found', u.wreck.pin.raycast !== stock && u.wreck.body.raycast !== stock, 'the pin answers a ray');
+
+  markRow += `\n  pin     the pin stands ${pin.hi.toFixed(3)} radii tall, the model ${(model.hi - model.lo).toFixed(4)} tall on top,`
+    + ` reaching ${model.arc.toFixed(2)} cells from the middle of the cell`;
   G.disposeCarrierGroup(group);
   ok('found', u.wreck == null, 'the dispose left the mini wreck behind');
 }

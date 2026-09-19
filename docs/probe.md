@@ -43,7 +43,7 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 
     - **The carrier has a reach.** Decision 3 states that the carrier is always heard. Every landing then said the same thing, and the first landing asked no question. `CARRIER_REACH` in `site.js` is `2 * PI / 3`, a third of the circumference, and `carrierAt()` gives null past it: no block, no fix, no wedge. A silent landing states a fact of its own. The error now runs from 2 to 10 degrees over the reach and no longer over pi.
     - **The fifth block pulses, and it opens a brief.** Risk 4 gives the block one flash on the first landing of a world, and a reader can miss one flash and still not know what the block is. The block now pulses until the reader opens the brief of that world, and it is a control: a press opens `<dialog id="carrier-brief">`, which names the instrument and the three phases. The store keeps a `briefed` flag per seed. Under `prefers-reduced-motion` the pulse is a static highlight.
-    - **A find leaves a mini wreck on the globe, and no ring.** A ring is the mark of a search, and the search is over. The globe now carries the body of `wreckGeometry()` at the source, 0.06 globe radii tall, on the terrain of its cell, with a lamp that blinks. `markFound()` drops the fixes with the find, and the Carrier row gains an **Aim** chip that turns the camera onto the cell of the source.
+    - **A find leaves a pin on the globe, and no ring.** A ring is the mark of a search, and the search is over. The globe keeps the cell of the source filled and stands a thin pin of 0.03 globe radii on it, with a see-through model of `wreckGeometry()` that floats and turns at the top. `markFound()` drops the fixes with the find. The first build stood the body itself at 0.06 radii on the cell, which reads as the size of a country.
 
     - **The needle on the ground takes the frame of the patch box, and not `groundBasis()`.** The box runs x along the u axis of its cell and z along the v axis, and (u, up, v) is left-handed, so the box is the mirror of the sky frame in x. A needle that came through `groundBasis()` pointed at the mirror of the source and away from the wreck. `carrierBox()` in `site.js` reads the slope of the map of the box instead. The mirror was an older defect and it closed on 2026-09-19: the box now runs z against v and is right-handed; see "The box is right-handed" in `docs/probe.md`. The needle still takes `carrierBox()` and not `groundBasis()`, because the map of the box holds no angle, and check 5 of `tools/carrier-check.mjs` fails on a mirror. The three digits stay the true bearing of the globe, because the wedge of a fix is drawn on the globe.
     - **The carrier block sits at the top left.** The plan gave the fifth block no place. The right edge of the overlay holds the altitude ladder, so the block took the left.
@@ -572,21 +572,13 @@ the same close button, and the Escape key of the browser. It states four steps a
 control the reader has to find. A found world does not pulse: a reader who has read the log knows
 what the block is.
 
-**The mini wreck of a find, `WRECK_H = 0.06` in `carrier-globe.js`.** The first build left one ring
-at the source after the find. A ring is the mark of a search and the search is over, so the ring
-said nothing the reader did not know, and a reader who came back a month later still had to hunt for
-the cell. The globe now carries the wreck itself: the body of `wreckGeometry()`, the same builder
-the patch uses, scaled to 0.06 globe radii and standing on the terrain of its cell with its up axis
-along the surface normal.
-
-0.06 is the relief of the terrain, so the model reads as a thing of the world and not as a second
-planet. It is five times the 0.011 units a plant of the globe stands, which is what makes it
-findable, and it spreads about 3.9 cells from the middle of its cell, which is under half the square
-the site marker draws. The body takes a `MeshStandardMaterial` in `WRECK_HULL`, the hull colour of
-the ground wreck, with 0.22 of that colour as emissive: without it the model is a black chip over
-the dark half of the world. The lamp is an additive shape over the mast at 0.07 of the height, and
-it blinks on a 2.4 s clock from `updateCarrierGroup()`. The lamp of the ground wreck is 0.04 of its
-body, which would be under a pixel from orbit.
+**The pin of a find, `PIN_H = 0.03` and `MODEL_H = 0.012` in `carrier-globe.js`.** The first
+build stood the wreck itself on the cell at 0.06 globe radii, with a lamp that blinked. On a planet
+of 4,879 km that is about 290 km tall, and the model read as the size of a country. The globe now
+keeps the cell of the source filled after the find, at a steady 0.45 of white, and stands a thin pin
+of 0.03 radii on it. A model of `wreckGeometry()` floats on top at 0.012 radii, see-through at 0.6,
+and it turns once in 14 s. The pin and the model keep a least size as a part of the distance from
+the camera, so both stay a few pixels wide from the home zoom.
 
 Neither mesh answers a ray. `pickDirs()` in `site.js` takes the sphere and not the scene, so nothing
 here can catch a tap today; the empty raycast states the rule all the same. `markFound()` drops the

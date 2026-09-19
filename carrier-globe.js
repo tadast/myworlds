@@ -88,6 +88,10 @@ const MAX_ERR = 89.5;
 const VISIT_LINE = 0.001;
 const VISIT_EDGE = 0.9;
 const VISIT_FILL = 0.2;
+// The aim square: the width of its outline, and the fill inside it. It draws wider than the
+// outline of a visited cell, so the reader tells the two apart.
+const HOVER_LINE = 0.0014;
+const HOVER_FILL = 0.12;
 // The goal: the cell of the source, filled when GOAL_WEDGES or more wedges overlap in a region under
 // GOAL_CELLS cells. The fill is white, because the ground under the cross already carries most of the
 // accent, and it pulses over GOAL_PERIOD seconds between GOAL_LO and GOAL_HI.
@@ -108,29 +112,27 @@ const GOAL_REACH = 12;
 // thing in the sky. depthTest stays on, so the far side of the globe still hides the part behind it.
 export const DRAPE_LIFT = 0.014;
 
-// ---------------------------------------------------------------- the mini wreck of a find
-// The first build left one ring at the source after the find. A ring is the mark of a search and
-// the search is over, so the ring said nothing the reader did not know. The globe now carries the
-// wreck itself: the same body ground-source.js puts on the patch, at the scale of the globe, on the
-// terrain of its own cell, with a lamp that blinks. A reader who comes back to the world a month
-// later reads the answer off the globe with no card and no row.
-export const WRECK_H = 0.06;    // globe radii: the height of the whole model, the lamp included
-// parts of WRECK_H: the size of the lamp over the mast. The lamp of the ground wreck is 0.04 of the
-// body, which is under a pixel from orbit, so this one stands wider. Past about 0.1 the lamp reads
-// as a shape of its own and the model stops reading as a machine.
-const WRECK_LAMP = 0.07;
-// The least size of the lamp, as a part of its distance from the camera. The grey model is a few
-// pixels from the home zoom, so the lamp holds about 10 pixels there and the reader can find it.
-// Near the model the lamp keeps its own size.
-const WRECK_LAMP_MIN = 0.007;
+// ---------------------------------------------------------------- the pin of a find
+// After the find the globe keeps the goal cell filled and stands a pin on it, with a small model of
+// the wreck that floats at the top of the pin. The first build stood the wreck itself on the cell
+// at 0.06 globe radii, which is about 290 km on a planet of 4,879 km: it read as the size of a
+// country. The pin is thin, and the model is a sign of what the pin marks, not a thing to scale.
+export const PIN_H = 0.03;      // globe radii: the pin, from the ground to the foot of the model
+const PIN_R = 0.0006;           // globe radii: the pin at its top; it narrows to a point
+// The least width of the pin and the least height of the model, as parts of the distance from the
+// camera, so the two stay a few pixels wide from the home zoom and keep their own size near them.
+const PIN_MIN = 0.0012;
+export const MODEL_H = 0.012;   // globe radii: the floating model at its own size
+const MODEL_MIN = 0.006;
+const MODEL_ALPHA = 0.6;
 // The hull stands on the lit globe and on the night side alike, so the body gives a little of its
 // own colour back. Without it the model is a black chip over the dark half of the world.
-const WRECK_EMIS = 0.22;
-const WRECK_PERIOD = 2.4;       // seconds: one blink of the lamp
-const WRECK_FLOOR = 0.25;       // the lamp never goes fully out, so the model reads between beats
-// The fall of one blink, over the period. A sharp rise and a slow fall read as a machine that
-// answers a clock; a plain sine reads as a thing that breathes.
-const WRECK_FALL = 4.5;
+const WRECK_EMIS = 0.35;
+const MODEL_SPIN = 14;          // seconds: one turn of the model about the pin
+const MODEL_BOB = 0.08;         // parts of MODEL_H: how far the model rises and falls
+const MODEL_BOB_S = 3.2;        // seconds: one rise and fall
+// The fill of the goal cell after the find. It does not pulse: the search is over.
+const FOUND_K = 0.45;
 const FADE_S = 1.2;             // seconds: a new wedge fades in over the end of the ascent
 const RENDER_ORDER = 2;         // after the terrain and before the atmosphere shells of app.js
 
@@ -245,6 +247,17 @@ export function inCell(planes, dir) {
   return Math.min(...planes.map((n) => n.dot(dir)));
 }
 
+// ---------------------------------------------------------------- the aim square
+// The square of the cell the probe would land on, painted on the terrain and the sea like the
+// wedges. A null site takes it off. The colour is the accent of the fauna palette, as before.
+export function showMarker(site, current) {
+  if (!site || !current) { uniforms.uHoverK.value = 0; return; }
+  cellPlanes(site, uniforms.uHoverN.value);
+  uniforms.uHoverCol.value.set(current.world.palette?.fauna?.accent || '#ffffff');
+  uniforms.uWedgeSea.value = current.world.seaRadius || 0;
+  uniforms.uHoverK.value = 0.9;
+}
+
 // ---------------------------------------------------------------- the goal
 // The cell of the source, or null. It takes the wedges of the globe and fills their overlap on a
 // grid of GOAL_STEP of a cell around the source, from the source out. The source always stands
@@ -317,6 +330,11 @@ const uniforms = {
   // The four inward edge normals of the goal cell, and its fill. 0 draws no goal.
   uGoalN: { value: Array.from({ length: 4 }, () => new THREE.Vector3()) },
   uGoalK: { value: 0 },
+  // The aim square: the four inward edge normals of the cell under the pointer, its colour, and its
+  // strength. 0 draws no square. showMarker() writes them.
+  uHoverN: { value: Array.from({ length: 4 }, () => new THREE.Vector3()) },
+  uHoverCol: { value: new THREE.Color('#ffffff') },
+  uHoverK: { value: 0 },
 };
 
 // The uniforms the patched materials read. A caller needs this only to look at the numbers; the
@@ -337,7 +355,10 @@ const WEDGE_DECL = `
   uniform float uWedgeSea;
   uniform vec3 uVisitN[${MAX_WEDGES * 4}];
   uniform vec3 uGoalN[4];
-  uniform float uGoalK;`;
+  uniform float uGoalK;
+  uniform vec3 uHoverN[4];
+  uniform vec3 uHoverCol;
+  uniform float uHoverK;`;
 
 // The paint, in the fragment shader of the terrain and of the sea.
 //
@@ -349,7 +370,7 @@ const WEDGE_DECL = `
 // the lighting of a MeshStandardMaterial already spends on the same fragment. No texture is read
 // and no branch diverges inside a wedge, because the loop runs the same count for every fragment.
 const WEDGE_TINT = `
-  if (uWedgeCount > 0 && length(vCarrierDir) > uWedgeSea - 0.002) {
+  if ((uWedgeCount > 0 || uGoalK > 0.0 || uHoverK > 0.0) && length(vCarrierDir) > uWedgeSea - 0.002) {
     vec3 wDir = normalize(vCarrierDir);
     float wN = 0.0;
     float wE = 0.0;
@@ -384,14 +405,18 @@ const WEDGE_TINT = `
       float gIn = smoothstep(0.0, ${WEDGE_SOFT.toFixed(7)}, gM);
       outgoingLight = mix(outgoingLight, vec3(1.0), gIn * uGoalK);
     }
+    if (uHoverK > 0.0) {
+      float hM = min(min(dot(wDir, uHoverN[0]), dot(wDir, uHoverN[1])), min(dot(wDir, uHoverN[2]), dot(wDir, uHoverN[3])));
+      float hIn = smoothstep(0.0, ${WEDGE_SOFT.toFixed(7)}, hM);
+      float hLine = 1.0 - smoothstep(${(HOVER_LINE * 0.6).toFixed(7)}, ${HOVER_LINE.toFixed(7)}, hM);
+      outgoingLight = mix(outgoingLight, uHoverCol, hIn * mix(${HOVER_FILL.toFixed(3)}, 1.0, hLine) * uHoverK);
+    }
   }`;
 
-// Paint the wedges into one material of the globe. app.js calls it for the terrain material and for
-// the ocean material of a world that holds a source.
-//
-// A world with no source gives no group, and the material then keeps the stock program of three.js:
-// a gas giant and a world where makeSource() found no cell both take that path, and they pay
-// nothing at all. A world that holds a group but no fix pays the one compare of WEDGE_TINT.
+// Paint the wedges and the aim square into one material of the globe. app.js calls it for the
+// terrain material and the ocean material of every world with a surface, because every such world
+// takes the aim square. A gas giant takes no patch and pays nothing. A world with no fix and no aim
+// pays the three compares of WEDGE_TINT.
 //
 // The patch **extends** whatever the material already carries. The ocean material of app.js holds
 // an onBeforeCompile of its own for the wobble of the sea, and this runs it first and then adds its
@@ -403,8 +428,8 @@ const WEDGE_TINT = `
 // the sea is a literal in the text of the ocean patch, so app.js states a key of its own for that
 // material. This appends its own mark to whatever key stands, so a patched material and a plain one
 // of the same type never share a program.
-export function patchCarrierMaterial(material, group) {
-  if (!material || !group) return material;
+export function patchCarrierMaterial(material) {
+  if (!material) return material;
   if (material.userData && material.userData.carrierPatched) return material;
   const prev = material.onBeforeCompile;
   const prevKey = material.customProgramCacheKey.bind(material);
@@ -453,7 +478,7 @@ function writeUniforms(group) {
     uniforms.uWedgeAge.value[i] = WEDGE_AGE[drawn.length - 1 - i] || WEDGE_AGE[WEDGE_AGE.length - 1];
     cellPlanes(drawn[i], uniforms.uVisitN.value.slice(i * 4, i * 4 + 4));
   }
-  u.goal = goalCell(u.world, drawn);
+  u.goal = u.found ? sourceSite(u.world) : goalCell(u.world, drawn);
   if (u.goal) cellPlanes(u.goal, uniforms.uGoalN.value);
   uniforms.uGoalK.value = goalK(u);
 }
@@ -461,6 +486,7 @@ function writeUniforms(group) {
 // The fill of the goal cell on this frame: it pulses, and it fades in with the wedge that closed it.
 function goalK(u) {
   if (!u.goal) return 0;
+  if (u.found) return FOUND_K;
   const beat = 0.5 - 0.5 * Math.cos(2 * Math.PI * u.goalT / GOAL_PERIOD);
   return (GOAL_LO + (GOAL_HI - GOAL_LO) * beat) * (u.fade ? u.fade.k : 1);
 }
@@ -481,92 +507,87 @@ function drapeR(world, hm, dir) {
   return Math.max(groundRadius(world, hm, dir), (world && world.seaRadius) || 0) + DRAPE_LIFT;
 }
 
-// The mini wreck a find leaves at the source, or null for a world with no source.
+// The pin a find leaves at the source, or null for a world with no source.
 //
-// The body is wreckGeometry() of ground-source.js, which stands about 18 units tall in the units of
-// a patch. The whole model is scaled to WRECK_H globe radii, so the reader reads it as a thing on
-// the globe and not as a second planet. It stands on the terrain of its cell, its up axis along the
-// surface normal there, and it turns by the yaw of the source when the world states one.
+// The pin stands on the ground of the cell, its axis along the surface normal. The model on top is
+// wreckGeometry() of ground-source.js, the body the reader walked up to on the patch, scaled to
+// MODEL_H and see-through, and it turns slowly about the pin.
 //
-// Neither mesh answers a ray. The pick of the globe in site.js takes the sphere and not the scene,
-// so nothing here can catch a tap today; the empty raycast states the rule all the same, so a later
-// pick that walks the scene still aims at the cell under the model and not at the model.
-const _lampAt = new THREE.Vector3();
+// Neither mesh answers a ray, so the pick of the globe in site.js still names the cell under them.
+const _camAt = new THREE.Vector3();
 function makeWreckModel(world, hm) {
   const at = sourceSite(world);
   if (!at) return null;
-  const geo = wreckGeometry();
-  const bb = geo.boundingBox;
-  const lamp = geo.userData.lamp || [0, bb.max.y, 0];
-  const foot = Math.min(bb.min.y, 0);                   // the ground under the hull, in patch units
-  const top = Math.max(bb.max.y, lamp[1]);
-  const k = WRECK_H / Math.max(top - foot, 1e-6);       // globe radii per unit of the patch
+  const accent = accentOf(world);
 
   const obj = new THREE.Group();
   obj.name = 'carrier-wreck';
   const dir = siteDir(at.lat, at.lon, new THREE.Vector3());
-  obj.position.copy(dir).multiplyScalar(drapeR(world, hm, dir));
+  obj.position.copy(dir).multiplyScalar(drapeR(world, hm, dir) - DRAPE_LIFT);
   obj.quaternion.setFromUnitVectors(_yUp, dir);         // the up axis follows the surface normal
-  obj.rotateY((world.source && world.source.yaw) || 0);
-  obj.scale.setScalar(k);
 
+  const pinGeo = new THREE.CylinderGeometry(PIN_R, PIN_R * 0.25, PIN_H, 6, 1);
+  pinGeo.translate(0, PIN_H / 2, 0);
+  const pinMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.9, toneMapped: false });
+  const pin = new THREE.Mesh(pinGeo, pinMat);
+  pin.renderOrder = RENDER_ORDER;
+  pin.raycast = () => {};
+  // The width takes the distance of the camera, which updateCarrierGroup() does not know. The
+  // matrix takes the new scale on the next frame, and one frame of lag does not show.
+  pin.onBeforeRender = (renderer, scene, camera) => {
+    const d = _camAt.setFromMatrixPosition(obj.matrixWorld).distanceTo(camera.position);
+    const k = Math.max(1, d * PIN_MIN / PIN_R);
+    pin.scale.set(k, 1, k);
+  };
+  obj.add(pin);
+
+  const geo = wreckGeometry();
+  const bb = geo.boundingBox;
+  const foot = Math.min(bb.min.y, 0);                   // the ground under the hull, in patch units
+  const unit = MODEL_H / Math.max(bb.max.y - foot, 1e-6); // globe radii per unit of the patch
   const hull = new THREE.Color(WRECK_HULL);
   const mat = new THREE.MeshStandardMaterial({
-    color: hull, emissive: hull.clone().multiplyScalar(WRECK_EMIS),
+    color: hull, emissive: hull.clone().lerp(new THREE.Color(accent), 0.5).multiplyScalar(WRECK_EMIS),
     roughness: 0.6, metalness: 0.1, flatShading: true,
+    transparent: true, opacity: MODEL_ALPHA, depthWrite: false,
   });
+  const float = new THREE.Group();
+  float.position.y = PIN_H;
+  obj.add(float);
   const body = new THREE.Mesh(geo, mat);
-  body.position.y = -foot;
-  body.renderOrder = RENDER_ORDER;
+  body.position.y = -foot * unit;
+  body.scale.setScalar(unit);
+  body.renderOrder = RENDER_ORDER + 1;
   body.raycast = () => {};
-  obj.add(body);
-
-  // The lamp: one additive shape over the mast, in the accent the wedges took. It blinks on the
-  // clock of updateCarrierGroup() and it needs no light of its own, because additive paint reads on
-  // the night side as well as on the lit side.
-  const lampGeo = new THREE.OctahedronGeometry(WRECK_LAMP * (top - foot), 0);
-  const lampMat = new THREE.MeshBasicMaterial({
-    color: accentOf(world), transparent: true, opacity: 0.8,
-    depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending,
-  });
-  const lampMesh = new THREE.Mesh(lampGeo, lampMat);
-  lampMesh.position.set(lamp[0], lamp[1] - foot, lamp[2]);
-  lampMesh.renderOrder = RENDER_ORDER + 1;
-  lampMesh.raycast = () => {};
-  // The scale takes the distance of the camera, which updateCarrierGroup() does not know. The
-  // matrix takes the new scale on the next frame, and one frame of lag does not show.
-  const lampR = WRECK_LAMP * WRECK_H;                   // globe radii: the lamp at its own size
-  lampMesh.userData.blink = 1;
-  lampMesh.onBeforeRender = (renderer, scene, camera) => {
-    const d = _lampAt.setFromMatrixPosition(lampMesh.matrixWorld).distanceTo(camera.position);
-    lampMesh.scale.setScalar(Math.max(1, d * WRECK_LAMP_MIN / lampR) * lampMesh.userData.blink);
+  body.onBeforeRender = (renderer, scene, camera) => {
+    const d = _camAt.setFromMatrixPosition(obj.matrixWorld).distanceTo(camera.position);
+    float.scale.setScalar(Math.max(1, d * MODEL_MIN / MODEL_H));
   };
-  obj.add(lampMesh);
+  float.add(body);
+  obj.rotateY((world.source && world.source.yaw) || 0);
 
-  return { obj, geo, mat, lampGeo, lampMat, lamp: lampMesh, t: 0 };
+  return { obj, geo, mat, pinGeo, pinMat, pin, float, body, t: 0 };
 }
 
-// One blink. The lamp rises at once and falls away over the period, so the eye reads a machine that
-// answers a clock. Nothing else of the model moves.
-function blinkWreck(w, dt) {
-  w.t = (w.t + dt) % WRECK_PERIOD;
-  const k = WRECK_FLOOR + (1 - WRECK_FLOOR) * Math.exp(-(w.t / WRECK_PERIOD) * WRECK_FALL);
-  w.lampMat.opacity = 0.3 + 0.6 * k;
-  w.lamp.userData.blink = 0.7 + 0.5 * k;
+// The model turns about the pin and rises and falls a little over it. The pin stands still.
+function floatWreck(w, dt) {
+  w.t += dt;
+  w.float.rotation.y = (w.t / MODEL_SPIN) * Math.PI * 2;
+  w.float.position.y = PIN_H + MODEL_H * MODEL_BOB * Math.sin((w.t / MODEL_BOB_S) * Math.PI * 2);
 }
 
-// Take the mini wreck off a group and give its buffers back.
+// Take the pin off a group and give its buffers back.
 function dropWreck(u) {
   if (!u.wreck) return;
   u.wreck.obj.removeFromParent();
   u.wreck.geo.dispose();
-  u.wreck.lampGeo.dispose();
+  u.wreck.pinGeo.dispose();
   u.wreck.mat.dispose();
-  u.wreck.lampMat.dispose();
+  u.wreck.pinMat.dispose();
   u.wreck = null;
 }
 
-// The colour of the carrier on one world: the wedges, the dots, and the lamp of the mini wreck.
+// The colour of the carrier on one world: the wedges, the visited cells, and the pin of a find.
 //
 // The first build took the accent of the fauna palette, which a world can also hold in its terrain,
 // and a wash of a colour on the same colour shows nothing. pickCarrierColour() reads the colours
@@ -703,12 +724,12 @@ export function setFound(group, world, heightMap) {
   rebuild(group);
 }
 
-// The lamp of a find, the pulse of the goal, and the fade of a new wedge, in seconds. The fading
+// The model on the pin of a find, the pulse of the goal, and the fade of a new wedge, in seconds. The fading
 // fix stands last in the uniforms, so the fade writes one float.
 export function updateCarrierGroup(group, dt) {
   if (!group) return;
   const u = group.userData;
-  if (u.wreck) blinkWreck(u.wreck, dt);
+  if (u.wreck) floatWreck(u.wreck, dt);
   if (u.fade) {
     u.fade.t += dt;
     const k = THREE.MathUtils.clamp(u.fade.t / FADE_S, 0, 1);
@@ -718,7 +739,7 @@ export function updateCarrierGroup(group, dt) {
     }
     if (k >= 1) settle(group);
   }
-  if (u.goal) {
+  if (u.goal && !u.found) {
     u.goalT = (u.goalT + dt) % GOAL_PERIOD;
     if (uniformOwner === group) uniforms.uGoalK.value = goalK(u);
   }
