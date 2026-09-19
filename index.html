@@ -133,6 +133,26 @@
     </form>
   </dialog>
 
+  <!-- The record of the missing carrier. The Carrier row of the sidebar opens it while the world
+       has heard nothing, so a reader who has never landed still learns why the row is there. It is
+       built the way the brief above is built, and it names no control: it states the incident and
+       what a landing inside the range of the beacon would catch. -->
+  <dialog id="carrier-lost" aria-labelledby="carrier-lost-title">
+    <form method="dialog" class="about-card">
+      <button type="submit" class="cclose" aria-label="Close">×</button>
+      <h2 id="carrier-lost-title">Missing carrier</h2>
+      <p>The registry holds one open incident for this world. A carrier went down here, and no crew
+        came back. Nobody has found the wreck.</p>
+      <p>The hull still transmits. The beacon is weak, and it reaches about a third of the way round
+        the planet, so most of this world hears nothing at all.</p>
+      <p>Send a probe to the surface. A landing inside that reach catches the beacon, and the
+        instrument reads a bearing to it, never a distance. A landing that hears nothing states a
+        fact of its own: the wreck lies more than a third of the way round from there.</p>
+      <p>Each bearing the probe catches stands on the globe as a wedge from the cell it was read
+        from. Land again far to one side, and the second wedge crosses the first over the wreck.</p>
+    </form>
+  </dialog>
+
   <!-- The probe overlay of issue 31. It shows while the probe is down: the air, the height, the
        hour of the star, and the uplink that explains where the probe has to stop. probe-hud.js
        writes the numbers and draws the noise. The frame starts right of the sidebar, so nothing

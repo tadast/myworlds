@@ -1782,6 +1782,24 @@ export function openBrief() {
 }
 
 briefDlg.addEventListener('click', (e) => { if (e.target === briefDlg) briefDlg.close(); });
+
+// The record of the missing carrier. The Carrier row states "Not heard" until the first landing
+// catches the beacon, and the words are a link to this: a reader who has never landed reads why the
+// row stands there and what a landing would catch. It marks nothing in the store, because the
+// reader has heard nothing yet, and it opens from the sidebar, which stands in orbit and on the
+// ground alike.
+const lostDlg = $('#carrier-lost');
+
+export function openLost() {
+  if (!lostDlg || lostDlg.open) return;
+  if (ground) ground.controls.enabled = false;
+  lostDlg.showModal();
+}
+
+lostDlg.addEventListener('click', (e) => { if (e.target === lostDlg) lostDlg.close(); });
+lostDlg.addEventListener('close', () => {
+  if (mode === 'ground' && ground && !dive) ground.controls.enabled = true;
+});
 briefDlg.addEventListener('close', () => {
   if (mode === 'ground' && ground && !dive) ground.controls.enabled = true;
 });
@@ -1878,13 +1896,15 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
-      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrier.text}${carrier.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this world">Clear</button>' : ''}${carrier.found && mode !== 'ground' ? '<button type="button" class="chip carrier-aim" title="Aim the probe at the wreck">Aim</button>' : ''}</dd>` : ''}
+      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrier.n === 0 && !carrier.found ? `<button type="button" class="carrier-lost" title="Read the record of the incident">${carrier.text}</button>` : carrier.text}${carrier.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this world">Clear</button>' : ''}${carrier.found && mode !== 'ground' ? '<button type="button" class="chip carrier-aim" title="Aim the probe at the wreck">Aim</button>' : ''}</dd>` : ''}
       ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
       ${groundPlants.length ? `<dt>Flora</dt><dd class="chips">${groundPlants.map((p) => `<button type="button" class="chip" data-plant="${p.kind}">${escapeHtml(p.lore.name)}</button>`).join('')}</dd>` : ''}
     </dl>`;
+  const lostBtn = infoBody.querySelector('.carrier-lost');
+  if (lostBtn) lostBtn.addEventListener('click', openLost);
   const clearBtn = infoBody.querySelector('.carrier-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => clearCarrier(w.seed));
   const aimBtn = infoBody.querySelector('.carrier-aim');
