@@ -5,10 +5,11 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere } from './site.js';
 import { loadFixes, addFix, markFound, clearFixes, foundSeeds } from './carrier-store.js';
 import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
+import { SourceInspector } from './ground-source.js';
 import { Ground, RIM } from './ground.js';
 import { skyView } from './ground-sky.js';
 import { ProbeHud } from './probe-hud.js';
@@ -563,8 +564,12 @@ const SLOPE_STEP = 0.02;
   // the world, and the far side of the globe hides the part of a wedge that runs behind it. A gas
   // giant gets no probe and a world where makeSource() found no cell has nothing to hear, so both
   // give null here and the sidebar hides the Carrier row. Issue 34, slice 2.
+  //
+  // The height map goes in because the ring of a find lies on the terrain. It comes off the same
+  // reply as `world`, so it stands here already; `current` does not, and it is written further
+  // down this function.
   carrierRecord = loadFixes(world.seed);
-  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, carrierRecord);
+  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, carrierRecord, heightMap);
   if (carrierGroup) planet.add(carrierGroup);
 
   // the upper cloud deck of a gas giant
@@ -852,7 +857,9 @@ function step(now) {
     ground.update(t, dt);
     ground.render();
     probeHud.update(ground.telemetry(), now);
-    if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows the ground camera
+    // Twice a second: the address bar follows the ground camera, and the motif of the source
+    // follows the distance to the wreck. Both are cheap and neither needs a frame of its own.
+    if (t - hashAt > 0.5) { hashAt = t; writeHash(); setCarrierLevel(); }
     return;
   }
   if (current) {
@@ -1144,8 +1151,17 @@ function requestPatch(target) {
       cell: siteCell(target),
       maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1,
       activity: activityHere(target),
+      source: sourceThere(target),
     },
   });
+}
+
+// The source this landing brings, or null. The rule is the one activityHere() holds: the cell and
+// not the pull, so one source can never stand in two patches and a landing that reaches the cell
+// without a pull shows it too. sourceHere() in site.js owns the test. Issue 34, slice 3.
+function sourceThere(target) {
+  const src = current.world.source;
+  return src && sourceHere(current.world, target) ? { kind: src.kind } : null;
 }
 
 // The phenomenon this landing brings, or null. The rule is the cell and not the pull: a landing
@@ -1235,12 +1251,13 @@ function enterGround() {
   mode = 'ground';
   ground = new Ground({
     renderer, canvas, world: current.world, site: lockedSite, tier: Q.ground,
-    onSelect: (kind) => { markedKind = kind; markedPlant = null; },
-    onSelectPlant: (kind) => { markedPlant = kind; markedKind = null; },
-    onDeselect: () => { markedKind = null; markedPlant = null; },
-    // Slice 3 of issue 34 calls this when the log card of the wreck first opens. Today's ground.js
-    // does not read it; window.__mw.onSourceFound is the other way in.
-    onSourceFound,
+    // The lamp of the wreck blinks the rhythm of the motif on the bar clock of the song, so the
+    // eye and the ear agree. Issue 34, slice 3.
+    music,
+    onSelect: (kind) => { markedKind = kind; markedPlant = null; markedSource = false; },
+    onSelectPlant: (kind) => { markedPlant = kind; markedKind = null; markedSource = false; },
+    onSelectSource: () => { markedSource = true; markedKind = null; markedPlant = null; },
+    onDeselect: () => { markedKind = null; markedPlant = null; markedSource = false; },
   });
   // The plant lore of this patch. It arrives with the patch, because it reads the biome of the
   // site, and it goes away with the patch. See describePatchFlora() in worker.js.
@@ -1299,7 +1316,8 @@ function leaveGround() {
   if (plantInspector.open) closeCard();   // the plant of a patch cannot be studied from orbit
   probeHud.hide();
   if (ground) { ground.dispose(); ground = null; }
-  markedKind = null; markedPlant = null;  // the marks belong to the patch, and the patch is gone
+  markedKind = null; markedPlant = null; markedSource = false;  // the marks belong to the patch, and the patch is gone
+  setCarrierLevel();  // the probe has left the cell, so the motif takes its orbit level
   perf.reset();       // the ground frames say nothing about the globe
   groundPlants = []; groundVariant = 0;   // the plant lore belongs to the patch too
   if (current) renderInfo(current.world);  // the sidebar loses its flora row
@@ -1315,7 +1333,7 @@ function abortProbe() {
   if (plantInspector.open) closeCard();
   probeHud.hide();
   if (ground) { ground.dispose(); ground = null; }
-  markedKind = null; markedPlant = null;
+  markedKind = null; markedPlant = null; markedSource = false;
   groundPlants = []; groundVariant = 0;
   perf.reset();
   dive = null;
@@ -1326,6 +1344,7 @@ function abortProbe() {
   patchState = { done: true, result: null };
   mode = 'orbit';
   controls.enabled = true;
+  setCarrierLevel();       // the probe is off the ground, so the motif takes its orbit level
   diveEl.style.opacity = '0';
   if (diveLabel) diveLabel.textContent = '';
   updateProbeBtn();
@@ -1403,6 +1422,9 @@ if (probeFloat) probeFloat.addEventListener('click', onProbeClick);
 // or walks. Only one thing is marked at a time, so the button always names what the ring is under.
 let markedKind = null;    // the species of the marked animal, or null while nothing is marked
 let markedPlant = null;   // the kind of the marked plant, or null while nothing is marked
+// Issue 34: the wreck takes the same button. One patch holds at most one wreck, so a flag says all
+// there is to say. The button then reads "Read the log" and it opens the card of the source.
+let markedSource = false;
 let creatureLabel = '';
 // The plants of the patch the probe is standing on, tallest first, and the flora signature the
 // card builds a preview with. Both are empty in orbit, because a plant belongs to a patch.
@@ -1420,6 +1442,9 @@ function updateCreatureFloat() {
     } else if (markedPlant !== null) {
       const p = plantOf(markedPlant);
       if (p) label = `Study the ${p.lore.name}`;   // the same form the animal takes, so one button reads one way
+    } else if (markedSource) {
+      // The wreck is not a subject to study but a record to read, so the button says what it does.
+      label = 'Read the log';
     }
   }
   if (label === creatureLabel) return;
@@ -1431,6 +1456,7 @@ if (creatureFloat) {
   creatureFloat.addEventListener('click', () => {
     if (markedKind !== null) inspect(markedKind);
     else if (markedPlant !== null) inspectPlant(markedPlant);
+    else if (markedSource) inspectSource();
   });
 }
 
@@ -1571,6 +1597,9 @@ function generate(seed, { save = true } = {}) {
       await warmShaders();
       renderInfo(msg.result.world);
       music.play(msg.result.world);
+      // The motif of the new world starts where its search stands: silent on a world with no find,
+      // and under the song on a world the reader has already solved. Issue 34, slice 5.
+      setCarrierLevel();
       if (save) saveWorld(msg.result.world);
       const landing = wanted && current.world.type !== 'gas' ? wanted : null;
       if (!landing) pendingView = null;   // no landing, so a ground camera in the URL has no ground
@@ -1689,23 +1718,55 @@ function clearCarrier(seed) {
   pendingFix = null;
   if (current && current.world.seed === seed) {
     disposeCarrierGroup(carrierGroup);
-    carrierGroup = makeCarrierGroup(current.world, carrierRecord);
+    carrierGroup = makeCarrierGroup(current.world, carrierRecord, current.heightMap);
     if (carrierGroup) current.planet.add(carrierGroup);
     renderInfo(current.world);
   }
 }
 
-// The reader has found the source. Slice 3 calls this when the log card of the wreck first opens.
-// The find stands in the store, the wedges give way to one ring at the source, and the sidebar
-// states it in two places: the Carrier row of this world and the thumb of the saved one.
+// The reader has found the source. inspectSource() calls this the first time the log card opens,
+// and the page shows no word of the log before that. The find stands in the store, the wedges give
+// way to one ring at the source, and the sidebar states it in two places: the Carrier row of this
+// world and the thumb of the saved one. window.__mw.onSourceFound is the other way in.
 export function onSourceFound() {
   if (!current || !current.world.source) return;
   carrierRecord = markFound(current.world.seed);
-  setFound(carrierGroup, current.world);
+  setFound(carrierGroup, current.world, current.heightMap);
   pendingFix = null;
   renderInfo(current.world);
   renderWorlds();
+  setCarrierLevel();     // the motif joins the song of this world for good. Issue 34, slice 5.
 }
+
+// ---------------------------------------------------------------- the motif in the song, slice 5
+// The source has a voice of its own, and its level says how near the probe stands. The song itself
+// never changes, so a reader who does not search loses nothing. Decision 11 of issue 34.
+//
+//   off the cell of the source   0
+//   on it                        CARRIER_EDGE at the edge of the reach, 1 at CARRIER_NEAR units
+//   in orbit                     0 before the find, CARRIER_ORBIT after it
+//
+// The reach is the walk limit of the ground, which is the same reach the worker placed the wreck
+// inside. See patchSource() in worker.js and reachOf() in ground.js.
+const CARRIER_NEAR = 40;      // units from the wreck where the motif stands full
+const CARRIER_EDGE = 0.15;    // the level at the edge of the reach
+const CARRIER_ORBIT = 0.6;    // the level in orbit after the find
+
+function carrierLevel() {
+  if (!current || !current.world.source) return 0;
+  if (mode === 'ground' && ground) {
+    const w = ground.source;
+    if (!w) return 0;                       // this cell is not the cell of the source
+    const p = ground.camera.position;
+    const r = Math.hypot(w.at.x - p.x, w.at.z - p.z);
+    const far = Math.max(CARRIER_NEAR + 1, ground.reach);
+    const k = 1 - THREE.MathUtils.smoothstep(r, CARRIER_NEAR, far);
+    return CARRIER_EDGE + (1 - CARRIER_EDGE) * k;
+  }
+  return carrierRecord && carrierRecord.found ? CARRIER_ORBIT : 0;
+}
+
+function setCarrierLevel() { music.setCarrier(carrierLevel()); }
 
 function renderInfo(w) {
   const s = w.stats;
@@ -1742,20 +1803,22 @@ function renderInfo(w) {
 }
 
 // ---------------------------------------------------------------- the study card
-// One card element carries two subjects. An animal is a subject of the world, so its card opens
+// One card element carries three subjects. An animal is a subject of the world, so its card opens
 // from orbit and from the ground. A plant is a subject of a patch: the lore of a plant reads the
 // biome it stands on, and the patch is the only place that biome is known, so the plant card only
-// opens while the probe is down. See docs/flora.md.
+// opens while the probe is down. See docs/flora.md. The wreck of issue 34 is a subject of one cell
+// of one world, and its card holds the log and no preview text.
 //
 // Each inspector owns its own canvas, because a WebGLRenderer owns the canvas it draws to. The
-// card shows one of the two and hides the other.
+// card shows one of the three and hides the others.
 const creatureCard = $('#creature');
-const creatureCanvas = $('#ccv'), plantCanvas = $('#pcv');
+const creatureCanvas = $('#ccv'), plantCanvas = $('#pcv'), sourceCanvas = $('#scv');
 const inspector = new Inspector({ card: creatureCard, canvas: creatureCanvas });
 const plantInspector = new PlantInspector({ card: creatureCard, canvas: plantCanvas });
-// What the card shows: 'animal' or 'plant'. The arrows and the close read it.
-const cardOpen = () => inspector.open || plantInspector.open;
-function closeCard() { inspector.hide(); plantInspector.hide(); }
+const sourceInspector = new SourceInspector({ card: creatureCard, canvas: sourceCanvas });
+// What the card shows: 'animal', 'plant', or 'source'. The arrows and the close read it.
+const cardOpen = () => inspector.open || plantInspector.open || sourceInspector.open;
+function closeCard() { inspector.hide(); plantInspector.hide(); sourceInspector.hide(); }
 function discColor() {
   const pal = current.world.palette;
   return current.world.type === 'gas' ? pal.atmo : (pal.ground || '#7fa860');
@@ -1765,12 +1828,13 @@ function discColor() {
 // is the only one that knows whether the patch really holds it.
 function inspect(kind) {
   if (!current) return;
-  markedPlant = null;
+  markedPlant = null; markedSource = false;
   if (ground && ground.flora) ground.flora.unmark();
-  plantInspector.hide();
-  creatureCard.classList.add('show');    // the two share the card, so a swap must not fade it out
+  if (ground && ground.source) ground.source.unmark();
+  plantInspector.hide(); sourceInspector.hide();
+  creatureCard.classList.add('show');    // the three share the card, so a swap must not fade it out
   creatureCard.hidden = false;
-  plantCanvas.hidden = true; creatureCanvas.hidden = false;
+  plantCanvas.hidden = true; sourceCanvas.hidden = true; creatureCanvas.hidden = false;
   inspector.show(current.world.species[kind], current.world.palette, discColor(), 3 + kind);
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'animal';
@@ -1778,21 +1842,47 @@ function inspect(kind) {
 function inspectPlant(kind) {
   const p = plantOf(kind);
   if (!current || !p) return;
-  markedKind = null;
+  markedKind = null; markedSource = false;
   if (ground && ground.fauna) ground.fauna.unmark();
-  inspector.hide();
+  if (ground && ground.source) ground.source.unmark();
+  inspector.hide(); sourceInspector.hide();
   creatureCard.classList.add('show');
   creatureCard.hidden = false;
-  creatureCanvas.hidden = true; plantCanvas.hidden = false;
+  creatureCanvas.hidden = true; sourceCanvas.hidden = true; plantCanvas.hidden = false;
   plantInspector.show(p, current.world.palette, discColor(), groundVariant);
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'plant';
+}
+
+// The log of the wreck. It opens from the floating button, and it is the only place the page ever
+// shows the log: the reader must stand on the cell and tap the thing itself. The first open is the
+// find, so onSourceFound() runs here and the Carrier row of the sidebar then reads "Found".
+//
+// The card holds no arrows: a world has one source, so there is nothing to step to. See
+// SourceInspector in ground-source.js for the preview, which turns the wreck on its own axis.
+function inspectSource() {
+  const src = current && current.world.source;
+  if (!src || !ground || !ground.source) return;
+  markedKind = null; markedPlant = null;
+  if (ground.fauna) ground.fauna.unmark();
+  if (ground.flora) ground.flora.unmark();
+  inspector.hide(); plantInspector.hide();
+  creatureCard.classList.add('show');
+  creatureCard.hidden = false;
+  creatureCanvas.hidden = true; plantCanvas.hidden = true; sourceCanvas.hidden = false;
+  const pal = current.world.palette || {};
+  sourceInspector.show(src.log, (pal.fauna && pal.fauna.accent) || '#ffd27f', discColor(),
+    music.motif(current.world));
+  creatureCard.dataset.subject = 'source';
+  if (!(carrierRecord && carrierRecord.found)) onSourceFound();
+  setCarrierLevel();
 }
 creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
 creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) closeCard(); });
 creatureCard.querySelector('.cprev').addEventListener('click', () => cycleInspect(-1));
 creatureCard.querySelector('.cnext').addEventListener('click', () => cycleInspect(1));
 function cycleInspect(dir) {
+  if (creatureCard.dataset.subject === 'source') return;   // a world holds one source and no more
   if (creatureCard.dataset.subject === 'plant') return cyclePlant(dir);
   // On the ground the list also carries the species of the patch: the pull and the niches can
   // put an animal on the ground that the globe sample never drew, and the arrows must reach it.
@@ -1825,6 +1915,7 @@ addEventListener('resize', () => {
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
   if (inspector.open) inspector.resize();
   if (plantInspector.open) plantInspector.resize();
+  if (sourceInspector.open) sourceInspector.resize();
 });
 
 // pick a creature under a screen point: nearest projected instance on the visible hemisphere
@@ -1970,6 +2061,7 @@ addEventListener('keydown', (e) => {
   if (!creatureCard.hidden) closeCard();
   else if (markedKind !== null) { if (ground && ground.fauna) ground.fauna.unmark(); markedKind = null; }
   else if (markedPlant !== null) { if (ground && ground.flora) ground.flora.unmark(); markedPlant = null; }
+  else if (markedSource) { if (ground && ground.source) ground.source.unmark(); markedSource = false; }
   else stopAim();
 });
 if (COMPACT) setCollapsed(true);
@@ -1988,13 +2080,13 @@ renderWorlds();
 // debug handle (harmless in production)
 window.__mw = {
   scene, camera, controls, renderer, generate, inspect, inspector, music, descend, ascend, perf,
-  inspectPlant, plantInspector,
+  inspectPlant, plantInspector, inspectSource, sourceInspector,
   get current() { return current; },
   get site() { return site; },
   get mode() { return mode; },
   get ground() { return ground; },
   get plants() { return groundPlants; },
-  get marked() { return { animal: markedKind, plant: markedPlant }; },
+  get marked() { return { animal: markedKind, plant: markedPlant, source: markedSource }; },
   // the search of this world: the record of the store and the group of wedges under the planet
   get carrier() { return { record: carrierRecord, group: carrierGroup, pending: pendingFix }; },
   onSourceFound,

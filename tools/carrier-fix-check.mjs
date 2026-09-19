@@ -15,6 +15,12 @@
 //    great circles. The planes come from the drawn vertices and not from the formula that made
 //    them, so a mirror in either file fails the run.
 //
+// C. The ring of a find. A wedge stands on the shell of WEDGE_R, because it runs to the antipode of
+//    its site and has to clear every mountain. The ring marks one place, so it lies on the terrain:
+//    every vertex takes the ground under it, or the sea where the ground lies under the sea, plus
+//    DRAPE_LIFT. The check builds a fake height map with relief inside one cell, so a ring that
+//    went back to a fixed radius fails the run.
+//
 // site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
 // the browser. Node has no import map, so a resolve hook points the same name at vendor/, as
 // tools/carrier-check.mjs does.
@@ -77,12 +83,32 @@ function randDir() {
 const snapDir = (d) => S.cellDir(S.dirCell(d.x, d.y, d.z), 0.5, 0.5, new THREE.Vector3());
 const wrap180 = (d) => ((d % 360) + 540) % 360 - 180;
 
+// A fake height map, at the 384 by 192 the worker sends. One texel is 0.016 rad of lon, and the
+// ring of a find runs 1.5 cells out, which is 0.015 rad, so the band crosses a texel edge and reads
+// more than one value. The high term along lon makes two neighbouring texels differ, so a ring that
+// stood at one radius could not pass the spread check below. Some of the field lies under SEA_R, so
+// the max() of the drape is exercised too.
+const HM_W = 384, HM_H = 192;
+const SEA_R = 0.995;
+const HM = new Float32Array(HM_W * HM_H);
+for (let j = 0; j < HM_H; j++) {
+  const lat = ((j + 0.5) / HM_H - 0.5) * Math.PI;
+  for (let i = 0; i < HM_W; i++) {
+    const lon = ((i + 0.5) / HM_W - 0.5) * Math.PI * 2;
+    HM[i + j * HM_W] = 1 + 0.02 * Math.sin(lon * 17) * Math.cos(lat * 23) + 0.03 * Math.sin(lat * 3 + lon);
+  }
+}
+
 function worldWith(seed, dir) {
   return {
     seed, type: 'terran', source: { kind: 'wreck', dir: [dir.x, dir.y, dir.z] },
     palette: { fauna: { accent: '#ff7b5c' } }, stats: { radius: '6,000' },
+    heightMapSize: [HM_W, HM_H], seaRadius: SEA_R,
   };
 }
+
+// The radius one vertex of the ring must stand at, read off site.js and not off carrier-globe.js.
+const drapeR = (world, dir) => Math.max(S.groundRadius(world, HM, dir), SEA_R) + G.DRAPE_LIFT;
 
 // ---------------------------------------------------------------- A: the store
 {
@@ -255,21 +281,34 @@ let fadeRow = '';
   ok('replace', u.fixes.length === 1, `a second landing on one cell left ${u.fixes.length} wedges`);
 
   // the find takes the wedges away and leaves one ring at the source
-  G.setFound(group, world);
+  G.setFound(group, world, HM);
   ok('found', !u.meshes.wedges.visible, 'a found world still draws a wedge');
   ok('found', u.meshes.marks.visible, 'a found world draws no ring');
   const at = S.sourceSite(world);
   const pos = u.meshes.marks.geometry.attributes.position;
-  let lo = Infinity, hi = 0;
+  let lo = Infinity, hi = 0;                 // cells of arc: how far out the band runs
+  let rLo = Infinity, rHi = 0;               // globe units: the radius the band stands at
+  let worstDrape = 0;                        // globe units: the gap against the rule of site.js
   for (let i = 0; i < pos.count; i++) {
     const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
-    ok('found', Math.abs(v.length() - G.WEDGE_R) < R_TOL, 'a point of the ring stands off the sphere of the wedges');
-    const arc = S.arcTo(at, v.normalize());
+    const r = v.length();
+    rLo = Math.min(rLo, r); rHi = Math.max(rHi, r);
+    v.normalize();
+    // The drape: the ground under this vertex, or the sea over it, plus the lift.
+    worstDrape = Math.max(worstDrape, Math.abs(r - drapeR(world, v)));
+    ok('found', r >= SEA_R + G.DRAPE_LIFT - R_TOL, `a point of the ring stands at ${r.toFixed(6)}, under the sea`);
+    const arc = S.arcTo(at, v);
     lo = Math.min(lo, arc); hi = Math.max(hi, arc);
   }
   const cells = (x) => x / S.CELL;
   ok('found', cells(lo) > 1.2 && cells(hi) < 1.8, `the ring runs ${cells(lo).toFixed(2)} to ${cells(hi).toFixed(2)} cells out`);
+  ok('drape', worstDrape < R_TOL, `a point of the ring stood ${worstDrape.toExponential(2)} off the ground under it`);
+  // The band follows the relief, so it cannot be one sphere. A ring that went back to a fixed
+  // radius reads a spread of zero here.
+  ok('drape', rHi - rLo > 1e-4, `the ring stands at one radius, spread ${(rHi - rLo).toExponential(2)}`);
+  ok('drape', rHi < G.WEDGE_R - 0.01, `the ring stands at ${rHi.toFixed(4)}, up at the shell of the wedges`);
   fadeRow += `\n  ring    the ring of a find runs ${cells(lo).toFixed(2)} to ${cells(hi).toFixed(2)} cells out from the source`;
+  fadeRow += `\n  drape   its ${pos.count} vertices lie on the ground, radius ${rLo.toFixed(4)} to ${rHi.toFixed(4)}, ${worstDrape.toExponential(1)} off the rule of site.js`;
   G.disposeCarrierGroup(group);
 }
 

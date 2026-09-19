@@ -1,8 +1,12 @@
 # 34 No cell is worth more than another, so the reader has no reason to pick a site
 
-Type: HITL for the design decisions below, then AFK per slice. Status: PLAN. No code exists yet.
+Status: CLOSED, 2026-09-19. All five slices are built.
 
-Plan from the design session on 2026-09-19.
+Type: HITL for the design decisions below, then AFK per slice.
+
+Plan from the design session on 2026-09-19. The plan below stands as it was written. "What the
+build changed" at the foot of this file records every place the build went another way, and the
+checks that stay open for a person.
 
 ## The defect
 
@@ -123,3 +127,25 @@ Use these words and no other words for them, in the code, the comments, and the 
 ## Blocked by
 
 Nothing. Slices 1 and 2 need each other to be of use. Slice 3 needs slice 1. Slices 4 and 5 need slice 3. Ship 1 to 3 together as the first release; 4 and 5 can follow in any order.
+
+## What the build changed
+
+Eight places where the build went another way than the plan. `docs/probe.md` decision 14 holds the
+same list for a reader who comes to it from the decisions.
+
+- **The needle on the ground takes the frame of the patch box, and not `groundBasis()`.** Slice 1 asks for the direction of the source turned through `groundBasis()`. The box of a patch runs x along the u axis of its cell and z along the v axis, and (u, up, v) is left-handed, so the box is the mirror of the sky frame in x. A needle through `groundBasis()` therefore points at the mirror of the source and away from the wreck. `carrierBox()` in `site.js` reads the slope of the map of the box instead. The mirror of the sky against the terrain is an older defect, it is open, and `tools/carrier-check.mjs` prints it as a note and not as a check. The three digits stay the true bearing of the globe, because the wedge of a fix is drawn on the globe.
+- **The carrier block sits at the top left.** Slice 1 gives the fifth block no place. The right edge of the overlay holds the altitude ladder, so the block took the left.
+- **The log names no pulsar and no giant star.** Slice 4 lists both as troubles. `rollStar()` lives in `star.js`, a module of the main thread, and `app.js` rolls the star after the worker replies, so the worker cannot read it. Those two troubles need the star in the worker first.
+- **A polar night line needs the tag `polarnight`.** Slice 4 names "the tilt and its polar night" as one trouble. A lean alone gives no polar night: the sun fails to rise only poleward of the polar circle, which stands at latitude `90 - lean`. So `sourceTags()` reads the latitude of the source against the lean of the axis, with a margin of 5 degrees. See `docs/source.md`.
+- **The motif keeps straight time while the song swings.** A machine transmits on a clock, so the swing of the song does not reach the motif. The motif also rolls from `'music:' + seed + '|source-motif'` and not from `makeRng(seed + '|source')` as slice 5 asks, so no song of any world changed and the worker takes no number the tune needs.
+- **The reach of `patchSource()` is the walk limit and not `FOG_NEAR`.** The reader has to reach the wreck on foot, and the walk stops at half the box less the band the plants thin out over. That is the rule `reachOf()` holds in `ground.js`, so the two cannot drift apart. The range the overlay states measures from the camera and not from the site, so it falls under 5 units at the hull.
+- **The ring of a find lies on the terrain, and the wedges stand at 1.07.** Slice 2 puts every shape on the shell of 1.07. A wedge runs to the antipode of its site, so it keeps that shell and clears every mountain. The ring marks one place, and at 1.07 it hung in the sky: the surface stands near 1.0 and the camera comes to 1.11. Every vertex of the ring now takes the ground under it, or the sea where the ground lies under the sea, plus a lift of 0.014, which clears the flora of the globe. `showMarker()` drapes the square of a cell the same way.
+- **The source does not read the vertices of the globe.** Slice 1 selects a dry vertex. The detail of the globe follows the tier, so a phone and a desktop found two different sources on one seed. `makeSource()` now draws each candidate direction from the source stream, snaps it to the middle of its cell, and tests it on the globe field, with a sea level from a fixed grid of samples. `node tools/world-checksum.mjs --source` proves that the two tiers agree.
+
+### The checks that stay open
+
+Three acceptance criteria need a person at the machine. No tool can close them.
+
+- **The tune of the error, risk 3.** 3 to 25 degrees is a first value. Walk five worlds by hand and count the landings: the median search must take three to five. Change `CARRIER_ERR` in `site.js` if it does not.
+- **The frame time on HIGH.** The carrier row, the wedges, and the wreck must add under 0.3 ms at the reveal camera, and `renderer.info.memory` must return to its orbit numbers after a recall. Measure it with `?perf` and with a timer query of the graphics card, as `docs/probe.md` does.
+- **The listen test of the motif.** With the sound on, the motif must stand in tune with the song on a terran world, a desert world, and an ice world. With the sound off, no fact may be lost.

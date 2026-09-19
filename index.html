@@ -79,14 +79,17 @@
   <section id="creature" hidden aria-live="polite">
     <div class="ccard">
       <button type="button" class="cclose" aria-label="Close">×</button>
-      <!-- One card, two subjects. A WebGLRenderer owns the canvas it draws to, so the animal
-           preview and the plant preview keep one canvas each and the card shows one of them. -->
-      <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas></div>
+      <!-- One card, three subjects. A WebGLRenderer owns the canvas it draws to, so the animal
+           preview, the plant preview, and the wreck of issue 34 keep one canvas each and the card
+           shows one of them. The log of the wreck takes .clog; the CSS hides the blocks the open
+           subject does not use, by the data-subject attribute app.js sets. -->
+      <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas><canvas id="scv" hidden></canvas></div>
       <div class="ctext">
         <div class="cname"></div>
         <div class="clatin"></div>
         <dl class="ctags"></dl>
         <p class="cstory"></p>
+        <div class="clog"></div>
         <div class="cnav"><button type="button" class="ghost cprev">‹ Previous</button><button type="button" class="ghost cnext">Next ›</button></div>
       </div>
     </div>

@@ -13,6 +13,7 @@ import { Flora, GrassField } from './ground-flora.js';
 import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
+import { SourceWreck } from './ground-source.js';
 import { perf } from './perf.js';
 
 // metres, the side of the ground box. The tier picks the real one and sends it with the patch
@@ -204,6 +205,10 @@ const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
 // units: how far behind a plant an animal may stand and still take the tap. A reader who taps an
 // animal beside a tree means the animal, so the animal wins unless it is clearly further back.
 const PICK_GRACE = 2;
+// units: how far past the ground under the pointer the wreck of issue 34 may stand and still take
+// the tap. The hull is 13 units long and the mast 18 tall, so a hit on the body can measure a few
+// units further out than the ground the same ray meets beside it.
+const WRECK_GRACE = 20;
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM. The
@@ -280,11 +285,16 @@ function makeGeometry(pos, col, idx) {
 
 export class Ground {
   // tier: { grid, maxFlora, maxFauna, shadows }
-  constructor({ renderer, canvas, world, site, tier, onSelect, onSelectPlant, onDeselect }) {
+  constructor({ renderer, canvas, world, site, tier, music, onSelect, onSelectPlant, onSelectSource, onDeselect }) {
     this.renderer = renderer;
     this.onSelect = onSelect || null;       // (kind) => void, a tap marked an animal of this species
     this.onSelectPlant = onSelectPlant || null; // (kind) => void, a tap marked a plant of this kind
-    this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took both marks off
+    this.onSelectSource = onSelectSource || null; // () => void, a tap marked the wreck. Issue 34.
+    this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took every mark off
+    // The music of the app. The lamp of the wreck reads its bar clock, so the eye and the ear keep
+    // one rhythm. It is null in a session with no music and the lamp then takes the clock of the
+    // landing. See ground-source.js.
+    this.music = music || null;
     this.canvas = canvas;
     this.world = world;
     this.site = site;
@@ -297,6 +307,7 @@ export class Ground {
     this.fauna = null;
     this.sea = null;
     this.phenomena = null;
+    this.source = null;     // the wreck of issue 34, on the one cell that holds it
     this.atCeiling = false;
     // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
     // it. _driveLod() moves it from the frame time; the last settled value comes from the store,
@@ -378,6 +389,9 @@ export class Ground {
     this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind, scale, dist, member } | null
     // The same seam for the plants, issue 24. It is set in load(), beside the flora.
     this.pickPlant = null;       // (ndcX, ndcY, event) => { point, kind, index, dist } | null
+    // The same seam for the wreck of issue 34. One body stands on the patch, so the pick needs no
+    // kind and no index. It is set in load(), beside the wreck.
+    this.pickSource = null;      // (ndcX, ndcY) => { point, dist } | null
     this._bound = {
       down: (e) => this._onDown(e),
       move: (e) => this._onMove(e),
@@ -470,6 +484,15 @@ export class Ground {
         heightAt: (x, z) => this.heightAt(x, z), renderer: this.renderer,
       });
       if (this.phenomena) this.content.add(this.phenomena.group);
+      // The source of the world, when this cell is the cell that holds it. The worker picked the
+      // place, flattened the disc, and scorched it; this raises the wreck on that disc. It comes
+      // after the terrain for the same reason the phenomenon does: it reads the drawn height.
+      // Issue 34, slice 3. See ground-source.js.
+      this.source = SourceWreck.create({
+        world: this.world, patch: p, tier: this.tier, music: this.music,
+        heightAt: (x, z) => this.heightAt(x, z),
+      });
+      if (this.source) this.content.add(this.source.group);
     } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
       const plane = new THREE.Mesh(
@@ -506,6 +529,9 @@ export class Ground {
       const px = (nx + 1) / 2 * r.width, py = (1 - ny) / 2 * r.height;
       return this.flora.pickHit(px, py, e && e.pointerType === 'touch' ? 52 : 34);
     };
+    // The same seam for the wreck. One ray against a body of 400 triangles is exact, so this one
+    // takes the point of the screen and no pixel tolerance. See SourceWreck.pickAt().
+    this.pickSource = (nx, ny) => (this.source ? this.source.pickAt(nx, ny, this.camera) : null);
 
     // A directional light takes its direction from the position and the target, not the distance,
     // so the height of the site must not move it. The colour and the strength come from the sky.
@@ -893,8 +919,14 @@ export class Ground {
   //             A positive rel puts the needle to the right of the screen, so it turns with the
   //             view. See below: it is an angle in the box and not the bearing less an azimuth.
   //   rangeKm   kilometres to the source inside CARRIER_RANGE cells of arc, else null. Decision 7.
-  //   range     units to the wreck on this patch. Slice 3 builds the wreck and fills this; until
-  //             then no patch holds one and the overlay states no range in units.
+  //   range     units from the camera to the wreck on this patch, or null off its cell. The
+  //             overlay then states the range in units and the word "here". Decision 7.
+  //
+  // On the cell of the source the needle stops reading the globe and reads the wreck: the reader can
+  // see the thing, so a needle that pointed anywhere else would be a fault the reader can measure.
+  // Both the needle and the range are taken from the CAMERA POSITION, which is the point the height
+  // of the overlay is measured from, so every number of the block speaks about one place. The
+  // camera moves as the reader walks, so the needle turns and the range falls with every step.
   _carrier() {
     const c = this.carrier;
     if (!c) return null;
@@ -907,13 +939,21 @@ export class Ground {
     const p = this.camera.position, tg = this.controls.target;
     let fx = tg.x - p.x, fz = tg.z - p.z;
     const fl = Math.hypot(fx, fz);
-    const d = c.dir;
+    let d = c.dir;
+    let range = null;
+    // The wreck stands on this patch, in the same units as the camera, so the needle takes the true
+    // way to it and the range is the plain distance over the ground.
+    if (this.source) {
+      const wx = this.source.at.x - p.x, wz = this.source.at.z - p.z;
+      range = Math.hypot(wx, wz);
+      if (range > 1e-6) d = [wx / range, wz / range];
+    }
     let rel = 0;
     if (d && fl > 1e-9) {
       fx /= fl; fz /= fl;
       rel = THREE.MathUtils.radToDeg(Math.atan2(d[1] * fx - d[0] * fz, d[0] * fx + d[1] * fz));
     }
-    return { brg: c.brg, err: c.err, arc: c.arc, rel, rangeKm: c.rangeKm, range: null };
+    return { brg: c.brg, err: c.err, arc: c.arc, rel, rangeKm: c.rangeKm, range };
   }
 
   // The time to the next sunset, or to the next sunrise when the star is under the horizon.
@@ -1008,6 +1048,9 @@ export class Ground {
     if (this.sky) { this.sky.update(t, dt, this.camera); this._followSun(); }
     // the phenomenon reads the field of view of the camera for its point sizes
     if (this.phenomena) this.phenomena.update(t, dt, this.camera);
+    // the lamp of the wreck blinks the rhythm of the motif, on the clock of the song or of the
+    // landing. It costs one loop over the steps of one bar.
+    if (this.source) this.source.update(t);
     // the sea follows the target, so it must move after the target clamp
     if (this.sea) this.sea.update(t, tg);
 
@@ -1480,6 +1523,7 @@ export class Ground {
     const tg = this.controls.target;
     const m = this.fauna.nearestMember(kind, tg.x, tg.z);
     if (this.flora) this.flora.unmark();   // one mark at a time: the ring must name the open card
+    if (this.source) this.source.unmark();
     if (!m) { this.fauna.unmark(); return false; }
     this.fauna.markMember(m);
     this.fauna.group.updateWorldMatrix(true, false);
@@ -1495,6 +1539,7 @@ export class Ground {
   focusPlant(kind) {
     if (!this.flora) return false;
     if (this.fauna) this.fauna.unmark();
+    if (this.source) this.source.unmark();
     const tg = this.controls.target;
     const hit = this.flora.nearest(kind, tg.x, tg.z);
     if (!hit) { this.flora.unmark(); return false; }
@@ -1593,15 +1638,34 @@ export class Ground {
       if (creature.dist <= plant.dist + PICK_GRACE) plant = null;
       else creature = null;
     }
+    // Issue 34: a tap on the wreck marks it the same way, and the app offers its log on the same
+    // button. The wreck is the biggest thing on the patch, so three things beat it: an animal or a
+    // plant clearly in front of it, because a reader who taps the beast beside the hull means the
+    // beast; and the ground itself when the ray meets the ground first, because the wreck then
+    // stands behind the hill the reader tapped. The second rule matters for the padded box of
+    // SourceWreck.pickAt(), which knows nothing about the terrain.
+    let wreck = this.pickSource ? this.pickSource(nx, ny) : null;
+    if (wreck && hit && wreck.dist > this.camera.position.distanceTo(hit) + WRECK_GRACE) wreck = null;
+    if (wreck && !((creature && creature.dist + PICK_GRACE < wreck.dist)
+      || (plant && plant.dist + PICK_GRACE < wreck.dist))) {
+      if (this.flora) this.flora.unmark();
+      if (this.fauna) this.fauna.unmark();
+      this.source.mark();
+      this.glideTo(wreck.point, null, true);
+      if (this.onSelectSource) this.onSelectSource();
+      return;
+    }
     if (plant) {
       this.flora.mark(plant);
       if (this.fauna) this.fauna.unmark();
+      if (this.source) this.source.unmark();
       this.glideTo(plant.point, null, true);
       if (this.onSelectPlant) this.onSelectPlant(plant.kind);
       return;
     }
     if (creature && creature.point) {
       if (this.flora) this.flora.unmark();
+      if (this.source) this.source.unmark();
       if (this.fauna && creature.member) this.fauna.markMember(creature.member);
       // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
       // it would point the view at the ground under it instead.
@@ -1610,9 +1674,11 @@ export class Ground {
       if (this.onSelect) this.onSelect(creature.kind);
       return;
     }
-    if ((this.fauna && this.fauna.marked) || (this.flora && this.flora.marked)) {
+    if ((this.fauna && this.fauna.marked) || (this.flora && this.flora.marked)
+      || (this.source && this.source.marked)) {
       if (this.fauna) this.fauna.unmark();
       if (this.flora) this.flora.unmark();
+      if (this.source) this.source.unmark();
       if (this.onDeselect) this.onDeselect();
     }
     if (hit) this.glideTo(hit);
@@ -1677,6 +1743,7 @@ export class Ground {
 
   _clear() {
     if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
+    if (this.source) { this.source.dispose(); this.source = null; }
     if (this.flora) { this.flora.dispose(); this.flora = null; }
     if (this.grass) { this.grass.dispose(); this.grass = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }

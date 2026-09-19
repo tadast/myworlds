@@ -2,6 +2,7 @@
 //
 //   node tools/world-checksum.mjs                 print one line per seed
 //   node tools/world-checksum.mjs --check         compare against the baseline file
+//   node tools/world-checksum.mjs --source        the source of each seed on both tiers
 //
 // Issue 34, decision 2. The source of a world takes its own hash stream, so no existing stream may
 // draw one number more and no world may change. This tool proves it: record the baseline before the
@@ -56,6 +57,50 @@ function lineFor(seed) {
   if (!r) throw new Error(`generate("${seed}") posted no result`);
   const parts = [r.world.type, hashArray(r.heightMap), hashArray(r.flora), hashArray(r.fauna)];
   return `${seed} ${parts.join(' ')}`;
+}
+
+// ---------------------------------------------------------------- the source on the two tiers
+// Issue 34. The source of a world must be the same on a phone and on a desktop. The two tiers draw
+// the globe at two detail levels, so this builds every seed twice and compares. app.js sets the
+// detail in Q; see the tier row there.
+const TIERS = { HIGH: { detail: 100, maxFlora: 20000, maxFauna: 300 }, LOW: { detail: 64, maxFlora: 6000, maxFauna: 140 } };
+// The five seeds above and twenty more, so the sweep covers every planet type more than once.
+const SOURCE_SEEDS = SEEDS.concat([
+  'Caldera', 'Nyx', 'Selene', 'Thule', 'Boreas', 'Kestrel', 'Halcyon', 'Verdant', 'Meridian II',
+  'Tarsis', 'Ilmen', 'Corvus', 'Peregrine', 'Solace', 'Ankaa', 'Draconis', 'Mire', 'Fennec',
+  'Ostara', 'Wyrd',
+]);
+
+function sourceOf(seed, opts) {
+  posted = null;
+  globalThis.__generate(seed, opts);
+  return posted.world;
+}
+
+function sourceReport() {
+  const deg = (v) => (v * 180 / Math.PI).toFixed(2);
+  let bad = 0, nulls = 0, surface = 0;
+  for (const seed of SOURCE_SEEDS) {
+    const hi = sourceOf(seed, TIERS.HIGH), lo = sourceOf(seed, TIERS.LOW);
+    const a = hi.source && hi.source.dir, b = lo.source && lo.source.dir;
+    const same = !a === !b && (!a || (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]));
+    if (!same) bad++;
+    if (hi.type !== 'gas') { surface++; if (!a) nulls++; }
+    const where = a
+      ? `lat ${deg(Math.asin(a[1])).padStart(7)}  lon ${deg(Math.atan2(a[2], a[0])).padStart(8)}`
+      : hi.type === 'gas' ? 'none, a gas giant' : 'NO SOURCE';
+    console.log(`  ${seed.padEnd(12)} ${hi.type.padEnd(7)} ${where.padEnd(32)} ${same ? 'same on both tiers' : 'DIFFERS'}`);
+  }
+  console.log(`\n${SOURCE_SEEDS.length} seeds on both tiers: ${bad} differ.`
+    + ` ${nulls} of ${surface} worlds with a surface hold no source`
+    + ` (${(nulls / Math.max(surface, 1) * 100).toFixed(0)}%).`);
+  if (bad) { console.error('source: the tiers disagree'); process.exitCode = 1; }
+}
+
+if (process.argv.includes('--source')) {
+  console.log(`the source on the two tiers, detail ${TIERS.HIGH.detail} against ${TIERS.LOW.detail}:`);
+  sourceReport();
+  process.exit(process.exitCode || 0);
 }
 
 const lines = SEEDS.map(lineFor);

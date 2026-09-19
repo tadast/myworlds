@@ -29,6 +29,25 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 
 12. **The sky turns, 2026-09-18.** A landing keeps a clock: one turn of the planet takes 1,800 s of real time, whatever the day of the world is. The star turns about the axis of the planet, so it rises and sets the way it does at that latitude, and the light, the colours of the sky, the fog, and the countdown of the overlay all follow it. The hours of the world therefore run about fifty times the hours of the reader, which is what makes a sunset something a reader can sit through. The moons keep the order the globe rolled and lose its speed: a moon crosses the sky in tens of minutes and no longer in tens of seconds. See `docs/issues/32-the-sky-turns.md`.
 
+14. **The carrier, 2026-09-19.** Every world with a surface carries one source, and the instrument of the probe reads a bearing to it. The reading has an error and no distance. The globe keeps a wedge per landing, and the source stands where two wedges cross. A landing on the cell of the source shows the thing itself: the wreck of an older survey probe, with a log of four entries that the lore engine writes from the facts of the world. The search takes three phases: hear, cross, and home. See `docs/issues/34-the-carrier.md` and `docs/source.md`.
+    - **The carrier is always heard, and the error does the work.** A range limit was rejected: a landing with no reading costs the reader a dive and gives little back. The error runs from 3 degrees at the source to 25 degrees at its antipode, straight in the arc. The offset inside the error comes from a hash of the seed and the cell, so a cell states one bearing on every visit and the true bearing always lies inside the wedge. Two far fixes cross wide, and the reader then decides between a third far fix and a near one. That decision is the feature.
+    - **A wedge, and not a line.** Two exact lines solve every world in two landings, and the search is dead by the third world. A wedge states the doubt honestly.
+    - **A wedge covers half a great circle.** A bearing has a direction, so a wedge starts at the site and ends at the antipode of the site. Two wedges then cross in one region and not in two.
+    - **The app draws no cross.** Two wedges read darker where they cross, and that is the whole display of the cross. The reader reads it by eye. A computed mark takes the only thought out of the search.
+    - **No pull to the source.** `pullSite()` does not know the source. The reader has to aim.
+    - **The song stays whole.** The first idea took the lead voice out of the song until the reader found the source. It makes every song worse for every reader who does not search, and the music starts muted, so it cannot carry a mechanic alone. The source gets a voice of its own instead, the motif, which adds to the song and takes nothing from it.
+
+    The build changed eight things against the plan.
+
+    - **The needle on the ground takes the frame of the patch box, and not `groundBasis()`.** The box runs x along the u axis of its cell and z along the v axis, and (u, up, v) is left-handed, so the box is the mirror of the sky frame in x. A needle that came through `groundBasis()` pointed at the mirror of the source and away from the wreck. `carrierBox()` in `site.js` reads the slope of the map of the box instead. The mirror of the sky against the terrain is an older defect, it is open, and `tools/carrier-check.mjs` prints it as a note and not as a check. The three digits stay the true bearing of the globe, because the wedge of a fix is drawn on the globe.
+    - **The carrier block sits at the top left.** The plan gave the fifth block no place. The right edge of the overlay holds the altitude ladder, so the block took the left.
+    - **The log names no pulsar and no giant star.** The plan lists both as troubles. `rollStar()` lives in `star.js`, a module of the main thread, and `app.js` rolls the star after the worker replies, so the worker cannot read it. Those two troubles need the star in the worker first.
+    - **A polar night line needs the tag `polarnight`.** The plan names "the tilt and its polar night" as one trouble. A lean alone gives no polar night: the sun fails to rise only poleward of the polar circle, which stands at latitude `90 - lean`. So `sourceTags()` reads the latitude of the source against the lean of the axis, with a margin of 5 degrees. See `docs/source.md`.
+    - **The motif keeps straight time while the song swings.** A machine transmits on a clock, so the swing of the song does not reach the motif. The motif rolls from `'music:' + seed + '|source-motif'` and not from the stream of the song, so no song of any world changed.
+    - **The reach of `patchSource()` is the walk limit and not `FOG_NEAR`.** The reader has to reach the wreck on foot, and the walk stops at half the box less the band the plants thin out over. That is the rule `reachOf()` holds in `ground.js`, so the two cannot drift apart. The range the overlay states measures from the camera and not from the site, so it falls under 5 units at the hull.
+    - **The ring of a find lies on the terrain, and the wedges stand at 1.07.** A wedge runs to the antipode of its site, so it has to clear every mountain and it keeps the shell the plan gives it. The ring marks one place, and at 1.07 it hung in the sky: the surface stands near 1.0 and the camera comes to 1.11. Every vertex of the ring now takes the ground under it, or the sea where the ground lies under the sea, plus a lift that clears the flora of the globe, the way `showMarker()` drapes the square of a cell.
+    - **The source does not read the vertices of the globe.** The plan selects a dry vertex. The detail of the globe follows the tier, so a phone and a desktop found two different sources on one seed. `makeSource()` now draws each candidate direction from the source stream and tests it on the globe field, with a sea level from a fixed grid of samples. `node tools/world-checksum.mjs --source` proves that the two tiers agree.
+
 ## Implementation notes
 
 Added with issue 04, the patch terrain. These notes record the constants and the two decisions the issue text did not fix.
@@ -373,6 +392,63 @@ At the pixel count a phone really asks for, 589 by 1,090, the same LOW site read
 **The overlay moved to the top right.** The sidebar owns the left of a wide screen from the top to the foot, and on a screen under 600 px it docks at the foot as a sheet. The overlay of `?perf` draws over the page, so at the lower left it covered the probe button of the sheet: measured on a viewport of 375 by 667, the old box stood at y 488 to 659 and the button at y 560 to 595. The top right is free in both layouts.
 
 **The sheet hid the probe button as well.** The body of the sidebar is the one scroll region, and on a viewport of 375 by 667 it holds 386 px of a scroll height of 1,496 px. A world with a tall card then puts the probe button at y 629, under the footer at y 626 to 667, and the reader who opens the sheet sees no button at all. So an expand of the sheet, and a change of what the button says, bring it into view. The scroll only moves while the button stands outside the body, so the reader who scrolled somewhere else keeps that place, and a wide screen where the button already shows never moves.
+
+### What the carrier holds
+
+Added with issue 34. These notes record the constants and the reasons the issue text did not fix.
+
+**The error, `CARRIER_ERR = [3, 25]` in `site.js`.** The error is 3 degrees on the cell of the
+source and 25 degrees at its antipode, straight in the arc. Three degrees is tight enough that a
+near fix reads as an answer, and 25 degrees is wide enough that two fixes from two continents cross
+over a region and not over a point. The pair is a first value, and it stays open: the plan asks for
+a tune by hand on five worlds, against a median search of three to five landings.
+
+**The range, `CARRIER_RANGE = 6` cells in `site.js`.** The range says nothing further out than 6
+cells of arc, which is 0.06 rad, or about 360 km on a world of 6,000 km. A range at every arc turns
+the search into one landing and a walk of the number down. A range inside 6 cells turns the last
+phase, home, into a phase the reader can finish.
+
+**The strength, in `probe-hud.js`.** One word states the strength, so a reader with the sound off
+loses no fact. `CARRIER_HERE` is 0.001 rad, a tenth of a cell: the fix snaps to the middle of its
+cell, so the arc on the cell of the source is small but never zero. `CARRIER_STRONG` is 0.06 rad,
+which is the 6 cells the range covers, so "strong" and a number arrive together. `CARRIER_CLEAR` is
+0.6 rad, a fifth of the half circle, where the error stands under 8 degrees and two fixes cross
+tight.
+
+**The wedges, `WEDGE_R = 1.07` and 48 steps in `carrier-globe.js`.** The shell of 1.07 stands over
+the relief of 0.06 and under the inner atmosphere shell of 1.115, so a wedge clears every mountain
+of every world and never stands outside the air. A wedge runs to the antipode of its site, so it
+cannot lie on the terrain: it would then cross every hill on the way. 48 steps put one step every
+3.75 degrees of arc, so the edge of a wedge reads as a curve and not as a chain of straight pieces.
+The alpha is 0.16, so one wedge is faint and two that cross read twice as strong. That is the whole
+display of the cross.
+
+**The ring of a find lies on the terrain.** 72 steps of a circle 1.5 cells out, in a band 0.3 cells
+wide, each vertex at the ground under it or at the sea over it, plus a lift of 0.014 globe units.
+The flora of the globe stands 0.011 units tall, and a lift under that put the ring below the trees
+of a forest, where the reader saw no ring. The lift also covers the gap between the smooth height
+map and the facets of the globe. `depthTest` stays on, so the
+globe still hides the part of the ring behind it.
+
+**The disc of 14 units, `SOURCE_DISC` in `worker.js`.** The worker flattens a disc of radius 14
+units under the wreck, holds the inner 55% of it flat, and carries a soft edge over the rest. It
+also keeps the plants, the grass, and the group anchors off the disc, as `patchActivity()` does for
+the phenomenon. The body of the wreck reaches 13.3 units from its own axis, so a radius of 14 holds
+the whole of it and leaves a thin skirt of scorched ground. A wider disc reads as a hole in the
+forest, and a narrower one lets a plant stand under the hull.
+
+**The mast of 18 units, `MAST_H` in `ground-source.js`.** The reader walks to the wreck across the
+cell, so the wreck has to read from far away. The hull is 13 units long and it leans 30 degrees, so
+a forest can hide it. The mast carries the lamp to 18 units and it stands nearly upright, because a
+mast that lay with the hull would say nothing at range. The lamp draws with the fog off: a lamp the
+fog took would go out at the distance the reader first looks for it. The whole body is 400
+triangles, well under the 1,500 the plan allows.
+
+**The bounds of the store, `MAX_FIXES = 64` and `MAX_SEEDS = 200` in `carrier-store.js`.** A fix
+writes about 46 characters of JSON, so 64 fixes take about 3 kB and 200 seeds take about 590 kB at
+the very worst. That stands well inside the 5 MB most browsers hold. A reader who needs 64 landings
+on one world has a broken instrument, and 200 seeds is over three times the 60 worlds the sidebar
+keeps, so neither bound can bite a real search.
 
 ## Phases
 

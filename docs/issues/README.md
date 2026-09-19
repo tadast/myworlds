@@ -24,7 +24,10 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `fauna.js` | Creature geometry from a genome, rig shader, `makeMover`/`stepMover` steering, the inspector card. |
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
-| `music.js` | Chip-tune per world. Not touched by this issue set. |
+| `music.js` | Chip-tune per world, and the motif of the source. `motifOf()` gives the rhythm of that motif with no audio, `setCarrier()` sets its level, and `barClock()` gives the clock the lamp of the wreck blinks on. |
+| `ground-source.js` | The source on the ground: the wreck of the older probe, its lamp, its mark, the tap that finds it, and the preview the log card turns. Issue 34. |
+| `carrier-store.js` | The fixes of the search in `localStorage`, under `myworlds.carrier.v1`. `loadFixes()`, `addFix()`, `markFound()`, `clearFixes()`, `foundSeeds()`. No three.js. Issue 34. |
+| `carrier-globe.js` | The fixes on the globe: a dot per fix, a wedge per fix, and the one ring a find leaves at the source. One group under `current.planet`. Issue 34. |
 | `probe-hud.js` | The instrument of the probe over the ground: the air, the height, the hour of the star, the uplink, and the noise at the edge of the reach. Reads `Ground.telemetry()`. |
 | `index.html`, `style.css` | The page and the sidebar. |
 
@@ -126,8 +129,8 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - A site is a lat and lon in degrees in the planet's local frame, the frame of the worker's `pos` arrays before `planet.rotation.y` is applied. Lat is `asin(y)`. Lon is `atan2(z, x)`. Both in degrees, two decimals. Lat in [-90, 90], lon in [-180, 180].
 - URL format: `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Without `@` the URL means orbit. The seed part is URL-encoded as today; the site part is plain.
 - Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
-- Patch message options: `{ grid, size, span, rim, maxFlora, maxFauna, pulledKind, activity }`.
-  `activity` is `{ kind }` when the landing cell holds the phenomenon of the world, else null. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `ground.js` exports the value as `RIM`.
+- Patch message options: `{ grid, size, span, rim, maxFlora, maxFauna, pulledKind, activity, source }`.
+  `activity` is `{ kind }` when the landing cell holds the phenomenon of the world, else null. `source` is `{ kind }` when the landing cell holds the source of the world, else null; issue 34 added it and the rule is the cell and not the pull, as it is for `activity`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `ground.js` exports the value as `RIM`.
 
 ### The gestures of the ground
 
@@ -167,7 +170,7 @@ Ground frame: x east, y up, z south. Origin at the site at sea level, so `height
 
 ### The patch protocol
 
-Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, span, rim, maxFlora, maxFauna, pulledKind, activity } })`. `pulledKind` is the species id the site was pulled to, or `-1`. `activity` is `{ kind }` on the one cell that holds the phenomenon of the world, else null; the worker then raises the shape at the origin of the patch. Issue 14.
+Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, span, rim, maxFlora, maxFauna, pulledKind, activity, source } })`. `pulledKind` is the species id the site was pulled to, or `-1`. `activity` is `{ kind }` on the one cell that holds the phenomenon of the world, else null; the worker then raises the shape at the origin of the patch. Issue 14. `source` is `{ kind }` on the one cell that holds the source of the world, else null; the worker then picks a place for the wreck, flattens a disc of 14 units under it, scorches that disc, and keeps the plants, the grass, and the group anchors off it. Issue 34.
 
 Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or `{ type: 'error', message }`. Transfer the buffers.
 
@@ -184,6 +187,8 @@ Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or 
     rim: { out, step, n, hasSea },                // issue 18: the coarse grid outside the box. out and step in units
     activity,                                     // issue 14: the phenomenon at the origin, or null.
                                                   // volcano: { kind, radius, peak, crater }. geyser: { kind, radius, pool }. units
+    source,                                       // issue 34: the wreck of the source, or null.
+                                                  // { kind, x, y, z, yaw } in units of the box, yaw in radians
   },
   heights: Float32Array(n * n),                   // row-major, row = z from north (-) to south (+), col = x from west to east
   colors:  Float32Array(n * n * 3),               // per vertex, linear RGB 0..1
@@ -207,7 +212,25 @@ Issue 34. One thing on a world with a surface transmits, and the probe reads a b
 - The bearing is 3 degrees wrong at the source and 25 degrees wrong at its antipode, straight in the arc. The offset inside that band comes from a hash of the seed and the cell, so one cell always gives one fix and the true bearing always lies inside the wedge.
 - **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `worker.js` lays the box on the axes of the cell of the cube grid, and `(u, up, v)` is left-handed, so the box is the mirror of the frame `groundBasis()` builds. The sky therefore stands in the mirror of its terrain; that is older than issue 34 and issue 34 does not touch it.
 - `boxPoint(site, dir, size)` is the exact inverse of the map `patch()` builds the box with. It gives `{ x, z }` in units of the box, or null for a direction more than 80 degrees from the face of the cell. Slice 3 takes the range in units from it. `carrierBox()` gives the needle as a unit `{ x, z }` in the same frame, from the slope of that map at the site, so it holds at every arc.
-- `Ground.load(result, { sunDir, view, carrier })`. The app builds `carrier` from `carrierAt()` and adds `carrier.dir`, the `[x, z]` of `carrierBox()` **in the frame of the box**. `telemetry()` then returns `carrier: { brg, err, arc, rel, rangeKm, range } | null`. `rel` runs -180 to 180 degrees from the way the view points to the way the needle points, and a positive `rel` puts the needle to the right of the screen. Do not build `rel` from the digits less an azimuth: the box turns the sense of a bearing over. `range` is the units to the wreck on this patch, and slice 3 fills it.
+- `Ground.load(result, { sunDir, view, carrier })`. The app builds `carrier` from `carrierAt()` and adds `carrier.dir`, the `[x, z]` of `carrierBox()` **in the frame of the box**. `telemetry()` then returns `carrier: { brg, err, arc, rel, rangeKm, range } | null`. `rel` runs -180 to 180 degrees from the way the view points to the way the needle points, and a positive `rel` puts the needle to the right of the screen. Do not build `rel` from the digits less an azimuth: the box turns the sense of a bearing over. `range` is the units to the wreck on this patch, or null off its cell.
+- On the cell of the source the needle and `range` stop reading the globe and read the wreck itself: `patch.source` gives its place in the units of the box, and both numbers are measured from the **camera position**, the point the height of the overlay is measured from. So the needle turns and the range falls as the reader walks. Off that cell nothing changes. Issue 34, slice 3.
+- `new Ground({ ..., music, onSelectSource })`. `music` is the `Music` instance of the app; the lamp of the wreck blinks the rhythm of `motifOf(world)` on `music.barClock()`, or on the clock of the landing when no sound runs. `onSelectSource()` fires when a tap marks the wreck, and the app then offers "Read the log" on the floating button. The find itself is not a job of `Ground`: `inspectSource()` in `app.js` calls `onSourceFound()` the first time the card opens.
+
+**The store.** The fixes live under a key of their own, `myworlds.carrier.v1`, and never under `myworlds.v1`. `persist()` drops its oldest worlds on a quota error, and a search must not go with them.
+
+- The shape is one object keyed by seed: `{ "Auralis": { fixes: [{ lat, lon, brg, err }], found, ts } }`. The site of a fix is snapped to the cell grid on the way in, so one cell holds one fix and a second landing on it replaces the first.
+- `carrier-store.js` gives `loadFixes(seed)`, `addFix(seed, fix)`, `markFound(seed)`, `clearFixes(seed)`, and `foundSeeds()`. `loadFixes()` gives an empty record for an unknown seed, so no caller tests for null. `clearFixes()` drops the fixes and keeps the find. Every call of `localStorage` sits in try and catch, as `persist()` does.
+- The bounds are `MAX_FIXES = 64` per seed and `MAX_SEEDS = 200`. The oldest goes first in both.
+- A shared URL carries no fix. A reader who opens a link starts the search with nothing.
+
+**The wedge.** `carrier-globe.js` gives `makeCarrierGroup(world, record, heightMap)`, `addWedge(group, fix, { fade })`, `setFound(group, world, heightMap)`, `updateCarrierGroup(group, dt)`, and `disposeCarrierGroup(group)`.
+
+- The group rides under `current.planet`, so it turns with the world. `depthTest` stays on, so the globe hides the part of a shape that runs over its far side.
+- A wedge is the band between the bearing less the error and the bearing plus the error. It runs from the site to the antipode of the site, 48 steps, on the shell `WEDGE_R = 1.07`, which clears the relief of 0.06 and stands under the inner atmosphere shell of 1.115. One `MeshBasicMaterial` in the accent of the palette at alpha 0.16, `depthWrite` off, `toneMapped` false. Two wedges read darker where they cross, and the app draws no other mark of the cross.
+- Every wedge of a world merges into one mesh and every dot into one more, whatever the number of fixes, so the group costs a handful of draw calls.
+- A new fix fades in over 1.2 s, because the ascent ends over the site and the reader watches the wedge arrive.
+- A find takes the wedges and the dots away and leaves one ring at the source, 1.5 cells of arc out in a band 0.3 cells wide. The ring **lies on the terrain**: every vertex takes `max(groundRadius(world, heightMap, dir), world.seaRadius) + DRAPE_LIFT`, the rule `showMarker()` in `site.js` drapes the square of a cell with. So `makeCarrierGroup()` and `setFound()` both take the height map of the world.
+- `tools/carrier-fix-check.mjs` holds the store, the wedge, and the drape. It reads the built geometry back through `bearingTo()` of `site.js`, so a mirrored east in either file fails the run.
 
 ### Metres for a creature
 
@@ -301,4 +324,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 31 | The probe carries no instrument, and the edge of its reach reads as a fault | AFK | 23, 25, 30 | CLOSED |
 | 32 | The sky of a landing holds one hour for ever, and the moons fly across it | AFK | 12, 31 | CLOSED |
 | 33 | Every world stands upright, and the light of a latitude never says otherwise | AFK | 32 | CLOSED |
-| 34 | No cell is worth more than another, so the reader has no reason to pick a site | HITL | 14, 31, design | PLAN |
+| 34 | No cell is worth more than another, so the reader has no reason to pick a site | HITL | 14, 31, design | CLOSED |

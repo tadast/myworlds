@@ -19,10 +19,14 @@
 // carrier-fix-check.mjs reads the built geometry back through bearingTo() and fails when the two
 // files disagree by more than a millionth of a degree.
 import * as THREE from 'three';
-import { CELL, sourceSite } from './site.js';
+import { CELL, groundRadius, sourceSite } from './site.js';
 
 // globe units: over the relief of 0.06 and under the inner atmosphere shell of 1.115, so a wedge
 // clears every mountain and never stands outside the air of the world.
+//
+// A wedge runs to the antipode of its site, so it has to clear the whole world and it stands on
+// this shell. The ring of a find covers 1.5 cells and it marks one place, so it lies on the terrain
+// instead: see drapeR() below.
 export const WEDGE_R = 1.07;
 const WEDGE_STEPS = 48;         // steps of the walk from the site to the antipode of the site
 const WEDGE_ALPHA = 0.16;       // one wedge is faint, and two that cross read twice as strong
@@ -30,7 +34,17 @@ const MARK_ALPHA = 0.5;         // the dot of a fix and the ring of a find, whic
 const DOT_R = 0.006;            // globe units: the radius of the dot at a site
 const RING_CELLS = 1.5;         // cells of arc: the radius of the ring a find leaves at the source
 const RING_WIDTH = 0.3;         // cells of arc: the width of the band of that ring
+// The ring carries 72 steps, so one step is 0.0013 globe units of arc against a height map texel of
+// 0.016. The band therefore reads every value the height map holds under it and the chord between
+// two steps sags by nothing the reader can see.
 const RING_SEGS = 72;
+// globe units: the lift of the ring over the terrain. The ring must clear the flora of the globe,
+// which stands 0.011 units tall: a lift of 0.0012 put the ring under the trees of a forest, and
+// the reader saw no ring. The height map is also smoother than the facets of the globe, and the
+// lift covers that too. It stays far under the 0.11 globe units the camera keeps over the surface
+// at its nearest, so the ring still reads as a mark on the ground and not as a thing in the sky.
+// depthTest stays on, so the far side of the globe still hides the part behind it.
+export const DRAPE_LIFT = 0.014;
 const FADE_S = 1.2;             // seconds: a new wedge fades in over the end of the ascent
 const RENDER_ORDER = 2;         // after the terrain and before the atmosphere shells of app.js
 
@@ -68,8 +82,19 @@ function walk(t, tan, out = _p) {
 // wedges draws in one call and the whole set of dots in one more.
 const newPart = () => ({ pos: [], idx: [] });
 
-function push(part, v) {
-  part.pos.push(v.x * WEDGE_R, v.y * WEDGE_R, v.z * WEDGE_R);
+function push(part, v, r = WEDGE_R) {
+  part.pos.push(v.x * r, v.y * r, v.z * r);
+}
+
+// The radius the ring of a find takes under one direction: the ground there, or the sea when the
+// ground lies under it, plus the lift. It is the rule showMarker() in site.js drapes the square of
+// a cell with, and it needs the height map the worker sent with the world.
+//
+// A ring at a fixed radius floats. The surface stands near 1.0, the camera comes to 1.11, and a
+// ring at the 1.07 of the wedges then hangs in the sky a long way from the source. The wedges keep
+// that shell, because a wedge runs to the antipode and has to clear every mountain on the way.
+function drapeR(world, hm, dir) {
+  return Math.max(groundRadius(world, hm, dir), (world && world.seaRadius) || 0) + DRAPE_LIFT;
 }
 
 function toGeometry(part) {
@@ -112,16 +137,22 @@ function addDotShape(part, site, segs = 12) {
 }
 
 // The ring a find leaves at the source: a thin band about 1.5 cells of arc out from the cell.
-function addRingShape(part, site) {
+//
+// Every vertex takes the radius of the terrain under it, so the band lies on the relief and rises
+// and falls with it. The steps are close enough that the two vertices of one step read the same
+// hill, and the reader sees a mark painted on the ground.
+function addRingShape(part, site, world, hm) {
   const base = part.pos.length / 3;
   frameAt(site);
   const inner = (RING_CELLS - RING_WIDTH * 0.5) * CELL;
   const outer = (RING_CELLS + RING_WIDTH * 0.5) * CELL;
-  const tan = new THREE.Vector3();
+  const tan = new THREE.Vector3(), at = new THREE.Vector3();
   for (let i = 0; i <= RING_SEGS; i++) {
     tangentAt(i * 360 / RING_SEGS, tan);
-    push(part, walk(inner, tan));
-    push(part, walk(outer, tan));
+    for (const arc of [inner, outer]) {
+      walk(arc, tan, at);
+      push(part, at, drapeR(world, hm, at));
+    }
   }
   for (let i = 0; i < RING_SEGS; i++) {
     const a = base + i * 2, b = a + 1, c = a + 2, d = a + 3;
@@ -159,10 +190,15 @@ const accentOf = (world) => (world && world.palette && world.palette.fauna && wo
 // The group of one world, or null for a world with no source. `record` is the record of
 // carrier-store.js: the fixes of this world and whether the reader has found the source.
 //
+// `heightMap` is the height map the worker sent with the world, which buildWorld() in app.js reads
+// off the same reply. The ring of a find lies on the terrain and needs it; the wedges and the dots
+// do not. A caller that gives none gets a ring on the sphere of radius 1, which is what a world
+// with no height map draws anyway.
+//
 // Four meshes and four materials, whatever the number of fixes: the settled wedges in one, their
 // dots in one more, and the wedge and the dot that fade in on the last landing in the other two.
 // A found world draws one ring instead and nothing else.
-export function makeCarrierGroup(world, record) {
+export function makeCarrierGroup(world, record, heightMap = null) {
   if (!world || !world.source || !world.source.dir) return null;
   const accent = accentOf(world);
   const mats = {
@@ -181,7 +217,7 @@ export function makeCarrierGroup(world, record) {
   };
   for (const m of Object.values(meshes)) group.add(m);
   group.userData = {
-    mats, meshes, world,
+    mats, meshes, world, hm: heightMap,
     fixes: (record && Array.isArray(record.fixes) ? record.fixes : []).slice(),
     found: !!(record && record.found),
     fade: null,       // { fix, t } while one wedge fades in
@@ -197,7 +233,7 @@ function rebuild(group) {
   if (u.found) {
     // The find takes the place of the search: no wedge and no dot, and one ring at the source.
     const at = sourceSite(u.world);
-    if (at) addRingShape(marks, at);
+    if (at) addRingShape(marks, at, u.world, u.hm);
   } else {
     for (const fix of u.fixes) { addWedgeShape(wedges, fix); addDotShape(marks, fix); }
   }
@@ -243,10 +279,13 @@ export function addWedge(group, fix, { fade = false } = {}) {
 }
 
 // The reader has found the source. Slice 3 calls onSourceFound() in app.js, which calls this.
-export function setFound(group, world) {
+// The ring the rebuild draws lies on the terrain, so a caller that gives a new world gives its
+// height map with it.
+export function setFound(group, world, heightMap) {
   if (!group) return;
   const u = group.userData;
   if (world) u.world = world;
+  if (heightMap) u.hm = heightMap;
   u.fade = null;
   u.mats.fadeWedge.opacity = 0;
   u.mats.fadeMark.opacity = 0;
