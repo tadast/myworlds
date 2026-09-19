@@ -355,7 +355,7 @@ let capRow = '';
 // formula of the GLSL in JS, and both read WEDGE_STEP of carrier-globe.js.
 let washRow = '';
 {
-  const want = [0.04, 0.15, 0.31, 0.48];
+  const want = [0.06, 0.22, 0.43, 0.63];
   const got = want.map((_, i) => G.wedgeWash(i + 1));
   for (let i = 0; i < want.length; i++) {
     ok('wash', Math.abs(got[i] - want[i]) < 0.005, `${i + 1} wedges wash ${got[i].toFixed(4)} and not ${want[i]}`);

@@ -7,7 +7,7 @@ import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impuls
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere, sourceSite } from './site.js';
 import { loadFixes, addFix, markFound, markBriefed, clearFixes, foundSeeds } from './carrier-store.js';
-import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial } from './carrier-globe.js';
+import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
 import { Ground, RIM } from './ground.js';
@@ -597,6 +597,8 @@ const SLOPE_STEP = 0.02;
   // The height map goes in because the ring of a find lies on the terrain. It comes off the same
   // reply as `world`, so it stands here already; `current` does not, and it is written further
   // down this function.
+  // The colour of the carrier comes off the colours of this terrain, so a wedge stands out on it.
+  if (world.type !== 'gas') pickCarrierColour(world, terrain.col, terrain.pos);
   carrierRecord = loadFixes(world.seed);
   carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, freshFixes(world, carrierRecord), heightMap);
   if (carrierGroup) planet.add(carrierGroup);

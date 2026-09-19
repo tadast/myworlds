@@ -45,18 +45,19 @@ import { wreckGeometry, WRECK_HULL } from './ground-source.js';
 export const MAX_WEDGES = 4;
 
 // The tint of one wedge, as a part of the way from the lit colour to the accent of the palette.
-// n wedges give 1 - pow(1 - WEDGE_STEP, n * n), so one wedge reads 0.04, two read 0.15, three read
-// 0.31, and four read 0.48. The square of the count is the point: the wash grows faster than the
+// n wedges give 1 - pow(1 - WEDGE_STEP, n * n), so one wedge reads 0.06, two read 0.22, three read
+// 0.43, and four read 0.63. The square of the count is the point: the wash grows faster than the
 // count, so one wedge alone is almost only its two lines, and the ground two or more wedges cover
 // stands out as the answer. The first build stepped by 1 - pow(1 - 0.08, n), and one wedge then
 // washed as much ground as a crossing did. The line on each edge of a wedge carries the shape of
 // one wedge; see WEDGE_EDGE.
-const WEDGE_STEP = 0.04;
+const WEDGE_STEP = 0.06;
 // The line on each edge of a wedge, as a part of the way to the accent, and its width in degrees.
 // The eye finds the cross as the region the lines close, so the lines must read and the wash must
-// not hide the ground. 0.3 degrees is about 1.5 px at the home zoom and half a facet of the globe.
-const WEDGE_EDGE = 0.5;
-const WEDGE_LINE = Math.sin(THREE.MathUtils.degToRad(0.3));
+// not hide the ground. 0.45 degrees is about 2 px at the home zoom. The second build drew the line at
+// 0.5 of the colour and 0.3 degrees wide, and one wedge alone was hard to find on a bright world.
+const WEDGE_EDGE = 0.85;
+const WEDGE_LINE = Math.sin(THREE.MathUtils.degToRad(0.45));
 // The share of WEDGE_EDGE the line of a wedge takes, by age: the newest wedge first and the oldest
 // last. Four lines of one strength read as a net, and the reader cannot tell which pair to trust.
 // The newest wedge draws its line full and each older one draws weaker, so the eye starts at the
@@ -505,8 +506,63 @@ function material(accent, opacity) {
   });
 }
 
-// The accent of the palette, as showMarker() reads it in site.js.
-const accentOf = (world) => (world && world.palette && world.palette.fauna && world.palette.fauna.accent) || '#ffffff';
+// The colour of the carrier on one world: the wedges, the dots, and the lamp of the mini wreck.
+//
+// The first build took the accent of the fauna palette, which a world can also hold in its terrain,
+// and a wash of a colour on the same colour shows nothing. pickCarrierColour() reads the colours
+// the globe draws and takes the candidate that stands farthest from them. The candidates are all
+// saturated, because a wash of white on a green hill reads as a lighter green hill. The last three
+// are dark, because a bright wash on an ice sheet shows nothing.
+//
+// It draws no random number, so the same world gets the same colour on each visit.
+const CARRIER_COLOURS = ['#ff2fa0', '#19e3ff', '#ffe433', '#ff7b1c', '#8dff2e', '#a066ff', '#ff3b30', '#1f4bff', '#c4007a', '#7a1fd6'];
+const CARRIER_SAMPLES = 3000;   // the most vertices one pick reads
+const CARRIER_PCT = 0.1;        // a candidate is as good as its distance to the nearest tenth of the surface
+const carrierColours = new WeakMap();
+
+// A colour as luma and two chroma parts, from linear RGB, with a square root for the gamma.
+function toYCC(r, g, b, out) {
+  r = Math.sqrt(Math.max(r, 0)); g = Math.sqrt(Math.max(g, 0)); b = Math.sqrt(Math.max(b, 0));
+  const y = 0.299 * r + 0.587 * g + 0.114 * b;
+  out[0] = y; out[1] = b - y; out[2] = r - y;
+  return out;
+}
+
+// col is the colour attribute of the terrain (linear RGB, 3 floats a vertex). pos is its position
+// attribute, which lets the pick skip the sea bed; a world with a sea counts the colour of the sea
+// one time for each vertex it skips. Without col the pick keeps the accent of the palette.
+export function pickCarrierColour(world, col, pos = null) {
+  if (!world || !col || col.length < 3) return accentOf(world);
+  const n = col.length / 3;
+  const step = Math.max(1, Math.floor(n / CARRIER_SAMPLES));
+  const sea = world.hasOcean && world.seaRadius ? world.seaRadius : 0;
+  const pal = world.palette || {};
+  const ocean = sea && pal.ocean ? toYCC(..._c.set(pal.ocean).toArray(), [0, 0, 0]) : null;
+  const samples = [];
+  const v = [0, 0, 0];
+  for (let i = 0; i < n; i += step) {
+    const k = i * 3;
+    if (sea && pos && Math.hypot(pos[k], pos[k + 1], pos[k + 2]) < sea) {
+      if (ocean) samples.push(ocean);
+      continue;
+    }
+    samples.push(toYCC(col[k], col[k + 1], col[k + 2], [0, 0, 0]));
+  }
+  if (!samples.length) return accentOf(world);
+  let best = CARRIER_COLOURS[0], bestScore = -1;
+  for (const hex of CARRIER_COLOURS) {
+    toYCC(..._c.set(hex).toArray(), v);
+    const d = samples.map((s) => Math.hypot(s[0] - v[0], s[1] - v[1], s[2] - v[2])).sort((a, b) => a - b);
+    const score = d[Math.floor((d.length - 1) * CARRIER_PCT)];
+    if (score > bestScore) { bestScore = score; best = hex; }
+  }
+  carrierColours.set(world, best);
+  return best;
+}
+const _c = new THREE.Color();
+
+const accentOf = (world) => (world && carrierColours.get(world))
+  || (world && world.palette && world.palette.fauna && world.palette.fauna.accent) || '#ffffff';
 
 // The group of one world, or null for a world with no source. `record` is the record of
 // carrier-store.js: the fixes of this world and whether the reader has found the source.
