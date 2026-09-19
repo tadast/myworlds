@@ -522,6 +522,14 @@ the part behind it. The dot stood at 0.006 units on the shell of the wedges befo
 as a large disc in the sky. `LIFT` in `site.js` holds the same measurement for the square of the
 aim marker, which drapes the same way at 0.006.
 
+**The visited cell and the goal cell are paint, and the dot is gone.** From the aim camera the lift
+of 0.014 still read as a disc that flew over the ground, and the reader could not tell which cell
+it marked. The shader now outlines the cell of each fix. A cell of the cube grid is four great
+circles, so four plane tests give it, as two give a wedge. When three or more wedges overlap in
+less than 4 cells, `goalCell()` fills the cell of the source in a white pulse. This breaks
+decision 6 on purpose: three wedges close on a few cells, and the eye cannot split those cells
+into one square to tap.
+
 **The disc of 14 units, `SOURCE_DISC` in `worker.js`.** The worker flattens a disc of radius 14
 units under the wreck, holds the inner 55% of it flat, and carries a soft edge over the rest. It
 also keeps the plants, the grass, and the group anchors off the disc, as `patchActivity()` does for

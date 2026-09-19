@@ -1,13 +1,15 @@
 // myworlds — the fixes of the carrier on the globe. Issue 34, slice 2.
 //
-// One landing gives one fix, and a fix draws two things: a dot on the cell the probe stood on, and
-// a wedge that runs out from that cell along the bearing the instrument stated, plus and minus its
+// One landing gives one fix, and a fix draws two things: the outline of the cell the probe stood
+// on, and a wedge that runs out from that cell along the bearing the instrument stated, plus and minus its
 // error. A wedge covers half a great circle, from the site to the antipode of the site, because a
 // bearing has a direction. Two wedges then cross in one region and not in two.
 //
-// The app draws no cross and computes none. Two wedges read stronger where they cross, and that is
-// the whole display of the cross. Decision 6 of issue 34: the reader reads the cross by eye, and a
-// computed mark would take the only thought out of the search.
+// Two wedges read stronger where they cross, and the reader reads that cross by eye. Decision 6 of
+// issue 34 said the app computes no cross. The reader then found that three wedges can close on a
+// region of a few cells that the eye still cannot split into one square to tap. So the app computes
+// one thing: when three or more wedges overlap in less than GOAL_CELLS cells, it fills the cell of
+// the source. See goalCell().
 //
 // **The wedge is paint on the terrain and not a shape in the sky.** The first build put every
 // wedge on a shell of radius 1.07. The aim camera comes to 1.11, and from there a wedge stood as a
@@ -16,10 +18,12 @@
 // ocean shader add to their own fragments, so it lies exactly on the ground it marks and it holds
 // no parallax at any camera. patchCarrierMaterial() below installs it.
 //
-// The dot of a fix and the mini wreck of a find stay as geometry, because each one marks one cell.
-// Both stand on the terrain: see drapeR().
+// The outline of a visited cell and the fill of the goal cell are paint too. The first build drew a
+// dot of geometry on each visited cell, lifted over the flora. From the aim camera the lift read as
+// a disc that flew over the ground, and the reader could not tell which cell it marked. The mini
+// wreck of a find stays as geometry on the terrain: see drapeR().
 //
-// The group rides under current.planet, so the dots turn with the world. The wedges turn with the
+// The group rides under current.planet, so the wreck turns with the world. The paint turns with the
 // world for free, because the shader reads the direction of a fragment in the LOCAL frame of the
 // planet and the fixes stand in that same frame.
 //
@@ -29,7 +33,7 @@
 // carrier-fix-check.mjs builds the planes with wedgePlanes(), the one function the uniforms come
 // from, and reads them back through bearingTo() and carrierAt() of site.js.
 import * as THREE from 'three';
-import { CELL, groundRadius, siteDir, sourceSite } from './site.js';
+import { CELL, cellDir, groundRadius, siteCell, siteDir, sourceSite } from './site.js';
 // The mini wreck of a find is the wreck of the ground, at the scale of the globe. ground-source.js
 // builds that body in wreckGeometry(), which takes no DOM and does nothing at import, so the two
 // models come from one builder and they cannot drift apart.
@@ -78,10 +82,25 @@ const WEDGE_SOFT = Math.sin(THREE.MathUtils.degToRad(0.15));
 // plane. carrierAt() tops the error at 10 degrees today, so the clamp never bites.
 const MAX_ERR = 89.5;
 
-const MARK_ALPHA = 0.5;         // the dot of a fix, which must read alone
-const DOT_CELLS = 0.35;         // cells of arc: the radius of the dot at a site
-const DOT_SEGS = 16;
-// globe units: the lift of the dot and of the mini wreck over the terrain. Both must clear the
+// The outline of a visited cell: its width as the sine of the angle in from the edge, and its
+// share of the way to the accent. A cell is about 0.01 of arc across, so the line takes a fifth of
+// the half width. The fill inside the outline is faint, so the wedges under it still read.
+const VISIT_LINE = 0.001;
+const VISIT_EDGE = 0.9;
+const VISIT_FILL = 0.2;
+// The goal: the cell of the source, filled when GOAL_WEDGES or more wedges overlap in a region under
+// GOAL_CELLS cells. The fill is white, because the ground under the cross already carries most of the
+// accent, and it pulses over GOAL_PERIOD seconds between GOAL_LO and GOAL_HI.
+export const GOAL_WEDGES = 3;
+export const GOAL_CELLS = 4;
+const GOAL_LO = 0.35;
+const GOAL_HI = 0.7;
+const GOAL_PERIOD = 1.6;
+// The step of the grid goalCell() fills the overlap on, as a part of a cell, and how far out it
+// looks, in cells. An overlap that reaches the edge of the grid is far wider than GOAL_CELLS.
+const GOAL_STEP = 1 / 4;
+const GOAL_REACH = 12;
+// globe units: the lift of the mini wreck over the terrain. It must clear the
 // flora of the globe, which stands 0.011 units tall: a lift of 0.0012 put a mark under the trees of
 // a forest, and the reader saw nothing. The height map is also smoother than the facets of the
 // globe, and the lift covers that too. It stays far under the 0.11 globe units the camera keeps
@@ -119,7 +138,6 @@ const _east = new THREE.Vector3();
 const _north = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _tan = new THREE.Vector3();
-const _p = new THREE.Vector3();
 const _yUp = new THREE.Vector3(0, 1, 0);   // the up axis of wreckGeometry(), in its own frame
 
 // The three axes of a bearing at a site: east, north, and up.
@@ -139,11 +157,6 @@ function frameAt(site) {
 function tangentAt(brg, out = _tan) {
   const b = THREE.MathUtils.degToRad(brg);
   return out.copy(_north).multiplyScalar(Math.cos(b)).addScaledVector(_east, Math.sin(b));
-}
-
-// The point at arc t along the great circle that leaves the site on a tangent.
-function walk(t, tan, out = _p) {
-  return out.copy(_up).multiplyScalar(Math.cos(t)).addScaledVector(tan, Math.sin(t));
 }
 
 // ---------------------------------------------------------------- the wedge, as numbers
@@ -208,6 +221,79 @@ export function wedgeCoverage(planes, dir) {
 // and tools/carrier-fix-check.mjs tests the numbers the shader paints.
 export function wedgeWash(n) { return 1 - Math.pow(1 - WEDGE_STEP, n * n); }
 
+// ---------------------------------------------------------------- the cell, as numbers
+// A cell of the cube grid is bounded by four great circles: a line of one gnomonic coordinate on a
+// face is a plane through the centre. So a cell is four inward plane normals, and a direction lies
+// in the cell when all four dots are positive. The dot is the sine of the angle to that edge, so
+// the shader draws one line width along all four edges.
+const _ca = new THREE.Vector3(), _cb = new THREE.Vector3(), _cm = new THREE.Vector3();
+const CELL_EDGES = [[0, 0, 1, 0], [1, 0, 1, 1], [1, 1, 0, 1], [0, 1, 0, 0]];
+export function cellPlanes(site, out = [0, 1, 2, 3].map(() => new THREE.Vector3())) {
+  const cell = siteCell(site);
+  cellDir(cell, 0.5, 0.5, _cm);
+  CELL_EDGES.forEach(([u0, v0, u1, v1], k) => {
+    cellDir(cell, u0, v0, _ca);
+    cellDir(cell, u1, v1, _cb);
+    out[k].crossVectors(_ca, _cb).normalize();
+    if (out[k].dot(_cm) < 0) out[k].negate();
+  });
+  return out;
+}
+
+// The dot of a direction with the four planes of a cell: the least of them, positive inside.
+export function inCell(planes, dir) {
+  return Math.min(...planes.map((n) => n.dot(dir)));
+}
+
+// ---------------------------------------------------------------- the goal
+// The cell of the source, or null. It takes the wedges of the globe and fills their overlap on a
+// grid of GOAL_STEP of a cell around the source, from the source out. The source always stands
+// inside every wedge, because carrierAt() states a bearing inside its error, so the fill starts
+// there. When the overlap holds less than GOAL_CELLS cells of area, the reader cannot miss the
+// cell any more, and the globe fills it.
+//
+// The grid is the tangent plane at the source, and a direction on it takes a normalize. The
+// overlap stands at most GOAL_REACH cells out, where the plane and the sphere part by under 0.1%.
+const _gE = new THREE.Vector3(), _gN = new THREE.Vector3(), _gD = new THREE.Vector3();
+export function goalCell(world, fixes) {
+  if (!fixes || fixes.length < GOAL_WEDGES) return null;
+  const at = sourceSite(world);
+  if (!at) return null;
+  const src = world.source.dir;
+  const s = new THREE.Vector3(src[0], src[1], src[2]).normalize();
+  const planes = fixes.map(wedgePlanes);
+  _gE.set(0, 1, 0).cross(s);
+  if (_gE.lengthSq() < 1e-8) _gE.set(1, 0, 0).cross(s);
+  _gE.normalize();
+  _gN.crossVectors(s, _gE);
+  const h = GOAL_STEP * CELL;
+  const R = Math.round(GOAL_REACH / GOAL_STEP);
+  const dirAt = (i, j) => _gD.copy(s).addScaledVector(_gE, i * h).addScaledVector(_gN, j * h).normalize();
+  const inAll = (d) => planes.every((p) => inWedge(p, d));
+  if (!inAll(dirAt(0, 0))) return null;
+  // the true area of a cell of the source, off its corners, in the units of the grid
+  const cell = siteCell(at);
+  const c00 = cellDir(cell, 0, 0), c10 = cellDir(cell, 1, 0), c01 = cellDir(cell, 0, 1);
+  const cellArea = c10.sub(c00).cross(c01.sub(c00)).length();
+  const most = GOAL_CELLS * cellArea / (h * h);
+  const seen = new Set(['0,0']);
+  const open = [[0, 0]];
+  let count = 0;
+  while (open.length) {
+    const [i, j] = open.pop();
+    if (++count >= most) return null;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const a = i + di, b = j + dj, key = a + ',' + b;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!inAll(dirAt(a, b))) continue;
+      if (Math.abs(a) >= R || Math.abs(b) >= R) return null;   // the overlap runs off the grid
+      open.push([a, b]);
+    }
+  }
+  return at;
+}
+
 // ---------------------------------------------------------------- the wedge, as a shader
 // One set of uniforms for the page. The terrain material and the ocean material of the world on the
 // screen hold the same uniform objects, so a write here reaches both with no copy, and a group that
@@ -225,6 +311,12 @@ const uniforms = {
   // The radius of the sea, or 0. The sea is see-through, so the sea bed under it must paint no
   // wedge, or a wedge over shallow water reads twice as strong as one over land.
   uWedgeSea: { value: 0 },
+  // The four inward edge normals of each visited cell, four slots per wedge in the order of the
+  // wedges, so a visited cell fades in with its wedge through uWedgeFade.
+  uVisitN: { value: Array.from({ length: MAX_WEDGES * 4 }, () => new THREE.Vector3()) },
+  // The four inward edge normals of the goal cell, and its fill. 0 draws no goal.
+  uGoalN: { value: Array.from({ length: 4 }, () => new THREE.Vector3()) },
+  uGoalK: { value: 0 },
 };
 
 // The uniforms the patched materials read. A caller needs this only to look at the numbers; the
@@ -242,7 +334,10 @@ const WEDGE_DECL = `
   uniform float uWedgeFade[${MAX_WEDGES}];
   uniform float uWedgeAge[${MAX_WEDGES}];
   uniform vec3 uWedgeCol;
-  uniform float uWedgeSea;`;
+  uniform float uWedgeSea;
+  uniform vec3 uVisitN[${MAX_WEDGES * 4}];
+  uniform vec3 uGoalN[4];
+  uniform float uGoalK;`;
 
 // The paint, in the fragment shader of the terrain and of the sea.
 //
@@ -258,6 +353,7 @@ const WEDGE_TINT = `
     vec3 wDir = normalize(vCarrierDir);
     float wN = 0.0;
     float wE = 0.0;
+    float wV = 0.0;
     for (int i = 0; i < ${MAX_WEDGES}; i++) {
       if (i >= uWedgeCount) break;
       float wC = dot(wDir, uWedgeS[i]);
@@ -271,11 +367,23 @@ const WEDGE_TINT = `
       // the line on the two edges: full at the edge plane, gone one line width inside it, and
       // weaker on an older wedge, so the eye starts at the last landing. uWedgeAge[i] holds it.
       wE = max(wE, uWedgeAge[i] * wIn * (1.0 - smoothstep(${(WEDGE_LINE * 0.5).toFixed(7)}, ${WEDGE_LINE.toFixed(7)}, min(wL, wR))));
+      // the visited cell: the least distance in from its four edges, positive inside the cell
+      float vM = min(min(dot(wDir, uVisitN[i * 4]), dot(wDir, uVisitN[i * 4 + 1])),
+                     min(dot(wDir, uVisitN[i * 4 + 2]), dot(wDir, uVisitN[i * 4 + 3])));
+      float vIn = smoothstep(0.0, ${WEDGE_SOFT.toFixed(7)}, vM);
+      float vLine = 1.0 - smoothstep(${(VISIT_LINE * 0.6).toFixed(7)}, ${VISIT_LINE.toFixed(7)}, vM);
+      wV = max(wV, uWedgeFade[i] * vIn * mix(${VISIT_FILL.toFixed(3)}, ${VISIT_EDGE.toFixed(3)}, vLine));
     }
     // the wash grows on the square of the count, so one wedge is almost only its lines and the
     // ground under two or more wedges stands out. wedgeWash() above is the same formula in JS.
     float wK = max(1.0 - pow(${(1 - WEDGE_STEP).toFixed(3)}, wN * wN), wE * ${WEDGE_EDGE.toFixed(3)});
+    wK = max(wK, wV);
     outgoingLight = mix(outgoingLight, uWedgeCol, wK) + uWedgeCol * (wK * ${WEDGE_EMIS.toFixed(3)});
+    if (uGoalK > 0.0) {
+      float gM = min(min(dot(wDir, uGoalN[0]), dot(wDir, uGoalN[1])), min(dot(wDir, uGoalN[2]), dot(wDir, uGoalN[3])));
+      float gIn = smoothstep(0.0, ${WEDGE_SOFT.toFixed(7)}, gM);
+      outgoingLight = mix(outgoingLight, vec3(1.0), gIn * uGoalK);
+    }
   }`;
 
 // Paint the wedges into one material of the globe. app.js calls it for the terrain material and for
@@ -343,58 +451,34 @@ function writeUniforms(group) {
     uniforms.uWedgeFade.value[i] = u.fade && drawn[i] === u.fade.fix ? u.fade.k : 1;
     // the newest fix stands last, so the age runs back from the end of the set
     uniforms.uWedgeAge.value[i] = WEDGE_AGE[drawn.length - 1 - i] || WEDGE_AGE[WEDGE_AGE.length - 1];
+    cellPlanes(drawn[i], uniforms.uVisitN.value.slice(i * 4, i * 4 + 4));
   }
+  u.goal = goalCell(u.world, drawn);
+  if (u.goal) cellPlanes(u.goal, uniforms.uGoalN.value);
+  uniforms.uGoalK.value = goalK(u);
+}
+
+// The fill of the goal cell on this frame: it pulses, and it fades in with the wedge that closed it.
+function goalK(u) {
+  if (!u.goal) return 0;
+  const beat = 0.5 - 0.5 * Math.cos(2 * Math.PI * u.goalT / GOAL_PERIOD);
+  return (GOAL_LO + (GOAL_HI - GOAL_LO) * beat) * (u.fade ? u.fade.k : 1);
 }
 
 // The count goes to nothing, so a material that outlives its group paints no wedge.
 function clearUniforms(group) {
   if (group && uniformOwner !== group) return;
   uniforms.uWedgeCount.value = 0;
+  uniforms.uGoalK.value = 0;
   uniformOwner = null;
 }
 
 // ---------------------------------------------------------------- the marks on the ground
-// A shape under construction. Every mark of a group writes into one of these, so the whole set of
-// dots draws in one call.
-const newPart = () => ({ pos: [], idx: [] });
-
-function push(part, v, r) {
-  part.pos.push(v.x * r, v.y * r, v.z * r);
-}
-
-// The radius a mark takes under one direction: the ground there, or the sea when the ground lies
-// under it, plus the lift. It is the rule showMarker() in site.js drapes the square of a cell with,
-// and it needs the height map the worker sent with the world.
-//
-// A mark at a fixed radius floats. The surface stands near 1.0 and the camera comes to 1.11, so a
-// dot on a shell of 1.07 read as a disc in the sky a long way from the cell it marked.
+// The radius the mini wreck stands at under one direction: the ground there, or the sea when the
+// ground lies under it, plus the lift. It is the rule showMarker() in site.js drapes the square of
+// a cell with, and it needs the height map the worker sent with the world.
 function drapeR(world, hm, dir) {
   return Math.max(groundRadius(world, hm, dir), (world && world.seaRadius) || 0) + DRAPE_LIFT;
-}
-
-function toGeometry(part) {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(part.pos), 3));
-  g.setIndex(new THREE.BufferAttribute(new Uint32Array(part.idx), 1));
-  if (part.pos.length) g.computeBoundingSphere();   // an empty shape holds no middle
-  return g;
-}
-
-// The dot at the site of a fix: a small disc that lies on the terrain of its cell.
-//
-// It reaches 0.35 of a cell from the middle, so it stands well inside the square the marker draws
-// and the reader reads it as a mark on one cell. The first build drew it at 0.006 globe units on
-// the shell of the wedges, which read as a large disc in the sky.
-function addDotShape(part, site, world, hm, segs = DOT_SEGS) {
-  const base = part.pos.length / 3;
-  frameAt(site);
-  const tan = new THREE.Vector3(), at = new THREE.Vector3();
-  push(part, _up, drapeR(world, hm, _up));
-  for (let i = 0; i < segs; i++) {
-    walk(DOT_CELLS * CELL, tangentAt(i * 360 / segs, tan), at);
-    push(part, at, drapeR(world, hm, at));
-  }
-  for (let i = 0; i < segs; i++) part.idx.push(base, base + 1 + i, base + 1 + (i + 1) % segs);
 }
 
 // The mini wreck a find leaves at the source, or null for a world with no source.
@@ -482,30 +566,6 @@ function dropWreck(u) {
   u.wreck = null;
 }
 
-function mesh(mat) {
-  const m = new THREE.Mesh(toGeometry(newPart()), mat);
-  m.renderOrder = RENDER_ORDER;
-  m.visible = false;
-  m.frustumCulled = false;      // the dots of one mesh stand all over the globe
-  return m;
-}
-
-// Put a fresh shape on a mesh and drop the one it held.
-function setShape(m, part) {
-  m.geometry.dispose();
-  m.geometry = toGeometry(part);
-  m.visible = part.idx.length > 0;
-}
-
-function material(accent, opacity) {
-  return new THREE.MeshBasicMaterial({
-    color: accent, transparent: true, opacity,
-    depthWrite: false,
-    toneMapped: false,
-    side: THREE.DoubleSide,
-  });
-}
-
 // The colour of the carrier on one world: the wedges, the dots, and the lamp of the mini wreck.
 //
 // The first build took the accent of the fauna palette, which a world can also hold in its terrain,
@@ -568,52 +628,39 @@ const accentOf = (world) => (world && carrierColours.get(world))
 // carrier-store.js: the fixes of this world and whether the reader has found the source.
 //
 // `heightMap` is the height map the worker sent with the world, which buildWorld() in app.js reads
-// off the same reply. Every mark lies on the terrain and needs it. A caller that gives none gets
-// the marks on the sphere of radius 1, which is what a world with no height map draws anyway.
+// off the same reply. The mini wreck stands on the terrain and needs it.
 //
-// Two meshes and two materials, whatever the number of fixes: the dots of the settled fixes in one
-// and the dot that fades in on the last landing in the other. The wedges themselves cost no mesh at
-// all; they ride in the uniforms of the terrain and of the sea. A found world draws no dot and no
-// wedge at all, and carries the mini wreck at the source instead.
+// The group holds no mesh during the search: the wedges, the visited cells, and the goal cell all
+// ride in the uniforms of the terrain and of the sea. A found world paints none of them, and
+// carries the mini wreck at the source instead.
 export function makeCarrierGroup(world, record, heightMap = null) {
   if (!world || !world.source || !world.source.dir) return null;
-  const accent = accentOf(world);
-  const mats = {
-    mark: material(accent, MARK_ALPHA),
-    fadeMark: material(accent, 0),
-  };
   const group = new THREE.Group();
   group.name = 'carrier';
-  const meshes = {
-    marks: mesh(mats.mark),
-    fadeMark: mesh(mats.fadeMark),
-  };
-  for (const m of Object.values(meshes)) group.add(m);
   group.userData = {
-    mats, meshes, world, hm: heightMap,
+    world, hm: heightMap,
     fixes: (record && Array.isArray(record.fixes) ? record.fixes : []).slice(),
     found: !!(record && record.found),
     fade: null,       // { fix, t, k } while one wedge fades in
     wreck: null,      // the mini wreck of a find. makeWreckModel() builds it.
+    goal: null,       // the site of the goal cell, or null. goalCell() finds it.
+    goalT: 0,         // seconds: the clock of the pulse of the goal
   };
   rebuild(group);
   return group;
 }
 
-// Draw the dots of the settled fixes, or stand the mini wreck at the source, and state the wedges
-// in the uniforms. It runs on every change and not on every frame.
+// Stand the mini wreck at the source, or take it away, and state the paint in the uniforms. It
+// runs on every change and not on every frame.
 function rebuild(group) {
   const u = group.userData;
-  const marks = newPart();
   if (u.found) {
-    // The find takes the place of the search: no wedge and no dot, and the wreck at the source.
+    // The find takes the place of the search: no paint, and the wreck at the source.
     if (!u.wreck) u.wreck = makeWreckModel(u.world, u.hm);
     if (u.wreck && u.wreck.obj.parent !== group) group.add(u.wreck.obj);
   } else {
     dropWreck(u);
-    for (const fix of u.fixes) addDotShape(marks, fix, u.world, u.hm);
   }
-  setShape(u.meshes.marks, marks);
   writeUniforms(group);
 }
 
@@ -623,14 +670,12 @@ function settle(group) {
   if (!u.fade) return;
   u.fixes.push(u.fade.fix);
   u.fade = null;
-  u.mats.fadeMark.opacity = 0;
-  u.meshes.fadeMark.visible = false;
   rebuild(group);
 }
 
-// Add the fix of a landing. `fade` fades the new wedge in over 1.2 s: the ascent ends over the
-// site, so the reader watches the wedge arrive. Without it the wedge stands there at once, which
-// is what a world built from the store needs.
+// Add the fix of a landing. `fade` fades the new wedge and its cell in over 1.2 s: the ascent ends
+// over the site, so the reader watches the wedge arrive. Without it the wedge stands there at once,
+// which is what a world built from the store needs.
 //
 // A fix on a cell that already holds one replaces it, as the store does: the instrument states the
 // same bearing on every visit, so the second wedge would only draw over the first.
@@ -641,10 +686,6 @@ export function addWedge(group, fix, { fade = false } = {}) {
   if (u.fade) settle(group);
   u.fixes = u.fixes.filter((f) => f.lat !== fix.lat || f.lon !== fix.lon);
   if (!fade) { u.fixes.push(fix); rebuild(group); return; }
-  const mark = newPart();
-  addDotShape(mark, fix, u.world, u.hm);
-  setShape(u.meshes.fadeMark, mark);
-  u.mats.fadeMark.opacity = 0;
   u.fade = { fix, t: 0, k: 0 };
   rebuild(group);
 }
@@ -658,28 +699,29 @@ export function setFound(group, world, heightMap) {
   if (world) u.world = world;
   if (heightMap) u.hm = heightMap;
   u.fade = null;
-  u.mats.fadeMark.opacity = 0;
-  u.meshes.fadeMark.visible = false;
   u.found = true;
   rebuild(group);
 }
 
-// The lamp of a find and the fade of a new wedge, in seconds. Nothing else on the group moves, so a
-// group with neither costs two tests. The fading fix stands last in the uniforms, so the fade
-// writes one float and one opacity.
+// The lamp of a find, the pulse of the goal, and the fade of a new wedge, in seconds. The fading
+// fix stands last in the uniforms, so the fade writes one float.
 export function updateCarrierGroup(group, dt) {
   if (!group) return;
   const u = group.userData;
   if (u.wreck) blinkWreck(u.wreck, dt);
-  if (!u.fade) return;
-  u.fade.t += dt;
-  const k = THREE.MathUtils.clamp(u.fade.t / FADE_S, 0, 1);
-  u.fade.k = THREE.MathUtils.smoothstep(k, 0, 1);
-  u.mats.fadeMark.opacity = MARK_ALPHA * u.fade.k;
-  if (uniformOwner === group && uniforms.uWedgeCount.value > 0) {
-    uniforms.uWedgeFade.value[uniforms.uWedgeCount.value - 1] = u.fade.k;
+  if (u.fade) {
+    u.fade.t += dt;
+    const k = THREE.MathUtils.clamp(u.fade.t / FADE_S, 0, 1);
+    u.fade.k = THREE.MathUtils.smoothstep(k, 0, 1);
+    if (uniformOwner === group && uniforms.uWedgeCount.value > 0) {
+      uniforms.uWedgeFade.value[uniforms.uWedgeCount.value - 1] = u.fade.k;
+    }
+    if (k >= 1) settle(group);
   }
-  if (k >= 1) settle(group);
+  if (u.goal) {
+    u.goalT = (u.goalT + dt) % GOAL_PERIOD;
+    if (uniformOwner === group) uniforms.uGoalK.value = goalK(u);
+  }
 }
 
 // Give every buffer and every material back, and take the wedges out of the uniforms.
@@ -690,8 +732,6 @@ export function disposeCarrierGroup(group) {
   const u = group.userData;
   clearUniforms(group);
   dropWreck(u);
-  for (const m of Object.values(u.meshes || {})) m.geometry.dispose();
-  for (const m of Object.values(u.mats || {})) m.dispose();
   if (group.parent) group.parent.remove(group);
   group.clear();
   group.userData = {};

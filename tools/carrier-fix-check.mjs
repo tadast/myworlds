@@ -24,10 +24,9 @@
 //    draws the 4 newest. The line of a wedge weakens with its age, and the wash grows on the square
 //    of the count. A new fix fades in over 1.2 s through its own slot of the fade uniform.
 //
-// D. The marks on the ground. The dot of a fix lies on the terrain: every vertex takes the ground
-//    under it, or the sea where the ground lies under the sea, plus DRAPE_LIFT. The check builds a
-//    fake height map with relief inside one cell, so a mark that stood at one radius fails the run.
-//    A find takes the dots and the wedges away and stands the mini wreck at the source, on the
+// D. The marks on the ground. The cell of a fix is four edge planes the shader paints; the middle
+//    of the cell stands inside and each next cell outside. Three near fixes fill the cell of the
+//    source, and two fixes or three wide ones do not. A find takes the paint away and stands the mini wreck at the source, on the
 //    terrain of that cell, with its up axis along the surface normal and its height at WRECK_H.
 //
 // site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
@@ -340,11 +339,15 @@ let capRow = '';
   ok('age', ages.every((a, i) => Math.abs(a - want[i]) < 1e-6), `the ages read ${ages.join(', ')} and not ${want.join(', ')}`);
   ok('age', G.WEDGE_AGE[0] === 1, `the newest wedge draws its line at ${G.WEDGE_AGE[0]} and not full`);
 
-  const drawn = group.children.filter((m) => m.visible);
-  ok('cap', drawn.length === 1, `${fixes.length} fixes drew ${drawn.length} meshes of dots`);
-  const dots = group.userData.meshes.marks.geometry.attributes.position.count;
-  ok('cap', dots === fixes.length * (1 + 16), `${fixes.length} dots hold ${dots} vertices`);
-  capRow = `  cap     ${fixes.length} fixes gave ${u.uWedgeCount.value} wedges of paint and one mesh of ${dots} vertices`;
+  ok('cap', group.children.length === 0, `${fixes.length} fixes drew ${group.children.length} meshes`);
+  // each drawn fix paints the outline of its own cell, in the slots of its wedge
+  for (let i = 0; i < G.MAX_WEDGES; i++) {
+    const f = fixes[fixes.length - G.MAX_WEDGES + i];
+    const planes = u.uVisitN.value.slice(i * 4, i * 4 + 4);
+    const mid = S.siteDir(f.lat, f.lon, new THREE.Vector3());
+    ok('cell', G.inCell(planes, mid) > 0, `slot ${i} does not hold the cell of its fix`);
+  }
+  capRow = `  cap     ${fixes.length} fixes gave ${u.uWedgeCount.value} wedges of paint and ${u.uWedgeCount.value} cells, no mesh`;
   capRow += `\n  age     the lines stand at ${ages.map((a) => a.toFixed(2)).join(', ')} of WEDGE_EDGE, the oldest first and the newest last`;
   G.disposeCarrierGroup(group);
 }
@@ -378,20 +381,17 @@ let fadeRow = '';
   const u = group.userData;
   const uni = G.carrierUniforms();
   ok('fade', uni.uWedgeCount.value === 0, 'a world with no fix painted a wedge');
-  ok('fade', !u.meshes.marks.visible, 'a world with no fix drew a dot');
 
   const c = S.carrierAt(world, a);
   G.addWedge(group, { lat: a.lat, lon: a.lon, brg: c.brg, err: c.err }, { fade: true });
   ok('fade', uni.uWedgeCount.value === 1 && uni.uWedgeFade.value[0] === 0, 'the new wedge did not start at nothing');
   ok('fade', uni.uWedgeAge.value[0] === G.WEDGE_AGE[0], 'the wedge that fades in is not the newest one');
-  ok('fade', u.meshes.fadeMark.visible && u.mats.fadeMark.opacity === 0, 'the new dot did not start at nothing');
   G.updateCarrierGroup(group, 0.6);
   const half = uni.uWedgeFade.value[0];
   ok('fade', half > 0 && half < 1, `the wedge stood at ${half} halfway through the fade`);
   G.updateCarrierGroup(group, 0.7);
   ok('fade', u.fade === null && u.fixes.length === 1, 'the wedge did not settle at the end of the fade');
   ok('fade', uni.uWedgeFade.value[0] === 1, 'the settled wedge did not reach full paint');
-  ok('fade', !u.meshes.fadeMark.visible && u.meshes.marks.visible, 'the settled dot stands on the wrong mesh');
   fadeRow = `  fade    the wedge stood at ${half.toFixed(4)} of 1 halfway through the 1.2 s`;
 
   // a second landing on the same cell replaces the wedge of that cell
@@ -412,25 +412,16 @@ let markRow = '';
   const group = G.makeCarrierGroup(world, { fixes: [{ lat: a.lat, lon: a.lon, brg: 10, err: 12 }], found: false, ts: 0 }, HM);
   const u = group.userData;
 
-  // the dot: on the ground, and about 0.35 of a cell across
+  // the cell of the fix: its middle inside, the middle of each next cell outside
   {
-    const pos = u.meshes.marks.geometry.attributes.position;
-    let rLo = Infinity, rHi = 0, worstDrape = 0, hi = 0;
-    for (let i = 0; i < pos.count; i++) {
-      const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
-      const r = v.length();
-      rLo = Math.min(rLo, r); rHi = Math.max(rHi, r);
-      v.normalize();
-      worstDrape = Math.max(worstDrape, Math.abs(r - drapeR(world, v)));
-      hi = Math.max(hi, S.arcTo(a, v));
+    const planes = G.cellPlanes(a);
+    const mid = S.siteDir(a.lat, a.lon, new THREE.Vector3());
+    ok('cell', Math.abs(G.inCell(planes, mid) - S.CELL / 2) < S.CELL * 0.1, `the middle of a cell stands ${(G.inCell(planes, mid) / S.CELL).toFixed(3)} cells in and not 0.5`);
+    const cell = S.siteCell(a);
+    for (const [uu, vv] of [[1.5, 0.5], [-0.5, 0.5], [0.5, 1.5], [0.5, -0.5]]) {
+      ok('cell', G.inCell(planes, S.cellDir(cell, uu, vv)) < 0, `the cell next door at ${uu},${vv} reads as inside`);
     }
-    ok('dot', Math.abs(hi / S.CELL - 0.35) < 0.01, `the dot runs ${(hi / S.CELL).toFixed(3)} cells out and not 0.35`);
-    // The drape is the proof that the dot lies on the terrain: every vertex has to read the rule of
-    // site.js to a millionth, and the old shell of 1.07 missed it by the whole relief. The spread
-    // of the radius says nothing here, because the dot covers a third of a cell and the height map
-    // holds one texel every one and a half cells.
-    ok('dot', worstDrape < R_TOL, `a point of the dot stood ${worstDrape.toExponential(2)} off the ground under it`);
-    markRow = `  dot     the dot of a fix runs ${(hi / S.CELL).toFixed(2)} cells out, on the ground, radius ${rLo.toFixed(4)} to ${rHi.toFixed(4)}`;
+    markRow = `  cell    the middle of a cell stands ${(G.inCell(planes, mid) / S.CELL).toFixed(3)} cells from its nearest edge, the four next cells outside`;
   }
 
   // The find takes the wedges and the dots away and stands the mini wreck at the source. Every
@@ -438,7 +429,7 @@ let markRow = '';
   // thing the reader sees and not the numbers that built it.
   G.setFound(group, world, HM);
   ok('found', G.carrierUniforms().uWedgeCount.value === 0, 'a found world still paints a wedge');
-  ok('found', !u.meshes.marks.visible, 'a found world still draws the dots of its search');
+  ok('found', G.carrierUniforms().uGoalK.value === 0, 'a found world still paints the goal');
   ok('found', !!u.wreck, 'a found world stands no mini wreck at the source');
   ok('found', u.wreck.obj.parent === group, 'the mini wreck stands outside the group of the carrier');
 
@@ -483,6 +474,43 @@ let markRow = '';
   ok('found', u.wreck == null, 'the dispose left the mini wreck behind');
 }
 
+// ---------------------------------------------------------------- the goal
+// Three fixes from near the source close on a few cells, and the globe then fills the cell of the
+// source. Two fixes never do, and three wide fixes from the edge of the reach do not either.
+let goalRow = '';
+{
+  let hit = 0, runs = 0, wide = 0;
+  for (let n = 0; n < 40; n++) {
+    const srcDir = snapDir(randDir());
+    const world = worldWith('Goal' + n, srcDir);
+    const at = S.sourceSite(world);
+    const near = [], far = [];
+    for (let k = 0; k < 3; k++) {
+      // a near site 3 cells out on three bearings, and a far one near the edge of the reach
+      const up = S.siteDir(at.lat, at.lon, new THREE.Vector3());
+      const t = new THREE.Vector3(0, 1, 0).cross(up).normalize().applyAxisAngle(up, k * 2.1);
+      for (const [arc, list] of [[3 * S.CELL, near], [S.CARRIER_REACH * 0.9, far]]) {
+        const d = up.clone().multiplyScalar(Math.cos(arc)).addScaledVector(t, Math.sin(arc));
+        const s = S.snapSite(S.dirToSite(d));
+        const c = S.carrierAt(world, s);
+        if (c) list.push({ lat: s.lat, lon: s.lon, brg: c.brg, err: c.err });
+      }
+    }
+    if (near.length < 3 || far.length < 3) continue;
+    runs++;
+    ok('goal', G.goalCell(world, near.slice(0, 2)) === null, 'two fixes filled a goal');
+    const g = G.goalCell(world, near);
+    if (g) {
+      hit++;
+      ok('goal', g.lat === at.lat && g.lon === at.lon, 'the goal is not the cell of the source');
+    }
+    if (G.goalCell(world, far)) wide++;
+  }
+  ok('goal', runs > 20 && hit > runs * 0.8, `three near fixes filled the goal on ${hit} of ${runs} worlds`);
+  ok('goal', wide === 0, `three far fixes filled the goal on ${wide} of ${runs} worlds`);
+  goalRow = `  goal    three near fixes filled the source cell on ${hit} of ${runs} worlds, three far fixes on ${wide}`;
+}
+
 // ---------------------------------------------------------------- the report
 console.log('carrier-fix-check');
 console.log('  store   one fix per cell, the brief, the find that drops the fixes, both bounds, a quota error, and garbage');
@@ -494,6 +522,7 @@ console.log(capRow);
 console.log(washRow);
 console.log(fadeRow);
 console.log(markRow);
+console.log(goalRow);
 if (fails.length) {
   console.error('\nFAIL');
   for (const f of fails) console.error('  ' + f);
