@@ -2,24 +2,29 @@
 //
 //   node tools/carrier-fix-check.mjs
 //
-// Two parts:
+// Four parts:
 //
 // A. The store. carrier-store.js runs against a fake localStorage: one fix per cell, the find that
 //    survives a clear, the two bounds, a quota error that must not throw and must not touch the key
 //    of the saved worlds, and a record of garbage that must read as empty.
 //
-// B. The wedge. East is easy to mirror, and the sky of this app had that defect once; see decision
-//    10 of docs/probe.md. carrier-globe.js keeps its own copy of the east of site.js, so this check
-//    reads the built geometry back through bearingTo() of site.js: every point of an edge has to
-//    read the bearing of that edge, and the direction of the source has to lie between the two edge
-//    great circles. The planes come from the drawn vertices and not from the formula that made
-//    them, so a mirror in either file fails the run.
+// B. The wedge. A wedge is no longer geometry: the terrain shader and the ocean shader paint it, so
+//    there is no mesh to read back. carrier-globe.js states the wedge as three unit vectors per fix
+//    — the site `s` and the two inward edge normals `nL` and `nR` — and wedgePlanes() builds both
+//    the uniforms the shader gets and the numbers this check tests. wedgeEdges() holds the same
+//    arithmetic the GLSL runs, line for line.
 //
-// C. The ring of a find. A wedge stands on the shell of WEDGE_R, because it runs to the antipode of
-//    its site and has to clear every mountain. The ring marks one place, so it lies on the terrain:
-//    every vertex takes the ground under it, or the sea where the ground lies under the sea, plus
-//    DRAPE_LIFT. The check builds a fake height map with relief inside one cell, so a ring that
-//    went back to a fixed radius fails the run.
+//    East is easy to mirror, and the sky of this app had that defect once; see decision 10 of
+//    docs/probe.md. So every direction this check builds is read back through bearingTo() of
+//    site.js before it goes into a plane test: a mirror in either file fails the run.
+//
+// C. The cap and the fade. The shader holds MAX_WEDGES = 8 fixes, and a world with more draws the 8
+//    newest. A new fix fades in over 1.2 s through its own slot of the fade uniform.
+//
+// D. The marks on the ground. The dot of a fix and the ring of a find lie on the terrain: every
+//    vertex takes the ground under it, or the sea where the ground lies under the sea, plus
+//    DRAPE_LIFT. The check builds a fake height map with relief inside one cell, so a mark that
+//    stood at one radius fails the run.
 //
 // site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
 // the browser. Node has no import map, so a resolve hook points the same name at vendor/, as
@@ -56,12 +61,11 @@ const C = await import(root + 'carrier-store.js');
 const G = await import(root + 'carrier-globe.js');
 
 const PAIRS = 300;              // pairs of a site and a source for the wedge
-// degrees: the slack on a bearing two files compute two ways. A position buffer holds float32, so
-// a vertex carries about seven digits and a bearing read back off it lands within a ten-thousandth
-// of a degree of the one that made it. The defect this guards against is a mirrored east, and that
-// reads 90 or 180 degrees off, so the limit has room to spare.
+// degrees: the slack on a bearing two files compute two ways. The defect this guards against is a
+// mirrored east, and that reads 90 or 180 degrees off, so the limit has room to spare.
 const ANG_TOL = 1e-3;
 const R_TOL = 1e-6;             // globe units: the slack on the radius of a vertex
+const OUT_DEG = 1;              // degrees past an edge that must read outside the wedge
 
 const fails = [];
 const fail = (what, detail) => { if (fails.length < 10) fails.push(`${what}: ${detail}`); };
@@ -83,9 +87,31 @@ function randDir() {
 const snapDir = (d) => S.cellDir(S.dirCell(d.x, d.y, d.z), 0.5, 0.5, new THREE.Vector3());
 const wrap180 = (d) => ((d % 360) + 540) % 360 - 180;
 
+// A unit direction at a bearing and an arc from a site. This check keeps its own copy of the east
+// of the globe, and every direction it builds goes back through bearingTo() of site.js below, so
+// the copy is checked and not trusted.
+function dirAt(site, brg, arc) {
+  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
+  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
+  const east = new THREE.Vector3(slo, 0, -clo);
+  const north = new THREE.Vector3(-sla * clo, cla, -sla * slo);
+  const up = new THREE.Vector3(cla * clo, sla, cla * slo);
+  const b = THREE.MathUtils.degToRad(brg);
+  const tan = north.multiplyScalar(Math.cos(b)).addScaledVector(east, Math.sin(b));
+  return up.multiplyScalar(Math.cos(arc)).addScaledVector(tan, Math.sin(arc));
+}
+
+// The same direction, with the bearing read back through site.js before it is used.
+function probe(site, brg, arc, what, why) {
+  const d = dirAt(site, brg, arc);
+  const back = Math.abs(wrap180(S.bearingTo(site, d) - brg));
+  ok(what, back < ANG_TOL, `${why}: the built direction reads ${back.toFixed(6)} deg off the bearing it was built at`);
+  return d;
+}
+
 // A fake height map, at the 384 by 192 the worker sends. One texel is 0.016 rad of lon, and the
 // ring of a find runs 1.5 cells out, which is 0.015 rad, so the band crosses a texel edge and reads
-// more than one value. The high term along lon makes two neighbouring texels differ, so a ring that
+// more than one value. The high term along lon makes two neighbouring texels differ, so a mark that
 // stood at one radius could not pass the spread check below. Some of the field lies under SEA_R, so
 // the max() of the drape is exercised too.
 const HM_W = 384, HM_H = 192;
@@ -107,7 +133,7 @@ function worldWith(seed, dir) {
   };
 }
 
-// The radius one vertex of the ring must stand at, read off site.js and not off carrier-globe.js.
+// The radius one vertex of a mark must stand at, read off site.js and not off carrier-globe.js.
 const drapeR = (world, dir) => Math.max(S.groundRadius(world, HM, dir), SEA_R) + G.DRAPE_LIFT;
 
 // ---------------------------------------------------------------- A: the store
@@ -175,114 +201,167 @@ const drapeR = (world, dir) => Math.max(S.groundRadius(world, HM, dir), SEA_R) +
 }
 
 // ---------------------------------------------------------------- B: the wedge
-// The vertices of a wedge, as two edges of unit directions. The mesh holds the pair of a step
-// beside each other: the edge of brg - err first and the edge of brg + err second.
-function edgesOf(mesh, radius) {
-  const pos = mesh.geometry.attributes.position;
-  const left = [], right = [];
-  for (let i = 0; i < pos.count; i++) {
-    const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
-    ok('radius', Math.abs(v.length() - radius) < R_TOL, `a vertex stands at ${v.length().toFixed(6)} and not at ${radius}`);
-    (i % 2 === 0 ? left : right).push(v.normalize());
-  }
-  return { left, right };
-}
-
-let worstEdge = 0;        // degrees: the widest gap between a drawn edge and the bearing it carries
+// The two plane tests of carrier-globe.js against 300 pairs of a site and a source. Every pair
+// checks five things:
+//
+//   1. the source lies inside the wedge of its own fix
+//   2. a direction one degree past either edge lies outside it
+//   3. a direction behind the site, on the other half of the great circle, lies outside it
+//   4. the wedge runs the whole way from the site to the antipode of the site, and no further
+//   5. the uniforms the shader gets hold the same three vectors
 let worstMargin = 1;      // parts of the wedge: how near the source came to an edge, 0 is on it
-const wedgeCount = { verts: 0, tris: 0 };
+let worstUniform = 0;     // the widest gap between a uniform and the plane it must carry
+const ARCS = [0.02, 0.5, 1.2, 2.0, 2.8, Math.PI - 0.02];
 for (let i = 0; i < PAIRS; i++) {
   const srcDir = snapDir(randDir());
   const site = S.dirToSite(snapDir(randDir()));
   const world = worldWith('Wedge' + i, srcDir);
   const c = S.carrierAt(world, site);
   const fix = { lat: site.lat, lon: site.lon, brg: c.brg, err: c.err };
-  const group = G.makeCarrierGroup(world, { fixes: [fix], found: false, ts: 0 });
-  if (!group) { fail('group', `pair ${i} gave no group`); continue; }
-  const wedges = group.userData.meshes.wedges;
-  wedgeCount.verts = wedges.geometry.attributes.position.count;
-  wedgeCount.tris = wedges.geometry.index.count / 3;
-  const { left, right } = edgesOf(wedges, G.WEDGE_R);
+  const planes = G.wedgePlanes(fix);
 
-  // 1. every point of an edge reads the bearing of that edge, through bearingTo() of site.js. The
-  //    two ends stand on the site and on its antipode, where a bearing means nothing.
-  for (let k = 1; k < left.length - 1; k++) {
-    const dl = Math.abs(wrap180(S.bearingTo(site, left[k]) - (c.brg - c.err)));
-    const dr = Math.abs(wrap180(S.bearingTo(site, right[k]) - (c.brg + c.err)));
-    if (dl > ANG_TOL || dr > ANG_TOL) fail('edge', `pair ${i} step ${k}: the drawn edges read ${dl.toFixed(9)} and ${dr.toFixed(9)} deg off their bearings`);
-    worstEdge = Math.max(worstEdge, dl, dr);
+  // 1. the true direction of the source lies between the two edge great circles
+  const e = G.wedgeEdges(planes, srcDir);
+  ok('wedge', G.inWedge(planes, srcDir), `pair ${i}: the source stands outside its own wedge (${e.l.toExponential(2)}, ${e.r.toExponential(2)})`);
+  // how near the source came to an edge, as a part of the half width of the wedge
+  worstMargin = Math.min(worstMargin, Math.min(e.l, e.r) / Math.sin(THREE.MathUtils.degToRad(c.err)));
+
+  for (const arc of ARCS) {
+    // 2. one degree past either edge is outside the wedge, and the paint there is nothing
+    for (const brg of [c.brg - c.err - OUT_DEG, c.brg + c.err + OUT_DEG]) {
+      const d = probe(site, brg, arc, 'edge', `pair ${i} at arc ${arc}`);
+      ok('edge', !G.inWedge(planes, d), `pair ${i}: a direction ${OUT_DEG} deg past an edge at arc ${arc} stands inside the wedge`);
+      ok('edge', G.wedgeCoverage(planes, d) === 0, `pair ${i}: a direction past an edge at arc ${arc} still takes paint`);
+    }
+    // 3. the other half of the great circle, behind the site, is outside the wedge
+    const back = probe(site, (c.brg + 180) % 360, arc, 'back', `pair ${i} at arc ${arc}`);
+    ok('back', !G.inWedge(planes, back), `pair ${i}: a direction behind the site at arc ${arc} stands inside the wedge`);
+    // 4. the wedge itself runs the whole way along the bearing, from the site to the antipode
+    const along = probe(site, c.brg, arc, 'along', `pair ${i} at arc ${arc}`);
+    ok('along', G.inWedge(planes, along), `pair ${i}: the bearing itself falls out of the wedge at arc ${arc}`);
+    ok('along', G.wedgeCoverage(planes, along) === 1, `pair ${i}: the bearing itself takes less than full paint at arc ${arc}`);
   }
 
-  // 2. the antipode closes the wedge
-  const last = left[left.length - 1].clone().add(right[right.length - 1]).multiplyScalar(0.5);
-  const up = S.siteDir(site.lat, site.lon, new THREE.Vector3());
-  ok('close', last.distanceTo(up.clone().multiplyScalar(-1)) < 1e-6, `pair ${i}: the two edges do not meet at the antipode`);
+  // 4. the antipode closes the wedge: the two edges meet there, so both tests read nothing
+  const anti = S.siteDir(site.lat, site.lon, new THREE.Vector3()).multiplyScalar(-1);
+  const ae = G.wedgeEdges(planes, anti);
+  ok('close', Math.abs(ae.l) < 1e-3 && Math.abs(ae.r) < 1e-3, `pair ${i}: the wedge does not close at the antipode (${ae.l.toExponential(2)}, ${ae.r.toExponential(2)})`);
+  // past the antipode the wedge is gone: a direction just past it on the same great circle is out
+  // a point at arc PI - x along the reverse bearing is the point x past the antipode along the
+  // bearing itself, so this is the wedge one twentieth of a radian past its own end
+  const past = probe(site, (c.brg + 180) % 360, Math.PI - 0.05, 'close', `pair ${i} past the antipode`);
+  ok('close', !G.inWedge(planes, past), `pair ${i}: the wedge reaches past the antipode of its site`);
 
-  // 3. the direction of the source lies between the two edge great circles. The planes come from
-  //    the drawn vertices: the normal of the circle through two points of one edge is their cross
-  //    product, and the sign of the source against the two normals states the side it stands on.
-  const nL = left[1].clone().cross(left[2]).normalize();
-  const nR = right[1].clone().cross(right[2]).normalize();
-  const dL = srcDir.dot(nL), dR = srcDir.dot(nR);
-  if (!(dL * dR < 0)) fail('wedge', `pair ${i}: the source stands outside the drawn wedge (${dL.toExponential(2)}, ${dR.toExponential(2)})`);
-  // how near the source came to an edge, as a part of the half width of the wedge
-  const arc = S.arcTo(site, srcDir);
-  const half = Math.sin(THREE.MathUtils.degToRad(2 * c.err)) * Math.sin(arc);
-  worstMargin = Math.min(worstMargin, Math.min(Math.abs(dL), Math.abs(dR)) / Math.max(half, 1e-12));
+  // 5. the uniforms the shader gets carry these same three vectors
+  const group = G.makeCarrierGroup(world, { fixes: [fix], found: false, ts: 0 }, HM);
+  if (!group) { fail('group', `pair ${i} gave no group`); continue; }
+  const u = G.carrierUniforms();
+  ok('uniform', u.uWedgeCount.value === 1, `pair ${i}: one fix gave a count of ${u.uWedgeCount.value}`);
+  worstUniform = Math.max(
+    worstUniform,
+    u.uWedgeS.value[0].distanceTo(planes.s),
+    u.uWedgeL.value[0].distanceTo(planes.nL),
+    u.uWedgeR.value[0].distanceTo(planes.nR),
+  );
+  ok('uniform', u.uWedgeFade.value[0] === 1, `pair ${i}: a settled fix stands at fade ${u.uWedgeFade.value[0]}`);
 
   G.disposeCarrierGroup(group);
   ok('dispose', group.children.length === 0, `pair ${i}: the group kept its children after the dispose`);
+  ok('dispose', G.carrierUniforms().uWedgeCount.value === 0, `pair ${i}: the dispose left ${G.carrierUniforms().uWedgeCount.value} wedges in the uniforms`);
 }
 
-// ---------------------------------------------------------------- B: three fixes in one mesh
-// The frame cost: the wedges of a world merge into one mesh and their dots into one more, whatever
-// the number of fixes, so the group costs a handful of draw calls and no more.
-let mergeRow = '';
+// ---------------------------------------------------------------- C: the cap of MAX_WEDGES
+// The shader holds MAX_WEDGES slots, so a world with more fixes draws the newest of them. The dots
+// of every fix still stand on the globe, and only the paint takes the cap.
+let capRow = '';
 {
-  const world = worldWith('Merge', snapDir(randDir()));
+  const world = worldWith('Cap', snapDir(randDir()));
   const fixes = [];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < G.MAX_WEDGES + 3; i++) {
     const s = S.dirToSite(snapDir(randDir()));
     const c = S.carrierAt(world, s);
     fixes.push({ lat: s.lat, lon: s.lon, brg: c.brg, err: c.err });
   }
-  const group = G.makeCarrierGroup(world, { fixes, found: false, ts: 0 });
+  const group = G.makeCarrierGroup(world, { fixes, found: false, ts: 0 }, HM);
+  const u = G.carrierUniforms();
+  ok('cap', u.uWedgeCount.value === G.MAX_WEDGES, `${fixes.length} fixes gave a count of ${u.uWedgeCount.value}`);
+  const last = G.wedgePlanes(fixes[fixes.length - 1]);
+  ok('cap', u.uWedgeS.value[G.MAX_WEDGES - 1].distanceTo(last.s) < 1e-6, 'the newest fix is not the last wedge in the uniforms');
   const drawn = group.children.filter((m) => m.visible);
-  ok('merge', drawn.length === 2, `three fixes drew ${drawn.length} meshes`);
-  const verts = group.userData.meshes.wedges.geometry.attributes.position.count;
-  ok('merge', verts === 3 * wedgeCount.verts, `three wedges hold ${verts} vertices and not ${3 * wedgeCount.verts}`);
-  mergeRow = `  merge   three fixes drew ${drawn.length} meshes, ${verts} vertices of wedge and ${group.userData.meshes.marks.geometry.attributes.position.count} of dot`;
+  ok('cap', drawn.length === 1, `${fixes.length} fixes drew ${drawn.length} meshes of dots`);
+  const dots = group.userData.meshes.marks.geometry.attributes.position.count;
+  ok('cap', dots === fixes.length * (1 + 16), `${fixes.length} dots hold ${dots} vertices`);
+  capRow = `  cap     ${fixes.length} fixes gave ${u.uWedgeCount.value} wedges of paint and one mesh of ${dots} vertices`;
   G.disposeCarrierGroup(group);
 }
 
-// ---------------------------------------------------------------- B: the fade, the replace, the ring
+// ---------------------------------------------------------------- C: the fade and the replace
 let fadeRow = '';
 {
   const srcDir = snapDir(randDir());
   const world = worldWith('Fade', srcDir);
   const a = S.dirToSite(snapDir(randDir()));
-  const group = G.makeCarrierGroup(world, { fixes: [], found: false, ts: 0 });
+  const group = G.makeCarrierGroup(world, { fixes: [], found: false, ts: 0 }, HM);
   const u = group.userData;
-  ok('fade', !u.meshes.wedges.visible, 'a world with no fix drew a wedge');
+  const uni = G.carrierUniforms();
+  ok('fade', uni.uWedgeCount.value === 0, 'a world with no fix painted a wedge');
+  ok('fade', !u.meshes.marks.visible, 'a world with no fix drew a dot');
 
   const c = S.carrierAt(world, a);
   G.addWedge(group, { lat: a.lat, lon: a.lon, brg: c.brg, err: c.err }, { fade: true });
-  ok('fade', u.meshes.fadeWedge.visible && u.mats.fadeWedge.opacity === 0, 'the new wedge did not start at nothing');
+  ok('fade', uni.uWedgeCount.value === 1 && uni.uWedgeFade.value[0] === 0, 'the new wedge did not start at nothing');
+  ok('fade', u.meshes.fadeMark.visible && u.mats.fadeMark.opacity === 0, 'the new dot did not start at nothing');
   G.updateCarrierGroup(group, 0.6);
-  const half = u.mats.fadeWedge.opacity;
-  ok('fade', half > 0 && half < 0.16, `the wedge stood at ${half} halfway through the fade`);
+  const half = uni.uWedgeFade.value[0];
+  ok('fade', half > 0 && half < 1, `the wedge stood at ${half} halfway through the fade`);
   G.updateCarrierGroup(group, 0.7);
   ok('fade', u.fade === null && u.fixes.length === 1, 'the wedge did not settle at the end of the fade');
-  ok('fade', !u.meshes.fadeWedge.visible && u.meshes.wedges.visible, 'the settled wedge stands on the wrong mesh');
-  fadeRow = `  fade    the wedge stood at ${half.toFixed(4)} of 0.16 halfway through the 1.2 s`;
+  ok('fade', uni.uWedgeFade.value[0] === 1, 'the settled wedge did not reach full paint');
+  ok('fade', !u.meshes.fadeMark.visible && u.meshes.marks.visible, 'the settled dot stands on the wrong mesh');
+  fadeRow = `  fade    the wedge stood at ${half.toFixed(4)} of 1 halfway through the 1.2 s`;
 
   // a second landing on the same cell replaces the wedge of that cell
   G.addWedge(group, { lat: a.lat, lon: a.lon, brg: c.brg, err: c.err }, { fade: false });
   ok('replace', u.fixes.length === 1, `a second landing on one cell left ${u.fixes.length} wedges`);
+  ok('replace', uni.uWedgeCount.value === 1, `a second landing on one cell painted ${uni.uWedgeCount.value} wedges`);
+  G.disposeCarrierGroup(group);
+}
+
+// ---------------------------------------------------------------- D: the marks on the ground
+// The dot of a fix and the ring of a find both drape on the terrain. A mark at one radius floats:
+// the surface stands near 1.0 and the camera comes to 1.11.
+let markRow = '';
+{
+  const srcDir = snapDir(randDir());
+  const world = worldWith('Mark', srcDir);
+  const a = S.dirToSite(snapDir(randDir()));
+  const group = G.makeCarrierGroup(world, { fixes: [{ lat: a.lat, lon: a.lon, brg: 10, err: 12 }], found: false, ts: 0 }, HM);
+  const u = group.userData;
+
+  // the dot: on the ground, and about 0.35 of a cell across
+  {
+    const pos = u.meshes.marks.geometry.attributes.position;
+    let rLo = Infinity, rHi = 0, worstDrape = 0, hi = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+      const r = v.length();
+      rLo = Math.min(rLo, r); rHi = Math.max(rHi, r);
+      v.normalize();
+      worstDrape = Math.max(worstDrape, Math.abs(r - drapeR(world, v)));
+      hi = Math.max(hi, S.arcTo(a, v));
+    }
+    ok('dot', Math.abs(hi / S.CELL - 0.35) < 0.01, `the dot runs ${(hi / S.CELL).toFixed(3)} cells out and not 0.35`);
+    // The drape is the proof that the dot lies on the terrain: every vertex has to read the rule of
+    // site.js to a millionth, and the old shell of 1.07 missed it by the whole relief. The spread
+    // of the radius says nothing here, because the dot covers a third of a cell and the height map
+    // holds one texel every one and a half cells.
+    ok('dot', worstDrape < R_TOL, `a point of the dot stood ${worstDrape.toExponential(2)} off the ground under it`);
+    markRow = `  dot     the dot of a fix runs ${(hi / S.CELL).toFixed(2)} cells out, on the ground, radius ${rLo.toFixed(4)} to ${rHi.toFixed(4)}`;
+  }
 
   // the find takes the wedges away and leaves one ring at the source
   G.setFound(group, world, HM);
-  ok('found', !u.meshes.wedges.visible, 'a found world still draws a wedge');
+  ok('found', G.carrierUniforms().uWedgeCount.value === 0, 'a found world still paints a wedge');
   ok('found', u.meshes.marks.visible, 'a found world draws no ring');
   const at = S.sourceSite(world);
   const pos = u.meshes.marks.geometry.attributes.position;
@@ -306,20 +385,21 @@ let fadeRow = '';
   // The band follows the relief, so it cannot be one sphere. A ring that went back to a fixed
   // radius reads a spread of zero here.
   ok('drape', rHi - rLo > 1e-4, `the ring stands at one radius, spread ${(rHi - rLo).toExponential(2)}`);
-  ok('drape', rHi < G.WEDGE_R - 0.01, `the ring stands at ${rHi.toFixed(4)}, up at the shell of the wedges`);
-  fadeRow += `\n  ring    the ring of a find runs ${cells(lo).toFixed(2)} to ${cells(hi).toFixed(2)} cells out from the source`;
-  fadeRow += `\n  drape   its ${pos.count} vertices lie on the ground, radius ${rLo.toFixed(4)} to ${rHi.toFixed(4)}, ${worstDrape.toExponential(1)} off the rule of site.js`;
+  markRow += `\n  ring    the ring of a find runs ${cells(lo).toFixed(2)} to ${cells(hi).toFixed(2)} cells out from the source`;
+  markRow += `\n  drape   its ${pos.count} vertices lie on the ground, radius ${rLo.toFixed(4)} to ${rHi.toFixed(4)}, ${worstDrape.toExponential(1)} off the rule of site.js`;
   G.disposeCarrierGroup(group);
 }
 
 // ---------------------------------------------------------------- the report
 console.log('carrier-fix-check');
 console.log('  store   one fix per cell, the find that survives a clear, both bounds, a quota error, and garbage');
-console.log(`  wedge   ${PAIRS} pairs of a site and a source, ${wedgeCount.verts} vertices and ${wedgeCount.tris} triangles each`);
-console.log(`  edge    a drawn edge read ${worstEdge.toExponential(1)} deg off its bearing at worst, limit ${ANG_TOL}`);
+console.log(`  wedge   ${PAIRS} pairs of a site and a source, ${ARCS.length} arcs each, from the site to the antipode`);
 console.log(`  cover   the source stood inside every wedge, and came within ${(worstMargin * 100).toFixed(2)}% of an edge at worst`);
-console.log(mergeRow);
+console.log(`  edge    ${OUT_DEG} deg past an edge, behind the site, and past the antipode: all outside, all unpainted`);
+console.log(`  uniform the ${G.MAX_WEDGES} slots the shader reads stood ${worstUniform.toExponential(1)} off wedgePlanes() at worst`);
+console.log(capRow);
 console.log(fadeRow);
+console.log(markRow);
 if (fails.length) {
   console.error('\nFAIL');
   for (const f of fails) console.error('  ' + f);

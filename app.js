@@ -7,7 +7,7 @@ import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impuls
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere } from './site.js';
 import { loadFixes, addFix, markFound, clearFixes, foundSeeds } from './carrier-store.js';
-import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup } from './carrier-globe.js';
+import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
 import { Ground, RIM } from './ground.js';
@@ -260,8 +260,9 @@ function disposeWorld() {
   if (!current) return;
   showMarker(null);                 // the ring is shared between worlds, so it must not be disposed
   site = null;
-  // The wedges go first, because they own their buffers and the walk below would only reach the
-  // geometry. See disposeCarrierGroup() in carrier-globe.js.
+  // The marks of the carrier go first, because they own their buffers and the walk below would
+  // only reach the geometry. The same call takes the wedges out of the uniforms of the shaders, so
+  // the next world starts with none. See disposeCarrierGroup() in carrier-globe.js.
   disposeCarrierGroup(carrierGroup);
   carrierGroup = null; carrierRecord = null; pendingFix = null;
   current.group.traverse((o) => {
@@ -324,6 +325,10 @@ function buildWorld(res) {
           transformed += normal * w * ${wobble.toFixed(5)};`);
       oceanMat.userData.shader = sh;
     };
+    // three.js keys a program on customProgramCacheKey(), which is the text of onBeforeCompile by
+    // default. The wobble above is a literal in that text, so every ocean of every world read one
+    // key and two worlds shared one program. The key states the number instead.
+    oceanMat.customProgramCacheKey = () => `ocean|${wobble.toFixed(5)}`;
     const ocean = new THREE.Mesh(og, oceanMat);
     ocean.receiveShadow = false;
     ocean.renderOrder = 1;
@@ -571,6 +576,14 @@ const SLOPE_STEP = 0.02;
   carrierRecord = loadFixes(world.seed);
   carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, carrierRecord, heightMap);
   if (carrierGroup) planet.add(carrierGroup);
+
+  // The wedges themselves are paint and not geometry: the terrain shader and the ocean shader test
+  // every fragment against the fixes in the uniforms, so a wedge lies on the ground it marks and it
+  // holds no parallax against the relief at any camera. The patch extends the wobble patch of the
+  // ocean above; it must run before gasWeather() below, which takes the whole onBeforeCompile of
+  // the terrain material for itself, and a gas giant gives no group here, so the two never meet.
+  patchCarrierMaterial(tm, carrierGroup);
+  patchCarrierMaterial(oceanMat, carrierGroup);
 
   // the upper cloud deck of a gas giant
   const deckMat = world.type === 'gas' && world.deck ? gasDeck(world, planet) : null;

@@ -519,35 +519,84 @@ function parseGroundView(text) {
 
 // ---------------------------------------------------------------- the marker
 // The square of the cell the probe would land on. It is the true footprint of the patch, not a
-// symbol: what the square holds is what the ground shows. Eight vertices and eight triangles
-// draw the outline, and each vertex sits at the ground radius under it, so the square follows
-// the relief instead of floating over a hill.
+// symbol: what the square holds is what the ground shows. Each vertex sits at the ground radius
+// under it, so the square follows the relief instead of floating over a hill.
+//
+// Each side carries MARK_SEGS steps, so the outline holds 32 outer and 32 inner vertices. Four
+// corners alone gave four long chords, and a ridge inside the cell cut through the middle of a
+// side. The height map holds one texel every 0.016 units of arc and a cell is 0.01 units across,
+// so eight steps read every value the map holds along a side.
+//
+// Two meshes share the one geometry. The ghost pass draws first with depthTest off at a low
+// opacity, so the outline still reads where a ridge stands in front of it, and the solid pass
+// draws after it with depthTest on, so the square reads as a thing on the ground. The far side of
+// the globe never shows the ghost, because the marker follows the pointer: pickSite() takes the
+// near hit of the ray, and the pull stays inside the cell, so the square always stands on the half
+// of the globe that faces the camera.
 const RING_IN = 0.9;                 // the inner edge of the outline, as a part of the cell
-const LIFT = 0.0008;                 // globe units the outline floats, so it clears the surface
+const MARK_SEGS = 8;                 // steps along one side of the square
+// globe units the outline floats, so it clears the facets of the globe.
+//
+// The square drapes on the height map, and the terrain draws from an icosphere. The two do not
+// agree: the map holds 384 by 192 texels, which is 0.016 units of arc, and a facet of the globe is
+// 0.013 units across, so the mesh carries detail the map has already smoothed away. A facet is also
+// a flat chord under a curve. Both together let a facet stand over the map at its own middle, and
+// the outline then sinks into the ground.
+//
+// Measured on five worlds, 184,320 facets each, as the radius of a facet at its middle less the map
+// under it:
+//
+//   world      p99      p99.9    worst
+//   Auralis    0.0012   0.0024   0.0049
+//   Vesper     0.0008   0.0027   0.0188
+//   Meridian   0.0033   0.0069   0.0165
+//   Tessaly    0.0036   0.0063   0.0140
+//   Orin       0.0040   0.0076   0.0350
+//
+// 0.006 clears about 999 facets in every 1,000 on the worst world, and it holds the everyday
+// mountain off the outline. The old 0.0008 cleared about 98 in 100, which is the defect. A lift
+// that cleared the last peak of a lava world would have to stand at 0.035, far over the 0.011 units
+// the flora of the globe stands, and the square would then float over a forest. The ghost pass
+// takes those last facets instead: the outline reads through a ridge at a low opacity.
+const LIFT = 0.006;
 // the four corners of the cell, in the order they go round it
 const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 
 let marker = null;
 
 function makeMarker() {
+  const n = MARK_SEGS * 4;           // vertices round one ring of the outline
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
-  // two triangles per side: the outer corner, the next outer corner, and the two inner ones
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 2 * 3), 3));
+  // two triangles per step: the outer point, the next outer point, and the two inner ones
   const idx = [];
-  for (let i = 0; i < 4; i++) {
-    const a = i, b = (i + 1) % 4, c = 4 + b, d = 4 + i;
+  for (let i = 0; i < n; i++) {
+    const a = i, b = (i + 1) % n, c = n + b, d = n + i;
     idx.push(a, b, c, a, c, d);
   }
   geo.setIndex(idx);
-  const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.name = 'site-marker';
-  mesh.renderOrder = 3;
-  mesh.frustumCulled = false;
-  return mesh;
+  const group = new THREE.Group();
+  group.name = 'site-marker';
+  // the ghost first, then the solid, so the solid stands over it where the ground faces the camera
+  for (const pass of [
+    { opacity: 0.25, depthTest: false, order: 3 },
+    { opacity: 0.9, depthTest: true, order: 4 },
+  ]) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: '#ffffff', transparent: true, opacity: pass.opacity,
+      side: THREE.DoubleSide, depthWrite: false, depthTest: pass.depthTest,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = pass.order;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+  }
+  group.userData.geo = geo;
+  return group;
 }
 
-// Show the square of the cell on the planet. A null site takes it off the scene.
+// Show the square of the cell on the planet. A null site takes it off the scene. It gives the
+// group of the two passes back; no caller in app.js reads it today.
 export function showMarker(site, current) {
   if (!site || !current) {
     if (marker && marker.parent) marker.parent.remove(marker);
@@ -559,19 +608,26 @@ export function showMarker(site, current) {
     current.planet.add(marker);
   }
   const pal = current.world.palette;
-  marker.material.color.set(pal.fauna?.accent || '#ffffff');
+  for (const m of marker.children) m.material.color.set(pal.fauna?.accent || '#ffffff');
 
   // The corners come from the cell of the cube grid, so the square the reader aims at is the quad
-  // the patch draws and it shares its edges with the cell next door.
+  // the patch draws and it shares its edges with the cell next door. Each side then walks from one
+  // corner to the next in MARK_SEGS steps.
   const cell = siteCell(site);
   const sea = current.world.seaRadius || 0;
-  const pos = marker.geometry.attributes.position;
+  const pos = marker.userData.geo.attributes.position;
+  const n = MARK_SEGS * 4;
   for (let ring = 0; ring < 2; ring++) {
     const w = ring === 0 ? 0.5 : 0.5 * RING_IN;
     for (let c = 0; c < 4; c++) {
-      cellDir(cell, 0.5 + CORNERS[c][0] * w, 0.5 + CORNERS[c][1] * w, _corner);
-      const r = Math.max(groundRadius(current.world, current.heightMap, _corner), sea) + LIFT;
-      pos.setXYZ(ring * 4 + c, _corner.x * r, _corner.y * r, _corner.z * r);
+      const from = CORNERS[c], to = CORNERS[(c + 1) % 4];
+      for (let k = 0; k < MARK_SEGS; k++) {
+        const f = k / MARK_SEGS;
+        const u = from[0] + (to[0] - from[0]) * f, v = from[1] + (to[1] - from[1]) * f;
+        cellDir(cell, 0.5 + u * w, 0.5 + v * w, _corner);
+        const r = Math.max(groundRadius(current.world, current.heightMap, _corner), sea) + LIFT;
+        pos.setXYZ(ring * n + c * MARK_SEGS + k, _corner.x * r, _corner.y * r, _corner.z * r);
+      }
     }
   }
   pos.needsUpdate = true;

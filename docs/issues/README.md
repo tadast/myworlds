@@ -27,7 +27,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `music.js` | Chip-tune per world, and the motif of the source. `motifOf()` gives the rhythm of that motif with no audio, `setCarrier()` sets its level, and `barClock()` gives the clock the lamp of the wreck blinks on. |
 | `ground-source.js` | The source on the ground: the wreck of the older probe, its lamp, its mark, the tap that finds it, and the preview the log card turns. Issue 34. |
 | `carrier-store.js` | The fixes of the search in `localStorage`, under `myworlds.carrier.v1`. `loadFixes()`, `addFix()`, `markFound()`, `clearFixes()`, `foundSeeds()`. No three.js. Issue 34. |
-| `carrier-globe.js` | The fixes on the globe: a dot per fix, a wedge per fix, and the one ring a find leaves at the source. One group under `current.planet`. Issue 34. |
+| `carrier-globe.js` | The fixes on the globe: a wedge per fix, which the terrain shader and the ocean shader paint, a dot per fix, and the one ring a find leaves at the source. One group under `current.planet` for the marks, and one set of uniforms for the paint. Issue 34. |
 | `probe-hud.js` | The instrument of the probe over the ground: the air, the height, the hour of the star, the uplink, and the noise at the edge of the reach. Reads `Ground.telemetry()`. |
 | `index.html`, `style.css` | The page and the sidebar. |
 
@@ -105,6 +105,15 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - The marker is the square of the cell, not a symbol: what the square holds is what the ground
   shows. It is therefore only a few pixels wide from far out, and the reader zooms in to see it.
 - Since issue 20 the marker shows only while the reader aims, and it follows the pointer.
+- Each side of the square carries 8 steps, so the outline holds 32 outer and 32 inner vertices, and
+  each one drapes on the ground under it plus a lift of 0.006 globe units. Four corners alone let a
+  ridge inside the cell cut through the middle of a side, and a lift of 0.0008 let the facets of
+  the globe rise through the outline in the mountains. See `LIFT` in `site.js` for the measurement.
+- `showMarker()` gives a group of two meshes that share one geometry. The ghost pass draws first
+  with `depthTest` off at opacity 0.25, so the outline still reads where a ridge stands in front of
+  it, and the solid pass draws after it with `depthTest` on at opacity 0.9. The far side of the
+  globe never shows the ghost, because `pickSite()` takes the near hit of the ray and the pull stays
+  inside the cell, so the square always stands on the half of the globe that faces the camera.
 
 ### The rim
 
@@ -223,14 +232,19 @@ Issue 34. One thing on a world with a surface transmits, and the probe reads a b
 - The bounds are `MAX_FIXES = 64` per seed and `MAX_SEEDS = 200`. The oldest goes first in both.
 - A shared URL carries no fix. A reader who opens a link starts the search with nothing.
 
-**The wedge.** `carrier-globe.js` gives `makeCarrierGroup(world, record, heightMap)`, `addWedge(group, fix, { fade })`, `setFound(group, world, heightMap)`, `updateCarrierGroup(group, dt)`, and `disposeCarrierGroup(group)`.
+**The wedge.** `carrier-globe.js` gives `makeCarrierGroup(world, record, heightMap)`, `addWedge(group, fix, { fade })`, `setFound(group, world, heightMap)`, `updateCarrierGroup(group, dt)`, `disposeCarrierGroup(group)`, `patchCarrierMaterial(material, group)`, `carrierUniforms()`, `wedgePlanes(fix)`, `wedgeEdges(planes, dir)`, `inWedge(planes, dir)`, and `wedgeCoverage(planes, dir)`.
 
-- The group rides under `current.planet`, so it turns with the world. `depthTest` stays on, so the globe hides the part of a shape that runs over its far side.
-- A wedge is the band between the bearing less the error and the bearing plus the error. It runs from the site to the antipode of the site, 48 steps, on the shell `WEDGE_R = 1.07`, which clears the relief of 0.06 and stands under the inner atmosphere shell of 1.115. One `MeshBasicMaterial` in the accent of the palette at alpha 0.16, `depthWrite` off, `toneMapped` false. Two wedges read darker where they cross, and the app draws no other mark of the cross.
-- Every wedge of a world merges into one mesh and every dot into one more, whatever the number of fixes, so the group costs a handful of draw calls.
-- A new fix fades in over 1.2 s, because the ascent ends over the site and the reader watches the wedge arrive.
-- A find takes the wedges and the dots away and leaves one ring at the source, 1.5 cells of arc out in a band 0.3 cells wide. The ring **lies on the terrain**: every vertex takes `max(groundRadius(world, heightMap, dir), world.seaRadius) + DRAPE_LIFT`, the rule `showMarker()` in `site.js` drapes the square of a cell with. So `makeCarrierGroup()` and `setFound()` both take the height map of the world.
-- `tools/carrier-fix-check.mjs` holds the store, the wedge, and the drape. It reads the built geometry back through `bearingTo()` of `site.js`, so a mirrored east in either file fails the run.
+- **A wedge is paint on the terrain and not a shape in the sky.** The terrain material and the ocean material of the world carry the wedges in their own fragment shader, so a wedge lies exactly on the ground it marks and it holds no parallax at any camera. `buildWorld()` in `app.js` calls `patchCarrierMaterial()` on both. The patch **extends** whatever `onBeforeCompile` the material already holds, it appends its own mark to `customProgramCacheKey()`, and it does nothing at all for a world with no group.
+- A fragment takes its direction in the **local frame of the planet**, a varying of `normalize(position)` from the vertex shader, so the wedges turn with the world and need no matrix.
+- A wedge in the uniforms is three unit vectors and a fade: the site `s`, and the inward normals `nL` and `nR` of the two edge great circle planes. `dot(d, nL) > 0` and `dot(d, nR) > 0` give the lune between the two planes, which runs from the site to the antipode of the site and no further. That is the half circle of decision 5 with no further rule. The rule holds while the error stands under 90 degrees, and `carrierAt()` states at most 25.
+- `wedgePlanes(fix)` builds both the uniforms and the numbers of the check, and `wedgeEdges()` holds the arithmetic of the GLSL line for line.
+- The cap is `MAX_WEDGES = 8`. A world with more fixes paints the 8 newest; every fix still keeps its dot.
+- Each wedge that covers a fragment adds one step of the accent of the palette: `1 - pow(0.92, n)` of the way from the lit colour to the accent, plus 0.06 of the accent as an emissive share, so a wedge on the night side still reads. One wedge reads 0.08, two read 0.15, and three read 0.22. A line 0.3 degrees wide on each edge, at 0.5 of the accent, carries the shape of the wedge. The sea bed under the sea paints no wedge. Each edge takes a soft band of 0.15 degrees, so the edge does not crawl on the facets of the globe. The app draws no other mark of the cross.
+- The group rides under `current.planet` and holds the marks. `depthTest` stays on, so the globe hides the part of a mark that runs over its far side. Every dot of a world merges into one mesh, whatever the number of fixes.
+- A new fix fades in over 1.2 s through its own slot of the fade uniform, because the ascent ends over the site and the reader watches the wedge arrive.
+- A find takes the wedges and the dots away and leaves one ring at the source, 1.5 cells of arc out in a band 0.3 cells wide.
+- The dot of a fix and the ring of a find both **lie on the terrain**: every vertex takes `max(groundRadius(world, heightMap, dir), world.seaRadius) + DRAPE_LIFT`, the rule `showMarker()` in `site.js` drapes the square of a cell with. The dot reaches 0.35 of a cell. So `makeCarrierGroup()` and `setFound()` both take the height map of the world.
+- `tools/carrier-fix-check.mjs` holds the store, the wedge, the cap, the fade, and the drape. It builds every test direction with its own copy of the east of the globe and reads it back through `bearingTo()` of `site.js`, so a mirrored east in either file fails the run.
 
 ### Metres for a creature
 

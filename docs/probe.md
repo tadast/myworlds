@@ -39,7 +39,7 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
     - **No pull to the source.** `pullSite()` does not know the source. The reader has to aim.
     - **The song stays whole.** The first idea took the lead voice out of the song until the reader found the source. It makes every song worse for every reader who does not search, and the music starts muted, so it cannot carry a mechanic alone. The source gets a voice of its own instead, the motif, which adds to the song and takes nothing from it.
 
-    The build changed eight things against the plan.
+    The build changed nine things against the plan.
 
     - **The needle on the ground takes the frame of the patch box, and not `groundBasis()`.** The box runs x along the u axis of its cell and z along the v axis, and (u, up, v) is left-handed, so the box is the mirror of the sky frame in x. A needle that came through `groundBasis()` pointed at the mirror of the source and away from the wreck. `carrierBox()` in `site.js` reads the slope of the map of the box instead. The mirror of the sky against the terrain is an older defect, it is open, and `tools/carrier-check.mjs` prints it as a note and not as a check. The three digits stay the true bearing of the globe, because the wedge of a fix is drawn on the globe.
     - **The carrier block sits at the top left.** The plan gave the fifth block no place. The right edge of the overlay holds the altitude ladder, so the block took the left.
@@ -47,7 +47,8 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
     - **A polar night line needs the tag `polarnight`.** The plan names "the tilt and its polar night" as one trouble. A lean alone gives no polar night: the sun fails to rise only poleward of the polar circle, which stands at latitude `90 - lean`. So `sourceTags()` reads the latitude of the source against the lean of the axis, with a margin of 5 degrees. See `docs/source.md`.
     - **The motif keeps straight time while the song swings.** A machine transmits on a clock, so the swing of the song does not reach the motif. The motif rolls from `'music:' + seed + '|source-motif'` and not from the stream of the song, so no song of any world changed.
     - **The reach of `patchSource()` is the walk limit and not `FOG_NEAR`.** The reader has to reach the wreck on foot, and the walk stops at half the box less the band the plants thin out over. That is the rule `reachOf()` holds in `ground.js`, so the two cannot drift apart. The range the overlay states measures from the camera and not from the site, so it falls under 5 units at the hull.
-    - **The ring of a find lies on the terrain, and the wedges stand at 1.07.** A wedge runs to the antipode of its site, so it has to clear every mountain and it keeps the shell the plan gives it. The ring marks one place, and at 1.07 it hung in the sky: the surface stands near 1.0 and the camera comes to 1.11. Every vertex of the ring now takes the ground under it, or the sea where the ground lies under the sea, plus a lift that clears the flora of the globe, the way `showMarker()` drapes the square of a cell.
+    - **The ring of a find lies on the terrain, and the wedges stood at 1.07.** The plan puts every shape on the shell of 1.07. The ring marks one place, and at 1.07 it hung in the sky: the surface stands near 1.0 and the camera comes to 1.11. Every vertex of the ring now takes the ground under it, or the sea where the ground lies under the sea, plus a lift that clears the flora of the globe, the way `showMarker()` drapes the square of a cell.
+    - **The wedges are painted on the terrain, and they are no longer geometry.** The shell of 1.07 failed the wedges for the same reason it failed the ring. From the aim camera at 1.11 a wedge stood as a sheet over the ground: the cross of two sheets held a large parallax against the relief, and the reader could not tell which cell lay under it. The terrain shader and the ocean shader now test each fragment against the fixes in their uniforms, so a wedge lies on the ground it marks at every camera and it needs no geometry at all. The cap is `MAX_WEDGES = 8`, and a world with more fixes paints the 8 newest. The dot of a fix drapes on the ground with the ring.
     - **The source does not read the vertices of the globe.** The plan selects a dry vertex. The detail of the globe follows the tier, so a phone and a desktop found two different sources on one seed. `makeSource()` now draws each candidate direction from the source stream and tests it on the globe field, with a sea level from a fixed grid of samples. `node tools/world-checksum.mjs --source` proves that the two tiers agree.
 
 ## Implementation notes
@@ -419,20 +420,51 @@ which is the 6 cells the range covers, so "strong" and a number arrive together.
 0.6 rad, a fifth of the half circle, where the error stands under 8 degrees and two fixes cross
 tight.
 
-**The wedges, `WEDGE_R = 1.07` and 48 steps in `carrier-globe.js`.** The shell of 1.07 stands over
-the relief of 0.06 and under the inner atmosphere shell of 1.115, so a wedge clears every mountain
-of every world and never stands outside the air. A wedge runs to the antipode of its site, so it
-cannot lie on the terrain: it would then cross every hill on the way. 48 steps put one step every
-3.75 degrees of arc, so the edge of a wedge reads as a curve and not as a chain of straight pieces.
-The alpha is 0.16, so one wedge is faint and two that cross read twice as strong. That is the whole
-display of the cross.
+**The wedges are paint, `MAX_WEDGES = 8` in `carrier-globe.js`.** A wedge runs to the antipode of
+its site, so the first build put it on a shell of 1.07, over the relief of 0.06 and under the inner
+atmosphere shell of 1.115. The aim camera comes to 1.11, and from there the sheet held a large
+parallax against the ground: the reader saw two sheets cross in the sky and could not say which
+cell stood under the cross. `patchCarrierMaterial()` now paints the wedges into the terrain
+material and the ocean material of the world, so a wedge lies on the ground it marks at every
+camera and no shell stands anywhere.
 
-**The ring of a find lies on the terrain.** 72 steps of a circle 1.5 cells out, in a band 0.3 cells
-wide, each vertex at the ground under it or at the sea over it, plus a lift of 0.014 globe units.
-The flora of the globe stands 0.011 units tall, and a lift under that put the ring below the trees
-of a forest, where the reader saw no ring. The lift also covers the gap between the smooth height
-map and the facets of the globe. `depthTest` stays on, so the
-globe still hides the part of the ring behind it.
+A fragment takes its direction in the local frame of the planet, so the wedges turn with the world
+for free. A wedge is three unit vectors: the site `s`, and the inward normals `nL` and `nR` of the
+two edge great circle planes. The pair of tests `dot(d, nL) > 0` and `dot(d, nR) > 0` gives the lune
+between the two planes, and a lune runs from the site to the antipode of the site and no further,
+which is decision 5 with no further rule. The rule holds while the error stands under 90 degrees,
+and `carrierAt()` states at most 25.
+
+Eight slots hold 112 floats, which every driver carries, and eight fixes is already more of a cross
+than a reader can read; a world with more fixes paints the 8 newest. Each wedge that covers a
+fragment adds one step of the accent: `1 - pow(0.92, n)` of the way from the lit colour to the
+accent, plus 0.06 of the accent as an emissive share, so a wedge on the night side of a planet is
+not black on black. One wedge reads 0.08, two read 0.15, and three read 0.22. The first value was
+0.18 a wedge, and three wide wedges then drowned the terrain in the accent. The wash is now light,
+and a line 0.3 degrees wide on each edge, at 0.5 of the accent, carries the shape: the eye finds
+the cross as the region the lines close. The sea is see-through, so the sea bed under it paints no
+wedge; `uWedgeSea` holds the radius of the sea for that test. Each edge takes a soft
+band of 0.15 degrees, measured on the angle to the edge plane and not on the plane distance, so the
+band holds one width from the site to the antipode and the edge does not crawl on the facets of the
+globe, which are 0.6 degrees of arc across. That is the whole display of the cross.
+
+The cost: the loop runs on every fragment of the planet and of the sea, which is the disc of the
+globe on the screen. A world with no fix reads one integer uniform and stops. A fix costs about
+twenty arithmetic operations, so eight fixes add about 160 against the several hundred the lighting
+of a `MeshStandardMaterial` already spends on the same fragment. No texture is read, and the branch
+never diverges inside a draw, because every fragment runs the same count.
+
+**The ring of a find and the dot of a fix lie on the terrain.** The ring is 72 steps of a circle 1.5
+cells out, in a band 0.3 cells wide. The dot is a disc 0.35 of a cell across at the site of a fix.
+Each vertex of both stands at the ground under it or at the sea over it, plus a lift of 0.014 globe
+units. The flora of the globe stands 0.011 units tall, and a lift under that put the ring below the
+trees of a forest, where the reader saw no ring. The lift also covers the gap between the smooth
+height map and the facets of the globe: measured over 184,320 facets on each of five worlds, a
+facet stands over the map by 0.0076 units at the 99.9th percentile on the worst world, and 0.014
+therefore clears the facets as well as the trees. `depthTest` stays on, so the globe still hides
+the part behind it. The dot stood at 0.006 units on the shell of the wedges before, where it read
+as a large disc in the sky. `LIFT` in `site.js` holds the same measurement for the square of the
+aim marker, which drapes the same way at 0.006.
 
 **The disc of 14 units, `SOURCE_DISC` in `worker.js`.** The worker flattens a disc of radius 14
 units under the wreck, holds the inner 55% of it flat, and carries a soft edge over the rest. It
