@@ -845,7 +845,7 @@ function frame() {
   if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
   step(now);
   updateCreatureFloat();
-  updateProbeFloat();   // after the creature button, because the marked animal takes the spot
+  updateProbeFloat();
   perf.work(performance.now() - now);
 }
 
@@ -1397,8 +1397,9 @@ function updateProbeFloat() {
   if (!probeFloat) return;
   let label = '';
   if (!dive && !busy && !aiming) {
-    // the marked animal holds the spot: the two floating buttons share one place on the screen
-    if (mode === 'ground' && ground && ground.atCeiling && !creatureLabel) label = 'Recall the probe';
+    // The two floating buttons share one place on the screen. At the ceiling the recall takes it,
+    // because the reader who pulls back to the limit asks to travel; the mark stays on the ground.
+    if (mode === 'ground' && ground && ground.atCeiling) label = 'Recall the probe';
     else if (mode === 'orbit' && canDescend() && camera.position.length() <= FLOAT_NEAR) label = 'Send a probe to the surface';
   }
   if (label === floatLabel) return;
@@ -1435,7 +1436,8 @@ const plantOf = (kind) => groundPlants.find((p) => p.kind === kind) || null;
 function updateCreatureFloat() {
   if (!creatureFloat) return;
   let label = '';
-  if (mode === 'ground' && !dive && !busy && creatureCard.hidden) {
+  // At the ceiling the recall of the probe takes the spot. See updateProbeFloat().
+  if (mode === 'ground' && !dive && !busy && creatureCard.hidden && !(ground && ground.atCeiling)) {
     if (markedKind !== null) {
       const G = current && current.world.species[markedKind];
       if (G) label = `Study the ${G.lore.name}`;

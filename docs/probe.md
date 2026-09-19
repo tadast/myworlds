@@ -29,6 +29,8 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 
 12. **The sky turns, 2026-09-18.** A landing keeps a clock: one turn of the planet takes 1,800 s of real time, whatever the day of the world is. The star turns about the axis of the planet, so it rises and sets the way it does at that latitude, and the light, the colours of the sky, the fog, and the countdown of the overlay all follow it. The hours of the world therefore run about fifty times the hours of the reader, which is what makes a sunset something a reader can sit through. The moons keep the order the globe rolled and lose its speed: a moon crosses the sky in tens of minutes and no longer in tens of seconds. See `docs/issues/32-the-sky-turns.md`.
 
+13. **The drone flight, 2026-09-18.** `W`, `A`, `S`, and `D` move the probe in the flat plane and no longer follow the tilt of the view. The arrows and `Q` and `E` turn and tilt the view about the eye. The velocity eases at `WALK_EASE` 2.2/s, so the probe keeps some momentum, and the speeds rose to 16 and 220 units a second. The reach now limits the camera and not the target. The old rule clamped the target, so a reader who backed into the edge stood outside the reach behind the target; a turn of the view then swung the target out, and the backstop pulled the whole pair toward the site. The target is now only the point the view looks at, and the backstop moves the camera alone. The keyboard tilt also holds inside the polar band of the controls, because a tilt past it made the controls swing the camera about the target.
+
 14. **The carrier, 2026-09-19.** Every world with a surface carries one source, and the instrument of the probe reads a bearing to it. The reading has an error and no distance. The globe keeps a wedge per landing, and the source stands where two wedges cross. A landing on the cell of the source shows the thing itself: the wreck of an older survey probe, with a log of four entries that the lore engine writes from the facts of the world. The search takes three phases: hear, cross, and home. See `docs/issues/34-the-carrier.md` and `docs/source.md`.
     - **The carrier is always heard, and the error does the work.** A range limit was rejected: a landing with no reading costs the reader a dive and gives little back. The error runs from 3 degrees at the source to 25 degrees at its antipode, straight in the arc. The offset inside the error comes from a hash of the seed and the cell, so a cell states one bearing on every visit and the true bearing always lies inside the wedge. Two far fixes cross wide, and the reader then decides between a third far fix and a near one. That decision is the feature.
     - **A wedge, and not a line.** Two exact lines solve every world in two landings, and the search is dead by the third world. A wedge states the doubt honestly.
@@ -209,15 +211,17 @@ points, and the reader steers with the thumb until the finger lifts. A press tha
 and the walk never arms, so the two cannot be confused: the rule is already there, because a press
 that moves more than `TAP_SLOP` stops being a tap.
 
-The **keys** carry the rest. The up and down arrows, and `W` and `S`, fly the camera the way the
-view points: a view that looks down flies down, and a view that looks up climbs. The side arrows
-turn the view, and so do `Q` and `E`. `A` and `D` step sideways, flat on the ground. `Space` lifts
-the camera, `Ctrl` drops it, `Shift` runs, `R` and `F` tilt, and `+` and `-` zoom.
+The **keys** carry the rest, and the probe flies like a drone. `W`, `A`, `S`, and `D` move it in
+the flat plane, parallel to the surface. The tilt of the view does not change the plane, and nothing
+follows the terrain. `Space` lifts the camera, `Ctrl` drops it, `Shift` runs, and `+` and `-` zoom.
+The side arrows turn the view, and the up and down arrows tilt it, and so do `Q` and `E`. The
+velocity eases to the speed the keys ask for at `WALK_EASE`, so the probe gathers speed and coasts
+to a stop over about half a second.
 
 The look keys turn the target about the eye, and not the eye about the target: the reader turns the
 head, and a camera swung about a target 15 m away would walk a 15 m circle instead. The walk moves
 the pair, so the view direction and the distance both hold and only the place changes. The speed
-follows the height, as the speed of a wheel step does: 11 units a second at eye height and 150 at
+follows the height, as the speed of a wheel step does: 16 units a second at eye height and 220 at
 the ceiling, and `Shift` multiplies by 5. An editable element takes every key first, so a reader
 who types a seed does not walk.
 
