@@ -245,7 +245,13 @@ export function activitySite(world) {
 // of a face, so the needle comes from the slope of that map and not from the bearing less a twist.
 // See carrierBox(). tools/carrier-check.mjs proves both jobs, and it fails when the box and the
 // frame of groundBasis() stand as a mirror of each other.
-export const CARRIER_ERR = [3, 25];   // degrees: the error at the source and at its antipode
+// degrees: the error at the source and at its antipode, straight in the arc between them.
+//
+// The first value was 3 to 25. Two far fixes then crossed over a quarter of a hemisphere, and the
+// search took many landings. With 2 to 10 two far fixes cross over a region about 15 cells wide, a
+// third fix from near that region closes it to a few cells, and the range of decision 7 does the
+// rest. That is the three to five landings the plan asks for.
+export const CARRIER_ERR = [2, 10];
 export const CARRIER_RANGE = 6;       // cells of arc: the range states nothing further out
 
 const _up = new THREE.Vector3();
@@ -313,7 +319,7 @@ export function bearingTo(site, dir) {
 // The instrument does not state the true bearing. It states one inside the wedge, and the offset
 // comes from a hash of the seed and the cell, so a fix is the same on every visit, two landings on
 // one cell never disagree, and the true bearing always lies inside the wedge. The error runs from
-// 3 degrees at the source to 25 degrees at its antipode, straight in the arc: two far fixes cross
+// 2 degrees at the source to 10 degrees at its antipode, straight in the arc: two far fixes cross
 // wide, and the reader then decides between a third far fix and a near one. Decision 3 of issue 34.
 //
 // The site takes the snap first, because the fix belongs to the cell and not to two decimals of a

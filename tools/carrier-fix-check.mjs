@@ -18,8 +18,10 @@
 //    docs/probe.md. So every direction this check builds is read back through bearingTo() of
 //    site.js before it goes into a plane test: a mirror in either file fails the run.
 //
-// C. The cap and the fade. The shader holds MAX_WEDGES = 8 fixes, and a world with more draws the 8
-//    newest. A new fix fades in over 1.2 s through its own slot of the fade uniform.
+// C. The cap, the age, the wash, and the fade. The store keeps MAX_FIXES = 4 fixes of a seed and
+//    the shader holds MAX_WEDGES = 4 of them, so the two caps are one number and a world with more
+//    draws the 4 newest. The line of a wedge weakens with its age, and the wash grows on the square
+//    of the count. A new fix fades in over 1.2 s through its own slot of the fade uniform.
 //
 // D. The marks on the ground. The dot of a fix and the ring of a find lie on the terrain: every
 //    vertex takes the ground under it, or the sea where the ground lies under the sea, plus
@@ -271,10 +273,15 @@ for (let i = 0; i < PAIRS; i++) {
 }
 
 // ---------------------------------------------------------------- C: the cap of MAX_WEDGES
-// The shader holds MAX_WEDGES slots, so a world with more fixes draws the newest of them. The dots
-// of every fix still stand on the globe, and only the paint takes the cap.
+// The store and the shader hold one cap of 4, so a landing past the fourth drops the oldest fix and
+// the globe paints the 4 newest. The dots of every fix a group is given still stand on the globe,
+// and only the paint takes the cap.
 let capRow = '';
 {
+  ok('cap', C.MAX_FIXES === 4, `the store keeps ${C.MAX_FIXES} fixes and not 4`);
+  ok('cap', G.MAX_WEDGES === 4, `the shader holds ${G.MAX_WEDGES} wedges and not 4`);
+  ok('cap', C.MAX_FIXES === G.MAX_WEDGES, 'the store and the shader hold two different caps');
+
   const world = worldWith('Cap', snapDir(randDir()));
   const fixes = [];
   for (let i = 0; i < G.MAX_WEDGES + 3; i++) {
@@ -287,12 +294,44 @@ let capRow = '';
   ok('cap', u.uWedgeCount.value === G.MAX_WEDGES, `${fixes.length} fixes gave a count of ${u.uWedgeCount.value}`);
   const last = G.wedgePlanes(fixes[fixes.length - 1]);
   ok('cap', u.uWedgeS.value[G.MAX_WEDGES - 1].distanceTo(last.s) < 1e-6, 'the newest fix is not the last wedge in the uniforms');
+  // the newest of the drawn set is the newest fix of the whole set, and the oldest drawn wedge is
+  // the one the cap let through last, so the four slots carry the four newest fixes in order
+  for (let i = 0; i < G.MAX_WEDGES; i++) {
+    const slot = G.wedgePlanes(fixes[fixes.length - G.MAX_WEDGES + i]);
+    ok('cap', u.uWedgeS.value[i].distanceTo(slot.s) < 1e-6, `slot ${i} does not hold the fix it should`);
+  }
+  // the age: the newest wedge draws its line full, and each older one draws weaker
+  const ages = Array.from(u.uWedgeAge.value.slice(0, G.MAX_WEDGES));
+  const want = G.WEDGE_AGE.slice(0, G.MAX_WEDGES).slice().reverse();
+  ok('age', ages.every((a, i) => Math.abs(a - want[i]) < 1e-6), `the ages read ${ages.join(', ')} and not ${want.join(', ')}`);
+  ok('age', G.WEDGE_AGE[0] === 1, `the newest wedge draws its line at ${G.WEDGE_AGE[0]} and not full`);
+
   const drawn = group.children.filter((m) => m.visible);
   ok('cap', drawn.length === 1, `${fixes.length} fixes drew ${drawn.length} meshes of dots`);
   const dots = group.userData.meshes.marks.geometry.attributes.position.count;
   ok('cap', dots === fixes.length * (1 + 16), `${fixes.length} dots hold ${dots} vertices`);
   capRow = `  cap     ${fixes.length} fixes gave ${u.uWedgeCount.value} wedges of paint and one mesh of ${dots} vertices`;
+  capRow += `\n  age     the lines stand at ${ages.map((a) => a.toFixed(2)).join(', ')} of WEDGE_EDGE, the oldest first and the newest last`;
   G.disposeCarrierGroup(group);
+}
+
+// ---------------------------------------------------------------- C: the wash of the overlap
+// One wedge alone must be almost only its two lines, and the ground two or more wedges cover must
+// stand out. So the wash grows on the square of the count and not on the count. wedgeWash() is the
+// formula of the GLSL in JS, and both read WEDGE_STEP of carrier-globe.js.
+let washRow = '';
+{
+  const want = [0.04, 0.15, 0.31, 0.48];
+  const got = want.map((_, i) => G.wedgeWash(i + 1));
+  for (let i = 0; i < want.length; i++) {
+    ok('wash', Math.abs(got[i] - want[i]) < 0.005, `${i + 1} wedges wash ${got[i].toFixed(4)} and not ${want[i]}`);
+  }
+  ok('wash', G.wedgeWash(0) === 0, 'no wedge still washed the ground');
+  // it has to grow faster than the count, or two wedges read as two of one
+  for (let i = 1; i < want.length; i++) {
+    ok('wash', got[i] - got[i - 1] > got[0], `the step from ${i} to ${i + 1} wedges is no wider than one wedge alone`);
+  }
+  washRow = `  wash    1 to ${want.length} wedges wash ${got.map((k) => k.toFixed(2)).join(', ')} of the way to the accent`;
 }
 
 // ---------------------------------------------------------------- C: the fade and the replace
@@ -310,6 +349,7 @@ let fadeRow = '';
   const c = S.carrierAt(world, a);
   G.addWedge(group, { lat: a.lat, lon: a.lon, brg: c.brg, err: c.err }, { fade: true });
   ok('fade', uni.uWedgeCount.value === 1 && uni.uWedgeFade.value[0] === 0, 'the new wedge did not start at nothing');
+  ok('fade', uni.uWedgeAge.value[0] === G.WEDGE_AGE[0], 'the wedge that fades in is not the newest one');
   ok('fade', u.meshes.fadeMark.visible && u.mats.fadeMark.opacity === 0, 'the new dot did not start at nothing');
   G.updateCarrierGroup(group, 0.6);
   const half = uni.uWedgeFade.value[0];
@@ -398,6 +438,7 @@ console.log(`  cover   the source stood inside every wedge, and came within ${(w
 console.log(`  edge    ${OUT_DEG} deg past an edge, behind the site, and past the antipode: all outside, all unpainted`);
 console.log(`  uniform the ${G.MAX_WEDGES} slots the shader reads stood ${worstUniform.toExponential(1)} off wedgePlanes() at worst`);
 console.log(capRow);
+console.log(washRow);
 console.log(fadeRow);
 console.log(markRow);
 if (fails.length) {

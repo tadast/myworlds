@@ -29,8 +29,8 @@ const TEXT_MS = 120;            // ms between two writes of the numbers. The eye
 //
 //   Here    the landing cell is the cell of the source
 //   Strong  under CARRIER_STRONG, which is the 6 cells decision 7 gives the range over
-//   Clear   under CARRIER_CLEAR, where the error stands under 8 degrees and two fixes cross tight
-//   Faint   further out, where the error runs on to 25 degrees at the antipode
+//   Clear   under CARRIER_CLEAR, where the error stands under 4 degrees and two fixes cross tight
+//   Faint   further out, where the error runs on to 10 degrees at the antipode
 //
 // A random landing is Faint five times in six, Clear about one time in six, and Strong only when
 // the reader aims for it. See carrierAt() in site.js for the error.

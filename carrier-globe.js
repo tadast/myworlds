@@ -31,23 +31,34 @@
 import * as THREE from 'three';
 import { CELL, groundRadius, sourceSite } from './site.js';
 
-// The number of wedges the shader holds. Eight uniform slots of three vec3 and one float cost 112
-// floats, which every driver carries with room to spare, and eight fixes is already more of a cross
-// than a reader can read. A world that holds more fixes draws the 8 newest; carrier-store.js keeps
-// up to MAX_FIXES of them, and the older ones wait for a clear.
-export const MAX_WEDGES = 8;
+// The number of wedges the shader holds. Four uniform slots of three vec3 and two floats cost 44
+// floats, which every driver carries with room to spare. The first build held eight, and after
+// eight landings the globe stood in wide wedges of the accent with lines everywhere: the reader
+// could read no cross out of it. Four fixes give a cross and one check of that cross, which is the
+// three to five landings the plan asks for. A world that holds more fixes draws the 4 newest;
+// carrier-store.js keeps up to MAX_FIXES of them, and MAX_FIXES is 4 as well, so the store and the
+// shader hold one set and a fifth landing drops the oldest.
+export const MAX_WEDGES = 4;
 
 // The tint of one wedge, as a part of the way from the lit colour to the accent of the palette.
-// n wedges give 1 - pow(1 - WEDGE_STEP, n), so one wedge reads 0.08, two read 0.15, and three read
-// 0.22: each crossing reads stronger than the last and none of them saturates. The first value was
-// 0.18, and in the browser three wide wedges drowned the terrain in the accent. The fill is now a
-// light wash, and the line on each edge of a wedge carries the shape. See WEDGE_EDGE.
-const WEDGE_STEP = 0.08;
+// n wedges give 1 - pow(1 - WEDGE_STEP, n * n), so one wedge reads 0.04, two read 0.15, three read
+// 0.31, and four read 0.48. The square of the count is the point: the wash grows faster than the
+// count, so one wedge alone is almost only its two lines, and the ground two or more wedges cover
+// stands out as the answer. The first build stepped by 1 - pow(1 - 0.08, n), and one wedge then
+// washed as much ground as a crossing did. The line on each edge of a wedge carries the shape of
+// one wedge; see WEDGE_EDGE.
+const WEDGE_STEP = 0.04;
 // The line on each edge of a wedge, as a part of the way to the accent, and its width in degrees.
 // The eye finds the cross as the region the lines close, so the lines must read and the wash must
 // not hide the ground. 0.3 degrees is about 1.5 px at the home zoom and half a facet of the globe.
 const WEDGE_EDGE = 0.5;
 const WEDGE_LINE = Math.sin(THREE.MathUtils.degToRad(0.3));
+// The share of WEDGE_EDGE the line of a wedge takes, by age: the newest wedge first and the oldest
+// last. Four lines of one strength read as a net, and the reader cannot tell which pair to trust.
+// The newest wedge draws its line full and each older one draws weaker, so the eye starts at the
+// last landing and works back. The wash does not age: an overlap is the answer whatever its age.
+// A wedge that fades in is the newest one, because drawnFixes() puts it last.
+export const WEDGE_AGE = [1, 0.75, 0.55, 0.4];
 // The share of the accent a wedge adds on top of the mix. The night side of a planet is near black,
 // and a mix alone would leave a wedge there at 0.18 of the accent, which the eye loses against the
 // terminator. This adds a small emissive share, so a wedge on the dark side still reads.
@@ -59,7 +70,7 @@ const WEDGE_EMIS = 0.06;
 const WEDGE_SOFT = Math.sin(THREE.MathUtils.degToRad(0.15));
 // degrees: the widest error a wedge may carry. The two half plane tests give the lune between the
 // two edge great circles, and that lune is the wedge only while the wedge is narrower than a half
-// plane. carrierAt() tops the error at 25 degrees today, so the clamp never bites.
+// plane. carrierAt() tops the error at 10 degrees today, so the clamp never bites.
 const MAX_ERR = 89.5;
 
 const MARK_ALPHA = 0.5;         // the dot of a fix and the ring of a find, which must read alone
@@ -123,7 +134,7 @@ function walk(t, tan, out = _p) {
 // The rule holds while the wedge is narrower than a half plane. At an error of exactly 90 degrees
 // the two planes fall together and the lune is a hemisphere, which is still right. Past 90 degrees
 // the intersection flips to the narrow lune on the far side, so the error takes the clamp of
-// MAX_ERR. carrierAt() states at most 25 degrees, so the clamp never bites.
+// MAX_ERR. carrierAt() states at most 10 degrees, so the clamp never bites.
 //
 // The shader runs this same arithmetic per fragment, and the uniforms come from this function, so
 // tools/carrier-fix-check.mjs tests the numbers the shader gets.
@@ -168,6 +179,11 @@ export function wedgeCoverage(planes, dir) {
   return THREE.MathUtils.smoothstep(e.l, 0, WEDGE_SOFT) * THREE.MathUtils.smoothstep(e.r, 0, WEDGE_SOFT);
 }
 
+// The wash n wedges lay on one fragment, as a part of the way from the lit colour to the accent.
+// This is the formula of the GLSL below, and both read WEDGE_STEP, so the two cannot drift apart
+// and tools/carrier-fix-check.mjs tests the numbers the shader paints.
+export function wedgeWash(n) { return 1 - Math.pow(1 - WEDGE_STEP, n * n); }
+
 // ---------------------------------------------------------------- the wedge, as a shader
 // One set of uniforms for the page. The terrain material and the ocean material of the world on the
 // screen hold the same uniform objects, so a write here reaches both with no copy, and a group that
@@ -179,6 +195,8 @@ const uniforms = {
   uWedgeL: { value: Array.from({ length: MAX_WEDGES }, () => new THREE.Vector3()) },
   uWedgeR: { value: Array.from({ length: MAX_WEDGES }, () => new THREE.Vector3()) },
   uWedgeFade: { value: new Float32Array(MAX_WEDGES) },
+  // the share of the line each wedge draws, by age: WEDGE_AGE, newest last as the fixes stand
+  uWedgeAge: { value: new Float32Array(MAX_WEDGES) },
   uWedgeCol: { value: new THREE.Color('#ffffff') },
   // The radius of the sea, or 0. The sea is see-through, so the sea bed under it must paint no
   // wedge, or a wedge over shallow water reads twice as strong as one over land.
@@ -198,6 +216,7 @@ const WEDGE_DECL = `
   uniform vec3 uWedgeL[${MAX_WEDGES}];
   uniform vec3 uWedgeR[${MAX_WEDGES}];
   uniform float uWedgeFade[${MAX_WEDGES}];
+  uniform float uWedgeAge[${MAX_WEDGES}];
   uniform vec3 uWedgeCol;
   uniform float uWedgeSea;`;
 
@@ -207,7 +226,7 @@ const WEDGE_DECL = `
 // globe on the screen and no more. A world with no fix reads one integer uniform and stops, so it
 // costs one compare per fragment and the varying that carries the direction. A fix costs three dot
 // products, one inverse square root, two smoothsteps, and a multiply and add: about twenty
-// arithmetic operations. Eight fixes therefore add about 160 operations against the several hundred
+// arithmetic operations. Four fixes therefore add about 80 operations against the several hundred
 // the lighting of a MeshStandardMaterial already spends on the same fragment. No texture is read
 // and no branch diverges inside a wedge, because the loop runs the same count for every fragment.
 const WEDGE_TINT = `
@@ -225,10 +244,13 @@ const WEDGE_TINT = `
       float wR = dot(wDir, uWedgeR[i]) * wInv;
       float wIn = smoothstep(0.0, ${WEDGE_SOFT.toFixed(7)}, wL) * smoothstep(0.0, ${WEDGE_SOFT.toFixed(7)}, wR) * uWedgeFade[i];
       wN += wIn;
-      // the line on the two edges: full at the edge plane, gone one line width inside it
-      wE = max(wE, wIn * (1.0 - smoothstep(${(WEDGE_LINE * 0.5).toFixed(7)}, ${WEDGE_LINE.toFixed(7)}, min(wL, wR))));
+      // the line on the two edges: full at the edge plane, gone one line width inside it, and
+      // weaker on an older wedge, so the eye starts at the last landing. uWedgeAge[i] holds it.
+      wE = max(wE, uWedgeAge[i] * wIn * (1.0 - smoothstep(${(WEDGE_LINE * 0.5).toFixed(7)}, ${WEDGE_LINE.toFixed(7)}, min(wL, wR))));
     }
-    float wK = max(1.0 - pow(${(1 - WEDGE_STEP).toFixed(3)}, wN), wE * ${WEDGE_EDGE.toFixed(3)});
+    // the wash grows on the square of the count, so one wedge is almost only its lines and the
+    // ground under two or more wedges stands out. wedgeWash() above is the same formula in JS.
+    float wK = max(1.0 - pow(${(1 - WEDGE_STEP).toFixed(3)}, wN * wN), wE * ${WEDGE_EDGE.toFixed(3)});
     outgoingLight = mix(outgoingLight, uWedgeCol, wK) + uWedgeCol * (wK * ${WEDGE_EMIS.toFixed(3)});
   }`;
 
@@ -295,6 +317,8 @@ function writeUniforms(group) {
     uniforms.uWedgeL.value[i].copy(p.nL);
     uniforms.uWedgeR.value[i].copy(p.nR);
     uniforms.uWedgeFade.value[i] = u.fade && drawn[i] === u.fade.fix ? u.fade.k : 1;
+    // the newest fix stands last, so the age runs back from the end of the set
+    uniforms.uWedgeAge.value[i] = WEDGE_AGE[drawn.length - 1 - i] || WEDGE_AGE[WEDGE_AGE.length - 1];
   }
 }
 

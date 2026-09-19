@@ -32,14 +32,14 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 13. **The drone flight, 2026-09-18.** `W`, `A`, `S`, and `D` move the probe in the flat plane and no longer follow the tilt of the view. The arrows and `Q` and `E` turn and tilt the view about the eye. The velocity eases at `WALK_EASE` 2.2/s, so the probe keeps some momentum, and the speeds rose to 16 and 220 units a second. The reach now limits the camera and not the target. The old rule clamped the target, so a reader who backed into the edge stood outside the reach behind the target; a turn of the view then swung the target out, and the backstop pulled the whole pair toward the site. The target is now only the point the view looks at, and the backstop moves the camera alone. The keyboard tilt also holds inside the polar band of the controls, because a tilt past it made the controls swing the camera about the target.
 
 14. **The carrier, 2026-09-19.** Every world with a surface carries one source, and the instrument of the probe reads a bearing to it. The reading has an error and no distance. The globe keeps a wedge per landing, and the source stands where two wedges cross. A landing on the cell of the source shows the thing itself: the wreck of an older survey probe, with a log of four entries that the lore engine writes from the facts of the world. The search takes three phases: hear, cross, and home. See `docs/issues/34-the-carrier.md` and `docs/source.md`.
-    - **The carrier is always heard, and the error does the work.** A range limit was rejected: a landing with no reading costs the reader a dive and gives little back. The error runs from 3 degrees at the source to 25 degrees at its antipode, straight in the arc. The offset inside the error comes from a hash of the seed and the cell, so a cell states one bearing on every visit and the true bearing always lies inside the wedge. Two far fixes cross wide, and the reader then decides between a third far fix and a near one. That decision is the feature.
+    - **The carrier is always heard, and the error does the work.** A range limit was rejected: a landing with no reading costs the reader a dive and gives little back. The error runs from 2 degrees at the source to 10 degrees at its antipode, straight in the arc. The offset inside the error comes from a hash of the seed and the cell, so a cell states one bearing on every visit and the true bearing always lies inside the wedge. Two far fixes cross wide, and the reader then decides between a third far fix and a near one. That decision is the feature.
     - **A wedge, and not a line.** Two exact lines solve every world in two landings, and the search is dead by the third world. A wedge states the doubt honestly.
     - **A wedge covers half a great circle.** A bearing has a direction, so a wedge starts at the site and ends at the antipode of the site. Two wedges then cross in one region and not in two.
     - **The app draws no cross.** Two wedges read darker where they cross, and that is the whole display of the cross. The reader reads it by eye. A computed mark takes the only thought out of the search.
     - **No pull to the source.** `pullSite()` does not know the source. The reader has to aim.
     - **The song stays whole.** The first idea took the lead voice out of the song until the reader found the source. It makes every song worse for every reader who does not search, and the music starts muted, so it cannot carry a mechanic alone. The source gets a voice of its own instead, the motif, which adds to the song and takes nothing from it.
 
-    The build changed nine things against the plan.
+    The build changed ten things against the plan.
 
     - **The needle on the ground takes the frame of the patch box, and not `groundBasis()`.** The box runs x along the u axis of its cell and z along the v axis, and (u, up, v) is left-handed, so the box is the mirror of the sky frame in x. A needle that came through `groundBasis()` pointed at the mirror of the source and away from the wreck. `carrierBox()` in `site.js` reads the slope of the map of the box instead. The mirror was an older defect and it closed on 2026-09-19: the box now runs z against v and is right-handed; see "The box is right-handed" in `docs/probe.md`. The needle still takes `carrierBox()` and not `groundBasis()`, because the map of the box holds no angle, and check 5 of `tools/carrier-check.mjs` fails on a mirror. The three digits stay the true bearing of the globe, because the wedge of a fix is drawn on the globe.
     - **The carrier block sits at the top left.** The plan gave the fifth block no place. The right edge of the overlay holds the altitude ladder, so the block took the left.
@@ -48,7 +48,8 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
     - **The motif keeps straight time while the song swings.** A machine transmits on a clock, so the swing of the song does not reach the motif. The motif rolls from `'music:' + seed + '|source-motif'` and not from the stream of the song, so no song of any world changed.
     - **The reach of `patchSource()` is the walk limit and not `FOG_NEAR`.** The reader has to reach the wreck on foot, and the walk stops at half the box less the band the plants thin out over. That is the rule `reachOf()` holds in `ground.js`, so the two cannot drift apart. The range the overlay states measures from the camera and not from the site, so it falls under 5 units at the hull.
     - **The ring of a find lies on the terrain, and the wedges stood at 1.07.** The plan puts every shape on the shell of 1.07. The ring marks one place, and at 1.07 it hung in the sky: the surface stands near 1.0 and the camera comes to 1.11. Every vertex of the ring now takes the ground under it, or the sea where the ground lies under the sea, plus a lift that clears the flora of the globe, the way `showMarker()` drapes the square of a cell.
-    - **The wedges are painted on the terrain, and they are no longer geometry.** The shell of 1.07 failed the wedges for the same reason it failed the ring. From the aim camera at 1.11 a wedge stood as a sheet over the ground: the cross of two sheets held a large parallax against the relief, and the reader could not tell which cell lay under it. The terrain shader and the ocean shader now test each fragment against the fixes in their uniforms, so a wedge lies on the ground it marks at every camera and it needs no geometry at all. The cap is `MAX_WEDGES = 8`, and a world with more fixes paints the 8 newest. The dot of a fix drapes on the ground with the ring.
+    - **The wedges are painted on the terrain, and they are no longer geometry.** The shell of 1.07 failed the wedges for the same reason it failed the ring. From the aim camera at 1.11 a wedge stood as a sheet over the ground: the cross of two sheets held a large parallax against the relief, and the reader could not tell which cell lay under it. The terrain shader and the ocean shader now test each fragment against the fixes in their uniforms, so a wedge lies on the ground it marks at every camera and it needs no geometry at all. The dot of a fix drapes on the ground with the ring.
+    - **The search keeps four fixes, and a wedge is narrow.** The first build held eight wedges at an error of 3 to 25 degrees. After eight landings the globe stood in eight wide wedges of the accent with lines everywhere, and the reader could read no cross out of it. Four things changed together. `MAX_FIXES` and `MAX_WEDGES` are both 4, so a fifth landing drops the oldest fix. `CARRIER_ERR` is `[2, 10]`, so two far fixes cross over a region about 15 cells wide and a third fix closes it. A stored fix takes its bearing and its error from `carrierAt()` again on every load, so an old wide fix narrows with no clear. The wash of the overlap is `1 - pow(0.96, n * n)`, which grows faster than the count, so one wedge alone is almost only its two lines. The line of an older wedge also draws weaker, at 1, 0.75, 0.55, and 0.4 of `WEDGE_EDGE`.
     - **The source does not read the vertices of the globe.** The plan selects a dry vertex. The detail of the globe follows the tier, so a phone and a desktop found two different sources on one seed. `makeSource()` now draws each candidate direction from the source stream and tests it on the globe field, with a sea level from a fixed grid of samples. `node tools/world-checksum.mjs --source` proves that the two tiers agree.
 
 ## Implementation notes
@@ -404,11 +405,23 @@ At the pixel count a phone really asks for, 589 by 1,090, the same LOW site read
 
 Added with issue 34. These notes record the constants and the reasons the issue text did not fix.
 
-**The error, `CARRIER_ERR = [3, 25]` in `site.js`.** The error is 3 degrees on the cell of the
-source and 25 degrees at its antipode, straight in the arc. Three degrees is tight enough that a
-near fix reads as an answer, and 25 degrees is wide enough that two fixes from two continents cross
-over a region and not over a point. The pair is a first value, and it stays open: the plan asks for
-a tune by hand on five worlds, against a median search of three to five landings.
+**The error, `CARRIER_ERR = [2, 10]` in `site.js`.** The error is 2 degrees on the cell of the
+source and 10 degrees at its antipode, straight in the arc. Two degrees is tight enough that a near
+fix reads as an answer, and 10 degrees is wide enough that two fixes from two continents cross over
+a region and not over a point.
+
+The first value was `[3, 25]`. Two far wedges then crossed over a quarter of a hemisphere, and the
+search took many landings. With 2 to 10 two far fixes cross over a region about 15 cells wide, a
+third fix from near that region closes it to a few cells, and the range of decision 7 does the
+rest. That is the three to five landings the plan asks for. The pair is the second value and it
+stays open for a walk of five worlds by hand.
+
+A stored fix carries `brg` and `err`, but the globe does not read them. `carrierAt()` is a pure
+function of the seed and the cell, so `buildWorld()` in `app.js` passes every loaded fix through it
+before `makeCarrierGroup()` draws the wedge. A reader who holds fixes from the first build sees
+them narrow with no clear of the search, and a later tune of this pair needs no migration and no
+bump of the store key. `carrier-store.js` takes no three.js and no `site.js`, so the refresh stands
+in `app.js` and nowhere else.
 
 **The range, `CARRIER_RANGE = 6` cells in `site.js`.** The range says nothing further out than 6
 cells of arc, which is 0.06 rad, or about 360 km on a world of 6,000 km. A range at every arc turns
@@ -419,10 +432,10 @@ phase, home, into a phase the reader can finish.
 loses no fact. `CARRIER_HERE` is 0.001 rad, a tenth of a cell: the fix snaps to the middle of its
 cell, so the arc on the cell of the source is small but never zero. `CARRIER_STRONG` is 0.06 rad,
 which is the 6 cells the range covers, so "strong" and a number arrive together. `CARRIER_CLEAR` is
-0.6 rad, a fifth of the half circle, where the error stands under 8 degrees and two fixes cross
+0.6 rad, a fifth of the half circle, where the error stands under 4 degrees and two fixes cross
 tight.
 
-**The wedges are paint, `MAX_WEDGES = 8` in `carrier-globe.js`.** A wedge runs to the antipode of
+**The wedges are paint, `MAX_WEDGES = 4` in `carrier-globe.js`.** A wedge runs to the antipode of
 its site, so the first build put it on a shell of 1.07, over the relief of 0.06 and under the inner
 atmosphere shell of 1.115. The aim camera comes to 1.11, and from there the sheet held a large
 parallax against the ground: the reader saw two sheets cross in the sky and could not say which
@@ -435,24 +448,40 @@ for free. A wedge is three unit vectors: the site `s`, and the inward normals `n
 two edge great circle planes. The pair of tests `dot(d, nL) > 0` and `dot(d, nR) > 0` gives the lune
 between the two planes, and a lune runs from the site to the antipode of the site and no further,
 which is decision 5 with no further rule. The rule holds while the error stands under 90 degrees,
-and `carrierAt()` states at most 25.
+and `carrierAt()` states at most 10.
 
-Eight slots hold 112 floats, which every driver carries, and eight fixes is already more of a cross
-than a reader can read; a world with more fixes paints the 8 newest. Each wedge that covers a
-fragment adds one step of the accent: `1 - pow(0.92, n)` of the way from the lit colour to the
-accent, plus 0.06 of the accent as an emissive share, so a wedge on the night side of a planet is
-not black on black. One wedge reads 0.08, two read 0.15, and three read 0.22. The first value was
-0.18 a wedge, and three wide wedges then drowned the terrain in the accent. The wash is now light,
-and a line 0.3 degrees wide on each edge, at 0.5 of the accent, carries the shape: the eye finds
-the cross as the region the lines close. The sea is see-through, so the sea bed under it paints no
-wedge; `uWedgeSea` holds the radius of the sea for that test. Each edge takes a soft
-band of 0.15 degrees, measured on the angle to the edge plane and not on the plane distance, so the
-band holds one width from the site to the antipode and the edge does not crawl on the facets of the
-globe, which are 0.6 degrees of arc across. That is the whole display of the cross.
+Four slots of three vec3 and two floats hold 44 floats, which every driver carries. The cap was 8,
+and after eight landings the globe stood in eight wide wedges of the accent with lines everywhere:
+the reader could read no cross out of it. Four fixes give a cross and one check of that cross.
+`MAX_FIXES` in `carrier-store.js` is 4 as well, so the store and the shader hold one set and a
+fifth landing drops the oldest fix.
+
+Every wedge that covers a fragment adds to a count `n`, and the wash is `1 - pow(0.96, n * n)` of
+the way from the lit colour to the accent, plus 0.06 of the accent as an emissive share, so a wedge
+on the night side of a planet is not black on black. The square of the count is the point: the wash
+grows faster than the count, so one wedge alone is almost only its two lines and the ground two or
+more wedges cover stands out as the answer. One wedge reads 0.04, two read 0.15, three read 0.31,
+and four read 0.48. The first build washed `1 - pow(0.92, n)`, where one wedge read 0.08 and
+covered as much ground as a crossing did. `wedgeWash(n)` in `carrier-globe.js` holds the same
+formula in JS, and `tools/carrier-fix-check.mjs` tests it.
+
+A line 0.3 degrees wide on each edge carries the shape of one wedge: the eye finds the cross as the
+region the lines close. The line of the newest wedge draws at 0.5 of the accent, and each older one
+draws weaker: `WEDGE_AGE` holds 1, 0.75, 0.55, and 0.4 from the newest to the oldest, and
+`uWedgeAge[i]` carries it to the shader. Four lines of one strength read as a net, and the reader
+cannot tell which pair to trust; an age lets the eye start at the last landing and work back. The
+wash does not age, because an overlap is the answer whatever its age. A wedge that fades in stands
+last in the uniforms, so it is the newest one.
+
+The sea is see-through, so the sea bed under it paints no wedge; `uWedgeSea` holds the radius of
+the sea for that test. Each edge takes a soft band of 0.15 degrees, measured on the angle to the
+edge plane and not on the plane distance, so the band holds one width from the site to the antipode
+and the edge does not crawl on the facets of the globe, which are 0.6 degrees of arc across. That
+is the whole display of the cross.
 
 The cost: the loop runs on every fragment of the planet and of the sea, which is the disc of the
 globe on the screen. A world with no fix reads one integer uniform and stops. A fix costs about
-twenty arithmetic operations, so eight fixes add about 160 against the several hundred the lighting
+twenty arithmetic operations, so four fixes add about 80 against the several hundred the lighting
 of a `MeshStandardMaterial` already spends on the same fragment. No texture is read, and the branch
 never diverges inside a draw, because every fragment runs the same count.
 
@@ -482,11 +511,13 @@ mast that lay with the hull would say nothing at range. The lamp draws with the 
 fog took would go out at the distance the reader first looks for it. The whole body is 400
 triangles, well under the 1,500 the plan allows.
 
-**The bounds of the store, `MAX_FIXES = 64` and `MAX_SEEDS = 200` in `carrier-store.js`.** A fix
-writes about 46 characters of JSON, so 64 fixes take about 3 kB and 200 seeds take about 590 kB at
-the very worst. That stands well inside the 5 MB most browsers hold. A reader who needs 64 landings
-on one world has a broken instrument, and 200 seeds is over three times the 60 worlds the sidebar
-keeps, so neither bound can bite a real search.
+**The bounds of the store, `MAX_FIXES = 4` and `MAX_SEEDS = 200` in `carrier-store.js`.** The globe
+paints `MAX_WEDGES` wedges and no more, so the store keeps the same four and a fifth landing drops
+the oldest fix of that seed. The first build kept 64, and a reader who landed eight times then
+stood before eight wide wedges with no cross in them. A fix writes about 46 characters of JSON, so
+one seed takes about 240 bytes and 200 seeds take about 50 kB at the very worst. That stands well
+inside the 5 MB most browsers hold, and 200 seeds is over three times the 60 worlds the sidebar
+keeps, so that bound cannot bite a real search.
 
 ## Phases
 

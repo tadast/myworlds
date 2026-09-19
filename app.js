@@ -256,6 +256,23 @@ let carrierRecord = null;
 let carrierGroup = null;
 let pendingFix = null;    // the fix of the last landing, waiting for the ascent to end
 
+// A record of the store with the bearing and the error of every fix computed again.
+//
+// carrierAt() is a pure function of the seed and the cell, so a stored fix needs no number of its
+// own: the store keeps `{ lat, lon, brg, err }` as the record of a landing, and the globe takes the
+// numbers the instrument states today. A reader who holds fixes from an older build therefore sees
+// them narrow with no clear of the search, and a later tune of CARRIER_ERR in site.js needs no
+// migration of the store. carrier-store.js holds no three.js and no site.js, so the refresh stands
+// here. A fix of a world with no source gives null and keeps its own numbers. Issue 34.
+function freshFixes(world, record) {
+  if (!record || !Array.isArray(record.fixes)) return record;
+  const fixes = record.fixes.map((f) => {
+    const c = carrierAt(world, f);
+    return c ? { ...f, brg: c.brg, err: c.err } : f;
+  });
+  return { ...record, fixes };
+}
+
 function disposeWorld() {
   if (!current) return;
   showMarker(null);                 // the ring is shared between worlds, so it must not be disposed
@@ -574,7 +591,7 @@ const SLOPE_STEP = 0.02;
   // reply as `world`, so it stands here already; `current` does not, and it is written further
   // down this function.
   carrierRecord = loadFixes(world.seed);
-  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, carrierRecord, heightMap);
+  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, freshFixes(world, carrierRecord), heightMap);
   if (carrierGroup) planet.add(carrierGroup);
 
   // The wedges themselves are paint and not geometry: the terrain shader and the ocean shader test
@@ -1733,7 +1750,7 @@ function clearCarrier(seed) {
   pendingFix = null;
   if (current && current.world.seed === seed) {
     disposeCarrierGroup(carrierGroup);
-    carrierGroup = makeCarrierGroup(current.world, carrierRecord, current.heightMap);
+    carrierGroup = makeCarrierGroup(current.world, freshFixes(current.world, carrierRecord), current.heightMap);
     if (carrierGroup) current.planet.add(carrierGroup);
     renderInfo(current.world);
   }

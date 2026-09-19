@@ -19,12 +19,16 @@ import { snapSite } from './site.js';
 
 export const CARRIER_KEY = 'myworlds.carrier.v1';
 
-// The bounds. A fix writes about 46 characters of JSON, so 64 fixes take about 3 kB and 200 seeds
-// take about 590 kB at the very worst, well inside the 5 MB most browsers hold. A reader who needs
-// 64 landings on one world has a broken instrument, and 200 seeds is over three times the 60 worlds
-// the sidebar keeps, so neither bound can bite a real search. The oldest goes first in both: the
-// oldest fix of a seed, and the seed with the oldest write.
-export const MAX_FIXES = 64;
+// The bounds. The globe paints MAX_WEDGES wedges and no more, so the store keeps the same four: a
+// fifth landing drops the oldest fix of that seed. The first build kept 64, and a reader who
+// landed eight times then stood before eight wide wedges with no cross in them. Four fixes give a
+// cross and one check of that cross.
+//
+// A fix writes about 46 characters of JSON, so one seed takes about 240 bytes and 200 seeds take
+// about 50 kB at the very worst, well inside the 5 MB most browsers hold. 200 seeds is over three
+// times the 60 worlds the sidebar keeps, so that bound cannot bite a real search. The oldest goes
+// first in both: the oldest fix of a seed, and the seed with the oldest write.
+export const MAX_FIXES = 4;
 export const MAX_SEEDS = 200;
 
 const empty = () => ({ fixes: [], found: false, ts: 0 });
