@@ -55,6 +55,10 @@ const REACH_FADE = 100;              // units, the fallback for the plant fade o
 // breaks up over the narrow one, because static that arrives early reads as a fault of the app
 // and not as a fact of the world.
 const SIGNAL_BAND = 420;    // units inside the reach where the uplink starts to thin
+// The LOW tier holds a reach of 650, so a band of 420 thins the uplink over most of the patch. The
+// band takes at most this part of the reach, and the full uplink holds over the rest.
+const SIGNAL_PART = 0.35;
+const signalBand = (reach) => Math.min(SIGNAL_BAND, reach * SIGNAL_PART);
 const NOISE_BAND = 150;     // units inside the reach where the picture starts to break up
 const reachOf = (half, fade) => half - (fade >= 0 ? fade : REACH_FADE);
 // The ceiling and the tilt hold the edge of the box out of sight. See "the rectangle" below.
@@ -168,9 +172,9 @@ const SPEED_SPAN = 400;     // metres, the height where a wheel step reaches its
 // The reader stands on a world 900 units wide and has to be able to cross it. A drag of the ground
 // carries the short distances and the keys carry the long ones. Both move the pair, the camera and
 // its target, so the view direction and the distance hold and only the place changes.
-const WALK_SLOW = 16;       // units per second at eye height
-const WALK_FAST = 220;      // units per second at the ceiling
-const WALK_RUN = 5;         // what a held Shift multiplies the speed by
+const WALK_SLOW = 10;       // units per second at eye height
+const WALK_FAST = 110;      // units per second at the ceiling
+const WALK_RUN = 3;       // what a held Shift multiplies the speed by
 // 1/s: how fast the flight reaches its speed, and how fast it stops. The probe flies like a drone,
 // so it keeps some momentum: it takes about half a second to reach its speed and to stop.
 const WALK_EASE = 2.2;
@@ -564,12 +568,14 @@ export class Ground {
     // The reveal: the camera starts CAM_START up and south of the site by the same tilt the
     // ceiling holds, and it looks at the site. The reader sees the patch from over the fog and
     // zooms in. The tilt keeps the edge of the box in the fog. See "the rectangle" above.
-    // The reach limits the camera, so on the narrow tier the reveal stands on the reach and looks
-    // a little steeper.
+    // The reveal stands inside the full uplink. On the LOW tier the tilt alone puts the camera on
+    // the reach, and the probe then starts with a lost signal. So the offset stops where the
+    // uplink starts to thin, and there the reveal looks a little steeper.
     this.glide = null;
     this.controls.target.set(0, this.base + TARGET_LIFT, 0);
     this.camera.up.set(0, 1, 0);
-    this.camera.position.set(0, this.base + CAM_START, Math.min(CAM_START * Math.tan(POLAR_HIGH), this.reach));
+    this.camera.position.set(0, this.base + CAM_START,
+      Math.min(CAM_START * Math.tan(POLAR_HIGH), this.reach - signalBand(this.reach)));
     this.controls.update();
     return this;
   }
@@ -894,7 +900,7 @@ export class Ground {
   //   tempC     the temperature at the site, dropped by the height the camera stands at
   //   agl       the height of the camera over the ground or the water under it
   //   sun       the seconds to the next sunset, or to the next sunrise when the star is down
-  //   signal    the strength of the uplink, 0 to 1, which falls over the last SIGNAL_BAND units
+  //   signal    the strength of the uplink, 0 to 1, which falls over the last signalBand() units
   //   near      0 inside the reach and 1 at it, over the last NOISE_BAND units: the noise ramp
   //   carrier   the bearing to the source of issue 34, or null on a world that holds none
   //
@@ -910,7 +916,7 @@ export class Ground {
     const site = patch && patch.tempC != null ? patch.tempC : null;
     const tempC = site == null ? null : site - (p.y - this.base) * LAPSE_C_PER_M;
     const r = Math.hypot(p.x, p.z);   // the reach limits the probe, which is the camera
-    const signal = 1 - THREE.MathUtils.smoothstep(r, this.reach - SIGNAL_BAND, this.reach) * 0.94;
+    const signal = 1 - THREE.MathUtils.smoothstep(r, this.reach - signalBand(this.reach), this.reach) * 0.94;
     const near = THREE.MathUtils.smoothstep(r, this.reach - NOISE_BAND, this.reach);
     return { tempC, agl, signal, near, sun: this._sunCountdown(), carrier: this._carrier() };
   }
@@ -1426,7 +1432,7 @@ export class Ground {
     if (lenF > 1e-6 || wy) this.glide = null;   // a key of the reader ends the glide of a tap
 
     // The height sets the speed, as it sets the speed of a wheel step: a flight near the ground is
-    // slow, and at the ceiling one second carries the reader over a sixth of the patch.
+    // slow, and at the ceiling one second carries the reader over a sixth of the LOW reach.
     const speed = THREE.MathUtils.lerp(WALK_SLOW, WALK_FAST, THREE.MathUtils.clamp(h / SPEED_SPAN, 0, 1))
       * (K.has('run') ? WALK_RUN : 1);
     // The velocity eases to the speed the keys ask for, so the probe gathers speed and coasts to a
