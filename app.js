@@ -1283,8 +1283,8 @@ function enterGround() {
   // The carrier of issue 34: the bearing from this cell to the source, with its error. The three
   // digits keep the bearing of the globe, because the wedge of a fix is drawn on the globe. The
   // needle takes the frame of the box instead, which carrierBox() reads off the axes of the cell:
-  // the box is the mirror of the frame the sky stands in, and the reader walks the terrain, so the
-  // needle has to agree with the terrain and with the wreck slice 3 puts on it. The vector holds
+  // the map of the box holds no angle, and the reader walks the terrain, so the needle has to
+  // agree with the terrain and with the wreck slice 3 puts on it. The vector holds
   // the error of the wedge, so the needle and the three digits say one thing.
   const carrier = carrierAt(current.world, lockedSite);
   if (carrier) {

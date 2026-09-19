@@ -938,10 +938,10 @@ export class Ground {
     if (!c) return null;
     // The camera looks from its own position at the target, so the flat part of that step is the
     // way the reader faces. carrier.dir is the way the needle points as (x, z) in the frame of the
-    // box, which the app reads off the axes of the cell; see carrierBox() in site.js. The box is
-    // the mirror of the frame x east, y up, z south, so the sense of a bearing is turned over in
-    // it and rel may not come from the three digits less an azimuth. It is the angle from the
-    // forward of the view to the needle, and the right of the view on the ground is (-fz, fx).
+    // box, which the app reads off the axes of the cell; see carrierBox() in site.js. The box
+    // stands at a twist to the frame x east, y up, z south and its map holds no angle, so rel may
+    // not come from the three digits less an azimuth. It is the angle from the forward of the
+    // view to the needle, and the right of the view on the ground is (-fz, fx).
     const p = this.camera.position, tg = this.controls.target;
     let fx = tg.x - p.x, fz = tg.z - p.z;
     const fl = Math.hypot(fx, fz);
