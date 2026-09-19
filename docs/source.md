@@ -40,6 +40,8 @@ log does not read that bound: a source stands where `makeSource()` put it, whoev
   keeper: 'Bo',                         // the person who writes the log
   crew: [{ name: 'Bo', role: 'navigator' }, ...],     // 3 to 5 people, one role each
   lost: { name: 'Suri', how: 'gone', day: 173 },      // the person a thread took out, or null
+  cause: 'tank',                        // the strand thread: why the crew could not leave
+  leads: ['doom', 'ride'],              // the leads the threads set, for the audit
   entries: [
     { slot: 'landing',        title: 'Landing',    day: 1,   text: '…' },
     { slot: 'world.cold',     title: '',           day: 12,  text: '…' },
@@ -50,10 +52,11 @@ log does not read that bound: a source stands where `makeSource()` put it, whoev
 }
 ```
 
-A log holds 8 to 20 entries. `slot` names the thread the entry came from, or the act: `landing`
+A log holds 8 to 20 entries, and since the strand thread most hold 15 or more. `slot` names the thread the entry came from, or the act: `landing`
 for the first entry and `end.<kind>` for the last one. A middle entry carries no title, and the
-card then shows the day alone. `lost` is the one field the card does not read; the audit reads it,
-to prove that no entry after that day names that person.
+card then shows the day alone. The card does not read `lost`, `cause`, or `leads`; the audit reads
+them, to prove that no entry after that day names that person, that the strand thread ran to its
+last beat, and that the ending fits the story.
 
 The page must not show any of this before the reader finds the wreck. The log stands nowhere else
 on the world: no other field of `world` holds the text.
@@ -87,7 +90,7 @@ A log is a story, and it has three parts.
 
 | Part | Entries | Holds |
 |---|---|---|
-| The landing | 1 | how the ship came down, and one real fact of this world |
+| The landing | 1 | one real fact of this world, and the plan to get home |
 | The beats | 6 to 18 | the threads, interleaved, rising in force |
 | The ending | 1 | the last entry. Its kind follows what the threads did |
 
@@ -98,11 +101,12 @@ or more**, and the writer takes one of them. That is what keeps two wrecks from 
 busiest beats carry five or six wordings, and a wording is a different small event with a different
 detail, not the same sentence with one word changed. The audit fails a beat under three wordings.
 
-`writeLog()` takes one world thread, one or two crew threads, and the fauna thread when the world
-carries beasts. There are three kinds.
+`writeLog()` takes one strand thread, one world thread, one or two crew threads, and the fauna
+thread when the world carries beasts. There are four kinds.
 
 | Kind | Gate | Holds |
 |---|---|---|
+| `strand` | none | why the crew cannot leave. Exactly one per log, never shortened |
 | `world` | tags, and a **salience** | a real fact of the world |
 | `crew` | none | the people. It also carries a **coda** and a **lead** |
 | `fauna` | `beasts` and a **motion tag** | the one species the log names |
@@ -112,6 +116,48 @@ and not a cut one. The trim takes one beat at a time off whichever thread is lon
 shorten from the back, which always cut the crew threads, because they are chosen last, and the
 ending then stopped following them. A thread that retires a person is never shortened, because the
 beat that takes the person out is its last.
+
+### Why the crew cannot leave
+
+The first build took the stranding for granted. A log spoke of a pump, a food count, and the cold,
+and never said why the ship did not lift and go home. Every log now states it, in plain words.
+
+One frame holds for every mission, and the second part of the landing entry states it:
+
+- An **orbiter** with no crew brings the lander to the world and waits overhead until day `{due}`.
+- The **lander** can climb back to orbit once, and no further.
+- A second ship from home needs `{years}` years to arrive.
+
+A strand thread breaks one link of that frame and says which one.
+
+| Thread | The fact | `due` |
+|---|---|---|
+| `bell` | the landing split the engine bell. The weld fails the test. The orbiter leaves | `last` |
+| `tank` | the landing split the climb tank. The fuel maker gives two litres a day of four thousand | `last` |
+| `fall` | the ground gave way in the mission. The lander lies on its side | `last` |
+| `orbiter` | the orbiter broke up in orbit. The lander is sound and has nothing to climb to | `never` |
+| `recall` | a fault sent the orbiter home early, under its own rules, with two days of notice | `never` |
+| `patched` | the feed line cracked and the patch is weak. The crew climbs on it | `next` |
+
+`due` says how the writer sets `{due}`. `last` is the day of the last beat of the thread, which is
+the beat that watches the orbiter go. `next` is the day after the ending. `never` is a day the log
+does not reach. A thread that breaks the lander on the landing brings its own `landing` wordings;
+the rest take `SOUND_LANDING`. So **no `ARRIVAL` line may state that the lander is sound or
+broken**: the strand thread owns that fact.
+
+`patched` carries `end: 'launch'`, which forces the launch ending. Every launch wording is gated
+on `leadlaunch`, so no other log reaches it: a crew with a dead lander cannot lift. The wreck the
+reader stands at is how the climb went, and one wording says so.
+
+"The carrier" is the radio signal of the wreck, in the words of issue 34. The ship overhead is
+therefore always "the orbiter".
+
+### A beat makes no claim about the days since the beat before it
+
+`writeLog()` takes the wordings first and lays the days after. Two beats of one thread can stand
+eight days apart or sixty. "Due back four days ago" and "the orbiter leaves in two days" are
+therefore false more often than true. A beat that needs a span states the whole span inside
+itself: "The orbiter sent a fault notice two days ago. It left this morning."
 
 ### Salience: the world thread is the loudest true fact
 
@@ -167,7 +213,7 @@ and every reckless ending is gated on it.
 | `msling` | slinger | a cord thrown at the standing growth, and a swing off the hold |
 | `mfly` | wings | it flies, it circles, it lands when it chooses, it comes to a lamp |
 | `mswarm` | wings, plan swarm | a wheel of shards, and no single body to name |
-| `mdrift` | sac | a bladder of warm gas. It never lands. The wind decides |
+| `mdrift` | sac | a bladder of warm gas. It never lands. It goes where the wind blows |
 | `mcruise` | fins | a whale of the air. It cruises, it dips, it sings, it never comes down |
 | `mdig` | plough | it travels a hand deep and pushes a mound. A raised line across the circle |
 | `manchor` | arch, periscope | it does not travel. The body stays under the ground |
@@ -223,8 +269,8 @@ state that it had heard nothing for a hundred.
 
 ### The crew
 
-`rollCrew()` draws 3 to 5 people from `NAMES`, which holds 74 short given names from many
-languages. A log never gives a surname. Each person takes one role from `ROLES`, and a pilot is
+`rollCrew()` draws 3 to 5 people from `NAMES`, which holds 131 given names from many languages,
+short ones and long ones. No name is also a plain English word a line may use. A log never gives a surname. Each person takes one role from `ROLES`, and a pilot is
 always aboard. The first name on the list is the keeper, who writes the log as "I" and "we". The
 other people are the cast of the threads: `{one}` and `{two}` inside a thread always name the same
 two people, and `{onejob}` and `{twojob}` are their jobs.
@@ -233,6 +279,21 @@ two people, and `{onejob}` and `{twojob}` are their jobs.
 {onejob}", "our {twojob}". A pronoun would need a gender, and the names come from many languages,
 so the log would have to invent one for every name. Naming the job is also what keeps three
 sentences in a row from reading "Gil. Gil. Gil.": a wording alternates between the two.
+
+**Every person but the keeper carries a trait.** `TRAITS` holds 24 of them: a fact of the life
+before this flight, or a habit the crew has to live with. A trait holds three asides, and
+`writeLog()` adds one to the end of an early entry that names that person, at most two per person
+and never two entries in a row. A thread that takes a person out gives that person an aside on
+its first beat, so the reader knows who walks away. An aside opens on `{who}` or "Our
+`{whojob}`", claims no fact of the world, and never follows a death.
+
+**A person who walks out has a reason, and the log states it.** Three threads send a person away.
+`cache` walks to the supply drop, `{far}` kilometres north, for ninety days of food and a spare
+radio. `salvage` walks to an old unmanned lander, thirty kilometres east, for power cells.
+`forage` goes to live off the land, comes back changed, is held outside by the quarantine rule,
+and leaves for good; it is shut to a world where a person cannot open a helmet. The first beats of
+all three hold whether or not the crew is stranded yet, because a first beat often comes before
+the strand thread has said so.
 
 **A dead or absent person never acts again.** A thread that retires a person carries `retires`, and
 the beat that does it carries `out`. `writeLog()` gives that thread a person of its own, so no
@@ -249,12 +310,12 @@ when the crew holds three people besides the keeper.
 | `ride` | the reckless plan: ride the animal. `mwalk` and 3 metres or more |
 | `catch` | the reckless plan: take hold of one. `mwalk` under 3 metres, or `mdig`, `manchor`, `mcrawl`, `mroll`, `mflow`, `msling` |
 | `follow` | the reckless plan: follow it to where it lives. `mfly`, `mcruise`, `mswarm`, `mdrift` |
-| `walk` | the walk out on foot, toward the sea, the vents, the geysers, or the north |
-| `launch` | the launch. The reader knows how it went, because the wreck is here |
+| `walk` | the walk out on foot, and what for: the supply drop, the heat of the vents, fresh water round the shore |
+| `launch` | the climb on a patched feed line. Forced by the `patched` strand thread, and reached by no other log |
 | `split` | some stay and some go |
 | `cut` | the entry that stops in the middle of a sentence |
 | `second` | the entry by a second hand, after the keeper dies |
-| `stay` | the quiet one: the crew decides to stay and live here |
+| `stay` | the quiet one: a person says the crew could live here, and the crew tries. `temperate waterliquid` only |
 | `message` | the message to whoever finds the log |
 | `joke` | the last joke |
 
@@ -351,6 +412,8 @@ list. `BEAST_TOKENS` lists the ones that name the animal.
 | `{keeper}`, `{keeperjob}` | the person who keeps the log, and their job |
 | `{crew}` | the count of the crew, in words |
 | `{few}`, `{many}` | two counts of days, rolled once per log |
+| `{due}`, `{years}`, `{far}` | the day the orbiter leaves, the years a second ship needs, the kilometres to the supply drop |
+| `{who}`, `{whojob}` | the person an aside is about |
 | `{count}` | a count of animals, rolled once per log, in words |
 | `{other}`, `{Other}`, `{others}`, `{Others}` | the animal the log names, in full: "the hardpan long-day hopper" |
 | `{kind}`, `{kinds}`, `{Kind}`, `{Kinds}` | the short form: the last word of the name, bare. "hopper", "hoppers", "Hoppers" |
@@ -381,17 +444,25 @@ it is quoted material, as the species lore is. Comments and documents stay in Si
 English. Inside the log, these rules hold:
 
 1. **Short declarative sentences.** Most are under 12 words and none is over 20. Plain concrete
-   words a five year old can read aloud. Numbers are good: days, metres, degrees, counts.
+   words a five year old can read aloud. Numbers are good: days, metres, degrees, counts. The
+   only tool of the writer is subtraction.
 2. **No metaphor and no simile.** No "like a", no "as if", no "as … as", no "seemed", and nothing
    the planet or the machine does on purpose. Say what happened. Let the facts carry the feeling,
    and do not name the feeling unless a person says it aloud.
-3. **The devices that are allowed** are repetition, "and" chains, understatement, a person's exact
+3. **No adverb of manner.** If the verb needs help, take a better verb. The audit fails an -ly
+   word outside a short list.
+4. **Every noun names a thing the reader can see.** "Tova said the quiet", "the wet is at the bus",
+   "the wind decides", and "the panels take nothing" each left a reader asking "the quiet what?".
+   An entry is read cold, so it says the water pump and not the pump, a geyser and not "one". What
+   is left unsaid is the feeling, and never the fact.
+5. **The devices that are allowed** are repetition, "and" chains, understatement, a person's exact
    words reported plainly, the thing left unsaid, and the small physical detail.
-4. **Safe for a five year old and true for a ninety year old.** Death may happen and is stated in
+6. **Safe for a five year old and true for a ninety year old.** Death may happen and is stated in
    one plain sentence. No gore, no cruelty to an animal, and nothing frightening in detail. Sad is
    fine. Wonder is required.
-5. **One entry holds 1 to 5 sentences.** The whole log reads in under two minutes.
-6. **No pronoun for a member of the crew.** See "The crew" above.
+7. **One wording holds 1 to 5 sentences.** A printed entry may hold 9: the landing is two parts,
+   an early beat may take an aside, and the ending may take a coda.
+8. **No pronoun for a member of the crew.** See "The crew" above.
 
 Do not name a place of the Earth or a species of the Earth. `PROBE_NAME` holds plain English nouns
 and a mark number, `NAMES` holds given names only, and `PET_NAME` holds plain words. No word of
@@ -411,7 +482,11 @@ to be told that it may shrink.
 
 ## The audit
 
-`node tools/lore-audit/audit.mjs` sweeps the landing pool, the threads, and the endings. The source
+`node tools/lore-audit/log-sample.mjs 0 3 forage` prints whole logs of real worlds, filtered by a
+cause or a slot. Read a log whole after every change to the text: the audit proves that a line is
+honest, and only a reader can tell that a log holds together.
+
+`node tools/lore-audit/audit.mjs` sweeps the landing pool, the threads, the asides, and the endings. The source
 pass runs ten checks.
 
 1. **Coverage.** Every world reaches the landing pool, at least three world threads, at least one
@@ -431,7 +506,8 @@ pass runs ten checks.
    a true line about a roller, and the rule steps over a `not` or a `never` on purpose.
 5. **The tokens.** A line may only use a token the writer fills, and a line that names the animal
    must sit under a gate on `beasts`.
-6. **The style.** No simile, no hedge, no entry over 5 sentences, and no sentence over 20 words
+6. **The style.** No simile, no hedge, no adverb of manner, no filler ("that is the whole of the
+   plan"), no wording over 5 sentences, no printed entry over 9, and no sentence over 20 words
    **once the tokens are filled**. A token is not one word: `{Other}` can print "The sea
    lamp-flanked sky whale" and `{size}` can print "Each shard a hand wide, the swarm 9 m". `WORST`
    in the audit holds the longest fill each token can take, and the lint counts with those. Raise a
@@ -468,6 +544,8 @@ the log of every source. It checks that:
 
 - the entry count lies between 8 and 20, the first entry is the landing on day 1, and the last one
   is an ending kind;
+- the log names a cause, the strand thread of that cause ran to its last beat, the landing names
+  the orbiter and the day it leaves, and a cause that forces an ending got that ending;
 - the days rise strictly, and `log.days` is the day of the last entry;
 - the crew holds 3 to 5 people, the names are distinct, the roles are distinct, and the keeper is
   one of them;

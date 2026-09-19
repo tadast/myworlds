@@ -617,7 +617,8 @@ const floraRelIssues = auditFloraRelations();
 //     the check that keeps a whale of the air from standing at the foot of the mast.
 //  5. The tokens. A line may only use a token the writer fills, and a line that names the animal
 //     must sit under a gate on `beasts`.
-//  6. The style. No simile, no hedge, no sentence over 20 words, and no entry over 5 sentences.
+//  6. The style. No simile, no hedge, no adverb of manner, no filler, no sentence over 20 words,
+//     no wording over 5 sentences, and no printed entry over 9.
 //  7. The state. A thread that retires a person may not name that person again after it, and a
 //     first beat may never look back at a day the reader has not read.
 //  8. Salience. Every world thread must say how loud its fact is, from the numbers of the planet.
@@ -665,12 +666,15 @@ for (const m of MOTION) {
 
 const SOURCE_TOKENS = SourceLore.TOKENS;
 const BEAST_TOKENS = SourceLore.BEAST_TOKENS;
-const THREAD_LISTS = [['world', ST.world], ['crew', ST.crew], ['fauna', ST.fauna]];
+const THREAD_LISTS = [['world', ST.world], ['crew', ST.crew], ['fauna', ST.fauna], ['strand', ST.strand]];
 const THREAD_MIN = 3;        // world threads every world must reach
 const END_MIN = 4;           // endings every world must reach
 const WORDING_MIN = 3;       // wordings every beat must hold
 const SENTENCE_MAX = 20;     // words
-const ENTRY_SENTENCES = 5;
+const ENTRY_SENTENCES = 5;   // one wording of a pool
+// A printed entry may be longer than one wording. The landing is an ARRIVAL line and the plan of
+// the strand thread, an early beat may take an aside, and the ending may take a coda.
+const PRINTED_SENTENCES = 9;
 
 // A beat is a list of wordings, or an object with `say` and the person it takes out of the story.
 const sayOf = (b) => (Array.isArray(b) ? b : b.say);
@@ -686,8 +690,15 @@ function sourceTexts() {
         sayOf(b).forEach((t, j) => out.push({ label: `${kind.toUpperCase()}.${th.key}[${i}.${j}]`, e: th, t, kind }));
       });
       for (const t of th.coda || []) out.push({ label: `${kind.toUpperCase()}.${th.key}.coda`, e: th, t, kind });
+      // The second part of the landing, which a strand thread may bring with it.
+      for (const t of th.landing || []) out.push({ label: `${kind.toUpperCase()}.${th.key}.landing`, e: th, t, kind });
     }
   }
+  // The plan of a crew whose lander came down whole, and the asides about the people. Neither
+  // carries a gate, so each rides on an entry of its own with no tags.
+  const PLAIN = {};
+  for (const t of SourceLore.SOUND_LANDING) out.push({ label: 'SOUND_LANDING', e: PLAIN, t, kind: 'strand' });
+  for (const tr of SourceLore.TRAITS) for (const t of tr.say) out.push({ label: 'TRAIT.' + tr.key, e: PLAIN, t, kind: 'trait' });
   for (const e of SourceLore.ENDINGS) out.push({ label: 'END.' + e.kind, e, t: e.t, kind: 'end' });
   return out;
 }
@@ -701,7 +712,20 @@ for (const e of SourceLore.ENDINGS) SOURCE_ENTRIES.push(['END.' + e.kind, e]);
 // ---- the style lint
 // The voice of the log is short, plain, and literal. These five patterns are the ones a writer
 // reaches for without noticing, and every one of them breaks the voice.
+// The log is a ship log, and its only tool is subtraction. An adverb of manner is the first word
+// to go: if the verb needs help, the line takes a better verb. ADVERB_OK holds the -ly words that
+// are not adverbs of manner, and a new one has to be read by hand before it is added.
+const ADVERB_OK = new Set(['only', 'early', 'family', 'supply', 'reply', 'belly', 'fly', 'ugly',
+  'monthly', 'weekly', 'daily', 'assembly', 'unfriendly',
+  // "3.6 m, mostly under the sand" is a size text of species.js, which a log prints through {size}.
+  'mostly']);
 const STYLE_BAD = [
+  [{ test: (t) => (String(t).match(/\b[a-z]+ly\b/gi) || []).some((w) => !ADVERB_OK.has(w.toLowerCase())), source: 'an -ly word' }, 'an adverb'],
+  // The filler a writer reaches for in place of the fact. Each of these left a reader asking
+  // "the whole of what?", "decides what?", "whatever what?".
+  [/\b(?:is|was) the whole of the\b|\bthat is the whole\b/i, 'a filler'],
+  [/\bwhatever (?:it|this|that|the)\b/i, 'a vague reference'],
+  [/\bthe wind decides\b|\bthe quiet\b|\bthe wet\b/i, 'a vague reference'],
   [/ like an? /i, 'a simile'],
   [/ as if /i, 'a simile'],
   [/ as though /i, 'a simile'],
@@ -726,13 +750,14 @@ const WORST = {
   kind: 1, kinds: 1, Kind: 1, Kinds: 1,        // the last word of the name: "whale", "hopper"
   one: 1, two: 1, keeper: 1, crew: 1, n: 1, count: 1,
   few: 1, many: 1, days: 1, since: 1, moon: 1, moons: 1, plant: 1, plants: 1,
+  due: 1, years: 1, far: 1, who: 1, whojob: 2,
 };
 const expandWorst = (text) => String(text).replace(/\{(\w+)\}/g, (m, k) => 'x '.repeat(WORST[k] == null ? 1 : WORST[k]).trim());
-function styleCheck(text) {
+function styleCheck(text, maxSentences = ENTRY_SENTENCES) {
   const bad = [];
   for (const [re, what] of STYLE_BAD) if (re.test(text)) bad.push(`${what}: /${re.source}/`);
   const sents = sentencesOf(text);
-  if (sents.length > ENTRY_SENTENCES) bad.push(`${sents.length} sentences, over ${ENTRY_SENTENCES}`);
+  if (sents.length > maxSentences) bad.push(`${sents.length} sentences, over ${maxSentences}`);
   for (const s of sentencesOf(expandWorst(text))) {
     const n = s.split(/\s+/).filter(Boolean).length;
     if (n > SENTENCE_MAX) bad.push(`a sentence of ${n} words once the tokens are filled`);
@@ -888,6 +913,8 @@ for (const [, sky] of sourceSkies) {
       const w = Lore.candidates(ST.world, ctx).length;
       if (w < THREAD_MIN) holes.push(`SOURCE world threads: only ${w} — ${f.type} [${[...skyTags].join(' ')}]`);
       if (!Lore.candidates(ST.crew, ctx).length) holes.push(`SOURCE crew threads — ${f.type}`);
+      // Every log has to say why the crew could not leave, so no world may be shut out of them.
+      if (!Lore.candidates(ST.strand, ctx).length) holes.push(`SOURCE strand threads — ${f.type}`);
       const fa = Lore.candidates(ST.fauna, ctx).length;
       if (beasts && !fa) holes.push(`SOURCE fauna threads — ${motion} ${ctx.G.social.kind} ${ctx.G.size} m — ${f.type}`);
       if (!beasts && fa) holes.push(`SOURCE fauna thread reaches a world with no beasts — ${f.type}`);
@@ -1076,7 +1103,20 @@ if (SEEDS > 0) {
         if (!/^end\./.test(last.slot) || !SourceLore.ENDING_KINDS.includes(last.slot.slice(4))) {
           holes.push(`seed ${seed}: the log closes on "${last.slot}", which is not an ending kind`);
         } else endSpread.set(last.slot.slice(4), (endSpread.get(last.slot.slice(4)) || 0) + 1);
-        for (const e of E) if (/^(world|crew|fauna)\./.test(e.slot)) threadSpread.set(e.slot, (threadSpread.get(e.slot) || 0) + 1);
+        for (const e of E) if (/^(world|crew|fauna|strand)\./.test(e.slot)) threadSpread.set(e.slot, (threadSpread.get(e.slot) || 0) + 1);
+        // Every log states why the crew could not leave: one strand thread, run to its last beat,
+        // and a landing that names the orbiter and the day it leaves.
+        const strand = ST.strand.find((x) => x.key === log.cause);
+        if (!strand) holes.push(`seed ${seed}: the log names no cause the crew is stranded by`);
+        else if (E.filter((e) => e.slot === 'strand.' + strand.key).length !== strand.beats.length) {
+          holes.push(`seed ${seed}: the strand thread "${strand.key}" did not run to its last beat`);
+        }
+        if (!/\borbiter\b/.test(E[0].text) || !/\bday \d+\b/.test(E[0].text)) {
+          holes.push(`seed ${seed}: the landing does not state the orbiter and the day it leaves\n    ${E[0].text}`);
+        }
+        if (strand && strand.end && last.slot !== 'end.' + strand.end) {
+          holes.push(`seed ${seed}: the cause "${strand.key}" asks for the ending "${strand.end}" and the log closes on "${last.slot}"`);
+        }
         // The crew, and the keeper who writes the log.
         const crew = log.crew || [];
         if (crew.length < CREW_MIN || crew.length > CREW_MAX) holes.push(`seed ${seed}: a crew of ${crew.length}`);
@@ -1111,7 +1151,7 @@ if (SEEDS > 0) {
             lexHits.push(`seed ${seed} log ${e.slot}: /${bad.word}/ needs "${bad.gate}" [${[...stags].join(' ')}]\n    ${e.text}`);
           }
           // The style, on the filled text, where a token has become a real phrase.
-          for (const bad of styleCheck(e.text)) holes.push(`seed ${seed} log ${e.slot}: ${bad}\n    ${e.text}`);
+          for (const bad of styleCheck(e.text, PRINTED_SENTENCES)) holes.push(`seed ${seed} log ${e.slot}: ${bad}\n    ${e.text}`);
           let bare = e.text;
           for (const s of strip) if (s) bare = bare.split(s).join(' ');
           for (const name of SourceLore.NAMES) {
@@ -1143,7 +1183,10 @@ if (SEEDS > 0) {
         }
         // The same for the ending, which may also read the genome. One wording of that kind must
         // pass both the gate of this world and the test on this animal.
-        const endCtx = { env, tags: stags, world, G: named };
+        // The leads are tags of the story and not of the planet, so the log carries them.
+        const endTags = new Set(stags);
+        for (const lead of log.leads || []) endTags.add('lead' + lead);
+        const endCtx = { env, tags: endTags, world, G: named };
         const endKind = last.slot.slice(4);
         if (!Lore.candidates(SourceLore.ENDINGS, endCtx).some((x) => x.kind === endKind)) {
           holes.push(`seed ${seed}: the ending "${endKind}" does not fit this world`);
