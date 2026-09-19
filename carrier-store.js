@@ -8,7 +8,11 @@
 //
 // The shape under the key is one object keyed by seed:
 //
-//   { "Auralis": { fixes: [{ lat, lon, brg, err }], found: false, ts: 1758240000000 } }
+//   { "Auralis": { fixes: [{ lat, lon, brg, err }], found: false, briefed: false, ts: 1758240000000 } }
+//
+// `briefed` says that the reader has opened the brief of the carrier on this world once. The block
+// of the overlay pulses until then. A record written before the flag reads as not briefed, so the
+// key does not move.
 //
 // A shared URL carries no fix. The reader who opens a link starts the search with nothing.
 //
@@ -31,7 +35,7 @@ export const CARRIER_KEY = 'myworlds.carrier.v1';
 export const MAX_FIXES = 4;
 export const MAX_SEEDS = 200;
 
-const empty = () => ({ fixes: [], found: false, ts: 0 });
+const empty = () => ({ fixes: [], found: false, briefed: false, ts: 0 });
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -80,7 +84,7 @@ function recordOf(all, seed) {
   if (!r || typeof r !== 'object') return empty();
   const fixes = [];
   if (Array.isArray(r.fixes)) for (const f of r.fixes) { const fix = asFix(f); if (fix) fixes.push(fix); }
-  return { fixes: fixes.slice(-MAX_FIXES), found: !!r.found, ts: num(r.ts) || 0 };
+  return { fixes: fixes.slice(-MAX_FIXES), found: !!r.found, briefed: !!r.briefed, ts: num(r.ts) || 0 };
 }
 
 // The fixes of one world. A seed with no record gives an empty one, so no caller tests for null.
@@ -91,6 +95,9 @@ export function loadFixes(seed) {
 // Add one fix, and give the record back. A landing on a cell that already holds a fix replaces it:
 // the instrument states the same bearing on every visit, so a second fix of one cell says nothing
 // new and a second wedge would only draw over the first. Decision 9 of issue 34.
+//
+// A found world takes no fix. The search is over, the globe carries the wreck at the source, and a
+// wedge after the find would only ask a question the reader has answered.
 export function addFix(seed, fix) {
   const keep = asFix(fix);
   if (!seed || !keep) return loadFixes(seed);
@@ -98,6 +105,7 @@ export function addFix(seed, fix) {
   keep.lat = at.lat; keep.lon = at.lon;
   const all = readAll();
   const rec = recordOf(all, seed);
+  if (rec.found) return rec;
   rec.fixes = rec.fixes.filter((f) => !sameCell(f, keep));
   rec.fixes.push(keep);
   if (rec.fixes.length > MAX_FIXES) rec.fixes.splice(0, rec.fixes.length - MAX_FIXES);
@@ -108,19 +116,38 @@ export function addFix(seed, fix) {
 }
 
 // The reader has found the source of this world. Slice 3 calls this when the log card first opens.
+// The find drops the fixes with it: the globe then carries the wreck at the source and no wedge, so
+// the answer stands where the question stood.
 export function markFound(seed) {
   if (!seed) return empty();
   const all = readAll();
   const rec = recordOf(all, seed);
   rec.found = true;
+  rec.fixes = [];
   rec.ts = Date.now();
   all[seed] = rec;
   writeAll(all);
   return rec;
 }
 
-// Drop the fixes of one world and keep the find. A reader who wants a clean globe asks for the
-// wedges to go; a reader who has found the wreck has earned the mark, and no button takes it back.
+// The reader has opened the brief of the carrier on this world. The block of the overlay pulses
+// until this stands, and the block is a control after it as well as before it, so the reader can
+// read the brief again on any landing that hears the carrier.
+export function markBriefed(seed) {
+  if (!seed) return empty();
+  const all = readAll();
+  const rec = recordOf(all, seed);
+  if (rec.briefed) return rec;
+  rec.briefed = true;
+  rec.ts = Date.now();
+  all[seed] = rec;
+  writeAll(all);
+  return rec;
+}
+
+// Drop the fixes of one world and keep the find and the brief. A reader who wants a clean globe
+// asks for the wedges to go; a reader who has found the wreck has earned the mark, and no button
+// takes it back. The brief stays read for the same reason: the pulse must not come back.
 export function clearFixes(seed) {
   if (!seed) return empty();
   const all = readAll();

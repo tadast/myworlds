@@ -131,8 +131,8 @@ Nothing. Slices 1 and 2 need each other to be of use. Slice 3 needs slice 1. Sli
 
 ## What the build changed
 
-Twelve places where the build went another way than the plan. `docs/probe.md` decision 14 holds the
-same list for a reader who comes to it from the decisions.
+Fifteen places where the build went another way than the plan. `docs/probe.md` decision 14 holds
+the same list for a reader who comes to it from the decisions.
 
 - **The needle on the ground takes the frame of the patch box, and not `groundBasis()`.** Slice 1 asks for the direction of the source turned through `groundBasis()`. The box of a patch runs x along the u axis of its cell and z along the v axis, and (u, up, v) is left-handed, so the box is the mirror of the sky frame in x. A needle through `groundBasis()` therefore points at the mirror of the source and away from the wreck. `carrierBox()` in `site.js` reads the slope of the map of the box instead. The mirror was an older defect and it closed on 2026-09-19: the box now runs z against v and is right-handed; see "The box is right-handed" in `docs/probe.md`. The needle still takes `carrierBox()` and not `groundBasis()`, because the map of the box holds no angle, and check 5 of `tools/carrier-check.mjs` fails on a mirror. The three digits stay the true bearing of the globe, because the wedge of a fix is drawn on the globe.
 - **The carrier block sits at the top left.** Slice 1 gives the fifth block no place. The right edge of the overlay holds the altitude ladder, so the block took the left.
@@ -150,6 +150,37 @@ same list for a reader who comes to it from the decisions.
 - **The source does not read the vertices of the globe.** Slice 1 selects a dry vertex. The detail of the globe follows the tier, so a phone and a desktop found two different sources on one seed. `makeSource()` now draws each candidate direction from the source stream, snaps it to the middle of its cell, and tests it on the globe field, with a sea level from a fixed grid of samples. `node tools/world-checksum.mjs --source` proves that the two tiers agree.
 - **The log is a story of 8 to 20 entries, and no longer four slots.** Slice 4 gives the wreck four entries: the arrival, the survey, the trouble, and the last entry. Four entries state facts, and a reader stops reading them after three wrecks. The wreck now holds the log of a crew of 3 to 5 people with names and roles, and the log is woven from threads: one world thread, one or two crew threads, and the fauna thread when the world has beasts. A thread is 3 to 6 beats that intensify, a beat is three wordings or more, the beats of every thread interleave by force, and the gaps between the days close toward the end. The last entry takes one of 12 kinds, from the doom faced calmly to a plan to ride the animal. The voice is short, plain, and literal, because the reader is between five and ninety years old. See `docs/source.md`.
 - **A fauna line is gated on how the animal moves, and a world thread on how loud its fact is.** The first build of the story gated the fauna only on `beasts`, so a 40 metre whale of the air stood at the foot of the mast, and it chose the world thread by tag alone, so a world of -72 °C opened on "the day is near enough to home that we sleep". `motionOf()` now returns one of eleven tags from `G.cls`, `G.loco`, and `G.plan`, and every fauna thread and every reckless ending carries it; `MOTION_LEXICON` in the audit is subject scoped and fails a line that has a flyer walk or a roller stand. Every world thread carries `sal(env)`, read from the temperature, the gravity, the day, the land share, and the activity, and the weight is the cube of it, so the loudest true fact wins nearly every time. The same pass split `hasocean` into five land threads, because a lava sea is not water and a world that is 92 per cent land has no coast to walk to. **There is no swimmer in this generator**: `fins` is `cls: 'air'`, so a sea whale swims through air and takes the `mcruise` thread.
+
+- **The carrier has a reach, against decision 3.** Decision 3 states that the carrier is always
+  heard and that the error does the work. Every landing then said the same thing — land anywhere,
+  take a fix, land again — and the first landing asked no question. `CARRIER_REACH` in `site.js` is
+  `2 * PI / 3`, a third of the circumference. `carrierAt()` gives null past it, and the landing then
+  shows no carrier block, stores no fix, and draws no wedge. A silent landing states a fact of its
+  own: the source lies more than a third of the way round from here. The error now runs from 2 to 10
+  degrees over the reach and no longer over pi, so a fix at the edge of the reach is as wide as a fix
+  at the antipode was. `freshFixes()` in `app.js` drops a stored fix the carrier no longer reaches,
+  so a store from the first build needs no migration and the key does not move.
+- **The first catch on each world pulses, and the block opens a brief.** Risk 4 gives the fifth
+  block one flash on the first landing of a world. One flash on one landing is a thing a reader can
+  miss, and a reader who sees it still does not know what the block is for. The block now pulses
+  without end on every landing that hears the carrier until the reader opens the brief of that
+  world, and it is a control: a click, a tap, or Enter on it opens `<dialog id="carrier-brief">`,
+  which names the instrument and the three phases in four steps. The store keeps a `briefed` flag
+  per seed, `markBriefed()` writes it, and `clearFixes()` keeps it as it keeps the find. Under
+  `prefers-reduced-motion` the pulse is a static highlight. While the block pulses it stands on a
+  dark plate and shows the hint "New signal · tap", because the glow alone does not read against a
+  bright sky. The block is the one part of the overlay
+  that takes a pointer event; the ground holds no pointer lock, so nothing has to be released.
+- **A find leaves a mini wreck on the globe, and no ring.** The first build left one ring at the
+  source. A ring is the mark of a search, and the search is over, so the ring said nothing the
+  reader did not know. `carrier-globe.js` now stands the body of `wreckGeometry()` at the source, at
+  `WRECK_H` of 0.06 globe radii, on the terrain of its cell, its up axis along the surface normal,
+  with a lamp that blinks on the clock of `updateCarrierGroup()`. The grey model is a few pixels
+  from the home zoom, so the lamp holds a least size of `WRECK_LAMP_MIN` of its distance from the
+  camera, which is about 10 pixels. `markFound()` drops the fixes with
+  the find, so a found world stores no new fix and draws no wedge. The Carrier row of the sidebar
+  gains an **Aim** chip in orbit, which turns the camera onto the cell of the source and starts the
+  aim, so the reader can walk back to the wreck without hunting for the cell.
 
 ### The checks that stay open
 

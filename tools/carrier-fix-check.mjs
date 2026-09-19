@@ -4,9 +4,10 @@
 //
 // Four parts:
 //
-// A. The store. carrier-store.js runs against a fake localStorage: one fix per cell, the find that
-//    survives a clear, the two bounds, a quota error that must not throw and must not touch the key
-//    of the saved worlds, and a record of garbage that must read as empty.
+// A. The store. carrier-store.js runs against a fake localStorage: one fix per cell, the brief that
+//    a record from an older build reads as unread, the find that drops the fixes and survives a
+//    clear, the two bounds, a quota error that must not throw and must not touch the key of the
+//    saved worlds, and a record of garbage that must read as empty.
 //
 // B. The wedge. A wedge is no longer geometry: the terrain shader and the ocean shader paint it, so
 //    there is no mesh to read back. carrier-globe.js states the wedge as three unit vectors per fix
@@ -23,10 +24,11 @@
 //    draws the 4 newest. The line of a wedge weakens with its age, and the wash grows on the square
 //    of the count. A new fix fades in over 1.2 s through its own slot of the fade uniform.
 //
-// D. The marks on the ground. The dot of a fix and the ring of a find lie on the terrain: every
-//    vertex takes the ground under it, or the sea where the ground lies under the sea, plus
-//    DRAPE_LIFT. The check builds a fake height map with relief inside one cell, so a mark that
-//    stood at one radius fails the run.
+// D. The marks on the ground. The dot of a fix lies on the terrain: every vertex takes the ground
+//    under it, or the sea where the ground lies under the sea, plus DRAPE_LIFT. The check builds a
+//    fake height map with relief inside one cell, so a mark that stood at one radius fails the run.
+//    A find takes the dots and the wedges away and stands the mini wreck at the source, on the
+//    terrain of that cell, with its up axis along the surface normal and its height at WRECK_H.
 //
 // site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
 // the browser. Node has no import map, so a resolve hook points the same name at vendor/, as
@@ -138,6 +140,17 @@ function worldWith(seed, dir) {
 // The radius one vertex of a mark must stand at, read off site.js and not off carrier-globe.js.
 const drapeR = (world, dir) => Math.max(S.groundRadius(world, HM, dir), SEA_R) + G.DRAPE_LIFT;
 
+// A site that hears the source of a world. The carrier reaches CARRIER_REACH and no further, so a
+// site drawn at random is silent about one time in four and states no fix at all.
+function siteHearing(world, what) {
+  for (let k = 0; k < 400; k++) {
+    const s = S.dirToSite(snapDir(randDir()));
+    if (S.carrierAt(world, s)) return s;
+  }
+  fail(what, 'no site inside the reach after 400 draws');
+  return null;
+}
+
 // ---------------------------------------------------------------- A: the store
 {
   store.clear();
@@ -164,10 +177,26 @@ const drapeR = (world, dir) => Math.max(S.groundRadius(world, HM, dir), SEA_R) +
   // a reload reads the same record back
   ok('store', C.loadFixes('Auralis').fixes.length === 2, 'the record did not survive a read');
 
-  // the find, and the clear that keeps it
-  ok('store', C.markFound('Auralis').found === true, 'markFound() did not mark the find');
+  // the brief: a record with no flag reads as not briefed, and the mark stands after a reload
+  ok('store', C.loadFixes('Auralis').briefed === false, 'a record with no flag read as briefed');
+  ok('store', C.markBriefed('Auralis').briefed === true, 'markBriefed() did not mark the brief');
+  ok('store', C.loadFixes('Auralis').briefed === true, 'the brief did not survive a read');
+  ok('store', C.loadFixes('Auralis').fixes.length === 2, 'the brief took the fixes with it');
+
+  // the find. It drops the fixes of that seed, because the search is over.
+  rec = C.markFound('Auralis');
+  ok('store', rec.found === true, 'markFound() did not mark the find');
+  ok('store', rec.fixes.length === 0, `the find left ${rec.fixes.length} fixes standing`);
+  ok('store', C.loadFixes('Auralis').fixes.length === 0, 'the fixes came back after the find');
+
+  // a found world takes no further fix
+  rec = C.addFix('Auralis', { lat: site.lat, lon: site.lon, brg: 41.2, err: 12.5 });
+  ok('store', rec.fixes.length === 0, 'a found world took a new fix');
+
+  // the clear keeps the find and the brief
   rec = C.clearFixes('Auralis');
   ok('store', rec.fixes.length === 0 && rec.found === true, 'the clear took the find with the fixes');
+  ok('store', rec.briefed === true, 'the clear took the brief with the fixes');
   ok('store', C.foundSeeds().has('Auralis'), 'foundSeeds() missed a found world');
 
   // the bound on the fixes of one seed: the oldest goes first
@@ -194,9 +223,9 @@ const drapeR = (world, dir) => Math.max(S.groundRadius(world, HM, dir), SEA_R) +
   ok('store', store.get(WORLDS_KEY) === '[{"seed":"Auralis"}]', 'the store of the saved worlds lost its key');
 
   // a record of garbage reads as empty and throws nothing
-  store.set(C.CARRIER_KEY, '{"Bad": {"fixes": [1, {"lat": "x"}], "found": "yes"}}');
+  store.set(C.CARRIER_KEY, '{"Bad": {"fixes": [1, {"lat": "x"}], "found": "yes", "briefed": 3}}');
   rec = C.loadFixes('Bad');
-  ok('store', rec.fixes.length === 0 && rec.found === true, 'a record of garbage did not clean up');
+  ok('store', rec.fixes.length === 0 && rec.found === true && rec.briefed === true, 'a record of garbage did not clean up');
   store.set(C.CARRIER_KEY, 'not json at all');
   ok('store', C.loadFixes('Bad').fixes.length === 0, 'a key of rubbish did not read as empty');
   store.clear();
@@ -216,9 +245,13 @@ let worstUniform = 0;     // the widest gap between a uniform and the plane it m
 const ARCS = [0.02, 0.5, 1.2, 2.0, 2.8, Math.PI - 0.02];
 for (let i = 0; i < PAIRS; i++) {
   const srcDir = snapDir(randDir());
-  const site = S.dirToSite(snapDir(randDir()));
   const world = worldWith('Wedge' + i, srcDir);
+  // The carrier reaches CARRIER_REACH and no further, so a site that hears nothing states no fix
+  // and draws no wedge. A pair here is a pair the instrument really reads.
+  const site = siteHearing(world, 'reach');
+  if (!site) break;
   const c = S.carrierAt(world, site);
+  ok('reach', S.arcTo(site, srcDir) <= S.CARRIER_REACH, `pair ${i}: a reading came from past the reach`);
   const fix = { lat: site.lat, lon: site.lon, brg: c.brg, err: c.err };
   const planes = G.wedgePlanes(fix);
 
@@ -285,7 +318,8 @@ let capRow = '';
   const world = worldWith('Cap', snapDir(randDir()));
   const fixes = [];
   for (let i = 0; i < G.MAX_WEDGES + 3; i++) {
-    const s = S.dirToSite(snapDir(randDir()));
+    const s = siteHearing(world, 'cap');
+    if (!s) break;
     const c = S.carrierAt(world, s);
     fixes.push({ lat: s.lat, lon: s.lon, brg: c.brg, err: c.err });
   }
@@ -339,7 +373,7 @@ let fadeRow = '';
 {
   const srcDir = snapDir(randDir());
   const world = worldWith('Fade', srcDir);
-  const a = S.dirToSite(snapDir(randDir()));
+  const a = siteHearing(world, 'fade');
   const group = G.makeCarrierGroup(world, { fixes: [], found: false, ts: 0 }, HM);
   const u = group.userData;
   const uni = G.carrierUniforms();
@@ -399,41 +433,60 @@ let markRow = '';
     markRow = `  dot     the dot of a fix runs ${(hi / S.CELL).toFixed(2)} cells out, on the ground, radius ${rLo.toFixed(4)} to ${rHi.toFixed(4)}`;
   }
 
-  // the find takes the wedges away and leaves one ring at the source
+  // The find takes the wedges and the dots away and stands the mini wreck at the source. Every
+  // vertex of that model is read back in the local frame of the planet, so the check measures the
+  // thing the reader sees and not the numbers that built it.
   G.setFound(group, world, HM);
   ok('found', G.carrierUniforms().uWedgeCount.value === 0, 'a found world still paints a wedge');
-  ok('found', u.meshes.marks.visible, 'a found world draws no ring');
+  ok('found', !u.meshes.marks.visible, 'a found world still draws the dots of its search');
+  ok('found', !!u.wreck, 'a found world stands no mini wreck at the source');
+  ok('found', u.wreck.obj.parent === group, 'the mini wreck stands outside the group of the carrier');
+
   const at = S.sourceSite(world);
-  const pos = u.meshes.marks.geometry.attributes.position;
-  let lo = Infinity, hi = 0;                 // cells of arc: how far out the band runs
-  let rLo = Infinity, rHi = 0;               // globe units: the radius the band stands at
-  let worstDrape = 0;                        // globe units: the gap against the rule of site.js
+  const up = S.siteDir(at.lat, at.lon, new THREE.Vector3());
+  u.wreck.obj.updateMatrixWorld(true);
+  const body = u.wreck.obj.children[0];
+  const pos = body.geometry.attributes.position;
+  let lo = Infinity, hi = 0;                 // globe units: the height of a vertex over the ground
+  let worstArc = 0;                          // cells of arc: how far the model spreads from the cell
+  const v = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
-    const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
-    const r = v.length();
-    rLo = Math.min(rLo, r); rHi = Math.max(rHi, r);
-    v.normalize();
-    // The drape: the ground under this vertex, or the sea over it, plus the lift.
-    worstDrape = Math.max(worstDrape, Math.abs(r - drapeR(world, v)));
-    ok('found', r >= SEA_R + G.DRAPE_LIFT - R_TOL, `a point of the ring stands at ${r.toFixed(6)}, under the sea`);
-    const arc = S.arcTo(at, v);
-    lo = Math.min(lo, arc); hi = Math.max(hi, arc);
+    v.fromBufferAttribute(pos, i).applyMatrix4(body.matrixWorld);
+    const over = v.dot(up) - drapeR(world, up);
+    lo = Math.min(lo, over); hi = Math.max(hi, over);
+    worstArc = Math.max(worstArc, S.arcTo(at, v.clone().normalize()) / S.CELL);
   }
-  const cells = (x) => x / S.CELL;
-  ok('found', cells(lo) > 1.2 && cells(hi) < 1.8, `the ring runs ${cells(lo).toFixed(2)} to ${cells(hi).toFixed(2)} cells out`);
-  ok('drape', worstDrape < R_TOL, `a point of the ring stood ${worstDrape.toExponential(2)} off the ground under it`);
-  // The band follows the relief, so it cannot be one sphere. A ring that went back to a fixed
-  // radius reads a spread of zero here.
-  ok('drape', rHi - rLo > 1e-4, `the ring stands at one radius, spread ${(rHi - rLo).toExponential(2)}`);
-  markRow += `\n  ring    the ring of a find runs ${cells(lo).toFixed(2)} to ${cells(hi).toFixed(2)} cells out from the source`;
-  markRow += `\n  drape   its ${pos.count} vertices lie on the ground, radius ${rLo.toFixed(4)} to ${rHi.toFixed(4)}, ${worstDrape.toExponential(1)} off the rule of site.js`;
+  ok('found', Math.abs(lo) < 1e-6, `the foot of the mini wreck stands ${lo.toExponential(2)} off the ground of its cell`);
+  ok('found', hi > 0 && hi <= G.WRECK_H + 1e-6, `the body of the mini wreck reaches ${hi.toFixed(5)} over the ground`);
+  // the lamp stands at the top, so the whole model reaches WRECK_H over the ground
+  u.wreck.lamp.updateMatrixWorld(true);
+  const lampTop = new THREE.Vector3().setFromMatrixPosition(u.wreck.lamp.matrixWorld).dot(up) - drapeR(world, up);
+  ok('found', Math.abs(lampTop - G.WRECK_H) < 1e-6, `the lamp of the mini wreck stands ${lampTop.toFixed(5)} over the ground and not ${G.WRECK_H}`);
+  // The model stands WRECK_H tall and the body is about half as wide as it is tall, so it covers a
+  // few cells. It must not grow into a landmark of its own: 5 cells is about half the width of the
+  // square the site marker draws at the home zoom.
+  ok('found', worstArc < 5, `the mini wreck spreads ${worstArc.toFixed(2)} cells from its own cell`);
+  // the up axis of the model is the surface normal of its cell: the mast runs along it
+  const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(u.wreck.obj.quaternion).normalize();
+  ok('found', axis.angleTo(up) < 1e-6, `the up axis of the mini wreck stands ${axis.angleTo(up).toFixed(6)} rad off the surface normal`);
+  // the lamp blinks: one call of updateCarrierGroup() moves it and nothing else
+  const before = u.wreck.lampMat.opacity;
+  G.updateCarrierGroup(group, 0.9);
+  ok('found', u.wreck.lampMat.opacity !== before, 'the lamp of the mini wreck does not blink');
+  // neither mesh answers a ray, so the pick of the globe still names the cell under the model
+  const stock = THREE.Mesh.prototype.raycast;
+  ok('found', body.raycast !== stock && u.wreck.lamp.raycast !== stock, 'the mini wreck answers a ray');
+
+  markRow += `\n  wreck   the mini wreck stands ${lampTop.toFixed(4)} globe radii tall on the ground of its cell,`
+    + ` reaching ${worstArc.toFixed(2)} cells from the middle of it, ${pos.count} vertices`;
   G.disposeCarrierGroup(group);
+  ok('found', u.wreck == null, 'the dispose left the mini wreck behind');
 }
 
 // ---------------------------------------------------------------- the report
 console.log('carrier-fix-check');
-console.log('  store   one fix per cell, the find that survives a clear, both bounds, a quota error, and garbage');
-console.log(`  wedge   ${PAIRS} pairs of a site and a source, ${ARCS.length} arcs each, from the site to the antipode`);
+console.log('  store   one fix per cell, the brief, the find that drops the fixes, both bounds, a quota error, and garbage');
+console.log(`  wedge   ${PAIRS} pairs of a site and a source inside the reach, ${ARCS.length} arcs each, from the site to the antipode`);
 console.log(`  cover   the source stood inside every wedge, and came within ${(worstMargin * 100).toFixed(2)}% of an edge at worst`);
 console.log(`  edge    ${OUT_DEG} deg past an edge, behind the site, and past the antipode: all outside, all unpainted`);
 console.log(`  uniform the ${G.MAX_WEDGES} slots the shader reads stood ${worstUniform.toExponential(1)} off wedgePlanes() at worst`);

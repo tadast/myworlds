@@ -30,10 +30,12 @@ const TEXT_MS = 120;            // ms between two writes of the numbers. The eye
 //   Here    the landing cell is the cell of the source
 //   Strong  under CARRIER_STRONG, which is the 6 cells decision 7 gives the range over
 //   Clear   under CARRIER_CLEAR, where the error stands under 4 degrees and two fixes cross tight
-//   Faint   further out, where the error runs on to 10 degrees at the antipode
+//   Faint   further out, where the error runs on to 10 degrees at the edge of the reach
 //
-// A random landing is Faint five times in six, Clear about one time in six, and Strong only when
-// the reader aims for it. See carrierAt() in site.js for the error.
+// The carrier reaches CARRIER_REACH, which is 2.09 radians, so Faint covers 0.6 to 2.09 and the
+// block is hidden past that. A landing inside the reach is Faint about two times in three, Clear
+// about one time in three, and Strong only when the reader aims for it. See carrierAt() in site.js
+// for the error and for the reach.
 // A site carries two decimals of a degree, so the site of record stands up to 0.013 of a cell from
 // the middle of that cell and the arc on the cell of the source is small but not zero. A tenth of
 // a cell clears that rounding and still reaches no further than the cell itself.
@@ -50,7 +52,10 @@ function clock(s) {
 }
 
 export class ProbeHud {
-  constructor(root) {
+  // `onCarrier` runs when the reader presses the carrier block. The block is a real control: it
+  // opens the brief of the distress signal. app.js owns the dialog, so the overlay only reports the
+  // press. Issue 34.
+  constructor(root, { onCarrier } = {}) {
     this.root = root;
     if (!root) return;
     this.canvas = root.querySelector('#probe-noise');
@@ -69,6 +74,7 @@ export class ProbeHud {
     this.elErr = root.querySelector('#hud-err');
     this.elStrength = root.querySelector('#hud-strength');
     this.elRange = root.querySelector('#hud-range');
+    if (this.elCarrier && onCarrier) this.elCarrier.addEventListener('click', onCarrier);
     this.bars = [];
     if (this.elBars) {
       for (let i = 0; i < BARS; i++) {
@@ -94,14 +100,13 @@ export class ProbeHud {
     this._needleAt = null;      // a new landing puts the needle where it stands, with no turn
   }
 
-  // One flash of the carrier row, for the first landing on a world. The class comes off and goes
-  // on again, because the animation runs only once and a second world has to see it too.
-  flashCarrier() {
-    const el = this.elCarrier;
-    if (!el) return;
-    el.classList.remove('flash');
-    void el.offsetWidth;
-    el.classList.add('flash');
+  // The pulse of the carrier block. Risk 4 of issue 34: a reader may never look at the fifth block.
+  // The block pulses on every landing that hears the carrier until the reader opens the brief, and
+  // it then stands quiet for good on that world. The pulse runs without end, because one flash on
+  // one landing is a thing a reader can miss. Under prefers-reduced-motion the CSS gives a static
+  // highlight instead of an animation, so the block still stands out and nothing moves.
+  setPulse(on) {
+    if (this.elCarrier) this.elCarrier.classList.toggle('pulse', !!on);
   }
 
   hide() {

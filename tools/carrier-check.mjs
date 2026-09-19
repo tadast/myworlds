@@ -5,6 +5,8 @@
 // East is easy to mirror, and the sky of this app had that defect once; see decision 10 of
 // docs/probe.md. So nothing here trusts a comment. Four checks run:
 //
+// 0. The reach. The carrier does not reach the far side of the world. carrierAt() gives a reading
+//    for an arc inside CARRIER_REACH and null past it, and nothing else decides that.
 // 1. The wedge. Over PAIRS random pairs of a site and a source, the true bearing lies inside the
 //    bearing carrierAt() states plus and minus its error.
 // 2. The walk. A walk of the great circle from the site along the TRUE bearing passes within
@@ -97,16 +99,31 @@ const wrap180 = (d) => ((d % 360) + 540) % 360 - 180;
 const fails = [];
 const fail = (what, detail) => { if (fails.length < 8) fails.push(`${what}: ${detail}`); };
 
-// ---------------------------------------------------------------- 1, 2 and 3: the random pairs
+// ---------------------------------------------------------------- 0, 1, 2 and 3: the random pairs
 let worstWedge = 0;      // how near a true bearing came to the edge of its wedge, as a part of it
 let worstWalk = 0;       // radians: the furthest a walk passed the source
 let worstNeedle = 0;     // degrees: the widest gap between the needle and the three digits
+let heard = 0, silent = 0;   // pairs inside the reach, and pairs past it
+let worstErr = 0;        // degrees: the widest error a reading stated
 for (let i = 0; i < PAIRS; i++) {
   const srcDir = snapDir(randDir());
   const site = S.dirToSite(snapDir(randDir()));
   const world = worldWith('Seed' + i, srcDir);
   const c = S.carrierAt(world, site);
-  if (!c) { fail('carrierAt', `pair ${i} gave null`); continue; }
+
+  // 0. the reach: a reading inside CARRIER_REACH and null past it, and nothing else
+  const arc = S.arcTo(S.snapSite(site), srcDir);
+  const inReach = arc <= S.CARRIER_REACH;
+  if (inReach !== !!c) {
+    fail('reach', `pair ${i}: the arc is ${arc.toFixed(4)} rad and carrierAt() gave ${c ? 'a reading' : 'null'}`);
+  }
+  if (!c) { silent++; continue; }
+  heard++;
+  if (Math.abs(c.arc - arc) > 1e-12) fail('reach', `pair ${i}: the arc reads ${c.arc.toFixed(6)} and not ${arc.toFixed(6)}`);
+  // the error runs straight over the reach, from CARRIER_ERR[0] to CARRIER_ERR[1]
+  const wantErr = S.CARRIER_ERR[0] + (S.CARRIER_ERR[1] - S.CARRIER_ERR[0]) * (arc / S.CARRIER_REACH);
+  if (Math.abs(c.err - wantErr) > 1e-9) fail('error', `pair ${i}: the error reads ${c.err.toFixed(6)} and not ${wantErr.toFixed(6)}`);
+  worstErr = Math.max(worstErr, c.err);
 
   // 1. the wedge holds the true bearing
   const trueBrg = S.bearingTo(site, srcDir);
@@ -157,6 +174,31 @@ for (let i = 0; i < 200; i++) {
   if (c.arc > 0.0005) fail('here', `world ${i}: the arc on the cell of the source is ${c.arc.toFixed(6)} rad`);
   if (c.rangeKm == null) fail('here', `world ${i}: the cell of the source states no range`);
   worstHere = Math.max(worstHere, c.arc);
+}
+
+// ---------------------------------------------------------------- the edge of the reach
+// A source placed at a known arc from a site, on both sides of CARRIER_REACH. The reading has to
+// stop at the reach and not one cell before it or one cell after it. The arcs stand clear of the
+// reach by more than the rounding of a site, which is 0.013 of a cell.
+let reachRow = '';
+{
+  const site = S.snapSite({ lat: -18.5, lon: 64.25, kind: -1 });
+  const f = frameOf(site);
+  const at = (arc) => f.up.clone().multiplyScalar(Math.cos(arc)).addScaledVector(f.east, Math.sin(arc));
+  for (const [arc, want] of [
+    [S.CARRIER_REACH - 0.02, true], [S.CARRIER_REACH - 0.001, true],
+    [S.CARRIER_REACH + 0.001, false], [S.CARRIER_REACH + 0.02, false], [Math.PI - 0.01, false],
+  ]) {
+    const c = S.carrierAt(worldWith('Reach', at(arc)), site);
+    if (!!c !== want) fail('reach', `an arc of ${arc.toFixed(4)} rad gave ${c ? 'a reading' : 'null'}`);
+  }
+  // the error at the two ends of the reach
+  const near = S.carrierAt(worldWith('Reach', at(0.0005)), site);
+  const edge = S.carrierAt(worldWith('Reach', at(S.CARRIER_REACH - 0.001)), site);
+  if (Math.abs(near.err - S.CARRIER_ERR[0]) > 0.02) fail('error', `the error at the source is ${near.err.toFixed(3)} and not ${S.CARRIER_ERR[0]}`);
+  if (Math.abs(edge.err - S.CARRIER_ERR[1]) > 0.02) fail('error', `the error at the edge of the reach is ${edge.err.toFixed(3)} and not ${S.CARRIER_ERR[1]}`);
+  reachRow = `  reach   ${S.CARRIER_REACH.toFixed(4)} rad, a third of the circumference.`
+    + ` The error runs ${near.err.toFixed(2)} to ${edge.err.toFixed(2)} deg over it, and past it the reading is null.`;
 }
 
 // ---------------------------------------------------------------- the plain east
@@ -233,10 +275,13 @@ const faceRows = [];
       if (d > PARALLEL_TOL) fail('needle', `face ${face}: the needle at the seat ${x},${z} stands ${d.toFixed(3)} deg off it`);
       worstAim = Math.max(worstAim, d);
     }
-    // b. a far source: one step of the globe from the site along the bearing the instrument states
-    const srcDir = snapDir(randDir());
+    // b. a far source: one step of the globe from the site along the bearing the instrument states.
+    // The source has to stand inside the reach, or the instrument states nothing to step along.
+    let srcDir = snapDir(randDir());
+    for (let k = 0; k < 200 && S.arcTo(site, srcDir) > S.CARRIER_REACH; k++) srcDir = snapDir(randDir());
     const world = worldWith('Face' + face, srcDir);
     const c = S.carrierAt(world, site);
+    if (!c) { fail('faces', `face ${face}: no source inside the reach after 200 draws`); continue; }
     const aim = S.carrierBox(world, site, c);
     const up = S.siteDir(site.lat, site.lon, new THREE.Vector3());
     const v = S.carrierDir(world, site, c, new THREE.Vector3());
@@ -300,6 +345,8 @@ const boxRows = [];
 
 // ---------------------------------------------------------------- the report
 console.log(`carrier-check: ${PAIRS} pairs of a site and a source`);
+console.log(reachRow);
+console.log(`  heard   ${heard} pairs stood inside the reach and ${silent} past it, and the widest error stated was ${worstErr.toFixed(2)} deg`);
 console.log(`  wedge   the true bearing reached ${(worstWedge * 100).toFixed(1)}% of the error at worst`);
 console.log(`  walk    the great circle passed ${worstWalk.toFixed(6)} rad from the source at worst, limit ${WALK_TOL}`);
 console.log(`  needle  the arrow stood ${worstNeedle.toExponential(1)} deg off the digits at worst`);

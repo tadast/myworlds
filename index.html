@@ -114,6 +114,25 @@
     </form>
   </dialog>
 
+  <!-- The brief of the distress signal, issue 34. The carrier block of the overlay opens it, and it
+       is built the way the about dialog above is built: a native <dialog>, the same card style, a
+       close button, and the Escape key of the browser. It says what the instrument does and how the
+       search works, and it names no key and no button the reader has to find. -->
+  <dialog id="carrier-brief" aria-labelledby="carrier-brief-title">
+    <form method="dialog" class="about-card">
+      <button type="submit" class="cclose" aria-label="Close">×</button>
+      <h2 id="carrier-brief-title">Distress signal</h2>
+      <p>The probe hears a distress signal. Something on this world still transmits.</p>
+      <p>The instrument shows a bearing to the source, with an error. It shows no distance. The signal does not reach the far side of the world.</p>
+      <ol class="brief-steps">
+        <li>Go back to orbit. The globe shows a wedge from this site. The source is inside the wedge.</li>
+        <li>Land at a second site, far to one side. The new wedge crosses the first.</li>
+        <li>Land where the wedges cross. Near the source, the instrument shows a range.</li>
+        <li>Follow the needle and walk to the source.</li>
+      </ol>
+    </form>
+  </dialog>
+
   <!-- The probe overlay of issue 31. It shows while the probe is down: the air, the height, the
        hour of the star, and the uplink that explains where the probe has to stop. probe-hud.js
        writes the numbers and draws the noise. The frame starts right of the sidebar, so nothing
@@ -134,16 +153,22 @@
     </div>
     <!-- The fifth block, issue 34: the carrier. A needle that turns with the view, the bearing as
          three digits, the error of that bearing, one word for the strength, and the range once the
-         probe stands near the source. probe-hud.js hides the block on a world with no source. -->
-    <div class="hud-carrier" id="hud-carrier" hidden>
+         probe stands near the source. probe-hud.js hides the block on a world with no source.
+
+         The block is a button, because it opens the brief of the distress signal below. The rest of
+         the overlay takes no pointer event, so the style gives this one block pointer-events: auto
+         and every other gesture still belongs to the ground under it. -->
+    <button type="button" class="hud-carrier" id="hud-carrier" hidden
+            aria-label="Read the brief of the distress signal">
       <div class="hud-dial"><i id="hud-needle"></i></div>
       <div class="hud-read">
         <span class="k">Carrier</span>
         <b id="hud-brg">—</b>
         <div class="hud-sub"><span class="k" id="hud-err">±0°</span><span class="k" id="hud-strength">Faint</span></div>
         <span class="k" id="hud-range" hidden></span>
+        <span class="k hud-hint">New signal · tap</span>
       </div>
-    </div>
+    </button>
     <div class="hud-link">
       <div class="hud-bars" id="hud-bars"></div>
       <div class="k" id="hud-link">Uplink nominal</div>

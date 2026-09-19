@@ -5,8 +5,8 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere } from './site.js';
-import { loadFixes, addFix, markFound, clearFixes, foundSeeds } from './carrier-store.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, showMarker, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere, sourceSite } from './site.js';
+import { loadFixes, addFix, markFound, markBriefed, clearFixes, foundSeeds } from './carrier-store.js';
 import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
@@ -103,8 +103,9 @@ const probeBtn = $('#probe');
 const probeIconBtn = $('#probe-icon');
 const probeFloat = $('#probe-float');
 // The instrument of the probe, issue 31. It shows while the probe is down and it reads one
-// telemetry object per frame from the ground. See probe-hud.js.
-const probeHud = new ProbeHud($('#probe-hud'));
+// telemetry object per frame from the ground. See probe-hud.js. The carrier block of it is a
+// control, and a press on it opens the brief of the distress signal; see openBrief() below.
+const probeHud = new ProbeHud($('#probe-hud'), { onCarrier: () => openBrief() });
 const creatureFloat = $('#creature-float');
 const aimEl = $('#aim');
 const helpEl = $('#help');
@@ -263,13 +264,19 @@ let pendingFix = null;    // the fix of the last landing, waiting for the ascent
 // numbers the instrument states today. A reader who holds fixes from an older build therefore sees
 // them narrow with no clear of the search, and a later tune of CARRIER_ERR in site.js needs no
 // migration of the store. carrier-store.js holds no three.js and no site.js, so the refresh stands
-// here. A fix of a world with no source gives null and keeps its own numbers. Issue 34.
+// here. Issue 34.
+//
+// A fix the carrier no longer reaches is dropped. `CARRIER_REACH` bounds the carrier, and a store
+// written before that bound holds fixes from cells that hear nothing today. Such a fix would paint
+// a wedge the instrument would not state, so the filter runs on every load and the store keeps the
+// record until the next write of that seed.
 function freshFixes(world, record) {
   if (!record || !Array.isArray(record.fixes)) return record;
-  const fixes = record.fixes.map((f) => {
+  const fixes = [];
+  for (const f of record.fixes) {
     const c = carrierAt(world, f);
-    return c ? { ...f, brg: c.brg, err: c.err } : f;
-  });
+    if (c) fixes.push({ ...f, brg: c.brg, err: c.err });
+  }
   return { ...record, fixes };
 }
 
@@ -1149,7 +1156,6 @@ function aimAt(x, y) {
 let mode = 'orbit';
 let ground = null;        // the Ground instance while the probe is down
 let lockedSite = null;    // the site the probe dives to, fixed at the start of the descent
-const carrierSeen = new Set();   // the seeds whose carrier row has flashed once. Issue 34.
 let dive = null;          // { kind, phase, t0, dur, from, to, look }
 let patchState = { done: true, result: null };   // the patch the worker builds during the dive
 
@@ -1271,6 +1277,9 @@ function stepDive(now) {
     // sees the globe answer the landing.
     if (pendingFix && carrierGroup) addWedge(carrierGroup, pendingFix, { fade: true });
     pendingFix = null;
+    // The sidebar is back in orbit, so the Carrier row may show its Aim chip again. leaveGround()
+    // wrote the row while the mode was still 'ground', where the aim means nothing.
+    if (current) renderInfo(current.world);
   } else if (ground) ground.controls.enabled = true;
   dive = null;
   updateProbeBtn();
@@ -1315,7 +1324,10 @@ function enterGround() {
   // The fix keeps the bearing the instrument STATES and not the true one, so the wedge and the
   // three digits say one thing. The wedge waits for the ascent: the reader is on the ground now
   // and the globe is not drawn. See stepDive().
-  if (carrier && carrierGroup) {
+  //
+  // A found world takes no fix. The search is over and the globe carries the wreck at the source,
+  // so a new wedge would only ask a question the reader has answered. addFix() holds the same rule.
+  if (carrier && carrierGroup && !(carrierRecord && carrierRecord.found)) {
     const at = snapSite(lockedSite);
     pendingFix = { lat: at.lat, lon: at.lon, brg: carrier.brg, err: carrier.err };
     carrierRecord = addFix(current.world.seed, pendingFix);
@@ -1329,13 +1341,10 @@ function enterGround() {
   ground.resize(innerWidth, innerHeight);
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
   probeHud.show();
-  // Risk 4 of issue 34: a reader may never look at the fifth block. The row flashes once on the
-  // first landing of each world, and no text says a word. Slice 2 keeps the fixes of a world in
-  // localStorage; until then the set holds the worlds of this session.
-  if (carrier && !carrierSeen.has(current.world.seed)) {
-    carrierSeen.add(current.world.seed);
-    probeHud.flashCarrier();
-  }
+  // Risk 4 of issue 34: a reader may never look at the fifth block. The block pulses on every
+  // landing that hears the carrier until the reader opens the brief of this world, and it stands
+  // quiet after the find as well, because a reader who has read the log knows what the block is.
+  probeHud.setPulse(!!carrier && !!carrierRecord && !carrierRecord.briefed && !carrierRecord.found);
   perf.reset();       // the orbit frames say nothing about the ground
   showMarker(null, current);
   writeHash();
@@ -1740,8 +1749,53 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&a
 function carrierState(w) {
   if (!w || !w.source || w.type === 'gas') return null;
   const rec = carrierRecord && current && current.world.seed === w.seed ? carrierRecord : loadFixes(w.seed);
-  const n = rec.fixes.length;
+  const n = freshFixes(w, rec).fixes.length;    // a fix the carrier no longer reaches is not counted
   return { n, found: rec.found, text: rec.found ? 'Found' : n === 0 ? 'Not heard' : n === 1 ? '1 fix' : `${n} fixes` };
+}
+
+// ---------------------------------------------------------------- the brief of the carrier
+// The reader lands, the fifth block pulses, and a press on it opens this. It says what the
+// instrument does and how the three phases of the search work, and it names no control the reader
+// has to find. The first open marks the world briefed and the pulse stops for good on that world.
+// The block stays a control after that, so the reader can read the brief again on any landing.
+//
+// The ground takes no pointer lock, so nothing has to be released here. The overlay itself takes no
+// pointer event except on that one block, so the press never starts a look drag and never picks.
+const briefDlg = $('#carrier-brief');
+
+export function openBrief() {
+  if (!briefDlg || briefDlg.open) return;
+  // The ground listens for the flight keys on the window, and the keys of a modal dialog still
+  // reach it. So the controls of the ground stop while the brief stands open, and the close gives
+  // them back. A drag stops with them, which is what a modal asks for.
+  if (ground) ground.controls.enabled = false;
+  briefDlg.showModal();
+  probeHud.setPulse(false);
+  if (current && current.world.source) {
+    carrierRecord = markBriefed(current.world.seed);
+  }
+}
+
+briefDlg.addEventListener('click', (e) => { if (e.target === briefDlg) briefDlg.close(); });
+briefDlg.addEventListener('close', () => {
+  if (mode === 'ground' && ground && !dive) ground.controls.enabled = true;
+});
+
+// The return path to the wreck. A reader who found the source a week ago has to find its cell
+// again, and the mini wreck on the globe is 0.06 radii tall. So the Carrier row carries an Aim chip
+// once the world is found: it turns the camera onto the cell of the source and starts the aim, so
+// the reader stands in the state a tap on that cell of the globe gives. The next tap sends the
+// probe. The chip only shows in orbit, because the aim means nothing on the ground.
+//
+// The pick reads the screen centre, and placeCameraOverSite() puts the site there, so the square
+// marker lands on the cell of the source with no new math.
+function aimAtSource() {
+  if (!current || !canDescend()) return;
+  const at = sourceSite(current.world);
+  if (!at) return;
+  placeCameraOverSite(at);
+  aimNdc.set(0, 0);
+  startAim();
 }
 
 // Drop the fixes of the world on the screen. The globe loses its wedges in the same breath.
@@ -1757,14 +1811,19 @@ function clearCarrier(seed) {
 }
 
 // The reader has found the source. inspectSource() calls this the first time the log card opens,
-// and the page shows no word of the log before that. The find stands in the store, the wedges give
-// way to one ring at the source, and the sidebar states it in two places: the Carrier row of this
-// world and the thumb of the saved one. window.__mw.onSourceFound is the other way in.
+// and the page shows no word of the log before that. The find stands in the store, the store drops
+// the fixes with it, the wedges give way to the mini wreck at the source, and the sidebar states it
+// in two places: the Carrier row of this world and the thumb of the saved one.
+// window.__mw.onSourceFound is the other way in.
+//
+// The reader is on the ground when this runs, so the model arrives while the globe is not drawn and
+// it stands there at the end of the ascent. A reload of a found world builds it in buildWorld().
 export function onSourceFound() {
   if (!current || !current.world.source) return;
   carrierRecord = markFound(current.world.seed);
   setFound(carrierGroup, current.world, current.heightMap);
   pendingFix = null;
+  probeHud.setPulse(false);   // a reader who has read the log knows what the fifth block is
   renderInfo(current.world);
   renderWorlds();
   setCarrierLevel();     // the motif joins the song of this world for good. Issue 34, slice 5.
@@ -1814,7 +1873,7 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
-      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrier.text}${carrier.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this world">Clear</button>' : ''}</dd>` : ''}
+      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrier.text}${carrier.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this world">Clear</button>' : ''}${carrier.found && mode !== 'ground' ? '<button type="button" class="chip carrier-aim" title="Aim the probe at the wreck">Aim</button>' : ''}</dd>` : ''}
       ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
@@ -1823,6 +1882,8 @@ function renderInfo(w) {
     </dl>`;
   const clearBtn = infoBody.querySelector('.carrier-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => clearCarrier(w.seed));
+  const aimBtn = infoBody.querySelector('.carrier-aim');
+  if (aimBtn) aimBtn.addEventListener('click', aimAtSource);
   // The flora row only exists while the probe is down, because the plants belong to the patch.
   infoBody.querySelectorAll('.chip[data-kind]').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
   infoBody.querySelectorAll('.chip[data-plant]').forEach((b) => b.addEventListener('click', () => {
@@ -1938,7 +1999,11 @@ function cyclePlant(dir) {
   inspectPlant(kind);
   if (mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
 }
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && cardOpen() && !$('#about').open) closeCard(); });
+// Escape closes the study card, but a modal dialog owns the key while it stands open: the browser
+// closes the dialog and the card behind it must stay.
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && cardOpen() && !$('#about').open && !briefDlg.open) closeCard();
+});
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
@@ -2087,7 +2152,7 @@ aboutDlg.addEventListener('click', (e) => { if (e.target === aboutDlg) aboutDlg.
 aboutDlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') aboutDlg.close(); });
 
 addEventListener('keydown', (e) => {
-  if (aboutDlg.open) return;
+  if (aboutDlg.open || briefDlg.open) return;   // a modal dialog owns the keyboard while it is open
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
   if (e.key !== 'Escape') return;
   if (!creatureCard.hidden) closeCard();
@@ -2122,4 +2187,6 @@ window.__mw = {
   // the search of this world: the record of the store and the group of wedges under the planet
   get carrier() { return { record: carrierRecord, group: carrierGroup, pending: pendingFix }; },
   onSourceFound,
+  briefCarrier: openBrief,       // opens the brief of the distress signal, as the block does
+  aimAtSource,
 };

@@ -39,7 +39,11 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
     - **No pull to the source.** `pullSite()` does not know the source. The reader has to aim.
     - **The song stays whole.** The first idea took the lead voice out of the song until the reader found the source. It makes every song worse for every reader who does not search, and the music starts muted, so it cannot carry a mechanic alone. The source gets a voice of its own instead, the motif, which adds to the song and takes nothing from it.
 
-    The build changed twelve things against the plan.
+    The build changed fifteen things against the plan.
+
+    - **The carrier has a reach.** Decision 3 states that the carrier is always heard. Every landing then said the same thing, and the first landing asked no question. `CARRIER_REACH` in `site.js` is `2 * PI / 3`, a third of the circumference, and `carrierAt()` gives null past it: no block, no fix, no wedge. A silent landing states a fact of its own. The error now runs from 2 to 10 degrees over the reach and no longer over pi.
+    - **The fifth block pulses, and it opens a brief.** Risk 4 gives the block one flash on the first landing of a world, and a reader can miss one flash and still not know what the block is. The block now pulses until the reader opens the brief of that world, and it is a control: a press opens `<dialog id="carrier-brief">`, which names the instrument and the three phases. The store keeps a `briefed` flag per seed. Under `prefers-reduced-motion` the pulse is a static highlight.
+    - **A find leaves a mini wreck on the globe, and no ring.** A ring is the mark of a search, and the search is over. The globe now carries the body of `wreckGeometry()` at the source, 0.06 globe radii tall, on the terrain of its cell, with a lamp that blinks. `markFound()` drops the fixes with the find, and the Carrier row gains an **Aim** chip that turns the camera onto the cell of the source.
 
     - **The needle on the ground takes the frame of the patch box, and not `groundBasis()`.** The box runs x along the u axis of its cell and z along the v axis, and (u, up, v) is left-handed, so the box is the mirror of the sky frame in x. A needle that came through `groundBasis()` pointed at the mirror of the source and away from the wreck. `carrierBox()` in `site.js` reads the slope of the map of the box instead. The mirror was an older defect and it closed on 2026-09-19: the box now runs z against v and is right-handed; see "The box is right-handed" in `docs/probe.md`. The needle still takes `carrierBox()` and not `groundBasis()`, because the map of the box holds no angle, and check 5 of `tools/carrier-check.mjs` fails on a mirror. The three digits stay the true bearing of the globe, because the wedge of a fix is drawn on the globe.
     - **The carrier block sits at the top left.** The plan gave the fifth block no place. The right edge of the overlay holds the altitude ladder, so the block took the left.
@@ -407,10 +411,23 @@ At the pixel count a phone really asks for, 589 by 1,090, the same LOW site read
 
 Added with issue 34. These notes record the constants and the reasons the issue text did not fix.
 
+**The reach, `CARRIER_REACH = 2 * PI / 3` in `site.js`.** The carrier reaches a third of the
+circumference and no further. The first build heard the carrier from every cell, and the error alone
+carried the search; every landing then said the same thing, and the first landing of a world asked
+no question. `carrierAt()` now gives null past the reach, and the landing shows no block, stores no
+fix, and draws no wedge. A landing that hears nothing states a fact of its own, which is the fact
+the reader needs first: the source lies more than a third of the way round from here.
+
+A third is the value because the reach must leave a real choice. A half would silence almost
+nothing, and a quarter would leave a reader who lands badly twice with no reading at all. At a third
+about three landings in four hear the carrier, which `tools/carrier-check.mjs` reports.
+
 **The error, `CARRIER_ERR = [2, 10]` in `site.js`.** The error is 2 degrees on the cell of the
-source and 10 degrees at its antipode, straight in the arc. Two degrees is tight enough that a near
-fix reads as an answer, and 10 degrees is wide enough that two fixes from two continents cross over
-a region and not over a point.
+source and 10 degrees at the edge of the reach, straight in the arc. Two degrees is tight enough
+that a near fix reads as an answer, and 10 degrees is wide enough that two fixes from two continents
+cross over a region and not over a point. The error ran over pi before the reach; a fix at the edge
+of the reach then stated 7.7 degrees, and the widest error the reader ever saw stood at an arc no
+landing could reach.
 
 The first value was `[3, 25]`. Two far wedges then crossed over a quarter of a hemisphere, and the
 search took many landings. With 2 to 10 two far fixes cross over a region about 15 cells wide, a
@@ -520,6 +537,49 @@ stood before eight wide wedges with no cross in them. A fix writes about 46 char
 one seed takes about 240 bytes and 200 seeds take about 50 kB at the very worst. That stands well
 inside the 5 MB most browsers hold, and 200 seeds is over three times the 60 worlds the sidebar
 keeps, so that bound cannot bite a real search.
+
+**The pulse and the brief, in `probe-hud.js`, `style.css`, and `app.js`.** Risk 4 asks for one flash
+of the fifth block on the first landing of a world. A reader can miss one flash, and a reader who
+sees it still does not know what the block is for. The block pulses on every landing that hears the
+carrier until the reader opens the brief of that world, and the store keeps the `briefed` flag per
+seed, beside the find. The pulse is a calm 2.6 s cycle of the border and the glow and it moves
+nothing, so it does not pull the eye off the world; under `prefers-reduced-motion` it is the same
+border and the same glow with no animation.
+
+The block is a `<button>`, so the keyboard reaches it and a screen reader names it. `#probe-hud`
+holds `pointer-events: none` and this one block takes `pointer-events: auto`, so a press on it never
+starts a look drag and never picks a plant; every other gesture still belongs to the ground under
+it. The ground holds no pointer lock, so nothing has to be released, but the ground does listen for
+the flight keys on the window, and the keys of a modal dialog reach it. So `openBrief()` stops the
+controls of the ground while the brief stands open and the close gives them back.
+
+The brief itself is a native `<dialog>` built the way the about dialog is built, with the same card,
+the same close button, and the Escape key of the browser. It states four steps and it names no
+control the reader has to find. A found world does not pulse: a reader who has read the log knows
+what the block is.
+
+**The mini wreck of a find, `WRECK_H = 0.06` in `carrier-globe.js`.** The first build left one ring
+at the source after the find. A ring is the mark of a search and the search is over, so the ring
+said nothing the reader did not know, and a reader who came back a month later still had to hunt for
+the cell. The globe now carries the wreck itself: the body of `wreckGeometry()`, the same builder
+the patch uses, scaled to 0.06 globe radii and standing on the terrain of its cell with its up axis
+along the surface normal.
+
+0.06 is the relief of the terrain, so the model reads as a thing of the world and not as a second
+planet. It is five times the 0.011 units a plant of the globe stands, which is what makes it
+findable, and it spreads about 3.9 cells from the middle of its cell, which is under half the square
+the site marker draws. The body takes a `MeshStandardMaterial` in `WRECK_HULL`, the hull colour of
+the ground wreck, with 0.22 of that colour as emissive: without it the model is a black chip over
+the dark half of the world. The lamp is an additive shape over the mast at 0.07 of the height, and
+it blinks on a 2.4 s clock from `updateCarrierGroup()`. The lamp of the ground wreck is 0.04 of its
+body, which would be under a pixel from orbit.
+
+Neither mesh answers a ray. `pickDirs()` in `site.js` takes the sphere and not the scene, so nothing
+here can catch a tap today; the empty raycast states the rule all the same. `markFound()` drops the
+fixes with the find, so a found world stores no new fix and paints no wedge, and the Carrier row of
+the sidebar gains an **Aim** chip in orbit: it turns the camera onto the cell of the source with
+`placeCameraOverSite()` and starts the aim, so the reader stands in the state a tap on that cell
+gives and the next tap sends the probe.
 
 ## Phases
 

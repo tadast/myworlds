@@ -16,8 +16,8 @@
 // ocean shader add to their own fragments, so it lies exactly on the ground it marks and it holds
 // no parallax at any camera. patchCarrierMaterial() below installs it.
 //
-// The dot of a fix and the ring of a find stay as geometry, because each one marks one cell and a
-// few triangles draw it. Both lie on the terrain: see drapeR().
+// The dot of a fix and the mini wreck of a find stay as geometry, because each one marks one cell.
+// Both stand on the terrain: see drapeR().
 //
 // The group rides under current.planet, so the dots turn with the world. The wedges turn with the
 // world for free, because the shader reads the direction of a fragment in the LOCAL frame of the
@@ -29,7 +29,11 @@
 // carrier-fix-check.mjs builds the planes with wedgePlanes(), the one function the uniforms come
 // from, and reads them back through bearingTo() and carrierAt() of site.js.
 import * as THREE from 'three';
-import { CELL, groundRadius, sourceSite } from './site.js';
+import { CELL, groundRadius, siteDir, sourceSite } from './site.js';
+// The mini wreck of a find is the wreck of the ground, at the scale of the globe. ground-source.js
+// builds that body in wreckGeometry(), which takes no DOM and does nothing at import, so the two
+// models come from one builder and they cannot drift apart.
+import { wreckGeometry, WRECK_HULL } from './ground-source.js';
 
 // The number of wedges the shader holds. Four uniform slots of three vec3 and two floats cost 44
 // floats, which every driver carries with room to spare. The first build held eight, and after
@@ -73,22 +77,40 @@ const WEDGE_SOFT = Math.sin(THREE.MathUtils.degToRad(0.15));
 // plane. carrierAt() tops the error at 10 degrees today, so the clamp never bites.
 const MAX_ERR = 89.5;
 
-const MARK_ALPHA = 0.5;         // the dot of a fix and the ring of a find, which must read alone
+const MARK_ALPHA = 0.5;         // the dot of a fix, which must read alone
 const DOT_CELLS = 0.35;         // cells of arc: the radius of the dot at a site
 const DOT_SEGS = 16;
-const RING_CELLS = 1.5;         // cells of arc: the radius of the ring a find leaves at the source
-const RING_WIDTH = 0.3;         // cells of arc: the width of the band of that ring
-// The ring carries 72 steps, so one step is 0.0013 globe units of arc against a height map texel of
-// 0.016. The band therefore reads every value the height map holds under it and the chord between
-// two steps sags by nothing the reader can see.
-const RING_SEGS = 72;
-// globe units: the lift of the dot and the ring over the terrain. Both must clear the flora of the
-// globe, which stands 0.011 units tall: a lift of 0.0012 put the ring under the trees of a forest,
-// and the reader saw no ring. The height map is also smoother than the facets of the globe, and the
-// lift covers that too. It stays far under the 0.11 globe units the camera keeps over the surface
-// at its nearest, so a mark still reads as paint on the ground and not as a thing in the sky.
-// depthTest stays on, so the far side of the globe still hides the part behind it.
+// globe units: the lift of the dot and of the mini wreck over the terrain. Both must clear the
+// flora of the globe, which stands 0.011 units tall: a lift of 0.0012 put a mark under the trees of
+// a forest, and the reader saw nothing. The height map is also smoother than the facets of the
+// globe, and the lift covers that too. It stays far under the 0.11 globe units the camera keeps
+// over the surface at its nearest, so a mark still reads as a thing on the ground and not as a
+// thing in the sky. depthTest stays on, so the far side of the globe still hides the part behind it.
 export const DRAPE_LIFT = 0.014;
+
+// ---------------------------------------------------------------- the mini wreck of a find
+// The first build left one ring at the source after the find. A ring is the mark of a search and
+// the search is over, so the ring said nothing the reader did not know. The globe now carries the
+// wreck itself: the same body ground-source.js puts on the patch, at the scale of the globe, on the
+// terrain of its own cell, with a lamp that blinks. A reader who comes back to the world a month
+// later reads the answer off the globe with no card and no row.
+export const WRECK_H = 0.06;    // globe radii: the height of the whole model, the lamp included
+// parts of WRECK_H: the size of the lamp over the mast. The lamp of the ground wreck is 0.04 of the
+// body, which is under a pixel from orbit, so this one stands wider. Past about 0.1 the lamp reads
+// as a shape of its own and the model stops reading as a machine.
+const WRECK_LAMP = 0.07;
+// The least size of the lamp, as a part of its distance from the camera. The grey model is a few
+// pixels from the home zoom, so the lamp holds about 10 pixels there and the reader can find it.
+// Near the model the lamp keeps its own size.
+const WRECK_LAMP_MIN = 0.007;
+// The hull stands on the lit globe and on the night side alike, so the body gives a little of its
+// own colour back. Without it the model is a black chip over the dark half of the world.
+const WRECK_EMIS = 0.22;
+const WRECK_PERIOD = 2.4;       // seconds: one blink of the lamp
+const WRECK_FLOOR = 0.25;       // the lamp never goes fully out, so the model reads between beats
+// The fall of one blink, over the period. A sharp rise and a slow fall read as a machine that
+// answers a clock; a plain sine reads as a thing that breathes.
+const WRECK_FALL = 4.5;
 const FADE_S = 1.2;             // seconds: a new wedge fades in over the end of the ascent
 const RENDER_ORDER = 2;         // after the terrain and before the atmosphere shells of app.js
 
@@ -97,6 +119,7 @@ const _north = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _tan = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _yUp = new THREE.Vector3(0, 1, 0);   // the up axis of wreckGeometry(), in its own frame
 
 // The three axes of a bearing at a site: east, north, and up.
 //
@@ -373,28 +396,89 @@ function addDotShape(part, site, world, hm, segs = DOT_SEGS) {
   for (let i = 0; i < segs; i++) part.idx.push(base, base + 1 + i, base + 1 + (i + 1) % segs);
 }
 
-// The ring a find leaves at the source: a thin band about 1.5 cells of arc out from the cell.
+// The mini wreck a find leaves at the source, or null for a world with no source.
 //
-// Every vertex takes the radius of the terrain under it, so the band lies on the relief and rises
-// and falls with it. The steps are close enough that the two vertices of one step read the same
-// hill, and the reader sees a mark painted on the ground.
-function addRingShape(part, site, world, hm) {
-  const base = part.pos.length / 3;
-  frameAt(site);
-  const inner = (RING_CELLS - RING_WIDTH * 0.5) * CELL;
-  const outer = (RING_CELLS + RING_WIDTH * 0.5) * CELL;
-  const tan = new THREE.Vector3(), at = new THREE.Vector3();
-  for (let i = 0; i <= RING_SEGS; i++) {
-    tangentAt(i * 360 / RING_SEGS, tan);
-    for (const arc of [inner, outer]) {
-      walk(arc, tan, at);
-      push(part, at, drapeR(world, hm, at));
-    }
-  }
-  for (let i = 0; i < RING_SEGS; i++) {
-    const a = base + i * 2, b = a + 1, c = a + 2, d = a + 3;
-    part.idx.push(a, b, c, b, d, c);
-  }
+// The body is wreckGeometry() of ground-source.js, which stands about 18 units tall in the units of
+// a patch. The whole model is scaled to WRECK_H globe radii, so the reader reads it as a thing on
+// the globe and not as a second planet. It stands on the terrain of its cell, its up axis along the
+// surface normal there, and it turns by the yaw of the source when the world states one.
+//
+// Neither mesh answers a ray. The pick of the globe in site.js takes the sphere and not the scene,
+// so nothing here can catch a tap today; the empty raycast states the rule all the same, so a later
+// pick that walks the scene still aims at the cell under the model and not at the model.
+const _lampAt = new THREE.Vector3();
+function makeWreckModel(world, hm) {
+  const at = sourceSite(world);
+  if (!at) return null;
+  const geo = wreckGeometry();
+  const bb = geo.boundingBox;
+  const lamp = geo.userData.lamp || [0, bb.max.y, 0];
+  const foot = Math.min(bb.min.y, 0);                   // the ground under the hull, in patch units
+  const top = Math.max(bb.max.y, lamp[1]);
+  const k = WRECK_H / Math.max(top - foot, 1e-6);       // globe radii per unit of the patch
+
+  const obj = new THREE.Group();
+  obj.name = 'carrier-wreck';
+  const dir = siteDir(at.lat, at.lon, new THREE.Vector3());
+  obj.position.copy(dir).multiplyScalar(drapeR(world, hm, dir));
+  obj.quaternion.setFromUnitVectors(_yUp, dir);         // the up axis follows the surface normal
+  obj.rotateY((world.source && world.source.yaw) || 0);
+  obj.scale.setScalar(k);
+
+  const hull = new THREE.Color(WRECK_HULL);
+  const mat = new THREE.MeshStandardMaterial({
+    color: hull, emissive: hull.clone().multiplyScalar(WRECK_EMIS),
+    roughness: 0.6, metalness: 0.1, flatShading: true,
+  });
+  const body = new THREE.Mesh(geo, mat);
+  body.position.y = -foot;
+  body.renderOrder = RENDER_ORDER;
+  body.raycast = () => {};
+  obj.add(body);
+
+  // The lamp: one additive shape over the mast, in the accent the wedges took. It blinks on the
+  // clock of updateCarrierGroup() and it needs no light of its own, because additive paint reads on
+  // the night side as well as on the lit side.
+  const lampGeo = new THREE.OctahedronGeometry(WRECK_LAMP * (top - foot), 0);
+  const lampMat = new THREE.MeshBasicMaterial({
+    color: accentOf(world), transparent: true, opacity: 0.8,
+    depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending,
+  });
+  const lampMesh = new THREE.Mesh(lampGeo, lampMat);
+  lampMesh.position.set(lamp[0], lamp[1] - foot, lamp[2]);
+  lampMesh.renderOrder = RENDER_ORDER + 1;
+  lampMesh.raycast = () => {};
+  // The scale takes the distance of the camera, which updateCarrierGroup() does not know. The
+  // matrix takes the new scale on the next frame, and one frame of lag does not show.
+  const lampR = WRECK_LAMP * WRECK_H;                   // globe radii: the lamp at its own size
+  lampMesh.userData.blink = 1;
+  lampMesh.onBeforeRender = (renderer, scene, camera) => {
+    const d = _lampAt.setFromMatrixPosition(lampMesh.matrixWorld).distanceTo(camera.position);
+    lampMesh.scale.setScalar(Math.max(1, d * WRECK_LAMP_MIN / lampR) * lampMesh.userData.blink);
+  };
+  obj.add(lampMesh);
+
+  return { obj, geo, mat, lampGeo, lampMat, lamp: lampMesh, t: 0 };
+}
+
+// One blink. The lamp rises at once and falls away over the period, so the eye reads a machine that
+// answers a clock. Nothing else of the model moves.
+function blinkWreck(w, dt) {
+  w.t = (w.t + dt) % WRECK_PERIOD;
+  const k = WRECK_FLOOR + (1 - WRECK_FLOOR) * Math.exp(-(w.t / WRECK_PERIOD) * WRECK_FALL);
+  w.lampMat.opacity = 0.3 + 0.6 * k;
+  w.lamp.userData.blink = 0.7 + 0.5 * k;
+}
+
+// Take the mini wreck off a group and give its buffers back.
+function dropWreck(u) {
+  if (!u.wreck) return;
+  u.wreck.obj.removeFromParent();
+  u.wreck.geo.dispose();
+  u.wreck.lampGeo.dispose();
+  u.wreck.mat.dispose();
+  u.wreck.lampMat.dispose();
+  u.wreck = null;
 }
 
 function mesh(mat) {
@@ -433,8 +517,8 @@ const accentOf = (world) => (world && world.palette && world.palette.fauna && wo
 //
 // Two meshes and two materials, whatever the number of fixes: the dots of the settled fixes in one
 // and the dot that fades in on the last landing in the other. The wedges themselves cost no mesh at
-// all; they ride in the uniforms of the terrain and of the sea. A found world draws one ring
-// instead and nothing else.
+// all; they ride in the uniforms of the terrain and of the sea. A found world draws no dot and no
+// wedge at all, and carries the mini wreck at the source instead.
 export function makeCarrierGroup(world, record, heightMap = null) {
   if (!world || !world.source || !world.source.dir) return null;
   const accent = accentOf(world);
@@ -454,21 +538,23 @@ export function makeCarrierGroup(world, record, heightMap = null) {
     fixes: (record && Array.isArray(record.fixes) ? record.fixes : []).slice(),
     found: !!(record && record.found),
     fade: null,       // { fix, t, k } while one wedge fades in
+    wreck: null,      // the mini wreck of a find. makeWreckModel() builds it.
   };
   rebuild(group);
   return group;
 }
 
-// Draw the dots of the settled fixes, or the ring of a find, and state the wedges in the uniforms.
-// It runs on every change and not on every frame.
+// Draw the dots of the settled fixes, or stand the mini wreck at the source, and state the wedges
+// in the uniforms. It runs on every change and not on every frame.
 function rebuild(group) {
   const u = group.userData;
   const marks = newPart();
   if (u.found) {
-    // The find takes the place of the search: no wedge and no dot, and one ring at the source.
-    const at = sourceSite(u.world);
-    if (at) addRingShape(marks, at, u.world, u.hm);
+    // The find takes the place of the search: no wedge and no dot, and the wreck at the source.
+    if (!u.wreck) u.wreck = makeWreckModel(u.world, u.hm);
+    if (u.wreck && u.wreck.obj.parent !== group) group.add(u.wreck.obj);
   } else {
+    dropWreck(u);
     for (const fix of u.fixes) addDotShape(marks, fix, u.world, u.hm);
   }
   setShape(u.meshes.marks, marks);
@@ -508,8 +594,8 @@ export function addWedge(group, fix, { fade = false } = {}) {
 }
 
 // The reader has found the source. Slice 3 calls onSourceFound() in app.js, which calls this.
-// The ring the rebuild draws lies on the terrain, so a caller that gives a new world gives its
-// height map with it.
+// The mini wreck the rebuild stands at the source sits on the terrain, so a caller that gives a new
+// world gives its height map with it.
 export function setFound(group, world, heightMap) {
   if (!group) return;
   const u = group.userData;
@@ -522,11 +608,13 @@ export function setFound(group, world, heightMap) {
   rebuild(group);
 }
 
-// The fade, in seconds. Nothing else on the group moves, so a group with no fade costs one test.
-// The fading fix stands last in the uniforms, so the fade writes one float and one opacity.
+// The lamp of a find and the fade of a new wedge, in seconds. Nothing else on the group moves, so a
+// group with neither costs two tests. The fading fix stands last in the uniforms, so the fade
+// writes one float and one opacity.
 export function updateCarrierGroup(group, dt) {
   if (!group) return;
   const u = group.userData;
+  if (u.wreck) blinkWreck(u.wreck, dt);
   if (!u.fade) return;
   u.fade.t += dt;
   const k = THREE.MathUtils.clamp(u.fade.t / FADE_S, 0, 1);
@@ -545,6 +633,7 @@ export function disposeCarrierGroup(group) {
   if (!group) return;
   const u = group.userData;
   clearUniforms(group);
+  dropWreck(u);
   for (const m of Object.values(u.meshes || {})) m.geometry.dispose();
   for (const m of Object.values(u.mats || {})) m.dispose();
   if (group.parent) group.parent.remove(group);

@@ -16,6 +16,11 @@ crew.
 The plan and the terms are in `docs/issues/34-the-carrier.md`. Use the words of that table:
 carrier, source, bearing, fix, wedge, wreck, motif, log.
 
+**The carrier does not reach the far side of the world.** `CARRIER_REACH` in `site.js` is a third of
+the circumference, and `carrierAt()` gives null past it. A landing past the reach shows no carrier
+block, stores no fix, and draws no wedge, and the reader who hears nothing learns a fact too. The
+log does not read that bound: a source stands where `makeSource()` put it, whoever can hear it.
+
 ## Where the log sits
 
 | Stage | File | Runs in | Output |
@@ -52,6 +57,10 @@ to prove that no entry after that day names that person.
 
 The page must not show any of this before the reader finds the wreck. The log stands nowhere else
 on the world: no other field of `world` holds the text.
+
+After the find the globe carries a mini model of the wreck at the source, and the wedges of the
+search are gone. `carrier-globe.js` builds that model from `wreckGeometry()` of `ground-source.js`,
+so the wreck of the patch and the wreck of the globe come from one builder.
 
 ## The one difference from the fauna and the flora
 

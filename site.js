@@ -245,7 +245,7 @@ export function activitySite(world) {
 // of a face, so the needle comes from the slope of that map and not from the bearing less a twist.
 // See carrierBox(). tools/carrier-check.mjs proves both jobs, and it fails when the box and the
 // frame of groundBasis() stand as a mirror of each other.
-// degrees: the error at the source and at its antipode, straight in the arc between them.
+// degrees: the error at the source and at the edge of the reach, straight in the arc between them.
 //
 // The first value was 3 to 25. Two far fixes then crossed over a quarter of a hemisphere, and the
 // search took many landings. With 2 to 10 two far fixes cross over a region about 15 cells wide, a
@@ -253,6 +253,14 @@ export function activitySite(world) {
 // rest. That is the three to five landings the plan asks for.
 export const CARRIER_ERR = [2, 10];
 export const CARRIER_RANGE = 6;       // cells of arc: the range states nothing further out
+
+// radians: how far the carrier reaches. It is a third of the circumference, so the source stands
+// silent over the far side of the world. A carrier every reader hears everywhere says the same
+// thing on every cell: land anywhere, take a fix, land again. A reach turns the first landing into
+// a real question, because a landing that hears nothing states a fact too: the source is more than
+// a third of the way round from here. carrierAt() gives null past the reach, and the caller then
+// shows no block, stores no fix, and draws no wedge.
+export const CARRIER_REACH = 2 * Math.PI / 3;
 
 const _up = new THREE.Vector3();
 const _to = new THREE.Vector3();
@@ -319,18 +327,20 @@ export function bearingTo(site, dir) {
 // The instrument does not state the true bearing. It states one inside the wedge, and the offset
 // comes from a hash of the seed and the cell, so a fix is the same on every visit, two landings on
 // one cell never disagree, and the true bearing always lies inside the wedge. The error runs from
-// 2 degrees at the source to 10 degrees at its antipode, straight in the arc: two far fixes cross
-// wide, and the reader then decides between a third far fix and a near one. Decision 3 of issue 34.
+// 2 degrees at the source to 10 degrees at the edge of the reach, straight in the arc: two far
+// fixes cross wide, and the reader then decides between a third far fix and a near one. Decision 3
+// of issue 34, with the reach of CARRIER_REACH over it.
 //
 // The site takes the snap first, because the fix belongs to the cell and not to two decimals of a
-// degree. Gives null for a world with no source.
+// degree. Gives null for a world with no source, and null for a site past the reach.
 export function carrierAt(world, site) {
   const src = world && world.source;
   if (!src || !src.dir || !site) return null;
   const at = snapSite(site);
   const cell = siteCell(at);
   const arc = arcTo(at, src.dir);
-  const err = CARRIER_ERR[0] + (CARRIER_ERR[1] - CARRIER_ERR[0]) * (arc / Math.PI);
+  if (arc > CARRIER_REACH) return null;      // the carrier does not reach the far side of the world
+  const err = CARRIER_ERR[0] + (CARRIER_ERR[1] - CARRIER_ERR[0]) * (arc / CARRIER_REACH);
   const off = hash01(`${world.seed}|carrier|${cell.face}|${cell.i}|${cell.j}`) * 2 - 1;
   const brg = (bearingTo(at, src.dir) + off * err + 360) % 360;
   // Decision 7: the range states nothing until the reader stands near the source.

@@ -33,7 +33,12 @@ const PICK_PAD = 6;          // units: the tap box stands this far out from the 
 // The metal of a machine. It takes no colour from the palette: a wreck must read as a made thing on
 // a green world and on an ice world alike, and a hull in the colours of the biome would read as
 // rock. Only the lamp takes the accent of the world.
-const C_HULL = '#8f959d';
+//
+// WRECK_HULL is the one colour that leaves this file. The mini wreck a find leaves on the globe is
+// far too small for a colour per part, so it takes the hull colour for the whole body and the two
+// wrecks then read as one machine. See carrier-globe.js.
+export const WRECK_HULL = '#8f959d';
+const C_HULL = WRECK_HULL;
 const C_HULL_DARK = '#5c626a';
 const C_BURN = '#3b3a3c';
 const C_DISH = '#c2c8d0';

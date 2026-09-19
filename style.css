@@ -334,14 +334,15 @@ button.probe[hidden] { display: none; }
   #creature[data-subject="source"] .cview { height: min(46vw, 200px); }
 }
 
-/* ---------- about
-   A native <dialog>. The browser gives the focus trap, the Escape key, and the top layer. */
-#about {
+/* ---------- about, and the brief of the carrier
+   Two native <dialog> elements of one style. The browser gives the focus trap, the Escape key, and
+   the top layer. The brief of issue 34 takes the same card, so the two read as one app. */
+#about, #carrier-brief {
   width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0;
   background: transparent; border: 0; color: var(--text); overflow: visible;
 }
-#about::backdrop { background: rgba(7, 10, 22, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-#about[open] { animation: about-in 0.28s ease-out; }
+#about::backdrop, #carrier-brief::backdrop { background: rgba(7, 10, 22, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+#about[open], #carrier-brief[open] { animation: about-in 0.28s ease-out; }
 @keyframes about-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
 .about-card {
   position: relative; margin: 0; padding: 28px 26px 22px; text-align: center;
@@ -356,8 +357,19 @@ button.probe[hidden] { display: none; }
   box-shadow: 0 0 34px rgba(124, 196, 255, 0.4), inset -10px -8px 20px rgba(0, 0, 0, 0.45);
   animation: spin 24s linear infinite;
 }
-@media (prefers-reduced-motion: reduce) { #about[open], .about-orb { animation: none; } }
-#about h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.3px; }
+@media (prefers-reduced-motion: reduce) { #about[open], #carrier-brief[open], .about-orb { animation: none; } }
+#about h2, #carrier-brief h2 { margin: 0 0 14px; font-size: 24px; font-weight: 600; letter-spacing: 0.3px; }
+#about h2 { margin-bottom: 0; }
+/* The about card is centred, because it is four short paragraphs about the app. The brief is a set
+   of instructions, so its body reads left to right under a centred title. */
+#carrier-brief p { text-align: left; }
+/* The four steps of the search. */
+.brief-steps {
+  margin: 16px 0 0; padding: 0 0 0 22px; text-align: left;
+  color: #dfe4ff; font-size: 14px; line-height: 1.55;
+}
+.brief-steps li { margin-bottom: 8px; }
+.brief-steps li:last-child { margin-bottom: 0; }
 .about-card .about-kicker {
   margin: 4px 0 18px; color: var(--accent-2);
   font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase;
@@ -475,10 +487,22 @@ button.probe[hidden] { display: none; }
    on the right because the right edge already carries the altitude ladder, and a landscape phone
    leaves no room for the two. The bottom left belongs to the uplink block and the bottom middle to
    the floating buttons, so this corner is the one free corner of the frame. */
+/* The block is a button, so it drops the styling a browser gives one and keeps the styling of the
+   overlay. It is the one part of the overlay that takes a pointer event: #probe-hud holds
+   pointer-events: none, so every other gesture still reaches the ground under it, and the press on
+   this block never starts a look drag and never picks a plant. The padding gives a finger a target
+   of about 44 px on a phone without moving the readings. */
 .hud-carrier {
-  position: absolute; top: calc(var(--hud-top) + 62px); left: calc(var(--hud-left) + 16px);
+  position: absolute; top: calc(var(--hud-top) + 54px); left: calc(var(--hud-left) + 8px);
   display: flex; align-items: center; gap: 10px;
+  pointer-events: auto; cursor: pointer; text-align: left;
+  margin: 0; padding: 8px; border: 1px solid transparent; border-radius: 12px;
+  background: none; color: inherit; font: inherit; letter-spacing: inherit;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.2s, background-color 0.2s;
 }
+.hud-carrier:hover { border-color: rgba(124, 196, 255, 0.45); background: rgba(7, 10, 22, 0.28); }
+.hud-carrier:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hud-carrier[hidden] { display: none; }
 .hud-dial {
   position: relative; flex: none; width: 38px; height: 38px;
@@ -497,16 +521,20 @@ button.probe[hidden] { display: none; }
 .hud-read b { display: block; color: var(--accent); text-shadow: 0 0 10px rgba(124, 196, 255, 0.45); }
 .hud-sub { display: flex; gap: 8px; }
 
-/* Risk 4 of issue 34: a reader may never look at the fifth block. It flashes once on the first
-   landing of each world, and no text says a word about it. */
-@keyframes hud-carrier-flash {
-  0% { opacity: 0.15; }
-  20% { opacity: 1; }
-  45% { opacity: 0.15; }
-  70% { opacity: 1; }
-  100% { opacity: 1; }
+/* Risk 4 of issue 34: a reader may never look at the fifth block. The block pulses on every landing
+   that hears the carrier until the reader opens the brief, and it then stands quiet on that world
+   for good. One flash on one landing is a thing a reader can miss, so the pulse does not stop. It
+   is a calm pulse of the border and the glow and it moves nothing, so it does not pull the eye off
+   the world. No text says a word about it. */
+@keyframes hud-carrier-pulse {
+  0%, 100% { border-color: rgba(124, 196, 255, 0.35); box-shadow: 0 0 0 rgba(124, 196, 255, 0); }
+  50% { border-color: rgba(124, 196, 255, 1); box-shadow: 0 0 22px rgba(124, 196, 255, 0.7); }
 }
-.hud-carrier.flash { animation: hud-carrier-flash 1.4s ease-in-out 1; }
+/* The dark plate holds the block against a bright sky, where the glow alone does not read. */
+.hud-carrier.pulse { background: rgba(7, 10, 22, 0.55); animation: hud-carrier-pulse 1.8s ease-in-out infinite; }
+/* The hint states that the block is a control. It shows only while the block pulses. */
+.hud-hint { display: none; color: var(--accent); }
+.hud-carrier.pulse .hud-hint { display: block; }
 
 /* the uplink block, inside the bottom left corner of the frame, clear of the floating buttons */
 .hud-link {
@@ -549,6 +577,11 @@ button.probe[hidden] { display: none; }
   .hud-warn { white-space: normal; text-align: center; max-width: calc(100vw - 48px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hud-ladder b, .hud-warn, .hud-dial i { transition: none; }
-  .hud-carrier.flash { animation: none; }
+  .hud-ladder b, .hud-warn, .hud-dial i, .hud-carrier { transition: none; }
+  /* A reader who asks for less motion still has to find the block, so the pulse becomes a static
+     highlight: the same border and the same glow, and nothing that moves. */
+  .hud-carrier.pulse {
+    animation: none;
+    border-color: rgba(124, 196, 255, 1); box-shadow: 0 0 22px rgba(124, 196, 255, 0.7);
+  }
 }
