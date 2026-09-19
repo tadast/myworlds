@@ -473,12 +473,25 @@ and a mark number, `NAMES` holds given names only, and `PET_NAME` holds plain wo
 `SourceInspector` in `ground-source.js` draws the card. The name of the ship takes `.cname`, the
 day count takes `.clatin`, the crew takes `.ccrew`, and the entries take `.clog`.
 
-A log may hold twenty entries, which is longer than a phone screen. So `.clog` scrolls inside the
-card and nothing else does: `#creature[data-subject="source"] .ccard` takes `overflow: hidden` and
-one grid row of `minmax(0, 1fr)`, and `.ctext` becomes a column that may shrink. The crew and the
-close button therefore stay on screen at 375 by 812 with twenty entries. A grid row is `auto` by
-default and grows to its content whatever the max height of the card says, which is why the row has
-to be told that it may shrink.
+The wreck card is a reader, and it has two columns. The left one says whose log this is: the
+wreck, and under it the crew, one person to a row, with the keeper marked. The right one is the
+name of the ship and the log. The left column is set by position and not by the grid, because
+`.ccrew` stands inside `.ctext` in the markup and has to stand under the preview on the screen. At
+720 pixels and under, the card is one column: the wreck as a band, the crew in a line, the log.
+
+An entry hangs off a rail with a dot at its day. The day is quiet and the text is what reads: a
+measure of 62 characters and open leading. The landing and the last entry carry a title, take the
+class `ctitled`, and take the accent.
+
+`.clog` scrolls inside the card and nothing else does, so the card holds a fixed height. Three
+rules keep the last line in sight:
+
+- The height reads `100dvh`, with `100vh` as the fallback. `100vh` is the large viewport on a
+  phone: it runs under the address bar, and the foot of a card that tall cannot be reached.
+- `.clog` fades at both ends with a mask, so a line at the edge reads as more text and not as a
+  cut line.
+- `.clog` carries 40 pixels of padding under the last entry, which is more than the fade. The
+  last line therefore scrolls clear of it.
 
 ## The audit
 

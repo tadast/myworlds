@@ -401,7 +401,7 @@ export class SourceInspector {
     // The log itself. A middle entry carries no title, and the header is then the day alone.
     const entries = (log && log.entries) || [];
     this.logEl.innerHTML = entries.length
-      ? entries.map((e) => `<div class="clog-entry"><h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p></div>`).join('')
+      ? entries.map((e) => `<div class="clog-entry${e.title ? ' ctitled' : ''}"><h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p></div>`).join('')
       : '<div class="clog-entry"><p>The recorder is dead. Nothing can be read from it.</p></div>';
     this.logEl.scrollTop = 0;
     this.card.hidden = false;

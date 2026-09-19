@@ -280,7 +280,9 @@ button.probe[hidden] { display: none; }
 #creature[hidden] { display: none; }
 .ccard {
   position: relative; display: grid; grid-template-columns: 320px 1fr; gap: 18px;
-  width: min(760px, 100%); max-height: calc(100vh - 24px); overflow: auto;
+  /* 100vh is the LARGE viewport on a phone: it runs under the address bar, and the last line of a
+     card that tall cannot be reached. dvh is the height the reader really has. */
+  width: min(760px, 100%); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow: auto;
   background: var(--glass); border: 1px solid var(--line); border-radius: 22px; padding: 18px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
 }
@@ -302,43 +304,104 @@ button.probe[hidden] { display: none; }
 .cstory { font-size: 14px; line-height: 1.45; margin: 0 0 12px; color: #dfe4ff; }
 .cnav { display: flex; gap: 8px; }
 .cnav .ghost { padding: 7px 12px; font-size: 13px; }
-/* The log of the wreck, issue 34. Up to twenty entries, each under a "Day n" header, in the type
-   of the story above. The card shows one subject at a time, so each subject hides the blocks it
-   does not use. A world holds one source, so the log takes no arrows.
+/* The log of the wreck, issue 34. The card shows one subject at a time, so each subject hides the
+   blocks it does not use. A world holds one source, so the log takes no arrows.
 
-   The log is the one block of this card that can run past the height of a phone, so it scrolls
-   inside itself. The card then holds its height, and the crew and the close button stay on screen
-   at 375 by 812 with twenty entries. The grid row has to be told it may shrink: a grid row is
-   `auto` by default and grows to its content, whatever the max-height of the card says. */
-#creature[data-subject="source"] .ccard { overflow: hidden; grid-template-rows: minmax(0, 1fr); }
-#creature[data-subject="source"] .ctext { display: flex; flex-direction: column; min-height: 0; }
-#creature[data-subject="source"] .clog { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-/* The crew, under the name of the ship. One row per person on a phone, and it does not scroll. */
-.ccrew { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 0 0 10px; font-size: 12px; color: var(--muted); }
-.ccrew span { white-space: nowrap; }
-.ccrew i { font-style: normal; opacity: 0.7; margin-left: 4px; }
-.ccrew .ckeeper { color: var(--text); }
-.clog-entry { margin: 0 0 12px; }
-.clog-entry h3 {
-  margin: 0 0 3px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
-  text-transform: uppercase; color: var(--accent);
+   The wreck card is a reader, and it has two columns. The left one says whose log this is: the
+   wreck, and under it the crew, one person to a row. The right one is the name of the ship and the
+   log. The left column is set by position and not by the grid, because the crew stands inside
+   .ctext in the markup and has to stand under the preview on the screen.
+
+   The log is the one block that can run past the height of a screen, so it scrolls inside itself
+   and the card holds a fixed height. The scroller fades at both ends and carries padding under the
+   last entry, so the last line scrolls clear of the fade and is never cut by the edge. */
+#creature[data-subject="source"] .ccard {
+  --side: 264px;
+  display: block; overflow: hidden;
+  /* A page of text needs a quiet ground, so this card is nearer to solid than the other two. */
+  background: rgba(11, 15, 32, 0.93);
+  width: min(920px, 100%);
+  height: min(700px, calc(100vh - 24px)); height: min(700px, calc(100dvh - 24px));
+  padding: 22px 8px 0 calc(var(--side) + 46px);
 }
-.clog-entry p { margin: 0; font-size: 14px; line-height: 1.45; color: #dfe4ff; }
+#creature[data-subject="source"] .cview {
+  position: absolute; left: 22px; top: 22px; width: var(--side); height: var(--side);
+}
+#creature[data-subject="source"] .ctext { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+#creature[data-subject="source"] .cname { font-size: 26px; margin: 2px 44px 0 0; letter-spacing: 0.01em; }
+#creature[data-subject="source"] .clatin { margin: 2px 44px 14px 0; }
+#creature[data-subject="source"] .clog {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 14px 22px 44px 22px; margin-left: -4px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 36px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 36px), transparent 100%);
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+/* The crew, under the wreck: one person to a row, the job on the right. The person who kept the
+   log is marked, because the log is written in that voice. */
+.ccrew { color: var(--muted); font-size: 13px; }
+#creature[data-subject="source"] .ccrew {
+  position: absolute; left: 22px; top: calc(var(--side) + 38px); width: var(--side);
+  display: flex; flex-direction: column; margin: 0;
+}
+.ccrew span { display: flex; justify-content: space-between; gap: 12px; padding: 7px 2px; border-top: 1px solid var(--line); }
+.ccrew span:last-child { border-bottom: 1px solid var(--line); }
+.ccrew i { font-style: normal; opacity: 0.75; text-align: right; }
+.ccrew .ckeeper { color: var(--text); }
+.ccrew .ckeeper i::after { content: ' · keeps the log'; color: var(--accent); opacity: 1; }
+/* An entry hangs off a rail, with a dot at its day. The day is quiet and the text is what reads:
+   a measure of 62 characters and open leading, as a page has. The landing and the last entry carry
+   a title, and those two take the accent. */
+.clog-entry { position: relative; margin: 0; padding: 0 0 18px 20px; border-left: 1px solid var(--line); }
+.clog-entry:last-child { border-left-color: transparent; padding-bottom: 0; }
+.clog-entry h3 {
+  position: relative; margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em; line-height: 1;
+  text-transform: uppercase; color: var(--muted);
+}
+.clog-entry h3::before {
+  content: ''; position: absolute; left: -24px; top: 2px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted); box-shadow: 0 0 0 3px rgba(12, 16, 34, 0.9);
+}
+.clog-entry.ctitled h3 { color: var(--accent); }
+.clog-entry.ctitled h3::before { background: var(--accent); }
+.clog-entry p { margin: 0; max-width: 62ch; font-size: 14.5px; line-height: 1.6; color: #dfe4ff; }
 #creature[data-subject="source"] .ctags,
 #creature[data-subject="source"] .cstory,
 #creature[data-subject="source"] .cnav { display: none; }
 #creature:not([data-subject="source"]) .clog,
 #creature:not([data-subject="source"]) .ccrew { display: none; }
+/* A short window: the wreck gives its height to the crew. */
+@media (max-height: 600px) and (min-width: 721px) {
+  #creature[data-subject="source"] .ccard { --side: 200px; }
+  #creature[data-subject="source"] .cview { height: 140px; }
+  #creature[data-subject="source"] .ccrew { top: 176px; }
+}
 @media (max-width: 720px) {
   .ccard { grid-template-columns: 1fr; gap: 12px; padding: 14px; }
   .cview { width: 100%; height: min(60vw, 300px); }
   .cname { font-size: 19px; }
   .cstory { font-size: 13px; }
-  .clog-entry p { font-size: 13px; }
-  /* One column here, so the card has two rows: the preview, then the text. The text row is the
-     one that may shrink, and the log inside it is what scrolls. */
-  #creature[data-subject="source"] .ccard { grid-template-rows: auto minmax(0, 1fr); }
-  #creature[data-subject="source"] .cview { height: min(46vw, 200px); }
+  /* One column. The wreck is a band across the top, the crew runs in a line under the name, and
+     the log takes all the height that is left. The card fills the screen the reader really has. */
+  #creature[data-subject="source"] .ccard {
+    display: flex; flex-direction: column; gap: 12px; padding: 14px 6px 0 14px;
+    height: calc(100vh - 24px); height: calc(100dvh - 24px);
+  }
+  #creature[data-subject="source"] .cview {
+    position: relative; left: auto; top: auto; flex: 0 0 auto;
+    width: calc(100% - 8px); height: clamp(96px, 20vh, 170px);
+  }
+  #creature[data-subject="source"] .ctext { flex: 1 1 auto; height: auto; }
+  #creature[data-subject="source"] .cname { font-size: 21px; margin-right: 8px; }
+  #creature[data-subject="source"] .clatin { margin: 2px 8px 10px 0; }
+  #creature[data-subject="source"] .ccrew {
+    position: static; width: auto; flex-direction: row; flex-wrap: wrap; gap: 4px 14px;
+    margin: 0 8px 4px 0; font-size: 12px;
+  }
+  #creature[data-subject="source"] .ccrew span { display: inline; padding: 0; border: 0; white-space: nowrap; }
+  #creature[data-subject="source"] .ccrew i { margin-left: 5px; }
+  #creature[data-subject="source"] .clog { padding: 12px 10px 40px 6px; margin-left: 0; }
+  .clog-entry p { font-size: 14px; line-height: 1.55; }
 }
 
 /* ---------- about, and the brief of the carrier
