@@ -218,6 +218,199 @@ export function activitySite(world) {
   return dir ? snapSite(dirToSite({ x: dir[0], y: dir[1], z: dir[2] })) : null;
 }
 
+// ---------------------------------------------------------------- the carrier, issue 34
+// Something on the world transmits. The instrument of the probe reads a bearing to that source,
+// with an error and with no distance. Two landings give two wedges on the globe, and the source
+// stands where the wedges cross.
+//
+// The frame of a bearing. North at a site is the part of the axis +y that lies in the tangent
+// plane. East is the east of groundBasis() in ground-sky.js: a positive planet.rotation.y takes +x
+// toward -z, lon counts from +x toward +z, so the surface runs toward falling lon and east is
+// (sin lon, 0, -cos lon). Bearing 90 is then the east the globe holds, and a wedge that runs out
+// on 90 runs east over the globe.
+//
+// The east of cellTwist() above is the opposite vector, and patch() in worker.js builds the box of
+// the ground in that same set. The box runs x along the u axis of the cell and z along the v axis,
+// and (u, up, v) is left-handed, so the terrain is the mirror of the frame above. Do not read an
+// east out of cellTwist() and do not change it, patch(), or the sky.
+//
+// So the two frames do two jobs here:
+//
+//   the globe    the three digits and the wedge of a fix keep the bearing above, because the
+//                wedge is drawn on the globe and the globe holds no mirror
+//   the ground   the needle keeps the frame of the box, because the reader walks the terrain and
+//                the wreck of slice 3 stands on the terrain in the units of the box
+//
+// The sky stands in the frame of groundBasis() and the terrain in the mirror of it. That is an
+// older defect and issue 34 does not touch it. tools/carrier-check.mjs proves both jobs and prints
+// the mirror as a note.
+export const CARRIER_ERR = [3, 25];   // degrees: the error at the source and at its antipode
+export const CARRIER_RANGE = 6;       // cells of arc: the range states nothing further out
+
+const _up = new THREE.Vector3();
+const _to = new THREE.Vector3();
+const _aim = new THREE.Vector3();
+const _mid = new THREE.Vector3();
+// A direction this far off the face of its cell has no point on the box: the gnomonic map of the
+// cube grid runs to infinity at a quarter turn from the face. See boxPoint().
+const BOX_FACE_MIN = Math.cos(80 * Math.PI / 180);
+
+// A direction argument as a vector. The worker writes a direction as three numbers in an array.
+function asDir(dir, out = _to) {
+  return Array.isArray(dir) ? out.set(dir[0], dir[1], dir[2]) : out.set(dir.x, dir.y, dir.z);
+}
+
+// A string to a number in 0 to 1. FNV-1a with an avalanche at the end. Every file that needs one
+// keeps a copy; ground-sky.js holds another.
+function hash01(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  h = Math.imul(h ^ (h >>> 16), 2246822507);
+  h = Math.imul(h ^ (h >>> 13), 3266489909);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// The site of the source of a world, or null. A gas giant and a world where no vertex passed the
+// tests of makeSource() both give null. See makeSource() in worker.js.
+export function sourceSite(world) {
+  const src = world && world.source;
+  return src && src.dir ? snapSite(dirToSite({ x: src.dir[0], y: src.dir[1], z: src.dir[2] })) : null;
+}
+
+// True when the landing cell is the cell of the source. The rule is the cell and not the pull, as
+// activityHere() has it in app.js, so one source can never stand in two patches. Slice 3 of issue
+// 34 puts the wreck on the patch by this test.
+export function sourceHere(world, site) {
+  const at = sourceSite(world);
+  if (!at || !site) return false;
+  const here = snapSite(site);
+  return here.lat === at.lat && here.lon === at.lon;
+}
+
+// The arc from a site to a direction, in radians on the globe of radius 1.
+export function arcTo(site, dir) {
+  const d = asDir(dir);
+  return Math.acos(THREE.MathUtils.clamp(siteDir(site.lat, site.lon, _up).dot(d), -1, 1));
+}
+
+// The bearing from a site to a direction: the angle from north, 0 to 360 degrees, east positive.
+// East and north stand in the tangent plane, so the two dots take the tangent part on their own.
+export function bearingTo(site, dir) {
+  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
+  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
+  _east.set(slo, 0, -clo);                        // the east of groundBasis(): falling lon
+  _north.set(-sla * clo, cla, -sla * slo);        // the part of +y in the tangent plane
+  const d = asDir(dir);
+  const e = d.dot(_east), n = d.dot(_north);
+  if (e === 0 && n === 0) return 0;               // the direction stands under the site or opposite it
+  return (THREE.MathUtils.radToDeg(Math.atan2(e, n)) + 360) % 360;
+}
+
+// The carrier at one site: the bearing the instrument states, the error of that bearing, the arc
+// to the source, and the range in kilometres when the site stands near it.
+//
+// The instrument does not state the true bearing. It states one inside the wedge, and the offset
+// comes from a hash of the seed and the cell, so a fix is the same on every visit, two landings on
+// one cell never disagree, and the true bearing always lies inside the wedge. The error runs from
+// 3 degrees at the source to 25 degrees at its antipode, straight in the arc: two far fixes cross
+// wide, and the reader then decides between a third far fix and a near one. Decision 3 of issue 34.
+//
+// The site takes the snap first, because the fix belongs to the cell and not to two decimals of a
+// degree. Gives null for a world with no source.
+export function carrierAt(world, site) {
+  const src = world && world.source;
+  if (!src || !src.dir || !site) return null;
+  const at = snapSite(site);
+  const cell = siteCell(at);
+  const arc = arcTo(at, src.dir);
+  const err = CARRIER_ERR[0] + (CARRIER_ERR[1] - CARRIER_ERR[0]) * (arc / Math.PI);
+  const off = hash01(`${world.seed}|carrier|${cell.face}|${cell.i}|${cell.j}`) * 2 - 1;
+  const brg = (bearingTo(at, src.dir) + off * err + 360) % 360;
+  // Decision 7: the range states nothing until the reader stands near the source.
+  const rangeKm = arc <= CARRIER_RANGE * CELL ? arc * radiusKm(world) : null;
+  return { brg, err, arc, rangeKm };
+}
+
+// The direction the needle points at, in planet space: the direction of the source turned about
+// the up axis of the site until it stands on the bearing carrierAt() states. The needle and the
+// three digits then say one thing, and the needle gives the source away no better than the digits
+// do. carrierBox() below reads this direction in the frame of the box, which is what the ground
+// takes. boxPoint() reads it as a place on the box, which is what slice 3 takes.
+//
+// A turn of +a about the up axis takes east toward north, which takes the bearing down, so the
+// offset turns the other way.
+export function carrierDir(world, site, carrier, out = new THREE.Vector3()) {
+  const src = world && world.source;
+  if (!src || !src.dir || !carrier || !site) return null;
+  const at = snapSite(site);
+  const off = THREE.MathUtils.degToRad(carrier.brg - bearingTo(at, src.dir));
+  out.set(src.dir[0], src.dir[1], src.dir[2]);
+  return out.applyAxisAngle(siteDir(at.lat, at.lon, _up), -off);
+}
+
+// The point of the ground box under a direction of the globe, in units of the box, or null.
+//
+// It is the exact inverse of the map patch() in worker.js builds the box with: that function reads
+// the two gnomonic coordinates of the cell at a point of the box and takes the direction, and this
+// reads the two coordinates of a direction and takes the point. So a direction inside the cell
+// comes back as the place on the ground the reader can walk to. The cell of the site carries the
+// map, and a direction outside that cell is legal: the gnomonic map stays true past the edge of a
+// face, which is what the rim of a patch already needs.
+//
+// Gives null for a direction more than 80 degrees from the face of the cell. The map runs to
+// infinity at a quarter turn from the face, and the far side of the globe has no point on the box.
+// Slice 3 takes the range to the wreck from this. The needle takes carrierBox() below, which holds
+// at every arc.
+export function boxPoint(site, dir, size = PATCH_SIZE) {
+  if (!site) return null;
+  const cell = siteCell(snapSite(site));
+  const F = FACES[cell.face];
+  const d = asDir(dir);
+  const n = d.x * F[0] + d.y * F[1] + d.z * F[2];
+  if (n <= BOX_FACE_MIN) return null;
+  const a = (d.x * F[3] + d.y * F[4] + d.z * F[5]) / n;
+  const b = (d.x * F[6] + d.y * F[7] + d.z * F[8]) / n;
+  const u = (Math.atan(a) * 4 / Math.PI + 1) * 0.5 * cell.n - cell.i;
+  const v = (Math.atan(b) * 4 / Math.PI + 1) * 0.5 * cell.n - cell.j;
+  return { x: (u - 0.5) * size, z: (v - 0.5) * size };
+}
+
+// The way the needle points, as a unit vector (x, z) in the frame of the box, or null.
+//
+// It is the step the box takes for a step of the globe toward the source: the slope of boxPoint()
+// at the site. A plain projection on two axes of the cell will not do, because the map of the box
+// holds no angle. It is a gnomonic map of a face of the cube with a tangent over it, and both
+// stretch one way more than the other away from the middle of the face. Measured on the six faces,
+// a projection stood up to 22 degrees off the true way.
+//
+// The slope, for a step from the site along a tangent t:
+//
+//   n = d . N, a = (d . U) / n, b = (d . V) / n      the gnomonic coordinates of boxPoint()
+//   x runs with atan(a), so dx/da is 1 / (1 + a * a), and z runs the same way with b
+//   da for a step t is ((t . U) - a * (t . N)) / n, and db is ((t . V) - b * (t . N)) / n
+//
+// Every factor the two share falls out when the pair is made a unit vector, and the part of the
+// direction that stands along the site falls out on its own: it gives da and db of nothing. So the
+// whole direction of carrierDir() goes in, at any arc, and the needle holds even where boxPoint()
+// gives null. The box is the mirror of the frame of groundBasis(), so the needle may not come
+// through that matrix: it would point at the mirror of the source and away from the wreck.
+export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }) {
+  if (!carrierDir(world, site, carrier, _aim)) return null;
+  const cell = siteCell(snapSite(site));
+  const F = FACES[cell.face];
+  cellDir(cell, 0.5, 0.5, _mid);
+  const n = _mid.x * F[0] + _mid.y * F[1] + _mid.z * F[2];
+  const a = (_mid.x * F[3] + _mid.y * F[4] + _mid.z * F[5]) / n;
+  const b = (_mid.x * F[6] + _mid.y * F[7] + _mid.z * F[8]) / n;
+  const vn = _aim.x * F[0] + _aim.y * F[1] + _aim.z * F[2];
+  const x = (_aim.x * F[3] + _aim.y * F[4] + _aim.z * F[5] - a * vn) / (1 + a * a);
+  const z = (_aim.x * F[6] + _aim.y * F[7] + _aim.z * F[8] - b * vn) / (1 + b * b);
+  const l = Math.hypot(x, z);
+  if (l < 1e-12) return null;     // the source stands under the site or at its antipode
+  out.x = x / l; out.z = z / l;
+  return out;
+}
+
 // The pull to life. A creature home inside the cell under the pick takes the site. The nearest
 // home wins. The site keeps the species id it was pulled to, or -1. The pull runs before the
 // snap, so a home anywhere in the cell puts its species on the patch, and the snap then returns
@@ -331,35 +524,84 @@ function parseGroundView(text) {
 
 // ---------------------------------------------------------------- the marker
 // The square of the cell the probe would land on. It is the true footprint of the patch, not a
-// symbol: what the square holds is what the ground shows. Eight vertices and eight triangles
-// draw the outline, and each vertex sits at the ground radius under it, so the square follows
-// the relief instead of floating over a hill.
+// symbol: what the square holds is what the ground shows. Each vertex sits at the ground radius
+// under it, so the square follows the relief instead of floating over a hill.
+//
+// Each side carries MARK_SEGS steps, so the outline holds 32 outer and 32 inner vertices. Four
+// corners alone gave four long chords, and a ridge inside the cell cut through the middle of a
+// side. The height map holds one texel every 0.016 units of arc and a cell is 0.01 units across,
+// so eight steps read every value the map holds along a side.
+//
+// Two meshes share the one geometry. The ghost pass draws first with depthTest off at a low
+// opacity, so the outline still reads where a ridge stands in front of it, and the solid pass
+// draws after it with depthTest on, so the square reads as a thing on the ground. The far side of
+// the globe never shows the ghost, because the marker follows the pointer: pickSite() takes the
+// near hit of the ray, and the pull stays inside the cell, so the square always stands on the half
+// of the globe that faces the camera.
 const RING_IN = 0.9;                 // the inner edge of the outline, as a part of the cell
-const LIFT = 0.0008;                 // globe units the outline floats, so it clears the surface
+const MARK_SEGS = 8;                 // steps along one side of the square
+// globe units the outline floats, so it clears the facets of the globe.
+//
+// The square drapes on the height map, and the terrain draws from an icosphere. The two do not
+// agree: the map holds 384 by 192 texels, which is 0.016 units of arc, and a facet of the globe is
+// 0.013 units across, so the mesh carries detail the map has already smoothed away. A facet is also
+// a flat chord under a curve. Both together let a facet stand over the map at its own middle, and
+// the outline then sinks into the ground.
+//
+// Measured on five worlds, 184,320 facets each, as the radius of a facet at its middle less the map
+// under it:
+//
+//   world      p99      p99.9    worst
+//   Auralis    0.0012   0.0024   0.0049
+//   Vesper     0.0008   0.0027   0.0188
+//   Meridian   0.0033   0.0069   0.0165
+//   Tessaly    0.0036   0.0063   0.0140
+//   Orin       0.0040   0.0076   0.0350
+//
+// 0.006 clears about 999 facets in every 1,000 on the worst world, and it holds the everyday
+// mountain off the outline. The old 0.0008 cleared about 98 in 100, which is the defect. A lift
+// that cleared the last peak of a lava world would have to stand at 0.035, far over the 0.011 units
+// the flora of the globe stands, and the square would then float over a forest. The ghost pass
+// takes those last facets instead: the outline reads through a ridge at a low opacity.
+const LIFT = 0.006;
 // the four corners of the cell, in the order they go round it
 const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 
 let marker = null;
 
 function makeMarker() {
+  const n = MARK_SEGS * 4;           // vertices round one ring of the outline
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
-  // two triangles per side: the outer corner, the next outer corner, and the two inner ones
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 2 * 3), 3));
+  // two triangles per step: the outer point, the next outer point, and the two inner ones
   const idx = [];
-  for (let i = 0; i < 4; i++) {
-    const a = i, b = (i + 1) % 4, c = 4 + b, d = 4 + i;
+  for (let i = 0; i < n; i++) {
+    const a = i, b = (i + 1) % n, c = n + b, d = n + i;
     idx.push(a, b, c, a, c, d);
   }
   geo.setIndex(idx);
-  const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.name = 'site-marker';
-  mesh.renderOrder = 3;
-  mesh.frustumCulled = false;
-  return mesh;
+  const group = new THREE.Group();
+  group.name = 'site-marker';
+  // the ghost first, then the solid, so the solid stands over it where the ground faces the camera
+  for (const pass of [
+    { opacity: 0.25, depthTest: false, order: 3 },
+    { opacity: 0.9, depthTest: true, order: 4 },
+  ]) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: '#ffffff', transparent: true, opacity: pass.opacity,
+      side: THREE.DoubleSide, depthWrite: false, depthTest: pass.depthTest,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = pass.order;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+  }
+  group.userData.geo = geo;
+  return group;
 }
 
-// Show the square of the cell on the planet. A null site takes it off the scene.
+// Show the square of the cell on the planet. A null site takes it off the scene. It gives the
+// group of the two passes back; no caller in app.js reads it today.
 export function showMarker(site, current) {
   if (!site || !current) {
     if (marker && marker.parent) marker.parent.remove(marker);
@@ -371,19 +613,26 @@ export function showMarker(site, current) {
     current.planet.add(marker);
   }
   const pal = current.world.palette;
-  marker.material.color.set(pal.fauna?.accent || '#ffffff');
+  for (const m of marker.children) m.material.color.set(pal.fauna?.accent || '#ffffff');
 
   // The corners come from the cell of the cube grid, so the square the reader aims at is the quad
-  // the patch draws and it shares its edges with the cell next door.
+  // the patch draws and it shares its edges with the cell next door. Each side then walks from one
+  // corner to the next in MARK_SEGS steps.
   const cell = siteCell(site);
   const sea = current.world.seaRadius || 0;
-  const pos = marker.geometry.attributes.position;
+  const pos = marker.userData.geo.attributes.position;
+  const n = MARK_SEGS * 4;
   for (let ring = 0; ring < 2; ring++) {
     const w = ring === 0 ? 0.5 : 0.5 * RING_IN;
     for (let c = 0; c < 4; c++) {
-      cellDir(cell, 0.5 + CORNERS[c][0] * w, 0.5 + CORNERS[c][1] * w, _corner);
-      const r = Math.max(groundRadius(current.world, current.heightMap, _corner), sea) + LIFT;
-      pos.setXYZ(ring * 4 + c, _corner.x * r, _corner.y * r, _corner.z * r);
+      const from = CORNERS[c], to = CORNERS[(c + 1) % 4];
+      for (let k = 0; k < MARK_SEGS; k++) {
+        const f = k / MARK_SEGS;
+        const u = from[0] + (to[0] - from[0]) * f, v = from[1] + (to[1] - from[1]) * f;
+        cellDir(cell, 0.5 + u * w, 0.5 + v * w, _corner);
+        const r = Math.max(groundRadius(current.world, current.heightMap, _corner), sea) + LIFT;
+        pos.setXYZ(ring * n + c * MARK_SEGS + k, _corner.x * r, _corner.y * r, _corner.z * r);
+      }
     }
   }
   pos.needsUpdate = true;

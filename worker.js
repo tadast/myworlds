@@ -6,6 +6,7 @@
 importScripts('./lore.js');       // the lore engine, shared with the flora (self.Lore)
 importScripts('./species.js');    // species genomes and lore (self.Species)
 importScripts('./flora-lore.js'); // the plant vocabulary, written per patch (self.FloraLore)
+importScripts('./source-lore.js'); // the log of the source, written per world (self.SourceLore)
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -571,6 +572,9 @@ function worldContext(seed) {
     },
     hasAtmosphere: true, atmoStrength: 1, seaLevel: 0, hasOcean: false, amp: 0,
     rings: null, moons: [], stats: {},
+    // Issue 34: the thing that transmits, one per world with a surface. makeSource() fills it in
+    // generate(). A gas giant keeps the null, because it takes no probe.
+    source: null,
   };
   // The planet numbers, and the facts the lore reads. `env` fills up as the world is built: the
   // moons, the rings, and the activity are added in generate(), which then writes the lore again.
@@ -869,6 +873,9 @@ function generate(seed, opts) {
   const act = makeActivity(makeRng(seed + '|activity'), type, world, P, pos, vCount, H, T, R, amp, beachW);
   const paintAct = act ? act.paint : null;
   const blockV = act ? act.block : null;
+  // Issue 34. The source stands after the activity, because a volcano raises the ground it must
+  // keep away from. Its stream is its own, so no world built before this issue changes.
+  makeSource(makeRng(seed + '|source'), ctx, world, beachW);
 
   post(62, 'Painting biomes');
   // per-face colouring, expanded to non-indexed triangles
@@ -983,6 +990,13 @@ function generate(seed, opts) {
   // with the moons, the rings, and the activity in hand. Same stream, same seed, same text.
   describeLife(ctx);
   world.stats = makeStats(frng, type, world, fc);
+  // Issue 34, slice 4. The log of the source stands last, because it names a species of this world
+  // and it reads the moons, the rings, and the activity that the lines above have only now settled.
+  // It rolls from a stream of its own, so no other stream draws one number more. A tool that
+  // evaluates this file without source-lore.js gets a source with no log; see tools/lore-audit.
+  if (world.source && self.SourceLore) {
+    world.source.log = self.SourceLore.writeLog({ world, rng: makeRng(seed + '|source-lore') });
+  }
 
   post(98, 'Almost there');
   const result = { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna, heightMap, floraGrid };
@@ -1413,6 +1427,116 @@ function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW) {
   return act;
 }
 
+// ---------------------------------------------------------------- the source, issue 34
+// One thing on every world with a surface transmits, and the instrument of the probe reads a
+// bearing to it. The reader hears the carrier on one landing, takes a second bearing from another
+// site, and crosses the two. So the source has to stand where a probe can reach it and where the
+// reader can believe it: on dry ground over the beach band, off a cliff, off the poles, and clear
+// of the cell of the activity, which already owns its landing.
+//
+// The stream is makeRng(seed + '|source') and no other stream draws one number more, so every
+// world the app built before this issue is unchanged. tools/world-checksum.mjs proves it. The
+// motif of the source is not rolled here: music.js rolls it from a stream of its own, so the
+// worker takes no number that the tune needs. See slice 5 of issue 34.
+//
+// The source may not read one vertex of the globe. The icosphere follows the tier, 100 on HIGH and
+// 64 on LOW, so a phone and a desktop hold two different sets of vertices and the walk of the
+// stream over them parted: one seed gave two wrecks and two readers searched two worlds. The
+// candidates now come out of the stream itself, as directions on the sphere, and every test reads
+// the field of the globe, which the tier does not touch. Each try draws two numbers whether it
+// passes or fails, so the stream stays in step.
+//
+// One input of the tests does follow the tier, and that is the sea level: generate() takes it as a
+// quantile of the continent field over the vertices. sampledSeaLevel() reads a fixed grid of
+// 60,000 directions instead and gives one number for every tier, so the tests take that one.
+// contextFor() already takes it for the patch path, so the source and the ground the reader walks
+// now read one sea level.
+//
+// The activity still reads the vertices, so it may differ between the two tiers. That is older
+// than this issue and it stays. On the rare candidate that stands near the activity, the rule of
+// SOURCE_KEEP cells can therefore fall one way on a phone and the other way on a desktop.
+const SOURCE_SLOPE = 0.5;      // the steepest ground the source takes: the rise of the globe over the arc
+const SOURCE_LAT = 80;         // degrees: the source stays inside this latitude, off the poles
+const SOURCE_KEEP = 4;         // cells the source stands away from the cell of the activity
+const SOURCE_TRIES = 600;      // draws before the world gives up and takes no source
+const _srcDir = [0, 0, 0], _srcAct = [0, 0, 0];
+const _srcE = [0, 0, 0], _srcN = [0, 0, 0], _srcP = [0, 0, 0];
+const _srcFld = { h: 0, t: 0, m: 0, fm: 0, r: 0, rg: 0 };
+
+// Two tangent axes at a unit direction. Any pair does: the slope below is the length of the
+// gradient and it does not change with the pair.
+function tangentsAt(d, e, n) {
+  if (Math.abs(d[1]) < 0.9) { e[0] = d[2]; e[1] = 0; e[2] = -d[0]; }   // (0, 1, 0) cross d
+  else { e[0] = 0; e[1] = -d[2]; e[2] = d[1]; }                        // (1, 0, 0) cross d
+  const l = Math.hypot(e[0], e[1], e[2]) || 1;
+  e[0] /= l; e[1] /= l; e[2] /= l;
+  n[0] = d[1] * e[2] - d[2] * e[1];
+  n[1] = d[2] * e[0] - d[0] * e[2];
+  n[2] = d[0] * e[1] - d[1] * e[0];
+}
+
+// The elevation a step of s radians from d along the tangent t.
+function heightStep(ctx, d, t, s) {
+  const c = Math.cos(s), k = Math.sin(s);
+  _srcP[0] = d[0] * c + t[0] * k; _srcP[1] = d[1] * c + t[1] * k; _srcP[2] = d[2] * c + t[2] * k;
+  return fieldAt(ctx, _srcP[0], _srcP[1], _srcP[2], _srcFld).h;
+}
+
+// The slope of the globe at one direction: the rise of the drawn radius over the arc, read over
+// half a cell each way. The globe draws its relief EXAGGERATION times too tall, so this is the
+// slope the reader sees and not the true one. Over the dry land of five worlds the median stands
+// near 0.3 and the tenth part near 0.09, so SOURCE_SLOPE keeps two thirds of the land and drops
+// every cliff.
+function surfaceSlope(ctx, d) {
+  tangentsAt(d, _srcE, _srcN);
+  const s = CELL * 0.5;
+  const dx = heightStep(ctx, d, _srcE, s) - heightStep(ctx, d, _srcE, -s);
+  const dz = heightStep(ctx, d, _srcN, s) - heightStep(ctx, d, _srcN, -s);
+  return ctx.amp * Math.hypot(dx, dz) / (2 * s);
+}
+
+function makeSource(rng, ctx, world, beachW) {
+  world.source = null;
+  const act = world.activity && world.activity.dir;
+  const actMid = act ? cellDir(dirCell(act[0], act[1], act[2]), 0.5, 0.5, _srcAct) : null;
+  const keep = Math.cos(SOURCE_KEEP * CELL);
+  const sinLat = Math.sin(SOURCE_LAT * Math.PI / 180);
+  const near = (d) => !!actMid && d[0] * actMid[0] + d[1] * actMid[1] + d[2] * actMid[2] > keep;
+
+  // The sea level of every tier. A world with no ocean keeps the one it has, which is already free
+  // of the tier. The swap is put back before this function returns, because the patch path reads
+  // the same context later; see cachedCtx in generate().
+  const seaWas = ctx.seaLevel;
+  if (ctx.land < 1) ctx.seaLevel = sampledSeaLevel(ctx);
+  try {
+    for (let t = 0; t < SOURCE_TRIES; t++) {
+      // Two numbers a try, drawn first and drawn always, so a candidate that fails takes the
+      // stream on by the same step a candidate that passes does. y runs inside the band of
+      // latitude: the area of a sphere is even in y, so the draw is even over that band and no try
+      // is thrown away on a pole.
+      const y = (rng() * 2 - 1) * sinLat, a = rng() * Math.PI * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      // The middle of the cell carries the cell, as snapSite() does in site.js: the reader lands on
+      // the middle of a cell, so the source stands there too or no landing could ever hold it. The
+      // tests run on the middle and not on the draw, because the snap moves a direction most of a
+      // cell and that is far enough to reach the sea, a cliff, or the cell of the activity.
+      const d = cellDir(dirCell(Math.cos(a) * r, y, Math.sin(a) * r), 0.5, 0.5, _srcDir);
+      if (d[1] > sinLat || d[1] < -sinLat) continue;
+      if (near(d)) continue;
+      // The field holds no activity: makeActivity() writes its cone into the height array and not
+      // into the field, so the slope below never sees one. The rule of SOURCE_KEEP cells is what
+      // holds the source off the activity.
+      if (fieldAt(ctx, d[0], d[1], d[2], _srcFld).h <= beachW) continue;
+      if (surfaceSlope(ctx, d) >= SOURCE_SLOPE) continue;
+      world.source = { kind: 'wreck', dir: [d[0], d[1], d[2]] };
+      return world.source;
+    }
+  } finally {
+    ctx.seaLevel = seaWas;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- gas giant
 function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   const gdetail = Math.max(24, Math.round(detail * 0.6));
@@ -1545,10 +1669,31 @@ const FACES = [
   [0, 0, -1, -1, 0, 0, 0, 1, 0],
 ];
 
+// The nominal arc of a cell, and the cells one face carries. site.js exports the same two numbers
+// as CELL and FACE_CELLS. Keep the two in step. app.js sends the cell of a landing on the patch
+// message, so the patch path never needs them; the source of issue 34 does, because it picks a
+// cell of its own.
+const CELL = 0.01;
+const FACE_CELLS = Math.round(Math.PI / 2 / CELL);
+
 // The unit direction at (u, v) inside a cell. u and v run 0 to 1 across the cell and may run past
 // it. Writes x, y, z into out.
 function cellDir(cell, u, v, out) {
   return cellDirT(cell, cellTan(cell.i, u, cell.n), cellTan(cell.j, v, cell.n), out);
+}
+
+// The cell a unit direction falls in. The mirror of cellDir(), and the same map dirCell() holds in
+// site.js.
+function dirCell(x, y, z) {
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  const face = ax >= ay && ax >= az ? (x >= 0 ? 0 : 1) : ay >= az ? (y >= 0 ? 2 : 3) : (z >= 0 ? 4 : 5);
+  const F = FACES[face];
+  const d = x * F[0] + y * F[1] + z * F[2];
+  const wa = Math.atan((x * F[3] + y * F[4] + z * F[5]) / d) * 4 / Math.PI;
+  const wb = Math.atan((x * F[6] + y * F[7] + z * F[8]) / d) * 4 / Math.PI;
+  const n = FACE_CELLS;
+  const q = (w) => clamp(Math.floor((w + 1) * 0.5 * n), 0, n - 1);
+  return { face, i: q(wa), j: q(wb), n };
 }
 
 // The gnomonic coordinate of a cell coordinate. A row of the patch grid holds one of these for
@@ -2426,6 +2571,138 @@ function patchActivity(ctx, kind, s) {
   };
 }
 
+// ---------------------------------------------------------------- the source of a patch, issue 34
+// A world holds at most one source. app.js says whether this landing cell is the cell that holds
+// it, and it names the kind in opts.source. The worker then picks a place for the wreck, flattens a
+// disc under it, scorches the ground, and keeps the plants and the animals off that disc, the way
+// patchActivity() does for the phenomenon. ground-source.js draws the wreck itself.
+//
+// The wreck does not stand at the origin, and the phenomenon does. A volcano is the reason the
+// reader picked the cell, so it stands where the probe lands; a wreck is a thing to find on the
+// cell, so it stands off the site and the reader walks to it on the needle of the carrier.
+//
+// The reach here is the walk limit of the ground and not FOG_NEAR: the reader has to reach the
+// wreck on foot, and the walk stops at half the box less the band the plants thin out over. That is
+// the rule reachOf() holds in ground.js, so the two cannot drift apart. The place is drawn inside
+// SOURCE_PLACE of it, which leaves the last part of the walk for the search.
+//
+// The wreck rolls from makeRng(pseed + '|source') and from no other stream, so a patch outside the
+// cell of the source is byte for byte the patch it was before issue 34.
+const SOURCE_DISC = 14;        // units, the radius of the disc the wreck flattens
+const SOURCE_SOFT = 0.55;      // the part of the disc that is flat; the rest carries the soft edge
+const SOURCE_PLACE = 0.6;      // the part of the reach the place is drawn inside
+const SOURCE_STAND = 0.35;     // the steepest ground the wreck stands on, in units up per unit across
+const SOURCE_RIM = 8;          // the points of the rim of the disc the walk tests, after the middle
+
+// The slope at one node of the patch, in units up over units across. It is the measure the colour
+// pass reads for its bare rock, so the wreck stands on ground the reader sees as flat.
+function patchSlope(heights, n, grid, i, j) {
+  const i1 = i > 0 ? i - 1 : i, i2 = i < n - 1 ? i + 1 : i;
+  const j1 = j > 0 ? j - 1 : j, j2 = j < n - 1 ? j + 1 : j;
+  const dhx = (heights[j * n + i2] - heights[j * n + i1]) / ((i2 - i1) * grid);
+  const dhz = (heights[j2 * n + i] - heights[j1 * n + i]) / ((j2 - j1) * grid);
+  return Math.hypot(dhx, dhz);
+}
+
+// The place and the paint of the wreck. It rewrites the heights in place and gives back the paint
+// pass, the mask the plants read, the window of the grid the paint covers, and the numbers the main
+// thread needs. A kind the ground cannot draw yet gives null, and the patch then builds as before.
+function patchSource(ctx, kind, s) {
+  if (kind !== 'wreck') return null;
+  const { heights, n, grid, half, pseed, avoid } = s;
+  const P = ctx.P;
+  const rng = makeRng(`${pseed}|source`);
+  const reach = Math.max(grid * 4, half - FLORA_EDGE);
+  const ang = rng() * Math.PI * 2;
+  const rad = Math.sqrt(rng()) * reach * SOURCE_PLACE;
+  const yaw = rng() * Math.PI * 2;
+  const toI = (m) => clamp(Math.round((m + half) / grid), 0, n - 1);
+  const toM = (i) => -half + i * grid;
+
+  // The walk: the nearest node to the draw that is dry, flat enough, and clear of the phenomenon
+  // when the cell holds one. The test runs on the rim of the disc as well as at the middle, because
+  // a middle that stands a metre over the water still gives a disc that reaches the sea.
+  const ok = (i, j) => {
+    const x = toM(i), z = toM(j);
+    if (Math.hypot(x, z) > reach) return false;
+    if (patchSlope(heights, n, grid, i, j) >= SOURCE_STAND) return false;
+    if (heights[j * n + i] <= 0) return false;
+    for (let k = 0; k < SOURCE_RIM; k++) {
+      const t = k * Math.PI * 2 / SOURCE_RIM;
+      const px = x + Math.cos(t) * SOURCE_DISC, pz = z + Math.sin(t) * SOURCE_DISC;
+      if (heights[toI(pz) * n + toI(px)] <= 0) return false;
+      if (avoid && avoid(px, pz)) return false;
+    }
+    return !(avoid && avoid(x, z));
+  };
+
+  let bi = -1, bj = -1;
+  const take = (i, j) => {
+    if (bi >= 0 || i < 0 || j < 0 || i >= n || j >= n || !ok(i, j)) return false;
+    bi = i; bj = j;
+    return true;
+  };
+  const si = toI(Math.cos(ang) * rad), sj = toI(Math.sin(ang) * rad);
+  take(si, sj);
+  const maxD = Math.ceil(reach / grid);
+  // The search runs out in rings, so the first node it takes is the nearest one that passes.
+  for (let d = 1; bi < 0 && d <= maxD; d++) {
+    for (let t = -d; t <= d; t++) {
+      if (take(si + t, sj - d) || take(si + t, sj + d) || take(si - d, sj + t) || take(si + d, sj + t)) break;
+    }
+  }
+  if (bi < 0) {
+    // No node passed. The cell is all water, or every dry part of it is a cliff. The wreck still
+    // stands, because a landing on the cell of the source must always show the source: it takes the
+    // driest and flattest node inside the reach, and the disc may then reach the water at its rim.
+    let best = -Infinity;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const x = toM(i), z = toM(j);
+        if (Math.hypot(x, z) > reach) continue;
+        const v = heights[j * n + i] - patchSlope(heights, n, grid, i, j) * SOURCE_DISC;
+        if (v > best) { best = v; bi = i; bj = j; }
+      }
+    }
+    if (bi < 0) { bi = toI(0); bj = toI(0); }
+  }
+
+  // The disc. The middle takes the height of the node the walk found, and the rim eases back into
+  // the ground the patch raised, so the wreck stands on a flat floor with no step around it.
+  const sx = toM(bi), sz = toM(bj);
+  const hs = heights[bj * n + bi];
+  const i0 = Math.max(0, Math.floor((sx + half - SOURCE_DISC) / grid));
+  const i1 = Math.min(n - 1, Math.ceil((sx + half + SOURCE_DISC) / grid));
+  const j0 = Math.max(0, Math.floor((sz + half - SOURCE_DISC) / grid));
+  const j1 = Math.min(n - 1, Math.ceil((sz + half + SOURCE_DISC) / grid));
+  for (let j = j0; j <= j1; j++) {
+    const zm = -half + j * grid;
+    for (let i = i0; i <= i1; i++) {
+      const xm = -half + i * grid;
+      const d = Math.hypot(xm - sx, zm - sz) / SOURCE_DISC;
+      if (d >= 1) continue;
+      const k = j * n + i;
+      heights[k] += (hs - heights[k]) * smoothstep(1, SOURCE_SOFT, d);
+    }
+  }
+
+  // The scorch. The ground under the wreck reads as burnt, so the disc darkens toward the dark end
+  // of the palette and lets the biome back in over the last part of its radius.
+  const scorch = scale(P.rock2 || P.rock || P.deep, 0.4);
+  const paint = (xm, zm, out, o) => {
+    const d = Math.hypot(xm - sx, zm - sz) / SOURCE_DISC;
+    if (d >= 1) return;
+    const c = mix(scorch, [out[o], out[o + 1], out[o + 2]], smoothstep(0.3, 1.0, d));
+    out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2];
+  };
+
+  return {
+    info: { kind, x: sx, y: hs, z: sz, yaw },
+    paint, i0, i1, j0, j1,
+    blocked: (x, z) => (x - sx) * (x - sx) + (z - sz) * (z - sz) < SOURCE_DISC * SOURCE_DISC,
+  };
+}
+
 // A ground patch at one site: a square height grid and a colour per vertex, both in the frame
 // x east, y up, z south, with the origin at the site at sea level.
 function patch(seed, lat, lon, opts) {
@@ -2602,6 +2879,19 @@ function patch(seed, lat, lon, opts) {
   const act = opts.activity && opts.activity.kind
     ? patchActivity(ctx, opts.activity.kind, { heights, n, grid, half }) : null;
 
+  // The source of the world, when this cell is the cell that holds it. It runs after the
+  // phenomenon, so the wreck can stand clear of a cone the same cell might hold. By the 4-cell rule
+  // of makeSource() the two never meet, and the guard costs nothing on the cells where they do not.
+  // Issue 34, slice 3.
+  const src = opts.source && opts.source.kind
+    ? patchSource(ctx, opts.source.kind, {
+      heights, n, grid, half, pseed, avoid: act ? act.blocked : null,
+    }) : null;
+  // The plants, the grass, and the group anchors keep off both footprints.
+  const blockAct = act ? act.blocked : null, blockSrc = src ? src.blocked : null;
+  const blocked = blockAct && blockSrc
+    ? (x, z) => blockAct(x, z) || blockSrc(x, z) : (blockAct || blockSrc);
+
   post(66, 'Painting the ground');
   const colors = new Float32Array(n * n * 3);
   const tint = [0, 0, 0];
@@ -2653,6 +2943,13 @@ function patch(seed, lat, lon, opts) {
     for (let j = act.i0; j <= act.i1; j++) {
       const zm = -half + j * grid, jn = j * n;
       for (let i = act.i0; i <= act.i1; i++) act.paint(-half + i * grid, zm, colors, (jn + i) * 3);
+    }
+  }
+  // The scorch of the wreck, on its own window of the grid, for the same reason. Issue 34.
+  if (src) {
+    for (let j = src.j0; j <= src.j1; j++) {
+      const zm = -half + j * grid, jn = j * n;
+      for (let i = src.i0; i <= src.i1; i++) src.paint(-half + i * grid, zm, colors, (jn + i) * 3);
     }
   }
 
@@ -2770,14 +3067,14 @@ function patch(seed, lat, lon, opts) {
   const grown = patchFlora(ctx, {
     heights, vary, n, grid, half, size, hPerM: H_PER_M, hPerU,
     cellT, cellM, cellF, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000, pseed,
-    blocked: act ? act.blocked : null,
+    blocked,
   });
   const flora = grown.flora, grass = grown.grass;
 
   post(96, 'Calling the animals');
   const { groups, members } = patchFauna(ctx, opts, {
     pseed, heights, vary, n, grid, half, hPerU, cellT, cellM, cellF,
-    blocked: act ? act.blocked : null,
+    blocked,
   });
 
   post(98, 'Almost there');
@@ -2797,6 +3094,9 @@ function patch(seed, lat, lon, opts) {
       // what the two passes after the scan put on the patch, for the load log
       marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big, mega: grown.mega },
       activity: act ? act.info : null,
+      // Issue 34: the wreck of the source at its place on this patch, in units of the box, or null
+      // on every cell but one. See patchSource() and ground-source.js.
+      source: src ? src.info : null,
       biome,
       // The temperature at the site, in degrees Celsius. The stats card of the world states the
       // mean of the planet, and a patch is not the mean. The probe overlay reads this one and

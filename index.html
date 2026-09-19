@@ -79,14 +79,17 @@
   <section id="creature" hidden aria-live="polite">
     <div class="ccard">
       <button type="button" class="cclose" aria-label="Close">×</button>
-      <!-- One card, two subjects. A WebGLRenderer owns the canvas it draws to, so the animal
-           preview and the plant preview keep one canvas each and the card shows one of them. -->
-      <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas></div>
+      <!-- One card, three subjects. A WebGLRenderer owns the canvas it draws to, so the animal
+           preview, the plant preview, and the wreck of issue 34 keep one canvas each and the card
+           shows one of them. The log of the wreck takes .clog; the CSS hides the blocks the open
+           subject does not use, by the data-subject attribute app.js sets. -->
+      <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas><canvas id="scv" hidden></canvas></div>
       <div class="ctext">
         <div class="cname"></div>
         <div class="clatin"></div>
         <dl class="ctags"></dl>
         <p class="cstory"></p>
+        <div class="clog"></div>
         <div class="cnav"><button type="button" class="ghost cprev">‹ Previous</button><button type="button" class="ghost cnext">Next ›</button></div>
       </div>
     </div>
@@ -125,6 +128,18 @@
       <span class="rung"></span><span class="rung"></span>
       <b id="hud-alt">—</b>
       <span class="k">Above ground</span>
+    </div>
+    <!-- The fifth block, issue 34: the carrier. A needle that turns with the view, the bearing as
+         three digits, the error of that bearing, one word for the strength, and the range once the
+         probe stands near the source. probe-hud.js hides the block on a world with no source. -->
+    <div class="hud-carrier" id="hud-carrier" hidden>
+      <div class="hud-dial"><i id="hud-needle"></i></div>
+      <div class="hud-read">
+        <span class="k">Carrier</span>
+        <b id="hud-brg">—</b>
+        <div class="hud-sub"><span class="k" id="hud-err">±0°</span><span class="k" id="hud-strength">Faint</span></div>
+        <span class="k" id="hud-range" hidden></span>
+      </div>
     </div>
     <div class="hud-link">
       <div class="hud-bars" id="hud-bars"></div>

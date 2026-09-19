@@ -33,13 +33,14 @@ globalThis.self = globalThis;
 require(path.join(root, 'lore.js'));
 require(path.join(root, 'species.js'));
 require(path.join(root, 'flora-lore.js'));
+require(path.join(root, 'source-lore.js'));
 // worker.js is a classic worker script, not a module. It is evaluated here in this scope so the
 // sweep can read PLANET_RANGES and FLORA_LORE, and so --seeds can call generate(). Nothing runs
 // until it is called; the file is definitions down to the onmessage handler at the end.
 globalThis.importScripts = () => {};
 globalThis.postMessage = () => {};
 new Function('self', readFileSync(path.join(root, 'worker.js'), 'utf8') + '\n;self.__generate = generate;')(globalThis);
-const { Lore, Species, FloraLore, PLANET_RANGES, FLORA_LORE } = globalThis;
+const { Lore, Species, FloraLore, SourceLore, PLANET_RANGES, FLORA_LORE } = globalThis;
 
 const arg = (name, dflt) => {
   const i = process.argv.indexOf('--' + name);
@@ -106,6 +107,18 @@ const LEXICON = [
   [/\bcliffs?\b|\bthe plain\b|\bhigh ground\b/i, '!noground'],
   [/\bthe vents?\b|\bthe flows?\b|\bash\b/i, 'volcanic|geysers|molten|lava'],
   [/\bbolt\b|\bthe charge\b|\bstorm belts?\b/i, 'stormy|gas'],
+  // Issue 34. The log of the source makes five claims the rules above do not name. No fauna line
+  // and no flora line holds any of these words today, so the five rules only bind the new text.
+  // `polarnight` is a tag of the source and not of the planet; see sourceTags() in source-lore.js.
+  [/\baurorae?\b/i, 'auroral'],
+  [/\bgeysers?\b/i, 'geysers'],
+  [/\blightning\b/i, 'stormy'],
+  [/\bthe ring overhead\b/i, 'ringed'],
+  // A sun that does not rise. The lean of the axis is not enough on its own: the claim also needs
+  // the latitude of the source, which is what `polarnight` carries. Every phrasing the log gates
+  // on that tag is named here, so a new line cannot state the claim behind a weaker gate. The
+  // species pool says "cannot come back up" of a fall, and \bnot come back up\b does not match it.
+  [/\bpolar night\b|\bstop rising\b|\bwill not come back up\b|\bunder the horizon for\b|\bflat circle\b|\bround the horizon\b|\bnot come back inside\b/i, 'polarnight'],
 ];
 // An exemption relaxes ONE lexicon rule, not the whole sentence. A skip that applied to the whole
 // text let any line that happened to contain a creature name past every rule. Each entry names the
@@ -336,7 +349,19 @@ const tagsSeen = new Set();
 // this pass. FLORA_SKY_TAGS below is that list, taken from the pools themselves, so a new gate on
 // a new tag widens the sweep on its own.
 const FLORA_SKY_TAGS = floraSkyTags();
-const skies = new Map();
+// The same collapse for the log of the source. The source reads three facts the planet tag set
+// does not carry: the lean of the axis, the latitude of the source, and whether the world holds
+// life. So the sweep runs every world through seven leans, five latitudes, and both states of the
+// life, and it keeps one world per distinct tag set.
+//
+// The seven leans cover every class rollAxis() draws: damped, ordered, tipped, and turned. 17 is
+// there because a source at 79 degrees carries `polarnight` at that lean while `tilted` starts at
+// 20, so the two tags must be swept apart. The latitudes stop at 79, because makeSource() keeps
+// the source inside SOURCE_LAT, which is 80 degrees.
+const SOURCE_SKY_TAGS = sourceSkyTags();
+const SOURCE_TILT = [0, 12, 17, 23.4, 60, 140, 177];
+const SOURCE_LATS = [0, 25, 45, 65, 79];
+const skies = new Map(), sourceSkies = new Map();
 for (const f of worlds()) {
   const env = Lore.makeEnv(f);
   for (const t of env.tags) tagsSeen.add(t);
@@ -344,6 +369,18 @@ for (const f of worlds()) {
   auditLines(env, f);
   const key = f.type + '|' + [...env.tags].filter((t) => FLORA_SKY_TAGS.has(t)).sort().join(',');
   if (!skies.has(key)) skies.set(key, { env, f });
+  // A gas giant takes no probe, so it carries no source and no log. See makeSource() in worker.js.
+  if (f.type !== 'gas') {
+    for (const obliquityDeg of SOURCE_TILT) {
+      for (const latDeg of SOURCE_LATS) {
+        for (const beasts of [true, false]) {
+          const tags = SourceLore.sourceTags(env, obliquityDeg, beasts, latDeg);
+          const sKey = f.type + '|' + [...tags].filter((t) => SOURCE_SKY_TAGS.has(t)).sort().join(',');
+          if (!sourceSkies.has(sKey)) sourceSkies.set(sKey, { env, f, tags, beasts });
+        }
+      }
+    }
+  }
   n++;
 }
 
@@ -391,6 +428,26 @@ function floraSkyTags() {
   for (const list of Object.values(FloraLore.POOLS.CLOSE)) eat(list);
   for (const k of ['PLAIN_FEATURE', 'HABIT', 'CLIMATE', 'SKY', 'FOOD', 'SPREAD',
     'STAND_ONE', 'STAND_FEW', 'STAND_MANY', 'WORLD_ADJ', 'WORLD_EPITHET']) eat(FloraLore.POOLS[k]);
+  for (const [, gate] of LEXICON) {
+    const g = Lore.parseGate(gate);
+    for (const any of g.need) for (const t of any) out.add(t);
+    for (const t of g.ban) out.add(t);
+  }
+  return out;
+}
+
+// Every tag a gate of the source names, plus every tag a lexicon rule names. A world outside this
+// list is the same world to the log, whatever else it carries.
+function sourceSkyTags() {
+  const out = new Set();
+  for (const list of Object.values(SourceLore.POOLS)) {
+    for (const e of list) {
+      if (!e.tags) continue;
+      const g = Lore.parseGate(e.tags);
+      for (const any of g.need) for (const t of any) out.add(t);
+      for (const t of g.ban) out.add(t);
+    }
+  }
   for (const [, gate] of LEXICON) {
     const g = Lore.parseGate(gate);
     for (const any of g.need) for (const t of any) out.add(t);
@@ -536,6 +593,131 @@ for (const [skyKey, { env, f }] of skies) {
 }
 const floraRelIssues = auditFloraRelations();
 
+// ---------------------------------------------------------------- pass 7: the log of the source
+// Issue 34, slice 4. Four slots, written once per world in generate() and carried on
+// world.source.log. The checks are the ones the other passes run, plus two of its own.
+//
+// Reachability splits in two here, because a line may carry a gate on the world and a test on the
+// genome at the same time. The two are independent, so the sweep asks them separately: one world
+// in the sweep must pass the gate, and one genome shape must pass the test. A line that fails
+// either half is dead text.
+const SP = SourceLore.POOLS;
+const SOURCE_POOLS = [['ARRIVAL', SP.ARRIVAL], ['SURVEY', SP.SURVEY], ['TROUBLE', SP.TROUBLE], ['LAST', SP.LAST]];
+const SOURCE_TOKENS = SourceLore.TOKENS;
+const BEAST_TOKENS = SourceLore.BEAST_TOKENS;
+// Every genome shape a test of the survey can tell apart: the locomotion, the head, the one part
+// the tests read, and the sociality, plus the swarm, which is a plan and not a locomotion.
+function* sourceShapes() {
+  for (const loco of LOCOS) {
+    for (const head of HEADS) {
+      for (const extra of ['', ...EXTRAS]) {
+        for (const social of SOC) yield genome(loco, head, extra, NICHES[0], null, social);
+      }
+    }
+  }
+  yield genome('wings', 'beak', '', NICHES[0], 'swarm', 'herd');
+}
+// The shapes the coverage sweep carries. Coverage asks whether a slot is empty, and no slot may
+// be empty for any animal, so one walker, one flyer, and one burrower under each sociality is the
+// population it has to hold for.
+const SOURCE_COVER = [];
+for (const social of SOC) for (const loco of Object.values(CLS_LOCO)) SOURCE_COVER.push(genome(loco, 'beak', '', NICHES[0], null, social));
+SOURCE_COVER.push(genome('wings', 'beak', '', NICHES[0], 'swarm', 'herd'));
+
+const sourceIssues = [];
+const srcReach = new Map();      // line -> { gate, cond }: the two halves of reachability
+const seenSource = new Map();    // line -> the lexicon contexts it has been read in
+let sourceChecked = 0;
+for (const [, list] of SOURCE_POOLS) for (const e of list) srcReach.set(e, { gate: false, cond: false });
+
+for (const [label, list] of SOURCE_POOLS) {
+  for (const e of list) {
+    if (!e.if) { srcReach.get(e).cond = true; continue; }
+    for (const G of sourceShapes()) {
+      let ok;
+      try { ok = e.if({ G, env: null, tags: new Set(), world: null }); }
+      catch (err) { sourceIssues.push(`SOURCE ${label}: if() threw — ${err.message}\n    ${e.t}`); ok = true; }
+      if (ok) { srcReach.get(e).cond = true; break; }
+    }
+  }
+}
+
+for (const [, sky] of sourceSkies) {
+  const { env, f, tags, beasts } = sky;
+  // The lexicon reads only the tags its own rules name, so one line is read once per such context.
+  let lexKey = '';
+  for (const t of LEX_TAGS) if (tags.has(t)) lexKey += t + ',';
+  const base = { env, tags, world: fakeWorld(f) };
+  // A world with no species gives the writer no genome, so the sweep gives the pools none either.
+  const ctxs = beasts ? SOURCE_COVER.map((G) => ({ ...base, G })) : [{ ...base, G: null }];
+  for (const [label, list] of SOURCE_POOLS) {
+    for (const ctx of ctxs) {
+      sourceChecked++;
+      if (!Lore.candidates(list, ctx).length) {
+        holes.push(`SOURCE ${label} — ${f.type} [${[...tags].join(' ')}]`);
+      }
+    }
+    for (const e of list) {
+      if (e.tags && !Lore.matchTags(Lore.gateOf(e), tags)) continue;
+      srcReach.get(e).gate = true;
+      let seen = seenSource.get(e);
+      if (!seen) { seen = new Set(); seenSource.set(e, seen); }
+      if (seen.has(lexKey)) continue;
+      seen.add(lexKey);
+      for (const bad of lexCheck(e.t, tags)) {
+        lexHits.push(`SOURCE ${label}: /${bad.word}/ needs "${bad.gate}" — ${f.type} [${[...tags].join(' ')}]\n    ${e.t}`);
+      }
+    }
+  }
+}
+
+// A line is wide when it fits any world the slot can reach: no ban, no test on the genome, and no
+// tag but `beasts`, which every survey line carries because the survey names an animal.
+const isWide = (e) => {
+  const g = Lore.parseGate(e.tags);
+  return !e.if && !g.ban.length && g.need.every((any) => any.length === 1 && any[0] === 'beasts');
+};
+const SOURCE_WIDE_MIN = 6;
+for (const [label, list] of SOURCE_POOLS) {
+  for (const e of list) {
+    const toks = Lore.tokensIn(e.t);
+    for (const tok of toks) {
+      if (!SOURCE_TOKENS.includes(tok)) tokenHits.push(`SOURCE ${label}: uses {${tok}}, which the log does not fill\n    ${e.t}`);
+    }
+    // A line that names the animal may only reach a world that carries one.
+    if (toks.some((t) => BEAST_TOKENS.includes(t))) {
+      const need = Lore.parseGate(e.tags).need;
+      if (!need.some((any) => any.length === 1 && any[0] === 'beasts')) {
+        sourceIssues.push(`SOURCE ${label}: names the animal but is not gated on "beasts"\n    ${e.t}`);
+      }
+    }
+    const r = srcReach.get(e);
+    if (!r.gate) sourceIssues.push(`SOURCE ${label}: no world in the sweep passes its gate [${e.tags || ''}]\n    ${e.t}`);
+    else if (!r.cond) sourceIssues.push(`SOURCE ${label}: no genome shape passes its if()\n    ${e.t}`);
+  }
+  const wide = list.filter(isWide).length;
+  if (wide < SOURCE_WIDE_MIN) {
+    sourceIssues.push(`SOURCE ${label}: only ${wide} lines fit any world, and five worlds in a row will repeat one`);
+  }
+  // Every gate of the trouble needs two lines, for the same reason.
+  if (label === 'TROUBLE') {
+    const byGate = new Map();
+    for (const e of list) {
+      if (!e.tags) continue;
+      byGate.set(e.tags, (byGate.get(e.tags) || 0) + 1);
+    }
+    // Two gates that name the same fact count together: "geysers" and "geysers waterliquid".
+    const byFirst = new Map();
+    for (const [gate, count] of byGate) {
+      const head = gate.split(/\s+/)[0];
+      byFirst.set(head, (byFirst.get(head) || 0) + count);
+    }
+    for (const [head, count] of byFirst) {
+      if (count < 2) sourceIssues.push(`SOURCE TROUBLE: the fault "${head}" carries only ${count} line`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- pass 4: real worlds through the worker
 let storyStats = null;
 if (SEEDS > 0) {
@@ -547,6 +729,32 @@ if (SEEDS > 0) {
     try { globalThis.__generate(seed, { detail: 24, maxFlora: 200, maxFauna: 40 }); } catch (e) { holes.push(`seed ${seed}: ${e.message}`); continue; }
     if (!world) continue;
     const env = Lore.makeEnv(world.env);
+    // The log of the source, issue 34 slice 4. A world with no source carries no log, which is
+    // the right answer for a gas giant and for a world where no vertex passed the tests.
+    if (world.source) {
+      const log = world.source.log;
+      const live = (world.species || []).filter((G) => G.lore);
+      if (!log) holes.push(`seed ${seed}: the source carries no log`);
+      else {
+        const want = SourceLore.SLOTS.map((s) => s.key).join(',');
+        const got = log.entries.map((e) => e.slot).join(',');
+        if (got !== want) holes.push(`seed ${seed}: the log reads ${got}, not ${want}`);
+        const stags = SourceLore.sourceTags(env, world.env.obliquityDeg, live.length > 0,
+          SourceLore.sourceLatDeg(world.source.dir));
+        for (const e of log.entries) {
+          if (!e.text) { holes.push(`seed ${seed}: the ${e.slot} entry of the log is empty`); continue; }
+          for (const tok of Lore.tokensIn(e.text)) tokenHits.push(`seed ${seed} log ${e.slot}: unfilled {${tok}}`);
+          for (const bad of lexCheck(e.text, stags)) {
+            lexHits.push(`seed ${seed} log ${e.slot}: /${bad.word}/ needs "${bad.gate}" [${[...stags].join(' ')}]\n    ${e.text}`);
+          }
+        }
+        // The survey names one animal of this world, so the log and the fauna card agree.
+        if (log.species && !live.some((G) => G.lore.name === log.species)) {
+          holes.push(`seed ${seed}: the log names "${log.species}", which is not a species of this world`);
+        }
+        if (!log.species && live.length) holes.push(`seed ${seed}: the world carries species and the log names none`);
+      }
+    }
     for (const G of world.species) {
       const s = G.lore.story;
       lens.push(s.length);
@@ -584,6 +792,7 @@ const relIssues = auditRelations([sky(0), sky(4)]);
 console.log(`worlds tested        ${n}`);
 console.log(`pool lookups         ${checked}`);
 console.log(`flora lookups        ${floraChecked} over ${skies.size} skies x ${KIND_COUNT} kinds x ${BIOMES.length} biomes`);
+console.log(`source lookups       ${sourceChecked} over ${sourceSkies.size} skies x 4 slots`);
 console.log(`distinct world tags  ${[...tagsSeen].sort().join(' ')}`);
 console.log('');
 const report = (title, map) => {
@@ -603,6 +812,8 @@ console.log(`relation issues: ${relIssues.length}`);
 for (const x of relIssues) console.log('  - ' + x);
 console.log(`flora relation issues: ${floraRelIssues.length}`);
 for (const x of floraRelIssues) console.log('  - ' + x);
+console.log(`source log issues: ${sourceIssues.length}`);
+for (const x of sourceIssues) console.log('  - ' + x);
 if (storyStats) console.log(`\nstory length (characters): min ${storyStats.min}, median ${storyStats.median}, max ${storyStats.max}, over ${storyStats.n} species`);
 
 for (const { seed, world, G } of sampleStories) {
@@ -613,5 +824,5 @@ for (const { seed, world, G } of sampleStories) {
   console.log(l.story);
 }
 const fail = holeMap.size + lexMap.size + tokenMap.size + relIssues.length + dead.length
-  + floraRelIssues.length + floraDead.length;
+  + floraRelIssues.length + floraDead.length + sourceIssues.length;
 process.exit(fail ? 1 : 0);

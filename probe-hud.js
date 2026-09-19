@@ -24,6 +24,22 @@ const VIGNETTE = 0.42;          // the part of the short side of the screen one 
 // does on a lens and no edge of the band can be found.
 const VIGNETTE_STOPS = [[0, 1], [0.22, 0.78], [0.45, 0.48], [0.68, 0.22], [0.86, 0.07], [1, 0]];
 const TEXT_MS = 120;            // ms between two writes of the numbers. The eye reads no faster.
+// The carrier of issue 34. One word states the strength, and it comes off the arc to the source.
+// The reader gets every fact of the carrier here, so nothing is lost with the sound off.
+//
+//   Here    the landing cell is the cell of the source
+//   Strong  under CARRIER_STRONG, which is the 6 cells decision 7 gives the range over
+//   Clear   under CARRIER_CLEAR, where the error stands under 8 degrees and two fixes cross tight
+//   Faint   further out, where the error runs on to 25 degrees at the antipode
+//
+// A random landing is Faint five times in six, Clear about one time in six, and Strong only when
+// the reader aims for it. See carrierAt() in site.js for the error.
+// A site carries two decimals of a degree, so the site of record stands up to 0.013 of a cell from
+// the middle of that cell and the arc on the cell of the source is small but not zero. A tenth of
+// a cell clears that rounding and still reaches no further than the cell itself.
+const CARRIER_HERE = 0.001;     // radians of arc, which is a tenth of a cell
+const CARRIER_STRONG = 0.06;    // radians of arc, which is 6 cells
+const CARRIER_CLEAR = 0.6;      // radians of arc, which is 60 cells, a fifth of the half circle
 
 // The seconds of a countdown as hours and minutes. A landing lasts minutes and a day lasts hours,
 // so the minutes carry the change the reader sees and the hours carry the fact.
@@ -47,6 +63,12 @@ export class ProbeHud {
     this.elLink = root.querySelector('#hud-link');
     this.elBars = root.querySelector('#hud-bars');
     this.elWarn = root.querySelector('#hud-warn');
+    this.elCarrier = root.querySelector('#hud-carrier');
+    this.elNeedle = root.querySelector('#hud-needle');
+    this.elBrg = root.querySelector('#hud-brg');
+    this.elErr = root.querySelector('#hud-err');
+    this.elStrength = root.querySelector('#hud-strength');
+    this.elRange = root.querySelector('#hud-range');
     this.bars = [];
     if (this.elBars) {
       for (let i = 0; i < BARS; i++) {
@@ -58,6 +80,7 @@ export class ProbeHud {
     }
     this._grainAt = 0;
     this._textAt = 0;
+    this._needleAt = null;   // the turn the needle of the carrier stands at. See _writeCarrier().
     this._lit = -1;
     this._state = '';
     this._w = 0; this._h = 0;
@@ -65,7 +88,21 @@ export class ProbeHud {
     this.grain = null;    // the small canvas the grain is drawn into
   }
 
-  show() { if (this.root) this.root.hidden = false; }
+  show() {
+    if (!this.root) return;
+    this.root.hidden = false;
+    this._needleAt = null;      // a new landing puts the needle where it stands, with no turn
+  }
+
+  // One flash of the carrier row, for the first landing on a world. The class comes off and goes
+  // on again, because the animation runs only once and a second world has to see it too.
+  flashCarrier() {
+    const el = this.elCarrier;
+    if (!el) return;
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+  }
 
   hide() {
     if (!this.root) return;
@@ -125,6 +162,7 @@ export class ProbeHud {
         this.bars[i].className = i < lit ? (weak ? 'lit hot' : 'lit') : '';
       }
     }
+    this._writeCarrier(tel.carrier);
     // Three words, and each one is a fact about the probe and not an order to the reader.
     const state = tel.near > 0.75 ? 'lost' : tel.near > 0.02 ? 'weak' : 'ok';
     if (state !== this._state) {
@@ -135,6 +173,39 @@ export class ProbeHud {
         this.elLink.classList.toggle('weak', state !== 'ok');
       }
       if (this.elWarn) this.elWarn.classList.toggle('show', state === 'lost');
+    }
+  }
+
+  // The carrier block. A world with no source gives null and the whole block goes away.
+  //
+  // The needle turns by `rel`, the bearing less the bearing the view points along, so 0 stands
+  // straight ahead. The bearing reads as three digits, because the reader compares one landing
+  // against the next and a number of one width is easier to compare. The range states kilometres
+  // near the source and units on its cell; both stay away until the probe is near. Decision 7.
+  _writeCarrier(c) {
+    if (!this.elCarrier) return;
+    this.elCarrier.hidden = !c;
+    if (!c) return;
+    // The needle takes the short way round. rel runs 0 to 360, so a view that turns through north
+    // takes it from 359 to 1, and a plain rotate() would then spin the needle the whole way back.
+    // The running angle holds the turn the needle has made and it steps by half a circle at most.
+    if (this.elNeedle) {
+      this._needleAt = this._needleAt == null ? c.rel
+        : this._needleAt + ((c.rel - this._needleAt + 540) % 360) - 180;
+      this.elNeedle.style.transform = `rotate(${this._needleAt.toFixed(1)}deg)`;
+    }
+    if (this.elBrg) this.elBrg.textContent = `${String(Math.round(c.brg) % 360).padStart(3, '0')}°`;
+    if (this.elErr) this.elErr.textContent = `±${Math.round(c.err)}°`;
+    if (this.elStrength) {
+      this.elStrength.textContent = c.arc < CARRIER_HERE ? 'Here'
+        : c.arc < CARRIER_STRONG ? 'Strong' : c.arc < CARRIER_CLEAR ? 'Clear' : 'Faint';
+    }
+    if (this.elRange) {
+      const text = c.range != null ? `${Math.round(c.range)} u`
+        : c.rangeKm != null ? `${c.rangeKm < 10 ? c.rangeKm.toFixed(1) : Math.round(c.rangeKm)} km`
+          : '';
+      this.elRange.hidden = !text;
+      this.elRange.textContent = text;
     }
   }
 

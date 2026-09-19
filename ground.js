@@ -13,6 +13,7 @@ import { Flora, GrassField } from './ground-flora.js';
 import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
+import { SourceWreck } from './ground-source.js';
 import { perf } from './perf.js';
 
 // metres, the side of the ground box. The tier picks the real one and sends it with the patch
@@ -167,28 +168,28 @@ const SPEED_SPAN = 400;     // metres, the height where a wheel step reaches its
 // The reader stands on a world 900 units wide and has to be able to cross it. A drag of the ground
 // carries the short distances and the keys carry the long ones. Both move the pair, the camera and
 // its target, so the view direction and the distance hold and only the place changes.
-const WALK_SLOW = 11;       // units per second at eye height
-const WALK_FAST = 150;      // units per second at the ceiling
+const WALK_SLOW = 16;       // units per second at eye height
+const WALK_FAST = 220;      // units per second at the ceiling
 const WALK_RUN = 5;         // what a held Shift multiplies the speed by
-const WALK_EASE = 6;        // 1/s: how fast the walk reaches its speed, and how fast it stops
+// 1/s: how fast the flight reaches its speed, and how fast it stops. The probe flies like a drone,
+// so it keeps some momentum: it takes about half a second to reach its speed and to stop.
+const WALK_EASE = 2.2;
 const WALK_HOLD = 300;      // ms a press must hold still before it becomes a walk
 const WALK_EDGE = 80;       // units: the walk slows to nothing over this band at the limit of the pan
-const KEY_YAW = 1.2;        // rad/s, the turn of the side arrows, Q, and E
-const KEY_TILT = 0.9;       // rad/s, the tilt of R and F
+const KEY_YAW = 1.2;        // rad/s, the turn of the side arrows
+const KEY_TILT = 0.9;       // rad/s, the tilt of the up and down arrows, Q, and E
 const KEY_ZOOM = 1.8;       // the part of the distance + and - take each second
 // One name per job, so the reader may press either of two keys for it. A key with one letter comes
 // in lower case; a named key comes as the browser writes it.
 //
-// The arrows fly the camera, because the arrows are the keys every reader finds first. Up and down
-// go the way the view points, so a view that looks down flies down. The side arrows turn the view
-// instead of stepping sideways, so one hand on the arrows owns the whole ground; A and D keep the
-// step sideways for the reader who walks with the left hand. Space lifts the camera, Ctrl drops
-// it, and Shift runs.
+// The probe flies like a drone. W, A, S, and D move it in the flat plane, parallel to the surface,
+// and they do not follow the terrain or the tilt of the view. Space lifts it, Ctrl drops it, and
+// Shift runs. The arrows turn the view about the eye: the side arrows turn it left and right, and
+// up and down tilt it. Q and E tilt it too, for the reader whose right hand holds the mouse.
 const KEY_JOB = {
-  w: 'fwd', arrowup: 'fwd', s: 'back', arrowdown: 'back',
-  a: 'left', d: 'right',
-  q: 'yawl', arrowleft: 'yawl', e: 'yawr', arrowright: 'yawr',
-  r: 'tiltu', f: 'tiltd',
+  w: 'fwd', s: 'back', a: 'left', d: 'right',
+  arrowleft: 'yawl', arrowright: 'yawr',
+  arrowup: 'tiltu', arrowdown: 'tiltd', q: 'tiltu', e: 'tiltd',
   ' ': 'up', control: 'down',
   '+': 'in', '=': 'in', '-': 'out', _: 'out', shift: 'run',
 };
@@ -204,6 +205,10 @@ const RAY_FAR = 3600;       // metres, how far the tap ray looks for the ground
 // units: how far behind a plant an animal may stand and still take the tap. A reader who taps an
 // animal beside a tree means the animal, so the animal wins unless it is clearly further back.
 const PICK_GRACE = 2;
+// units: how far past the ground under the pointer the wreck of issue 34 may stand and still take
+// the tap. The hull is 13 units long and the mast 18 tall, so a hit on the body can measure a few
+// units further out than the ground the same ray meets beside it.
+const WRECK_GRACE = 20;
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM. The
@@ -235,7 +240,6 @@ const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.Vector3();
 const _sph = new THREE.Spherical();
 const _fw = new THREE.Vector3(), _rt = new THREE.Vector3();   // the walk basis of the frame
-const _seat = new THREE.Vector3();   // the candidate pivot of _seatTarget()
 const _UP = new THREE.Vector3(0, 1, 0);
 const _tint = [0, 0, 0];   // scratch colour for the rim rows
 
@@ -280,22 +284,29 @@ function makeGeometry(pos, col, idx) {
 
 export class Ground {
   // tier: { grid, maxFlora, maxFauna, shadows }
-  constructor({ renderer, canvas, world, site, tier, onSelect, onSelectPlant, onDeselect }) {
+  constructor({ renderer, canvas, world, site, tier, music, onSelect, onSelectPlant, onSelectSource, onDeselect }) {
     this.renderer = renderer;
     this.onSelect = onSelect || null;       // (kind) => void, a tap marked an animal of this species
     this.onSelectPlant = onSelectPlant || null; // (kind) => void, a tap marked a plant of this kind
-    this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took both marks off
+    this.onSelectSource = onSelectSource || null; // () => void, a tap marked the wreck. Issue 34.
+    this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took every mark off
+    // The music of the app. The lamp of the wreck reads its bar clock, so the eye and the ear keep
+    // one rhythm. It is null in a session with no music and the lamp then takes the clock of the
+    // landing. See ground-source.js.
+    this.music = music || null;
     this.canvas = canvas;
     this.world = world;
     this.site = site;
     this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true, lodMax: LOD_MAX };
     this.result = null;
+    this.carrier = null;    // the reading of issue 34, from the app. See load().
     this.sky = null;
     this.flora = null;
     this.grass = null;
     this.fauna = null;
     this.sea = null;
     this.phenomena = null;
+    this.source = null;     // the wreck of issue 34, on the one cell that holds it
     this.atCeiling = false;
     // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
     // it. _driveLod() moves it from the frame time; the last settled value comes from the store,
@@ -377,6 +388,9 @@ export class Ground {
     this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind, scale, dist, member } | null
     // The same seam for the plants, issue 24. It is set in load(), beside the flora.
     this.pickPlant = null;       // (ndcX, ndcY, event) => { point, kind, index, dist } | null
+    // The same seam for the wreck of issue 34. One body stands on the patch, so the pick needs no
+    // kind and no index. It is set in load(), beside the wreck.
+    this.pickSource = null;      // (ndcX, ndcY) => { point, dist } | null
     this._bound = {
       down: (e) => this._onDown(e),
       move: (e) => this._onMove(e),
@@ -406,9 +420,12 @@ export class Ground {
   // The worker's patch result, or null for the placeholder ground of issue 03.
   // The sun direction comes from the app, because only the app knows planet.rotation.y. The view
   // comes from the app for the same reason: it holds the sun, the moons, and the ring of the globe
-  // in the frame of the site. See ground-sky.js.
-  load(result, { sunDir, view } = {}) {
+  // in the frame of the site. See ground-sky.js. The carrier of issue 34 comes from the app for
+  // the same reason again: carrierAt() in site.js reads the globe and the app turns the direction
+  // of the source into this frame.
+  load(result, { sunDir, view, carrier } = {}) {
     this.result = result;
+    this.carrier = carrier || null;
     if (sunDir) this.sunDir.copy(sunDir).normalize();
     this._clear();
     this._shadowOn = false;      // the camera arrives 800 m up, where nothing casts
@@ -466,6 +483,15 @@ export class Ground {
         heightAt: (x, z) => this.heightAt(x, z), renderer: this.renderer,
       });
       if (this.phenomena) this.content.add(this.phenomena.group);
+      // The source of the world, when this cell is the cell that holds it. The worker picked the
+      // place, flattened the disc, and scorched it; this raises the wreck on that disc. It comes
+      // after the terrain for the same reason the phenomenon does: it reads the drawn height.
+      // Issue 34, slice 3. See ground-source.js.
+      this.source = SourceWreck.create({
+        world: this.world, patch: p, tier: this.tier, music: this.music,
+        heightAt: (x, z) => this.heightAt(x, z),
+      });
+      if (this.source) this.content.add(this.source.group);
     } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
       const plane = new THREE.Mesh(
@@ -502,6 +528,9 @@ export class Ground {
       const px = (nx + 1) / 2 * r.width, py = (1 - ny) / 2 * r.height;
       return this.flora.pickHit(px, py, e && e.pointerType === 'touch' ? 52 : 34);
     };
+    // The same seam for the wreck. One ray against a body of 400 triangles is exact, so this one
+    // takes the point of the screen and no pixel tolerance. See SourceWreck.pickAt().
+    this.pickSource = (nx, ny) => (this.source ? this.source.pickAt(nx, ny, this.camera) : null);
 
     // A directional light takes its direction from the position and the target, not the distance,
     // so the height of the site must not move it. The colour and the strength come from the sky.
@@ -535,10 +564,12 @@ export class Ground {
     // The reveal: the camera starts CAM_START up and south of the site by the same tilt the
     // ceiling holds, and it looks at the site. The reader sees the patch from over the fog and
     // zooms in. The tilt keeps the edge of the box in the fog. See "the rectangle" above.
+    // The reach limits the camera, so on the narrow tier the reveal stands on the reach and looks
+    // a little steeper.
     this.glide = null;
     this.controls.target.set(0, this.base + TARGET_LIFT, 0);
     this.camera.up.set(0, 1, 0);
-    this.camera.position.set(0, this.base + CAM_START, CAM_START * Math.tan(POLAR_HIGH));
+    this.camera.position.set(0, this.base + CAM_START, Math.min(CAM_START * Math.tan(POLAR_HIGH), this.reach));
     this.controls.update();
     return this;
   }
@@ -838,13 +869,18 @@ export class Ground {
   // back. The brake takes the outward part of the step the controls just made and fades it out
   // over the same band the walk uses, so a drag slows to nothing at the reach and a drag along
   // the edge or back toward the site keeps its full speed.
-  _brakeEdge(x0, z0) {
+  //
+  // The reach limits the probe, which is the camera, and not the target. The target is only the
+  // point the view looks at. The step of the pan is the step of the target, because the pan moves
+  // the pair and a turn of the view moves only the camera. The distance to the reach is the
+  // distance of the camera.
+  _brakeEdge(x0, z0, cx, cz) {
     const tg = this.controls.target, p = this.camera.position;
     const dx = tg.x - x0, dz = tg.z - z0;
     if (dx === 0 && dz === 0) return;
-    const r0 = Math.hypot(x0, z0);
+    const r0 = Math.hypot(cx, cz);
     if (r0 < 1e-6 || r0 < this.reach - WALK_EDGE) return;
-    const ux = x0 / r0, uz = z0 / r0;
+    const ux = cx / r0, uz = cz / r0;
     const out = dx * ux + dz * uz;
     if (out <= 0) return;                    // inward or along the edge: the reader keeps it all
     const cut = out * THREE.MathUtils.smoothstep(r0, this.reach - WALK_EDGE, this.reach);
@@ -860,6 +896,7 @@ export class Ground {
   //   sun       the seconds to the next sunset, or to the next sunrise when the star is down
   //   signal    the strength of the uplink, 0 to 1, which falls over the last SIGNAL_BAND units
   //   near      0 inside the reach and 1 at it, over the last NOISE_BAND units: the noise ramp
+  //   carrier   the bearing to the source of issue 34, or null on a world that holds none
   //
   // The temperature falls with the height at the lapse rate of a real atmosphere, and it reads
   // the same height the ladder states. The box holds a vertical scale of its own, so one unit of
@@ -872,10 +909,57 @@ export class Ground {
     const agl = Math.max(0, p.y - surface);
     const site = patch && patch.tempC != null ? patch.tempC : null;
     const tempC = site == null ? null : site - (p.y - this.base) * LAPSE_C_PER_M;
-    const r = Math.hypot(this.controls.target.x, this.controls.target.z);
+    const r = Math.hypot(p.x, p.z);   // the reach limits the probe, which is the camera
     const signal = 1 - THREE.MathUtils.smoothstep(r, this.reach - SIGNAL_BAND, this.reach) * 0.94;
     const near = THREE.MathUtils.smoothstep(r, this.reach - NOISE_BAND, this.reach);
-    return { tempC, agl, signal, near, sun: this._sunCountdown() };
+    return { tempC, agl, signal, near, sun: this._sunCountdown(), carrier: this._carrier() };
+  }
+
+  // The carrier of issue 34, or null. The app hands over the reading of the cell in load():
+  //
+  //   brg       the bearing the instrument states, 0 to 360 degrees from north, east positive
+  //   err       the error of that bearing in degrees. The true bearing lies inside brg plus or
+  //             minus err, and the wedge on the globe is that band. Decision 3.
+  //   arc       radians from the site to the source. The overlay reads the strength off it.
+  //   rel       degrees from the way the view points to the way the needle points, -180 to 180.
+  //             A positive rel puts the needle to the right of the screen, so it turns with the
+  //             view. See below: it is an angle in the box and not the bearing less an azimuth.
+  //   rangeKm   kilometres to the source inside CARRIER_RANGE cells of arc, else null. Decision 7.
+  //   range     units from the camera to the wreck on this patch, or null off its cell. The
+  //             overlay then states the range in units and the word "here". Decision 7.
+  //
+  // On the cell of the source the needle stops reading the globe and reads the wreck: the reader can
+  // see the thing, so a needle that pointed anywhere else would be a fault the reader can measure.
+  // Both the needle and the range are taken from the CAMERA POSITION, which is the point the height
+  // of the overlay is measured from, so every number of the block speaks about one place. The
+  // camera moves as the reader walks, so the needle turns and the range falls with every step.
+  _carrier() {
+    const c = this.carrier;
+    if (!c) return null;
+    // The camera looks from its own position at the target, so the flat part of that step is the
+    // way the reader faces. carrier.dir is the way the needle points as (x, z) in the frame of the
+    // box, which the app reads off the axes of the cell; see carrierBox() in site.js. The box is
+    // the mirror of the frame x east, y up, z south, so the sense of a bearing is turned over in
+    // it and rel may not come from the three digits less an azimuth. It is the angle from the
+    // forward of the view to the needle, and the right of the view on the ground is (-fz, fx).
+    const p = this.camera.position, tg = this.controls.target;
+    let fx = tg.x - p.x, fz = tg.z - p.z;
+    const fl = Math.hypot(fx, fz);
+    let d = c.dir;
+    let range = null;
+    // The wreck stands on this patch, in the same units as the camera, so the needle takes the true
+    // way to it and the range is the plain distance over the ground.
+    if (this.source) {
+      const wx = this.source.at.x - p.x, wz = this.source.at.z - p.z;
+      range = Math.hypot(wx, wz);
+      if (range > 1e-6) d = [wx / range, wz / range];
+    }
+    let rel = 0;
+    if (d && fl > 1e-9) {
+      fx /= fl; fz /= fl;
+      rel = THREE.MathUtils.radToDeg(Math.atan2(d[1] * fx - d[0] * fz, d[0] * fx + d[1] * fz));
+    }
+    return { brg: c.brg, err: c.err, arc: c.arc, rel, rangeKm: c.rangeKm, range };
   }
 
   // The time to the next sunset, or to the next sunrise when the star is under the horizon.
@@ -901,10 +985,11 @@ export class Ground {
 
   update(t, dt) {
     this._drive();               // the speeds and the tilt, both from the height of the camera
-    // Where the pair stands before the controls move it. The brake below reads the two numbers.
+    // Where the pair stands before the controls move it. The brake below reads the four numbers.
     const bx = this.controls.target.x, bz = this.controls.target.z;
+    const cx = this.camera.position.x, cz = this.camera.position.z;
     this.controls.update();
-    this._brakeEdge(bx, bz);     // the drag eases to a stop at the reach, it does not hit a wall
+    this._brakeEdge(bx, bz, cx, cz);     // the drag eases to a stop at the reach, it does not hit a wall
     if (this.glide) this._stepGlide(dt);
     // Issue 23: a press that holds still, and does not move, becomes a walk.
     const tap = this._tap;
@@ -913,16 +998,15 @@ export class Ground {
     const p = this.camera.position, tg = this.controls.target;
 
     // The backstop. The brake above and the cut in _stepMove() take the outward part of every
-    // step the reader asks for, so the pair reaches the reach and stops there. A glide or a link
-    // can still put the target outside it in one jump, and this pulls it back. It used to run on
-    // every frame against a walk that was still pushing, and the snap it made was the jitter the
-    // reader felt at the edge.
-    const tr = Math.hypot(tg.x, tg.z);
-    if (tr > this.reach) {
-      const k = this.reach / tr - 1;
-      const dx = tg.x * k, dz = tg.z * k;
-      tg.x += dx; tg.z += dz;
-      p.x += dx; p.z += dz;
+    // step the reader asks for, so the camera reaches the reach and stops there. A turn of the
+    // view with the mouse, a zoom, a glide, or a link can still put the camera outside it, and
+    // this puts the camera back on the reach. Only the camera moves: the target is where the
+    // reader looks. The old backstop pulled the target in and the camera with it, so a reader at
+    // the edge moved toward the site each time the view turned.
+    const cr = Math.hypot(p.x, p.z);
+    if (cr > this.reach) {
+      const k = this.reach / cr;
+      p.x *= k; p.z *= k;
     }
 
     // The height of the pair. The reader owns it. The camera used to ride the terrain: the target
@@ -970,6 +1054,9 @@ export class Ground {
     if (this.sky) { this.sky.update(t, dt, this.camera); this._followSun(); }
     // the phenomenon reads the field of view of the camera for its point sizes
     if (this.phenomena) this.phenomena.update(t, dt, this.camera);
+    // the lamp of the wreck blinks the rhythm of the motif, on the clock of the song or of the
+    // landing. It costs one loop over the steps of one bar.
+    if (this.source) this.source.update(t);
     // the sea follows the target, so it must move after the target clamp
     if (this.sea) this.sea.update(t, tg);
 
@@ -1239,26 +1326,11 @@ export class Ground {
       if (y <= this._surfaceAt(p.x + _dir.x * t, p.z + _dir.z * t)) {
         const d = Math.max(this.controls.minDistance, t);
         if (d >= d0) return;
-        // The seat runs every frame, and a camera that stands outside the reach seats its target
-        // outward, toward itself. The backstop of update() then read that as a reader pushing at
-        // the edge and pulled the whole pair in, one frame after another. So a seat that would
-        // put the target outside the reach is dropped: the pivot stays where it is and nothing
-        // moves the camera behind the reader's back.
-        _seat.copy(p).addScaledVector(_dir, d);
-        if (Math.hypot(_seat.x, _seat.z) > this.reach) return;
-        tg.copy(_seat);
+        // The reach limits the camera and not the target, so the target may sit outside it.
+        tg.copy(p).addScaledVector(_dir, d);
         return;
       }
     }
-  }
-
-  // The way the view points, in three dimensions. The forward keys follow this, so a view that
-  // looks down flies down and a view that looks up climbs. The target travels with the camera, so
-  // the direction holds over the whole flight: a straight line stays a straight line.
-  _look(out) {
-    out.copy(this.controls.target).sub(this.camera.position);
-    if (out.lengthSq() > 1e-8) return out.normalize();
-    return this._forward(out);
   }
 
   // The way the view faces, flat on the ground. A view that points straight down has no such way,
@@ -1299,8 +1371,17 @@ export class Ground {
       _dir.copy(tg).sub(p);
       if (yaw) _dir.applyAxisAngle(_UP, yaw * KEY_YAW * dt);
       if (tilt) {
-        _rt.crossVectors(_dir, _UP);
-        if (_rt.lengthSq() > 1e-8) _dir.applyAxisAngle(_rt.normalize(), tilt * KEY_TILT * dt);
+        // The tilt holds inside the band of the controls. A tilt past the band made the controls
+        // swing the camera about the target to put the angle back, and the reader saw the probe
+        // move when only the view should turn.
+        const len = _dir.length();
+        _rt.set(_dir.x, 0, _dir.z);
+        if (_rt.lengthSq() < 1e-8 && !this._forward(_rt)) _rt.set(0, 0, -1);
+        _rt.normalize();
+        const c = this.controls;
+        const phi = THREE.MathUtils.clamp(Math.acos(THREE.MathUtils.clamp(-_dir.y / len, -1, 1))
+          + tilt * KEY_TILT * dt, c.minPolarAngle + 1e-3, c.maxPolarAngle - 1e-3);
+        _dir.copy(_rt).multiplyScalar(len * Math.sin(phi)).setY(-len * Math.cos(phi));
       }
       tg.copy(p).add(_dir);
       this.glide = null;
@@ -1316,66 +1397,57 @@ export class Ground {
       this.glide = null;
     }
 
-    // The direction the reader asks for, in three dimensions. The keys come first; a press that
-    // holds still steers with the pointer instead. A press that moves is a drag of the ground, and
-    // the controls own it.
-    let wx = 0, wy = 0, wz = 0;
+    // The direction the reader asks for. The keys come first; a press that holds still steers with
+    // the pointer instead. A press that moves is a drag of the ground, and the controls own it.
+    //
+    // W, A, S, and D move the probe in the flat plane. The tilt of the view does not change the
+    // plane, so a view that looks down still flies level, and nothing follows the terrain: the
+    // floor of update() is the only thing that lifts the probe over a hill.
+    let wx = 0, wz = 0;
     const f = (K.has('fwd') ? 1 : 0) - (K.has('back') ? 1 : 0);
     const r = (K.has('right') ? 1 : 0) - (K.has('left') ? 1 : 0);
     const lift = (K.has('up') ? 1 : 0) - (K.has('down') ? 1 : 0);
-    const look = this._look(_fw);
-    if (look && (f || r)) {
-      wx = look.x * f; wy = look.y * f; wz = look.z * f;
-      if (r) {
-        // The step sideways stays flat: a reader who steps aside means the ground, not the sky.
-        _rt.crossVectors(look, _UP);
-        if (_rt.lengthSq() > 1e-8) { _rt.normalize(); wx += _rt.x * r; wz += _rt.z * r; }
-      }
+    const fwd = (f || r) ? this._forward(_fw) : null;
+    if (fwd) {
+      wx = fwd.x * f; wz = fwd.z * f;
+      if (r) { wx -= fwd.z * r; wz += fwd.x * r; }   // the right of the flat forward
     } else if (!f && !r && !lift && this._tap && this._tap.walk) {
       const way = this._pointerWay(_rt);
       if (way) { wx = way.x; wz = way.z; }
     }
-    // The step the view asks for, as one unit vector. The lift keys are not in it yet: the cut at
-    // the edge takes the whole of this step, and a reader who asks for height by name keeps it.
-    const len = Math.hypot(wx, wy, wz);
-    if (len > 1e-6) {
-      wx /= len; wy /= len; wz /= len;
-      // The pan of the reader stops at the reach and so does the walk. It slows over the last
-      // WALK_EDGE units instead of meeting a wall, and only the part of the step that goes outward
-      // slows, so the reader still walks along the edge and back in at full speed.
-      const tr = Math.hypot(tg.x, tg.z);
-      const out = tr > 1e-6 ? (wx * tg.x + wz * tg.z) / tr : 0;
-      if (out > 0 && tr > this.reach - WALK_EDGE) {
-        const k = THREE.MathUtils.smoothstep(tr, this.reach - WALK_EDGE, this.reach);
-        wx -= (tg.x / tr) * k * out; wz -= (tg.z / tr) * k * out;
-        // The step of the flight keys follows the view, so it carries a vertical part. The cut
-        // used to take the flat part alone, and a reader who held the key at the edge flew
-        // straight up instead of stopping: the ground stood still and the camera climbed. The
-        // same cut now takes the whole step, so a walk into the edge slows to a stop on every
-        // axis.
-        wy *= 1 - k;
-      }
-    } else { wx = 0; wy = 0; wz = 0; }
-    wy += lift;
+    const lenF = Math.hypot(wx, wz);
+    if (lenF > 1) { wx /= lenF; wz /= lenF; }
+    let wy = lift;
     // The floor and the ceiling take the vertical part before the ease reads it, so a key held
     // against a limit winds up no speed that the clamp of update() then throws away.
     const h = Math.max(0, p.y - this._floorAt(p.x, p.z));
     if (wy < 0 && h <= 0.05) wy = 0;
     if (wy > 0 && p.y >= this.ceiling - 0.05) wy = 0;
-    // A step longer than one unit would run faster than the speed below states, which a diagonal
-    // of a walk key and a lift key can reach.
-    const len2 = Math.hypot(wx, wy, wz);
-    if (len2 > 1) { wx /= len2; wy /= len2; wz /= len2; }
-    if (len2 > 1e-6) this.glide = null;   // a key of the reader ends the glide of a tap
+    if (lenF > 1e-6 || wy) this.glide = null;   // a key of the reader ends the glide of a tap
 
-    // The height sets the speed, as it sets the speed of a wheel step: a walk near the ground is a
-    // walk, and at the ceiling one second carries the reader over a third of the patch.
+    // The height sets the speed, as it sets the speed of a wheel step: a flight near the ground is
+    // slow, and at the ceiling one second carries the reader over a sixth of the patch.
     const speed = THREE.MathUtils.lerp(WALK_SLOW, WALK_FAST, THREE.MathUtils.clamp(h / SPEED_SPAN, 0, 1))
       * (K.has('run') ? WALK_RUN : 1);
+    // The velocity eases to the speed the keys ask for, so the probe gathers speed and coasts to a
+    // stop like a drone.
     const k = 1 - Math.exp(-WALK_EASE * dt);
     this._vx += (wx * speed - this._vx) * k;
     this._vy += (wy * speed - this._vy) * k;
     this._vz += (wz * speed - this._vz) * k;
+    // A limit stops the vertical speed, so the probe does not press into the floor or the ceiling.
+    if ((this._vy < 0 && h <= 0.05) || (this._vy > 0 && p.y >= this.ceiling - 0.05)) this._vy = 0;
+
+    // The reach limits the probe, which is the camera. The outward part of the velocity slows over
+    // the last WALK_EDGE units and is zero at the reach, so the probe coasts to a stop and does not
+    // meet a wall. The part along the edge and the part back in keep their full speed.
+    const cr = Math.hypot(p.x, p.z);
+    if (cr > this.reach - WALK_EDGE && cr > 1e-6) {
+      const ux = p.x / cr, uz = p.z / cr;
+      const out = this._vx * ux + this._vz * uz;
+      const cap = speed * (1 - THREE.MathUtils.smoothstep(cr, this.reach - WALK_EDGE, this.reach));
+      if (out > cap) { this._vx -= ux * (out - cap); this._vz -= uz * (out - cap); }
+    }
     // The camera and the target take one step on all three axes, so the view direction and the
     // distance hold and only the place changes.
     const dx = this._vx * dt, dy = this._vy * dt, dz = this._vz * dt;
@@ -1442,6 +1514,7 @@ export class Ground {
     const tg = this.controls.target;
     const m = this.fauna.nearestMember(kind, tg.x, tg.z);
     if (this.flora) this.flora.unmark();   // one mark at a time: the ring must name the open card
+    if (this.source) this.source.unmark();
     if (!m) { this.fauna.unmark(); return false; }
     this.fauna.markMember(m);
     this.fauna.group.updateWorldMatrix(true, false);
@@ -1457,6 +1530,7 @@ export class Ground {
   focusPlant(kind) {
     if (!this.flora) return false;
     if (this.fauna) this.fauna.unmark();
+    if (this.source) this.source.unmark();
     const tg = this.controls.target;
     const hit = this.flora.nearest(kind, tg.x, tg.z);
     if (!hit) { this.flora.unmark(); return false; }
@@ -1555,15 +1629,34 @@ export class Ground {
       if (creature.dist <= plant.dist + PICK_GRACE) plant = null;
       else creature = null;
     }
+    // Issue 34: a tap on the wreck marks it the same way, and the app offers its log on the same
+    // button. The wreck is the biggest thing on the patch, so three things beat it: an animal or a
+    // plant clearly in front of it, because a reader who taps the beast beside the hull means the
+    // beast; and the ground itself when the ray meets the ground first, because the wreck then
+    // stands behind the hill the reader tapped. The second rule matters for the padded box of
+    // SourceWreck.pickAt(), which knows nothing about the terrain.
+    let wreck = this.pickSource ? this.pickSource(nx, ny) : null;
+    if (wreck && hit && wreck.dist > this.camera.position.distanceTo(hit) + WRECK_GRACE) wreck = null;
+    if (wreck && !((creature && creature.dist + PICK_GRACE < wreck.dist)
+      || (plant && plant.dist + PICK_GRACE < wreck.dist))) {
+      if (this.flora) this.flora.unmark();
+      if (this.fauna) this.fauna.unmark();
+      this.source.mark();
+      this.glideTo(wreck.point, null, true);
+      if (this.onSelectSource) this.onSelectSource();
+      return;
+    }
     if (plant) {
       this.flora.mark(plant);
       if (this.fauna) this.fauna.unmark();
+      if (this.source) this.source.unmark();
       this.glideTo(plant.point, null, true);
       if (this.onSelectPlant) this.onSelectPlant(plant.kind);
       return;
     }
     if (creature && creature.point) {
       if (this.flora) this.flora.unmark();
+      if (this.source) this.source.unmark();
       if (this.fauna && creature.member) this.fauna.markMember(creature.member);
       // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
       // it would point the view at the ground under it instead.
@@ -1572,9 +1665,11 @@ export class Ground {
       if (this.onSelect) this.onSelect(creature.kind);
       return;
     }
-    if ((this.fauna && this.fauna.marked) || (this.flora && this.flora.marked)) {
+    if ((this.fauna && this.fauna.marked) || (this.flora && this.flora.marked)
+      || (this.source && this.source.marked)) {
       if (this.fauna) this.fauna.unmark();
       if (this.flora) this.flora.unmark();
+      if (this.source) this.source.unmark();
       if (this.onDeselect) this.onDeselect();
     }
     if (hit) this.glideTo(hit);
@@ -1639,6 +1734,7 @@ export class Ground {
 
   _clear() {
     if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
+    if (this.source) { this.source.dispose(); this.source = null; }
     if (this.flora) { this.flora.dispose(); this.flora = null; }
     if (this.grass) { this.grass.dispose(); this.grass = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }
