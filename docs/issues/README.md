@@ -288,3 +288,4 @@ Parallel lanes once 04 is merged: 05, 06, 07, 09 can run at the same time. 07 an
 | 31 | The probe carries no instrument, and the edge of its reach reads as a fault | AFK | 23, 25, 30 | CLOSED |
 | 32 | The sky of a landing holds one hour for ever, and the moons fly across it | AFK | 12, 31 | CLOSED |
 | 33 | Every world stands upright, and the light of a latitude never says otherwise | AFK | 32 | CLOSED |
+| 34 | No cell is worth more than another, so the reader has no reason to pick a site | HITL | 14, 31, design | PLAN |
