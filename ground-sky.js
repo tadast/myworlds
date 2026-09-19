@@ -83,7 +83,9 @@ function hashSeed(s) {
 // The three axes then make a right-handed frame, and the sky is not mirrored.
 // `twist` turns the frame about the up axis. Since issue 30 the box of the patch runs along the
 // axes of its cell of the cube grid and not along east and south, so the sky takes the same turn
-// or the sun stands in the wrong quarter of it. See cellTwist() in site.js.
+// or the sun stands in the wrong quarter of it. See cellTwist() in site.js. The box is a
+// right-handed set too, x along the u axis of the cell and z against the v axis, so a turn is all
+// the sky needs. tools/frame-check.mjs fails when either side becomes a mirror.
 export function groundBasis(planet, site, twist = 0) {
   const lat = site.lat * DEG, lon = site.lon * DEG;
   const cl = Math.cos(lat), sl = Math.sin(lat), co = Math.cos(lon), so = Math.sin(lon);

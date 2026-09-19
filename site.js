@@ -81,16 +81,21 @@ export function siteCell(site) {
   return dirCell(d.x, d.y, d.z);
 }
 
-// The turn from the frame of the site, x east and z south, to the frame of the cell. The box of
-// the patch runs along the axes of the cell, so the sky must take the same turn or the sun stands
-// in the wrong quarter of it. See groundBasis() in ground-sky.js.
+// The turn from the frame of the site, x east and z south, to the frame of the box. The box of
+// the patch runs x along the u axis of the cell and z against the v axis, so the sky must take the
+// same turn or the sun stands in the wrong quarter of it. See groundBasis() in ground-sky.js.
+//
+// East is the east of groundBasis(): the direction of falling lon. The turn is the angle of the u
+// axis from east toward south, which is the turn groundBasis() makes. patch() in worker.js builds
+// a right-handed box, so one turn about the up axis brings the two frames together and the sky
+// holds no mirror of the terrain.
 export function cellTwist(site) {
   const cell = siteCell(site);
   const mid = cellDir(cell, 0.5, 0.5, _corner);
   const along = cellDir(cell, 1, 0.5, _dir).sub(mid);      // the u axis of the cell, at the middle
   const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
   const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
-  _east.set(-slo, 0, clo);
+  _east.set(slo, 0, -clo);
   _north.set(-sla * clo, cla, -sla * slo);
   return Math.atan2(-along.dot(_north), along.dot(_east));  // south is the opposite of north
 }

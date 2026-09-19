@@ -1558,6 +1558,31 @@ function cellTan(ci, u, n) {
   return Math.tan(((ci + u) * 2 / n - 1) * Math.PI / 4);
 }
 
+// The two gnomonic coordinates under a point of the ground box. xu and zu are units of the box from
+// its middle, and size is the side of the box.
+//
+// The box runs x along the u axis of the cell and z against the v axis. For every face u cross v
+// is the outward normal, so (u, up, v) is a left-handed set and (u, up, -v) is a right-handed
+// one. A box with z along v drew the mirror of the cell: the coast turned the wrong way against
+// the globe, and the sky of groundBasis() in ground-sky.js stood mirrored against the terrain. On
+// the four faces of the equator u runs east and v runs north, so the box there has x east and z
+// south with no twist. cellTwist() in site.js reads the same axes, and tools/frame-check.mjs
+// fails on a mirror. Keep them in step.
+function boxTanX(cell, xu, size) { return cellTan(cell.i, 0.5 + xu / size, cell.n); }
+function boxTanZ(cell, zu, size) { return cellTan(cell.j, 0.5 - zu / size, cell.n); }
+
+// The frame of a patch with no cell, at a site: up, then east, then south. East is the direction
+// of falling lon, as groundBasis() has it, so (east, up, south) is a right-handed set.
+function tangentFrame(lat, lon) {
+  const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
+  return {
+    up: [cla * clo, sla, cla * slo],
+    east: [slo, 0, -clo],                    // east has no y part
+    south: [sla * clo, -cla, sla * slo],     // south is the opposite of north
+  };
+}
+
 // The unit direction at two gnomonic coordinates of a face.
 function cellDirT(cell, a, b, out) {
   const F = FACES[cell.face];
@@ -2434,16 +2459,12 @@ function patch(seed, lat, lon, opts) {
   // same direction along the edge the two share. Without one the patch keeps the tangent frame of
   // the site, which is what a caller that knows no cell gets.
   const cell = opts.cell && opts.cell.n > 0 ? opts.cell : null;
-  const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
-  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
-  const ux = cla * clo, uy = sla, uz = cla * slo;
-  const ex = -slo, ez = clo;                       // east has no y part
-  const sx = sla * clo, sy = -cla, sz = sla * slo; // south is the opposite of north
+  const { up: [ux, uy, uz], east: [ex, , ez], south: [sx, sy, sz] } = tangentFrame(lat, lon);
   const _d = [0, 0, 0];
   // The two gnomonic coordinates of a point of the box, one per axis. A loop that walks a row
-  // takes the second one once for the whole row. See cellTan().
-  const tanX = cell ? (xu) => cellTan(cell.i, xu / size + 0.5, cell.n) : null;
-  const tanZ = cell ? (zu) => cellTan(cell.j, zu / size + 0.5, cell.n) : null;
+  // takes the second one once for the whole row. See boxTanX().
+  const tanX = cell ? (xu) => boxTanX(cell, xu, size) : null;
+  const tanZ = cell ? (zu) => boxTanZ(cell, zu, size) : null;
   const dirOn = cell
     ? (xu, zu) => cellDirT(cell, tanX(xu), tanZ(zu), _d)
     : (xu, zu) => {

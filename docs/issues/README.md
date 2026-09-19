@@ -87,8 +87,13 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - `cellSpan(world, site)` gives the width of that cell in metres. `app.js` passes it as `opts.span`
   on the patch message. The worker uses it for the scale it reports and not for the frequencies of
   the relief field; those come from the nominal cell, so two neighbours stay in phase.
+- The box runs x along the u axis of the cell and z against the v axis, so (x, up, z) is a
+  right-handed set and the terrain is the true image of the cell, not its mirror. East is the east
+  of `groundBasis()`: the direction of falling lon. `boxTanX()` and `boxTanZ()` in `worker.js` hold
+  the map. Run `node tools/frame-check.mjs` after a change to the map, to `cellTwist()`, or to
+  `groundBasis()`; it fails on a mirror.
 - `cellTwist(site)` gives the turn from the frame of the site, x east and z south, to the axes of
-  the cell. The box runs along the axes of the cell, so `groundBasis()` takes the same turn and the
+  the box. The box runs along the axes of the cell, so `groundBasis()` takes the same turn and the
   sky stands in the right quarter.
 - The pull to life runs before the snap and reaches half a cell, so a creature that lives in the
   cell claims the patch and the snap then puts the site back on the grid.

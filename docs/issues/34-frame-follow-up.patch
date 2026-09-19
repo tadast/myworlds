@@ -1,0 +1,276 @@
+diff --git a/app.js b/app.js
+index 848ee7d..3f5b345 100644
+--- a/app.js
++++ b/app.js
+@@ -1253,8 +1253,8 @@ function enterGround() {
+   // The carrier of issue 34: the bearing from this cell to the source, with its error. The three
+   // digits keep the bearing of the globe, because the wedge of a fix is drawn on the globe. The
+   // needle takes the frame of the box instead, which carrierBox() reads off the axes of the cell:
+-  // the box is the mirror of the frame the sky stands in, and the reader walks the terrain, so the
+-  // needle has to agree with the terrain and with the wreck slice 3 puts on it. The vector holds
++  // the map of the box holds no angle, and the reader walks the terrain, so the needle has to
++  // agree with the terrain and with the wreck slice 3 puts on it. The vector holds
+   // the error of the wedge, so the needle and the three digits say one thing.
+   const carrier = carrierAt(current.world, lockedSite);
+   if (carrier) {
+diff --git a/docs/issues/README.md b/docs/issues/README.md
+index 076ae63..2419a51 100644
+--- a/docs/issues/README.md
++++ b/docs/issues/README.md
+@@ -210,7 +210,7 @@ Issue 34. One thing on a world with a surface transmits, and the probe reads a b
+ - The log: `world.source.log = { probe, days, species, entries: [{ slot, title, day, text }, ...] }`. The four slots are `arrival`, `survey`, `trouble`, and `last`, in that order. `probe` is the name of the old probe, `days` is the day of the last entry, and `species` is the animal the survey names, or null. `source-lore.js` writes it in `generate()` from `makeRng(seed + '|source-lore')`. The page must not show the log before the reader finds the wreck. See `docs/source.md`.
+ - `site.js` gives `sourceSite(world)`, `sourceHere(world, site)`, `bearingTo(site, dir)`, `arcTo(site, dir)`, `carrierAt(world, site)`, `carrierDir(world, site, carrier)`, `carrierBox(world, site, carrier)`, and `boxPoint(site, dir, size)`. `carrierAt` returns `{ brg, err, arc, rangeKm }`: the bearing in degrees from north with east positive, its error in degrees, the arc in radians, and the kilometres to the source inside `CARRIER_RANGE` cells of arc, else null.
+ - The bearing is 3 degrees wrong at the source and 25 degrees wrong at its antipode, straight in the arc. The offset inside that band comes from a hash of the seed and the cell, so one cell always gives one fix and the true bearing always lies inside the wedge.
+-- **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `worker.js` lays the box on the axes of the cell of the cube grid, and `(u, up, v)` is left-handed, so the box is the mirror of the frame `groundBasis()` builds. The sky therefore stands in the mirror of its terrain; that is older than issue 34 and issue 34 does not touch it.
++- **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `worker.js` lays the box on the axes of the cell of the cube grid, x along u and z against v, which is a right-handed set as the frame of `groundBasis()` is. The box was the mirror of that frame until 2026-09-19; see "The box is right-handed" in `docs/probe.md`. The map of the box still holds no angle, so the needle comes from the slope of that map and not from the bearing less a twist.
+ - `boxPoint(site, dir, size)` is the exact inverse of the map `patch()` builds the box with. It gives `{ x, z }` in units of the box, or null for a direction more than 80 degrees from the face of the cell. Slice 3 takes the range in units from it. `carrierBox()` gives the needle as a unit `{ x, z }` in the same frame, from the slope of that map at the site, so it holds at every arc.
+ - `Ground.load(result, { sunDir, view, carrier })`. The app builds `carrier` from `carrierAt()` and adds `carrier.dir`, the `[x, z]` of `carrierBox()` **in the frame of the box**. `telemetry()` then returns `carrier: { brg, err, arc, rel, rangeKm, range } | null`. `rel` runs -180 to 180 degrees from the way the view points to the way the needle points, and a positive `rel` puts the needle to the right of the screen. Do not build `rel` from the digits less an azimuth: the box turns the sense of a bearing over. `range` is the units to the wreck on this patch, and slice 3 fills it.
+ 
+diff --git a/ground.js b/ground.js
+index 88df2c1..c241771 100644
+--- a/ground.js
++++ b/ground.js
+@@ -906,10 +906,10 @@ export class Ground {
+     if (!c) return null;
+     // The camera looks from its own position at the target, so the flat part of that step is the
+     // way the reader faces. carrier.dir is the way the needle points as (x, z) in the frame of the
+-    // box, which the app reads off the axes of the cell; see carrierBox() in site.js. The box is
+-    // the mirror of the frame x east, y up, z south, so the sense of a bearing is turned over in
+-    // it and rel may not come from the three digits less an azimuth. It is the angle from the
+-    // forward of the view to the needle, and the right of the view on the ground is (-fz, fx).
++    // box, which the app reads off the axes of the cell; see carrierBox() in site.js. The box
++    // stands at a twist to the frame x east, y up, z south and its map holds no angle, so rel may
++    // not come from the three digits less an azimuth. It is the angle from the forward of the
++    // view to the needle, and the right of the view on the ground is (-fz, fx).
+     const p = this.camera.position, tg = this.controls.target;
+     let fx = tg.x - p.x, fz = tg.z - p.z;
+     const fl = Math.hypot(fx, fz);
+diff --git a/site.js b/site.js
+index 969bc91..98ffbd3 100644
+--- a/site.js
++++ b/site.js
+@@ -229,21 +229,22 @@ export function activitySite(world) {
+ // (sin lon, 0, -cos lon). Bearing 90 is then the east the globe holds, and a wedge that runs out
+ // on 90 runs east over the globe.
+ //
+-// The east of cellTwist() above is the opposite vector, and patch() in worker.js builds the box of
+-// the ground in that same set. The box runs x along the u axis of the cell and z along the v axis,
+-// and (u, up, v) is left-handed, so the terrain is the mirror of the frame above. Do not read an
+-// east out of cellTwist() and do not change it, patch(), or the sky.
++// cellTwist() above takes the same east, and patch() in worker.js builds the box of the ground as
++// a right-handed set: x along the u axis of the cell and z against the v axis. The box was the
++// mirror of that until 2026-09-19, with z along v; see "The box is right-handed" in docs/probe.md.
+ //
+-// So the two frames do two jobs here:
++// The two frames still do two jobs here:
+ //
+ //   the globe    the three digits and the wedge of a fix keep the bearing above, because the
+-//                wedge is drawn on the globe and the globe holds no mirror
++//                wedge is drawn on the globe
+ //   the ground   the needle keeps the frame of the box, because the reader walks the terrain and
+ //                the wreck of slice 3 stands on the terrain in the units of the box
+ //
+-// The sky stands in the frame of groundBasis() and the terrain in the mirror of it. That is an
+-// older defect and issue 34 does not touch it. tools/carrier-check.mjs proves both jobs and prints
+-// the mirror as a note.
++// The box holds no mirror of the globe, so the sense of a bearing is the same in both. The box
++// holds no angle all the same: its map stretches one way more than the other away from the middle
++// of a face, so the needle comes from the slope of that map and not from the bearing less a twist.
++// See carrierBox(). tools/carrier-check.mjs proves both jobs, and it fails when the box and the
++// frame of groundBasis() stand as a mirror of each other.
+ export const CARRIER_ERR = [3, 25];   // degrees: the error at the source and at its antipode
+ export const CARRIER_RANGE = 6;       // cells of arc: the range states nothing further out
+ 
+@@ -350,9 +351,10 @@ export function carrierDir(world, site, carrier, out = new THREE.Vector3()) {
+ 
+ // The point of the ground box under a direction of the globe, in units of the box, or null.
+ //
+-// It is the exact inverse of the map patch() in worker.js builds the box with: that function reads
+-// the two gnomonic coordinates of the cell at a point of the box and takes the direction, and this
+-// reads the two coordinates of a direction and takes the point. So a direction inside the cell
++// It is the exact inverse of the map patch() in worker.js builds the box with, boxTanX() and
++// boxTanZ(): that map reads the two gnomonic coordinates of the cell at a point of the box and
++// takes the direction, and this reads the two coordinates of a direction and takes the point. The
++// box runs x along u and z against v, so z takes the sign the other way. So a direction inside the cell
+ // comes back as the place on the ground the reader can walk to. The cell of the site carries the
+ // map, and a direction outside that cell is legal: the gnomonic map stays true past the edge of a
+ // face, which is what the rim of a patch already needs.
+@@ -372,7 +374,7 @@ export function boxPoint(site, dir, size = PATCH_SIZE) {
+   const b = (d.x * F[6] + d.y * F[7] + d.z * F[8]) / n;
+   const u = (Math.atan(a) * 4 / Math.PI + 1) * 0.5 * cell.n - cell.i;
+   const v = (Math.atan(b) * 4 / Math.PI + 1) * 0.5 * cell.n - cell.j;
+-  return { x: (u - 0.5) * size, z: (v - 0.5) * size };
++  return { x: (u - 0.5) * size, z: (0.5 - v) * size };
+ }
+ 
+ // The way the needle points, as a unit vector (x, z) in the frame of the box, or null.
+@@ -386,14 +388,14 @@ export function boxPoint(site, dir, size = PATCH_SIZE) {
+ // The slope, for a step from the site along a tangent t:
+ //
+ //   n = d . N, a = (d . U) / n, b = (d . V) / n      the gnomonic coordinates of boxPoint()
+-//   x runs with atan(a), so dx/da is 1 / (1 + a * a), and z runs the same way with b
++//   x runs with atan(a), so dx/da is 1 / (1 + a * a), and z runs against atan(b) the same way
+ //   da for a step t is ((t . U) - a * (t . N)) / n, and db is ((t . V) - b * (t . N)) / n
+ //
+ // Every factor the two share falls out when the pair is made a unit vector, and the part of the
+ // direction that stands along the site falls out on its own: it gives da and db of nothing. So the
+ // whole direction of carrierDir() goes in, at any arc, and the needle holds even where boxPoint()
+-// gives null. The box is the mirror of the frame of groundBasis(), so the needle may not come
+-// through that matrix: it would point at the mirror of the source and away from the wreck.
++// gives null. The needle may not come through the matrix of groundBasis() with the twist: that
++// frame is square and the box is not, so the needle would stand off the wreck by the same angle.
+ export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }) {
+   if (!carrierDir(world, site, carrier, _aim)) return null;
+   const cell = siteCell(snapSite(site));
+@@ -404,7 +406,7 @@ export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }) {
+   const b = (_mid.x * F[6] + _mid.y * F[7] + _mid.z * F[8]) / n;
+   const vn = _aim.x * F[0] + _aim.y * F[1] + _aim.z * F[2];
+   const x = (_aim.x * F[3] + _aim.y * F[4] + _aim.z * F[5] - a * vn) / (1 + a * a);
+-  const z = (_aim.x * F[6] + _aim.y * F[7] + _aim.z * F[8] - b * vn) / (1 + b * b);
++  const z = -(_aim.x * F[6] + _aim.y * F[7] + _aim.z * F[8] - b * vn) / (1 + b * b);   // z runs against v
+   const l = Math.hypot(x, z);
+   if (l < 1e-12) return null;     // the source stands under the site or at its antipode
+   out.x = x / l; out.z = z / l;
+diff --git a/tools/carrier-check.mjs b/tools/carrier-check.mjs
+index 7119357..9909c93 100644
+--- a/tools/carrier-check.mjs
++++ b/tools/carrier-check.mjs
+@@ -20,6 +20,11 @@
+ //       the offset of the wedge taken out, lies along it.
+ //    b. For a far source, a short step of the globe from the site along the stated bearing lands
+ //       on the box along the needle.
++// 5. The mirror. The box of patch() in worker.js and the frame of groundBasis() must be the same
++//    hand. The box was the mirror of that frame once, and the needle then had to take the mirror
++//    too. A step along box +x must read (1, 0) in the ground frame and a step along box +z must
++//    read toward (0, 1), and the needle must stand where the sky frame holds the source. The map
++//    of the box is boxTanX() and boxTanZ() of worker.js itself, and not a copy.
+ //
+ // site.js and ground-sky.js take three.js by the bare name `three`, which the import map of
+ // index.html resolves in the browser. Node has no import map, so a resolve hook points the same
+@@ -167,6 +172,27 @@ for (let i = 0; i < 200; i++) {
+   if (Math.abs(wrap180(sbrg - 180)) > 1e-9) fail('south', `a step along the south of groundBasis() reads bearing ${sbrg.toFixed(6)}`);
+ }
+ 
++// ---------------------------------------------------------------- the map of the worker
++// patch() in worker.js builds the box with boxTanX() and boxTanZ(). The checks below take the map
++// from that file and hold no copy of it, so a change of the box fails here and not on the ground.
++{
++  const { createRequire } = await import('node:module');
++  const { readFileSync } = await import('node:fs');
++  const require = createRequire(import.meta.url);
++  const dir = fileURLToPath(new URL('.', root));
++  globalThis.self = globalThis;
++  require(path.join(dir, 'lore.js'));
++  require(path.join(dir, 'species.js'));
++  require(path.join(dir, 'flora-lore.js'));
++  globalThis.importScripts = () => {};
++  globalThis.postMessage = () => {};
++  new Function('self', readFileSync(path.join(dir, 'worker.js'), 'utf8')
++    + '\n;self.__w = { cellDirT, boxTanX, boxTanZ };')(globalThis);
++}
++// dirOn() of patch() in worker.js, for a cell: the globe direction under a point of the box
++const dirOn = (cell, xu, zu, size) => new THREE.Vector3(...globalThis.__w.cellDirT(
++  cell, globalThis.__w.boxTanX(cell, xu, size), globalThis.__w.boxTanZ(cell, zu, size), [0, 0, 0]));
++
+ // ---------------------------------------------------------------- 4: one site in each face
+ // The needle in the frame of the box, on a site in each face of the cube grid with a twist.
+ const BOX = 1500;             // units, the side of the box. PATCH_SIZE in site.js.
+@@ -194,7 +220,7 @@ const faceRows = [];
+     let worstSeat = 0, worstAim = 0;
+     // a. a source seated at a known point of the box
+     for (const [x, z] of SEAT) {
+-      const dir = S.cellDir(cell, x / BOX + 0.5, z / BOX + 0.5, new THREE.Vector3());
++      const dir = dirOn(cell, x, z, BOX);
+       const world = worldWith('Seat' + face, dir);
+       const p = S.boxPoint(site, dir, BOX);
+       if (!p) { fail('boxPoint', `face ${face}: the seat at ${x},${z} gave no point`); continue; }
+@@ -227,45 +253,48 @@ const faceRows = [];
+   }
+ }
+ 
+-// ---------------------------------------------------------------- a note, not a check
+-// The sky against the box: an older defect, and issue 34 does not touch it. patch() in worker.js
+-// lays the box on the axes of the cell of the cube grid, and that set is the mirror of the frame
+-// groundBasis() builds, x east, y up, z south. The box of the cell at lat 0 lon 0 runs +x to the
+-// east and +z to the north, where that frame runs +z south, so no turn carries the one onto the
+-// other. The sun, the moons, and the ring come through groundBasis(), so the sky of a landing
+-// stands in the mirror of the terrain under it.
+-//
+-// The needle of issue 34 takes the box, because the reader walks the terrain and the wreck of
+-// slice 3 stands on the terrain. The lines below print the mirror, and they fail nothing.
++// ---------------------------------------------------------------- 5: the mirror
++// The sky against the box. patch() in worker.js lays the box on the axes of the cell of the cube
++// grid, and groundBasis() builds the frame the sun, the moons, and the ring stand in: x east, y up,
++// z south. The two were a mirror of each other once, with box z along the v axis of the cell, and
++// no turn carries a mirror onto its image. So this is a check and not a note. A step along box +x
++// must read (1, 0) in (x, z) of the ground frame. A step along box +z must read toward (0, 1); the
++// two axes of a cell do not stand square near a corner of a face, so it gets a slack, and a mirror
++// reads (0, -1), which no slack hides. The needle closes it: in a box of the right hand, a source
++// to the east of north puts the needle to the right of box north, turned by the twist.
++const MIRROR_Z_MIN = 0.85;    // the least z part of the +z step: cos of the 30 deg a face corner bends
+ const boxRows = [];
+ {
+-  const { createRequire } = await import('node:module');
+-  const { readFileSync } = await import('node:fs');
+-  const require = createRequire(import.meta.url);
+-  const dir = fileURLToPath(new URL('.', root));
+-  globalThis.self = globalThis;
+-  require(path.join(dir, 'lore.js'));
+-  require(path.join(dir, 'species.js'));
+-  require(path.join(dir, 'flora-lore.js'));
+-  globalThis.importScripts = () => {};
+-  globalThis.postMessage = () => {};
+-  new Function('self', readFileSync(path.join(dir, 'worker.js'), 'utf8')
+-    + '\n;self.__cellDirT = cellDirT; self.__cellTan = cellTan;')(globalThis);
+-  // dirOn() of patch() in worker.js, for a cell: the globe direction under a point of the box
+   const SIZE = 1500;
+-  const dirOn = (cell, xu, zu) => globalThis.__cellDirT(
+-    cell, globalThis.__cellTan(cell.i, xu / SIZE + 0.5, cell.n),
+-    globalThis.__cellTan(cell.j, zu / SIZE + 0.5, cell.n), [0, 0, 0]);
+-  for (const [lat, lon] of [[0, 0], [12.5, -73.25], [-40, 120]]) {
+-    const site = S.snapSite({ lat, lon, kind: -1 });
++  const sites = [[0, 0], [12.5, -73.25], [-40, 120]].map(([lat, lon]) => S.snapSite({ lat, lon, kind: -1 }));
++  for (const site of sites) {
+     const cell = S.siteCell(site);
+     const basis = groundBasis(null, site, S.cellTwist(site));
+-    const at = new THREE.Vector3(...dirOn(cell, 0, 0)).applyMatrix4(basis);
+-    const ax = new THREE.Vector3(...dirOn(cell, 300, 0)).applyMatrix4(basis).sub(at).normalize();
+-    const az = new THREE.Vector3(...dirOn(cell, 0, 300)).applyMatrix4(basis).sub(at).normalize();
++    const at = dirOn(cell, 0, 0, SIZE).applyMatrix4(basis);
++    const ax = dirOn(cell, 300, 0, SIZE).applyMatrix4(basis).sub(at).normalize();
++    const az = dirOn(cell, 0, 300, SIZE).applyMatrix4(basis).sub(at).normalize();
+     const f = (v) => `(${v.x.toFixed(3)}, ${v.z.toFixed(3)})`;
++    const name = `site ${site.lat.toFixed(2)},${site.lon.toFixed(2)}`;
++    if (Math.hypot(ax.x - 1, ax.z) > 1e-3) fail('mirror', `${name}: box +x reads ${f(ax)} in the ground frame, not (1, 0)`);
++    if (az.z < MIRROR_Z_MIN) {
++      fail('mirror', `${name}: box +z reads ${f(az)} in the ground frame, not toward (0, 1)`
++        + (az.z < 0 ? ': the box is the mirror of the sky' : ''));
++    }
++    // The needle against the sky. The source stands one cell out on a true bearing of 60 degrees.
++    // Read through groundBasis(), that way is (sin 60, -cos 60) in (x, z): east is +x and north
++    // is -z. carrierBox() must give the same way in the box, inside the slack of the map. A mirror
++    // puts the needle on the other side of north, 120 degrees off, and no slack hides that.
++    const fr = frameOf(site);
++    const BRG = THREE.MathUtils.degToRad(60);
++    const t = fr.east.clone().multiplyScalar(Math.sin(BRG)).addScaledVector(fr.south, -Math.cos(BRG));
++    const src = fr.up.clone().multiplyScalar(Math.cos(0.01)).addScaledVector(t, Math.sin(0.01));
++    const world = worldWith('Mirror', src);
++    const aim = S.carrierBox(world, site, { brg: S.bearingTo(site, src) });
++    const sky = src.clone().applyMatrix4(basis);
++    const off = Math.abs(wrap180(THREE.MathUtils.radToDeg(Math.atan2(aim.z, aim.x) - Math.atan2(sky.z, sky.x))));
++    if (off > 35) fail('mirror', `${name}: the needle stands ${off.toFixed(1)} deg off the source as the sky frame holds it`);
+     boxRows.push(`  site ${site.lat.toFixed(2).padStart(7)},${site.lon.toFixed(2).padStart(8)}`
+-      + `  box +x reads ${f(ax)}  box +z reads ${f(az)}   (x, z of the ground frame)`);
++      + `  box +x reads ${f(ax)}  box +z reads ${f(az)}  needle ${off.toFixed(2)} deg off the sky`);
+   }
+ }
+ 
+@@ -279,7 +308,7 @@ console.log('the needle in the frame of the box, on a site in each face of the c
+ console.log(`  seat: how far boxPoint() missed a seated source. near: the needle against that seat.`);
+ console.log(`  far: the needle against one step of ${STEP} rad along the stated bearing. Limit ${PARALLEL_TOL} deg.`);
+ for (const r of faceRows) console.log(r);
+-console.log('note, and not a check: the sky stands in the mirror of the terrain, in x. Older than this issue.');
++console.log(`the mirror: the axes of the box in (x, z) of the ground frame. +x must read (1, 0), +z toward (0, 1), z part ${MIRROR_Z_MIN} or more.`);
+ for (const r of boxRows) console.log(r);
+ if (fails.length) {
+   console.error('\nFAIL');
