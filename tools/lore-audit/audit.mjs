@@ -109,12 +109,16 @@ const LEXICON = [
   [/\bbolt\b|\bthe charge\b|\bstorm belts?\b/i, 'stormy|gas'],
   // Issue 34. The log of the source makes five claims the rules above do not name. No fauna line
   // and no flora line holds any of these words today, so the five rules only bind the new text.
-  // `tilted` is a tag of the source and not of the planet; see sourceTags() in source-lore.js.
+  // `polarnight` is a tag of the source and not of the planet; see sourceTags() in source-lore.js.
   [/\baurorae?\b/i, 'auroral'],
   [/\bgeysers?\b/i, 'geysers'],
   [/\blightning\b/i, 'stormy'],
-  [/\bpolar night\b/i, 'tilted'],
   [/\bthe ring overhead\b/i, 'ringed'],
+  // A sun that does not rise. The lean of the axis is not enough on its own: the claim also needs
+  // the latitude of the source, which is what `polarnight` carries. Every phrasing the log gates
+  // on that tag is named here, so a new line cannot state the claim behind a weaker gate. The
+  // species pool says "cannot come back up" of a fall, and \bnot come back up\b does not match it.
+  [/\bpolar night\b|\bstop rising\b|\bwill not come back up\b|\bunder the horizon for\b|\bflat circle\b|\bround the horizon\b|\bnot come back inside\b/i, 'polarnight'],
 ];
 // An exemption relaxes ONE lexicon rule, not the whole sentence. A skip that applied to the whole
 // text let any line that happened to contain a creature name past every rule. Each entry names the
@@ -345,12 +349,18 @@ const tagsSeen = new Set();
 // this pass. FLORA_SKY_TAGS below is that list, taken from the pools themselves, so a new gate on
 // a new tag widens the sweep on its own.
 const FLORA_SKY_TAGS = floraSkyTags();
-// The same collapse for the log of the source. The source reads two facts the planet tag set does
-// not carry: the lean of the axis and whether the world holds life. So the sweep runs every world
-// through six leans and through both states of the life, and it keeps one world per distinct tag
-// set. The six leans cover every class rollAxis() draws: damped, ordered, tipped, and turned.
+// The same collapse for the log of the source. The source reads three facts the planet tag set
+// does not carry: the lean of the axis, the latitude of the source, and whether the world holds
+// life. So the sweep runs every world through seven leans, five latitudes, and both states of the
+// life, and it keeps one world per distinct tag set.
+//
+// The seven leans cover every class rollAxis() draws: damped, ordered, tipped, and turned. 17 is
+// there because a source at 79 degrees carries `polarnight` at that lean while `tilted` starts at
+// 20, so the two tags must be swept apart. The latitudes stop at 79, because makeSource() keeps
+// the source inside SOURCE_LAT, which is 80 degrees.
 const SOURCE_SKY_TAGS = sourceSkyTags();
-const SOURCE_TILT = [0, 12, 23.4, 60, 140, 177];
+const SOURCE_TILT = [0, 12, 17, 23.4, 60, 140, 177];
+const SOURCE_LATS = [0, 25, 45, 65, 79];
 const skies = new Map(), sourceSkies = new Map();
 for (const f of worlds()) {
   const env = Lore.makeEnv(f);
@@ -362,10 +372,12 @@ for (const f of worlds()) {
   // A gas giant takes no probe, so it carries no source and no log. See makeSource() in worker.js.
   if (f.type !== 'gas') {
     for (const obliquityDeg of SOURCE_TILT) {
-      for (const beasts of [true, false]) {
-        const tags = SourceLore.sourceTags(env, obliquityDeg, beasts);
-        const sKey = f.type + '|' + [...tags].filter((t) => SOURCE_SKY_TAGS.has(t)).sort().join(',');
-        if (!sourceSkies.has(sKey)) sourceSkies.set(sKey, { env, f, tags, beasts });
+      for (const latDeg of SOURCE_LATS) {
+        for (const beasts of [true, false]) {
+          const tags = SourceLore.sourceTags(env, obliquityDeg, beasts, latDeg);
+          const sKey = f.type + '|' + [...tags].filter((t) => SOURCE_SKY_TAGS.has(t)).sort().join(',');
+          if (!sourceSkies.has(sKey)) sourceSkies.set(sKey, { env, f, tags, beasts });
+        }
       }
     }
   }
@@ -727,7 +739,8 @@ if (SEEDS > 0) {
         const want = SourceLore.SLOTS.map((s) => s.key).join(',');
         const got = log.entries.map((e) => e.slot).join(',');
         if (got !== want) holes.push(`seed ${seed}: the log reads ${got}, not ${want}`);
-        const stags = SourceLore.sourceTags(env, world.env.obliquityDeg, live.length > 0);
+        const stags = SourceLore.sourceTags(env, world.env.obliquityDeg, live.length > 0,
+          SourceLore.sourceLatDeg(world.source.dir));
         for (const e of log.entries) {
           if (!e.text) { holes.push(`seed ${seed}: the ${e.slot} entry of the log is empty`); continue; }
           for (const tok of Lore.tokensIn(e.text)) tokenHits.push(`seed ${seed} log ${e.slot}: unfilled {${tok}}`);

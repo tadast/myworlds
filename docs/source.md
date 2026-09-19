@@ -82,12 +82,37 @@ line reads three tag sources at once:
 |---|---|---|
 | the world | `frozen`, `crushgrav`, `longday`, `rainy`, `tides`, `volcanic`, `ringed` | `Lore.makeEnv()` |
 | the axis | `upright`, `tilted`, `sidetilt`, `retrograde` | `sourceTags()` |
+| the site | `polarnight` | `sourceTags()` |
 | the life | `beasts` | `sourceTags()` |
 
 `Lore.makeEnv()` does not read the lean of the axis, so `sourceTags()` adds it. The lean the
 climate feels is the smaller of the obliquity and its supplement: a world turned past 135 degrees
 stands nearly upright again and turns the other way, as Venus does. The two limits, 54 degrees and
 135 degrees, are the limits `makeStats()` states on the card of the world.
+
+### The polar night is a fact of the site, not of the axis
+
+**`tilted` does not give a polar night.** The sun fails to rise only poleward of the polar circle,
+which stands at latitude `90 - lean`. A wreck on the equator of a world leaning 50 degrees sees the
+sun every day of the year. So `polarnight` reads the latitude of the source as well as the lean:
+
+```
+|lat| > 90 - lean + POLAR_MARGIN        POLAR_MARGIN = 5 degrees
+```
+
+The margin keeps the tag off a site at the edge of the circle, where the night is one day. The
+latitude comes from `world.source.dir`; `sourceLatDeg()` turns that direction into degrees, the way
+`docs/issues/README.md` defines a site: the y of a unit direction is the sine of the latitude.
+
+`makeSource()` keeps the source inside `SOURCE_LAT`, 80 degrees, so no source can carry
+`polarnight` until the lean passes 15 degrees. `tilted` starts at a lean of 20, so the two tags are
+not the same set and the sweep has to vary both the lean and the latitude.
+
+Every line that claims a sun that does not rise, a sun that runs a flat circle, or a light that
+does not come back is gated on `polarnight`. A line about a strong season that claims no polar
+night keeps `tilted` or `sidetilt`. Two lines say why the season is strong and claim nothing about
+the sunrise: the `sidetilt` pair, which states that a world leaning past 54 degrees gives its poles
+more light over a year than its equator. That is the same limit `makeStats()` uses.
 
 Three rules hold the text honest.
 
@@ -118,7 +143,7 @@ list. `BEAST_TOKENS` lists the ones that name the animal.
 |---|---|
 | `{world}` | the designation of the planet |
 | `{probe}` | the name of the old probe |
-| `{lat}` | the latitude of the source, in words |
+| `{lat}` | the latitude of the source, in words. Under `EQUATOR_DEG`, 3 degrees, the word is "the equator" |
 | `{day}`, `{night}` | the turn of the planet, and half of it |
 | `{temp}`, `{grav}`, `{tilt}` | the temperature, the gravity, and the lean of the axis |
 | `{days}` | the day of this entry |
@@ -128,7 +153,9 @@ list. `BEAST_TOKENS` lists the ones that name the animal.
 | `{size}`, `{n}`, `{diet}` | the size text, the group count, and the diet of that animal |
 
 `{size}` and `{diet}` come straight off `G.lore`, so the log states the numbers the fauna card
-states.
+states. `{tilt}` comes from `world.env.obliquityDeg` and **not** from the result of
+`Lore.makeEnv()`, which keeps only the numbers its tags come from and drops the lean of the axis.
+A token that reads a dropped field prints "an unmeasured angle".
 
 ## The day count
 
@@ -156,7 +183,11 @@ and a mark number, and it must stay that way. `docs/flora.md` states the same ru
    must pass the gate, and one genome shape must pass the test.
 3. **The lexicon.** A word that claims a fact may only appear where the world has that fact. Issue
    34 adds five rules: `aurora` needs `auroral`, `geyser` needs `geysers`, `lightning` needs
-   `stormy`, `polar night` needs `tilted`, and `the ring overhead` needs `ringed`.
+   `stormy`, `the ring overhead` needs `ringed`, and one rule for the sun that does not rise. That
+   last rule names every phrasing the log gates on `polarnight` — "polar night", "stop rising",
+   "will not come back up", "under the horizon for", "flat circle", "round the horizon", and "not
+   come back inside" — so a new line cannot state the claim behind a weaker gate. Do not widen it
+   to "the long dark": the fauna pool already holds that phrase for the night of a long day.
 4. **The tokens.** A line may only use a token the writer fills, and a line that names the animal
    must be gated on `beasts`.
 5. **Variety.** Every slot needs at least six lines that fit any world it can reach, and every
@@ -166,8 +197,12 @@ Two facts of the sweep live in the audit:
 
 - `SOURCE_SKY_TAGS` collapses the 11,616 worlds to the skies a source gate can tell apart, the way
   `FLORA_SKY_TAGS` does for the plants. A new gate on a new tag widens the sweep on its own.
-- `SOURCE_TILT` holds six leans, one per class `rollAxis()` draws: damped, ordered, tipped, and
-  turned. The sweep runs every world through all six, and through both states of `beasts`.
+- `SOURCE_TILT` holds seven leans, covering every class `rollAxis()` draws: damped, ordered,
+  tipped, and turned. 17 degrees is in the list because a source at 79 degrees carries
+  `polarnight` at that lean while `tilted` only starts at 20, so the two tags must be swept apart.
+- `SOURCE_LATS` holds five latitudes of the source, 0 to 79 degrees. It stops at 79 because
+  `makeSource()` keeps the source inside 80. The sweep runs every world through every lean, every
+  latitude, and both states of `beasts`.
 
 `node tools/lore-audit/audit.mjs --seeds 40` runs real worlds through `generate()`. It reads the
 log of every source and checks that the four slots are there in order, that no entry is empty, that

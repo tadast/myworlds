@@ -55,15 +55,33 @@
   const BEAST_TOKENS = ['other', 'Other', 'others', 'Others', 'size', 'n', 'diet'];
 
   // ---------------------------------------------------------------- the tags of the source
-  // Lore.makeEnv() gives the tags of the planet. Two facts the log needs are not in that set.
+  // Lore.makeEnv() gives the tags of the planet. Three facts the log needs are not in that set.
   //
   // The lean of the axis. A world turned past 135 degrees stands nearly upright again and turns
   // the other way, as Venus does, so the lean the climate feels is the smaller of the angle and
   // its supplement. makeStats() reads the same two limits, 54 degrees and 135 degrees.
   //
+  // The polar night AT THE SOURCE. The lean alone does not give one: the sun fails to rise only
+  // poleward of the polar circle, which stands at latitude 90 - lean. A wreck on the equator of a
+  // world leaning 50 degrees still sees the sun every day of the year. So `polarnight` reads the
+  // latitude of the source as well as the lean:
+  //
+  //     |lat| > 90 - lean + POLAR_MARGIN
+  //
+  // POLAR_MARGIN is 5 degrees, so the night is not one day at the edge of the circle but weeks of
+  // it. makeSource() keeps the source inside SOURCE_LAT, 80 degrees, so the tag needs a lean over
+  // 15 degrees before any source can carry it.
+  //
   // The life. `beasts` says the world carries at least one species with lore.
   const TILT_UPRIGHT = 8, TILT_TILTED = 20, TILT_SIDE = 54, TILT_BACK = 135;
-  function sourceTags(env, obliquityDeg, hasBeasts) {
+  const POLAR_MARGIN = 5;
+  // The latitude of the source in degrees, from its unit direction. The y of a direction is the
+  // sine of the latitude, as site.js states.
+  function sourceLatDeg(dir) {
+    if (!dir) return 0;
+    return Math.asin(Math.max(-1, Math.min(1, dir[1]))) * 180 / Math.PI;
+  }
+  function sourceTags(env, obliquityDeg, hasBeasts, latDeg) {
     const tags = new Set(env.tags);
     if (obliquityDeg != null) {
       const o = Math.abs(obliquityDeg);
@@ -72,6 +90,7 @@
       if (lean >= TILT_TILTED) tags.add('tilted');
       if (lean >= TILT_SIDE) tags.add('sidetilt');
       if (o > TILT_BACK) tags.add('retrograde');
+      if (latDeg != null && Math.abs(latDeg) > 90 - lean + POLAR_MARGIN) tags.add('polarnight');
     }
     if (hasBeasts) tags.add('beasts');
     return tags;
@@ -107,7 +126,8 @@
     { t: 'We came down at {lat} on a world that turns the other way. The sun rose behind us, and nothing in the flight plan had prepared the cameras for it.', tags: 'retrograde' },
     { t: 'The axis of {world} stands very nearly straight, so the sun will run the same arc over {lat} every day we are here. That made the power budget simple, and it is the only simple thing about this landing.', tags: 'upright' },
     { t: 'We came down at {lat} on a world with almost no lean at all. Whatever season {world} is in, it is the season it will be in for the whole of our stay.', tags: 'upright' },
-    { t: 'The axis of {world} lies over at {tilt}, so the sun at {lat} runs a flat circle and never climbs. We landed in that light and we have worked in it since.', tags: 'sidetilt' },
+    { t: 'The axis of {world} lies over at {tilt}, and at {lat} the sun runs a flat circle without climbing. We landed in that light and we have worked in it since.', tags: 'polarnight' },
+    { t: 'The axis of {world} lies over at {tilt}. We came down at {lat} in a season that will not hold, and the whole survey plan is written around that.', tags: 'sidetilt' },
   ]);
 
   // ---------------------------------------------------------------- slot 2: the survey
@@ -192,10 +212,12 @@
     { t: 'The heat of {world} has taken the cameras. Two are white from end to end and the third reads {temp} on every pixel.', tags: 'hot|molten' },
     { t: 'A day of {day} makes a night of {night}, and the cells do not cross it. We wake cold and we spend the morning becoming useful.', tags: 'longday|slowspin' },
     { t: 'The sun has not moved since the last entry. At {day} to the turn, weather we could have outrun on a faster world simply arrives and stays.', tags: 'longday|slowspin' },
-    { t: 'The axis of {world} leans {tilt}, and the polar night is coming down the map toward us. It will not lift inside our power budget.', tags: 'tilted' },
-    { t: 'At a lean of {tilt} this hemisphere is turning away from the sun. We have watched it set a little further along the horizon each day, and we can extrapolate.', tags: 'tilted' },
-    { t: 'On a world lying over at {tilt} the sun runs a ring around us and gives no noon. The panels never see it square, and they never will.', tags: 'sidetilt' },
-    { t: 'At {tilt} the season here is one long day followed by one long dark, and we arrived late in the first of them. That was not our error to make.', tags: 'sidetilt' },
+    { t: 'The axis of {world} leans {tilt}, and at {lat} the polar night is already on the map above us. It will not lift inside our power budget.', tags: 'polarnight' },
+    { t: 'We are far enough toward the pole, on a world leaning {tilt}, that the sun here will stop rising. The power plan allowed for a season. It did not allow for this.', tags: 'polarnight' },
+    { t: 'At a lean of {tilt} this hemisphere is turning away from the sun. It sets a little further along the horizon every day, and what we collect falls with it.', tags: 'tilted' },
+    { t: 'On {world} the season is the whole of the weather. At a lean of {tilt}, the ground we surveyed in the warm is not the ground we are standing on now.', tags: 'tilted' },
+    { t: 'On a world lying over at {tilt} the year moves the light far more than the day does. Nothing in the power plan was written for a sun that behaves like this.', tags: 'sidetilt' },
+    { t: 'At {tilt} the poles of {world} take more light over a year than the equator does. Every rule of thumb we brought with us is the wrong way round here.', tags: 'sidetilt' },
     { t: 'The vents to the south have stayed open for {days} days. The ash is fine enough to pass the filters, and it is in the bearings now.', tags: 'volcanic' },
     { t: 'The ground breathes here. There is ash on the panels every morning, and what we wipe off is back by the evening.', tags: 'volcanic' },
     { t: 'The geysers do not keep the interval the orbiter recorded. One opened inside the landing circle on the ninth day, and it has coated the mast since.', tags: 'geysers' },
@@ -232,7 +254,7 @@
     { t: 'The cold will hold everything on this deck exactly as it is, including this entry. We have counted on that.', tags: 'frozen|subzero' },
     { t: 'Nothing on a dry world takes a machine apart quickly. The record will sit here in the open, and it will still be readable when somebody comes.', tags: 'dryworld' },
     { t: 'What the geysers throw will cover the deck long before anything else finds it. The carrier runs off the mast, which stands above the fall.', tags: 'geysers' },
-    { t: 'The sun will go round the horizon once more and then it will not come back up. We have closed the log while there is light to close it in.', tags: 'sidetilt' },
+    { t: 'The sun will go round the horizon once more and then it will not come back up. We have closed the log while there is light to close it in.', tags: 'polarnight' },
     { t: 'The ring overhead will still be there when the mast is a line of rust. We have pointed the last camera up at it and left the shutter open.', tags: 'ringed' },
     { t: 'The ash on the deck is a finger deep and we have stopped measuring it. The record bay is sealed, and the carrier runs off the mast for as long as the mast is clear.', tags: 'volcanic' },
     { t: 'The sky over {world} is lit again and the band is useless. We have left the record where it lies and the carrier where it stands. We are finished talking to the orbiter.', tags: 'auroral' },
@@ -241,7 +263,7 @@
     { t: 'We have earthed everything that can be earthed and accepted the rest. The record is written, the carrier is up, and the storm can have the mast.', tags: 'stormy' },
     { t: 'The {plants} are inside the landing circle now, and they will be over the deck within a season. We leave the record to them to keep.', tags: 'flora' },
     { t: 'We will not see this sun again. At {day} to the turn there is more night ahead than power, so the record is closed and the carrier is on.', tags: 'longday|slowspin' },
-    { t: 'The light moves further along the horizon each day and it will not come back inside our budget. We have closed the log and set the carrier to repeat.', tags: 'tilted' },
+    { t: 'The light moves further along the horizon each day, and at {lat} it will not come back inside our budget. We have closed the log and set the carrier to repeat.', tags: 'polarnight' },
     { t: 'The wet is in everything we could not seal, and the bus will follow the arm within a day. We have set the carrier to repeat while it has something to repeat with.', tags: 'rainy' },
     { t: 'It has rained for the whole of the last three turns and the panels take nothing now. We have stopped waiting on the weather and closed the log.', tags: 'rainy' },
     { t: 'At {temp} nothing we leave behind stays soft for long. The record is in the hardened store, and the carrier is on the mast.', tags: 'hot|molten' },
@@ -253,7 +275,8 @@
     { t: 'At {grav} we will not be blown over and we will not be buried. Whatever comes for this record will find us standing where we landed.', tags: 'highgrav|crushgrav' },
     { t: 'The ash will reach the deck before anything else does. We have sealed the record bay, pointed the dish, and stopped clearing the panels.', tags: 'volcanic' },
     { t: 'Dawn is {night} away and the cells will not reach it. We have put what is left into the transmitter and we are writing this in the dark.', tags: 'longday|slowspin' },
-    { t: 'The sun will be under the horizon for longer than our power budget runs. We have set the carrier to repeat and closed the log.', tags: 'tilted' },
+    { t: 'The sun will be under the horizon for longer than our power budget runs. We have set the carrier to repeat and closed the log.', tags: 'polarnight' },
+    { t: 'The season is against us from here on, and at a lean of {tilt} the season is a long one. We have put the rest of the power into the transmitter.', tags: 'tilted' },
     { t: 'The next strike takes the transmitter or it does not. Either way, this is the last entry we will make.', tags: 'stormy' },
     { t: 'The sky is burning again and nothing we say goes out through it. We are writing this for the wreck to hold rather than for the orbiter to hear.', tags: 'auroral' },
     { t: 'The rain will be inside the bus by the morning. We have written the record to the hardened store, where the wet cannot reach it.', tags: 'rainy' },
@@ -272,13 +295,16 @@
   // reads as a mission and not as one week. The card shows `days`, the day of the last entry.
   const DAY_GAP = { survey: [8, 38], trouble: [20, 180], last: [3, 120] };
 
-  // The latitude of the source, in the words the log uses. A source stands inside 80 degrees, so
-  // the text never has to name a pole.
+  // The latitude of the source, in the words the log uses. A source stands inside SOURCE_LAT, 80
+  // degrees, so the text never has to name a pole. EQUATOR_DEG is how near the line a source must
+  // stand before the log calls it the equator: 3 degrees is about 330 km on a world the size of
+  // the Earth, and the word is a place and not a measurement.
+  const EQUATOR_DEG = 3;
   function latWord(dir) {
     if (!dir) return 'an unrecorded latitude';
-    const deg = Math.asin(Math.max(-1, Math.min(1, dir[1]))) * 180 / Math.PI;
+    const deg = sourceLatDeg(dir);
     const a = Math.round(Math.abs(deg));
-    if (a < 3) return 'the equator';
+    if (a < EQUATOR_DEG) return 'the equator';
     return `${a} degrees ${deg > 0 ? 'north' : 'south'}`;
   }
 
@@ -288,10 +314,12 @@
   const PLANT_PLURAL = { cactus: 'cacti' };
   const manyOf = (w) => PLANT_PLURAL[w] || (/(s|x|sh|ch)$/.test(w) ? w + 'es' : w + 's');
 
-  function tokensFor(world, env, probe, day) {
+  // `env` here is the result of Lore.makeEnv(), which keeps the planet numbers the tags come from
+  // and drops the rest. The lean of the axis is one it drops, so writeLog() passes `obl` from
+  // world.env. Read no other number of the axis off `env`.
+  function tokensFor(world, env, probe, day, obl) {
     const hours = Math.max(1, Math.round(env.dayHours || 24));
     const plant = env.plantWord || 'growth';
-    const obl = env.obliquityDeg;
     return {
       world: world.designation, probe, lat: latWord(world.source && world.source.dir),
       day: `${hours} hours`, night: `${Math.max(1, Math.round(hours / 2))} hours`,
@@ -325,7 +353,8 @@
   function writeLog({ world, rng }) {
     const env = L.makeEnv(world.env || { type: world.type });
     const beasts = (world.species || []).filter((G) => G.lore);
-    const tags = sourceTags(env, (world.env || {}).obliquityDeg, beasts.length > 0);
+    const dir = world.source && world.source.dir;
+    const tags = sourceTags(env, (world.env || {}).obliquityDeg, beasts.length > 0, sourceLatDeg(dir));
     const probe = `${L.pick(rng, PROBE_NAME)} ${1 + Math.floor(rng() * 19)}`;
     const G = beasts.length ? L.pick(rng, beasts) : null;
     const ctx = { env, tags, world, G };
@@ -343,7 +372,7 @@
     for (const slot of SLOTS) {
       const e = L.line(rng, POOL[slot.key], ctx, used);
       const day = days[slot.key];
-      const tokens = tokensFor(world, env, probe, day);
+      const tokens = tokensFor(world, env, probe, day, (world.env || {}).obliquityDeg);
       if (G) Object.assign(tokens, beastTokens(G));
       entries.push({ slot: slot.key, title: slot.title, day, text: e ? cap(L.fill(e.t, tokens)) : '' });
     }
@@ -351,7 +380,7 @@
   }
 
   self.SourceLore = {
-    writeLog, sourceTags, SLOTS, TOKENS, BEAST_TOKENS,
+    writeLog, sourceTags, sourceLatDeg, SLOTS, TOKENS, BEAST_TOKENS,
     POOLS: { ARRIVAL, SURVEY, TROUBLE, LAST },
   };
 })();
