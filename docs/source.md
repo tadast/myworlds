@@ -180,6 +180,20 @@ rule one wording in three introduced `{pet}` and the others used it, so a log co
 the reader had never met. The audit finds the first beat any wording of which holds `{pet}` and
 fails any wording of it that does not name the animal, and any earlier wording that uses `{pet}`.
 
+### Every entry stands on its own subject
+
+The threads are interleaved, so an entry never follows the entry before it in its own thread. The
+reader meets each entry cold, a month of log after the last time that thread spoke. **The first
+reference to a subject inside an entry must therefore be a noun or a name, and never a pronoun.**
+For the animal that means a naming token, `{Other}`, `{Others}`, `{kind}`, `{kinds}`, or `{pet}`
+once the naming beat has run; for a person, the name or the job; for a thing, the noun. After the
+first mention inside the same entry, "it" and "they" are free. A phrase that stands in for a
+pronoun is the same defect: "one of them", "the big ones", "a second one", "the band", "the wheel",
+and a bare "one" in "a hand on the back of one" all leave the reader with no subject. The
+impersonal "it" is fine, because it stands for nothing: "It is colder.", "It rained for six hours."
+The audit enforces both halves, with a tight list of impersonal openings that a writer must extend
+by hand.
+
 ### How the beats interleave
 
 Every beat carries the force of its place in its thread: beat `i` of `n` takes `(i + 1) / n`, plus
@@ -329,9 +343,17 @@ list. `BEAST_TOKENS` lists the ones that name the animal.
 | `{crew}` | the count of the crew, in words |
 | `{few}`, `{many}` | two counts of days, rolled once per log |
 | `{count}` | a count of animals, rolled once per log, in words |
-| `{other}`, `{Other}`, `{others}`, `{Others}` | the animal the log names |
+| `{other}`, `{Other}`, `{others}`, `{Others}` | the animal the log names, in full: "the hardpan long-day hopper" |
+| `{kind}`, `{kinds}`, `{Kind}`, `{Kinds}` | the short form: the last word of the name, bare. "hopper", "hoppers", "Hoppers" |
 | `{size}`, `{n}`, `{diet}` | the size text, the group count, and the diet of that animal |
 | `{pet}` | the name the crew gives one animal |
+
+`{kind}` is the last word of the name. `species.js` builds a name as "[place] adjective NOUN", so
+that word is always the noun it picked for the locomotion — hopper, strider, whale, ribbon, keel —
+and it always takes an "s" in the plural. A log needs it, because the full name can be five words
+and an entry may have to name the animal twice: "Lina put food on the step and three flappers came
+down for it." It is bare, with no article, so a line writes "the {kind}", "a {kind}", or
+"{n} {kinds}".
 
 `{size}` and `{diet}` come straight off `G.lore`, so the log states the numbers the fauna card
 states. **`{size}` already carries its unit and often its place** — "3.6 m, mostly under the sand",
@@ -381,7 +403,7 @@ to be told that it may shrink.
 ## The audit
 
 `node tools/lore-audit/audit.mjs` sweeps the landing pool, the threads, and the endings. The source
-pass runs nine checks.
+pass runs ten checks.
 
 1. **Coverage.** Every world reaches the landing pool, at least three world threads, at least one
    crew thread, at least one fauna thread for **every one of the eleven ways of moving** when it
@@ -400,13 +422,20 @@ pass runs nine checks.
    a true line about a roller, and the rule steps over a `not` or a `never` on purpose.
 5. **The tokens.** A line may only use a token the writer fills, and a line that names the animal
    must sit under a gate on `beasts`.
-6. **The style.** No simile, no hedge, no sentence over 20 words, and no entry over 5 sentences.
-7. **The state.** A thread of 3 to 6 beats. A `retires` thread must carry an `out` beat, and no beat
+6. **The style.** No simile, no hedge, no entry over 5 sentences, and no sentence over 20 words
+   **once the tokens are filled**. A token is not one word: `{Other}` can print "The sea
+   lamp-flanked sky whale" and `{size}` can print "Each shard a hand wide, the swarm 9 m". `WORST`
+   in the audit holds the longest fill each token can take, and the lint counts with those. Raise a
+   number there when `species.js` grows a longer name or a longer size text.
+7. **The subject.** Every entry stands on its own subject, as above. A fauna wording, and an ending
+   that names a way of moving, may not let a pronoun or a stand-in phrase reach the reader before a
+   naming token. Every other wording may not OPEN on a pronoun outside the impersonal list.
+8. **The state.** A thread of 3 to 6 beats. A `retires` thread must carry an `out` beat, and no beat
    after it and no coda may name `{one}`. A first beat may not look back, with `{since}` or with a
    phrase. A beat may not claim a span longer than the shortest mission. The naming beat of a fauna
    thread must give the name in every one of its wordings.
-8. **Salience.** Every world thread must carry `sal()`, or the loudest fact of a world can lose.
-9. **Variety.** Three wordings per beat or more, no two wordings alike, no sentence in two pools,
+9. **Salience.** Every world thread must carry `sal()`, or the loudest fact of a world can lose.
+10. **Variety.** Three wordings per beat or more, no two wordings alike, no sentence in two pools,
    ten ending kinds, three wordings per ending kind, six threads of each kind, 60 given names.
 
 Four facts of the sweep live in the audit:

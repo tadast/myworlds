@@ -711,16 +711,78 @@ const STYLE_BAD = [
 function sentencesOf(text) {
   return String(text).split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
 }
+// A token is not one word. "{Other}" can print "The sea lamp-flanked sky whale" and "{size}" can
+// print "Each shard a hand wide, the swarm 9 m". A sentence of eleven tokens-and-words can
+// therefore run to twenty-five words on a real world, which is how two swarm wordings and a polar
+// night line got past a lint that counted every token as one. WORST holds the longest fill each
+// token can take, in words, and the lint counts with those. Raise a number here when species.js
+// grows a longer name or a longer size text.
+const WORST = {
+  Other: 5, other: 5, Others: 5, others: 5,   // "The sea lamp-flanked sky whale"
+  size: 9,                                     // "Each shard a hand wide, the swarm 9 m"
+  diet: 6, lat: 3, tilt: 3,
+  day: 2, night: 2, temp: 2, grav: 2, world: 2, probe: 2, pet: 2,
+  onejob: 2, twojob: 2, keeperjob: 2,
+  kind: 1, kinds: 1, Kind: 1, Kinds: 1,        // the last word of the name: "whale", "hopper"
+  one: 1, two: 1, keeper: 1, crew: 1, n: 1, count: 1,
+  few: 1, many: 1, days: 1, since: 1, moon: 1, moons: 1, plant: 1, plants: 1,
+};
+const expandWorst = (text) => String(text).replace(/\{(\w+)\}/g, (m, k) => 'x '.repeat(WORST[k] == null ? 1 : WORST[k]).trim());
 function styleCheck(text) {
   const bad = [];
   for (const [re, what] of STYLE_BAD) if (re.test(text)) bad.push(`${what}: /${re.source}/`);
   const sents = sentencesOf(text);
   if (sents.length > ENTRY_SENTENCES) bad.push(`${sents.length} sentences, over ${ENTRY_SENTENCES}`);
-  for (const s of sents) {
+  for (const s of sentencesOf(expandWorst(text))) {
     const n = s.split(/\s+/).filter(Boolean).length;
-    if (n > SENTENCE_MAX) bad.push(`a sentence of ${n} words: ${s}`);
+    if (n > SENTENCE_MAX) bad.push(`a sentence of ${n} words once the tokens are filled`);
   }
   return bad;
+}
+
+// ---- every entry stands on its own subject
+// The threads are interleaved, so an entry never follows the entry before it in its own thread.
+// The reader meets each entry cold. The FIRST reference to a subject inside an entry must
+// therefore be a noun or a name, and never a pronoun.
+//
+// For the animal the naming tokens are {Other}, {Others}, {other}, {others}, {kind}, {kinds},
+// {Kind}, {Kinds}, and {pet}. A stand-in phrase is the same defect as a pronoun: "one of them",
+// "the big ones", "two of them", "the band" and "the wheel" tell the reader nothing on their own.
+const NAMING_TOKENS = SourceLore.NAMING_TOKENS;
+// A bare "one" is the commonest stand-in of all: "a hand on the back of one". The scan marks the
+// tokens first, so the crew token {one} is never read as the word "one", and then it looks for the
+// shapes a bare "one" takes when it means the animal. "one of us" and "one hour" are left alone.
+const STANDIN = new RegExp([
+  '\\b(?:it|its|they|them|their|theirs)\\b',
+  '\\bone of them\\b', '\\btwo of them\\b', '\\bthree of them\\b',
+  '\\bthe big ones\\b', '\\bthe band\\b', '\\bthe wheel\\b', '\\bthe flock\\b',
+  '\\bsecond one\\b', '\\bthe one (?:with|at|in|that)\\b',
+  '\\b(?:beside|behind|on|of|at|with|to|for|near|past|under) (?:a |an |the )?one\\b',
+  '\\bone (?:came|landed|stopped|went|has|had|was|is|sat|opened|folded|knelt|got|would|will)\\b',
+].join('|'), 'gi');
+function subjectCheck(text) {
+  // ANIMAL for a naming token, WORD for every other token, so a token is never read as prose.
+  const marked = String(text).replace(/\{(\w+)\}/g,
+    (m, k) => (NAMING_TOKENS.includes(k) ? ' ANIMALNAME ' : ' CREWWORD '));
+  const at = marked.indexOf('ANIMALNAME');
+  const first = at < 0 ? Infinity : at;
+  STANDIN.lastIndex = 0;
+  let x;
+  while ((x = STANDIN.exec(marked))) {
+    if (x.index < first) return `"${x[0].trim()}" stands for the animal before the entry has named it`;
+  }
+  return null;
+}
+// A world, crew or landing wording may not OPEN on a pronoun either, because the subject of the
+// first sentence is the one the reader has no way to guess. The list below is tight on purpose:
+// every one of these is the impersonal "it" of the weather, the clock or a state of affairs, and
+// every new hit has to be read by hand before it is added.
+const IMPERSONAL_OPEN = /^(It is|It was|It has been|It has rained|It rains|It rained|It took|It gains|It costs|It buys|It helps)\b/;
+const PRONOUN_OPEN = /^(It|Its|They|Them|Their|He|She|Both|One of them)\b/;
+function openCheck(text) {
+  if (!PRONOUN_OPEN.test(text)) return null;
+  if (IMPERSONAL_OPEN.test(text)) return null;
+  return `opens on a pronoun, and the reader has no subject for it`;
 }
 
 // ---- the motion lexicon
@@ -734,7 +796,7 @@ function styleCheck(text) {
 // over the crew or the world threads. They run on the POOL text, where the animal is still a
 // token; the --seeds pass does not repeat them, because the pool sweep already reads every wording
 // against every way of moving.
-const SUBJ = '(?:\\{Other\\}|\\{Others\\}|\\{pet\\}|[Ii]t|[Tt]hey|[Oo]ne of them|[Tt]he band|[Tt]he wheel|[Tt]hree of them|[Tt]wo of them)';
+const SUBJ = '(?:\\{Other\\}|\\{Others\\}|\\{other\\}|\\{others\\}|\\{Kind\\}|\\{Kinds\\}|\\{kind\\}|\\{kinds\\}|\\{pet\\}|[Ii]t|[Tt]hey|[Oo]ne of them|[Tt]hree of them|[Tt]wo of them)';
 // A denial is honest anywhere: "It never walks" is a true line about a roller. So the prefix
 // allows only the tenses, and a 'not' or a 'never' between the subject and the verb breaks the
 // match on purpose.
@@ -869,6 +931,12 @@ for (const x of SOURCE_TEXTS) {
     }
   }
   for (const bad of styleCheck(x.t)) sourceIssues.push(`SOURCE ${x.label}: ${bad}\n    ${x.t}`);
+  // Every entry stands on its own subject. A fauna wording, and an ending that names a way of
+  // moving, has to name the animal before any word stands in for it. Every other wording only has
+  // to open on a subject the reader can see.
+  const aboutAnimal = x.kind === 'fauna' || (x.kind === 'end' && namesMotion(x.e));
+  const bad = aboutAnimal ? subjectCheck(x.t) : openCheck(x.t);
+  if (bad) sourceIssues.push(`SOURCE ${x.label}: ${bad}\n    ${x.t}`);
 }
 for (const [label, e] of SOURCE_ENTRIES) {
   const r = srcReach.get(e);
