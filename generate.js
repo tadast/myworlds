@@ -16,10 +16,11 @@
 //
 // This file holds no three.js and no DOM, because a module worker has no import map.
 import { Species } from './species.js';           // species genomes and lore
-import { FloraLore } from './flora-lore.js';       // the plant vocabulary, written per patch
+import { FloraLore, FLORA_LORE } from './flora-lore.js';   // the plant vocabulary, written per patch
 import { SourceLore } from './source-lore.js';     // the log of the source, written per world
 import { Lore } from './lore.js';                 // the lore engine, shared with the flora
 import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, tangentFrame } from './cell-grid.js';
+import { TYPES, TYPE_LABEL, TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE } from './world-types.js';
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -263,32 +264,11 @@ function icosphere(n) {
   return { pos, idx, vCount: vc, triCount };
 }
 
-// ---------------------------------------------------------------- planet archetypes
-const TYPES = [
-  ['terran', 28], ['ocean', 12], ['desert', 12], ['ice', 12], ['lava', 8], ['gas', 14], ['exotic', 14],
-];
-const TYPE_LABEL = {
-  terran: 'Temperate Terran', ocean: 'Ocean World', desert: 'Arid Desert', ice: 'Frozen Ice World',
-  lava: 'Volcanic Hellscape', gas: 'Gas Giant', exotic: 'Exotic Alien World',
-};
-// The kind codes must match FLORA in flora-geometry.js. The globe grows the first seven. The
-// ground patch grows all of them; see patchFlora() and docs/issues/21-alien-flora.md.
-const FLORA = {
-  TREE: 0, PINE: 1, CACTUS: 2, CRYSTAL: 3, MUSHROOM: 4, BOULDER: 5, PALM: 6,
-  TOWER: 7, SPINDLE: 8, PUFF: 9, SHARD: 10, GRASS: 11, COLOSSUS: 12, FAN: 13, POD: 14, STACK: 15,
-};
-// What each plant kind means to the text. The lore engine takes resolved tags, not kind codes, so
-// this is the only table that knows both, and the flora file will read the same one.
-// The word field names one plant of the kind; the lore uses it where a sentence points at a standing plant.
-export const FLORA_LORE = {
-  [FLORA.TREE]: { tag: 'woody', word: 'tree' },
-  [FLORA.PINE]: { tag: 'woody', word: 'pine' },
-  [FLORA.CACTUS]: { tag: 'cactus', word: 'cactus' },
-  [FLORA.CRYSTAL]: { tag: 'crystalflora', word: 'crystal' },
-  [FLORA.MUSHROOM]: { tag: 'fungal', word: 'mushroom' },
-  [FLORA.BOULDER]: { tag: 'stoneflora', word: 'stone' },
-  [FLORA.PALM]: { tag: 'woody', word: 'palm' },
-};
+// ---------------------------------------------------------------- the world types
+// world-types.js holds the types, their weights, and the ranges each type rolls in. The kind codes
+// come from flora-lore.js. The globe grows the first seven kinds. The ground patch grows all of
+// them; see patchFlora() and docs/issues/21-alien-flora.md.
+const FLORA = FloraLore.FLORA;
 const floraLore = (kinds) => (kinds || []).map((k) => FLORA_LORE[k]).filter(Boolean);
 // fauna: each world rolls its own species set (species.js); a creature's kind is its species index
 
@@ -299,13 +279,6 @@ function chooseType(rng) {
   return 'terran';
 }
 
-// The plant kinds each type grows. makePalette() assigns the same lists; they are named here so
-// the lore audit can sweep them without running a palette.
-const FLORA_BY_TYPE = {
-  terran: [FLORA.TREE, FLORA.PINE], ocean: [FLORA.PALM, FLORA.TREE], desert: [FLORA.CACTUS, FLORA.BOULDER],
-  ice: [FLORA.CRYSTAL, FLORA.PINE], lava: [FLORA.BOULDER, FLORA.CRYSTAL],
-  exotic: [FLORA.MUSHROOM, FLORA.CRYSTAL, FLORA.TREE], gas: [],
-};
 function makePalette(type, rng) {
   const P = {};
   P.jitter = 0.05;
@@ -404,14 +377,6 @@ function moonName(rng) {
 // after the designation, because three readers need them before the globe exists: the ground turns
 // globe units into metres with the radius, the creature rig uses the gravity, and the lore reads
 // all four. makeStats() formats the same values later and draws nothing more except the life text.
-const TEMP_BY_TYPE = { terran: [-5, 28], ocean: [5, 32], desert: [30, 75], ice: [-120, -40], lava: [420, 900], gas: [-190, -90], exotic: [-30, 60] };
-// Every value a world of each type can reach, for the lore audit. It must list the ends of the
-// range the switch in worldContext() rolls, plus any single value the roll can jump to: a desert
-// is 0.75 to 0.92 land, or 1 outright. tools/lore-audit reads this rather than restating it, so a
-// change to the rolls cannot leave the sweep testing a world the generator never builds.
-const LAND_BY_TYPE = { terran: [0.22, 0.42], ocean: [0.03, 0.12], desert: [0.75, 0.92, 1], ice: [0.3, 0.55], lava: [0.35, 0.6], exotic: [0.2, 0.6], gas: [null] };
-const FLORA_DENSITY_BY_TYPE = { terran: 2.0, ocean: 1.6, desert: 0.22, ice: 0.18, lava: 0.15, exotic: 1.4, gas: 0 };
-export const PLANET_RANGES = { TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE };
 function rollPlanet(frng, type) {
   const radiusKm = type === 'gas' ? Math.round(rrange(frng, 24000, 75000)) : Math.round(rrange(frng, 3200, 9800));
   const gravity = type === 'gas' ? rrange(frng, 0.9, 2.6) : (radiusKm / 6371) * rrange(frng, 0.8, 1.2);
@@ -621,17 +586,18 @@ function worldContext(seed) {
   if (type === 'gas') { initLife(ctx); return ctx; }
 
   // ---- terrain parameters per type
-  // land: the fraction of the surface above the sea. Earth is 0.29.
+  // land: the fraction of the surface above the sea. Earth is 0.29. It rolls in LAND_BY_TYPE of
+  //   world-types.js, which the lore audit sweeps.
   // contFreq: the size of the continents. A lower value gives fewer and larger continents.
   // islands: the weight of the volcanic arcs that make small islands in the open sea.
   let land, amp, mountain, contFreq, islands, tempBias, snowLine, beachW, floraDensity, cloudCount;
   switch (type) {
-    case 'terran': land = rrange(rng, 0.22, 0.42); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.55, 0.85); islands = 0.2; tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = FLORA_DENSITY_BY_TYPE.terran; cloudCount = Math.round(rrange(rng, 40, 70)); break;
-    case 'ocean': land = rrange(rng, 0.03, 0.12); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 0.8, 1.3); islands = 0.6; tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = FLORA_DENSITY_BY_TYPE.ocean; cloudCount = Math.round(rrange(rng, 55, 85)); break;
-    case 'desert': land = rng() < 0.6 ? rrange(rng, 0.75, 0.92) : 1; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.5, 0.8); islands = 0.1; tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.desert; cloudCount = Math.round(rrange(rng, 6, 18)); break;
-    case 'ice': land = rrange(rng, 0.3, 0.55); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.55, 0.9); islands = 0.15; tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.ice; cloudCount = Math.round(rrange(rng, 15, 30)); break;
-    case 'lava': land = rrange(rng, 0.35, 0.6); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 0.6, 1.0); islands = 0.3; tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.lava; cloudCount = Math.round(rrange(rng, 12, 28)); break;
-    case 'exotic': land = rrange(rng, 0.2, 0.6); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.5, 1.0); islands = 0.25; tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = FLORA_DENSITY_BY_TYPE.exotic; cloudCount = Math.round(rrange(rng, 25, 60)); break;
+    case 'terran': land = rrange(rng, ...LAND_BY_TYPE.terran); amp = 0.06; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.55, 0.85); islands = 0.2; tempBias = rrange(rng, -0.1, 0.15); snowLine = 0.6; beachW = 0.03; floraDensity = FLORA_DENSITY_BY_TYPE.terran; cloudCount = Math.round(rrange(rng, 40, 70)); break;
+    case 'ocean': land = rrange(rng, ...LAND_BY_TYPE.ocean); amp = 0.06; mountain = rrange(rng, 0.4, 0.8); contFreq = rrange(rng, 0.8, 1.3); islands = 0.6; tempBias = 0.15; snowLine = 0.5; beachW = 0.04; floraDensity = FLORA_DENSITY_BY_TYPE.ocean; cloudCount = Math.round(rrange(rng, 55, 85)); break;
+    case 'desert': land = rng() < 0.6 ? rrange(rng, LAND_BY_TYPE.desert[0], LAND_BY_TYPE.desert[1]) : LAND_BY_TYPE.desert[2]; amp = 0.055; mountain = rrange(rng, 0.5, 0.9); contFreq = rrange(rng, 0.5, 0.8); islands = 0.1; tempBias = 0.5; snowLine = 0.9; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.desert; cloudCount = Math.round(rrange(rng, 6, 18)); break;
+    case 'ice': land = rrange(rng, ...LAND_BY_TYPE.ice); amp = 0.06; mountain = rrange(rng, 0.6, 1.0); contFreq = rrange(rng, 0.55, 0.9); islands = 0.15; tempBias = -0.8; snowLine = 0.1; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.ice; cloudCount = Math.round(rrange(rng, 15, 30)); break;
+    case 'lava': land = rrange(rng, ...LAND_BY_TYPE.lava); amp = 0.065; mountain = rrange(rng, 0.8, 1.2); contFreq = rrange(rng, 0.6, 1.0); islands = 0.3; tempBias = 1.2; snowLine = 9; beachW = 0.02; floraDensity = FLORA_DENSITY_BY_TYPE.lava; cloudCount = Math.round(rrange(rng, 12, 28)); break;
+    case 'exotic': land = rrange(rng, ...LAND_BY_TYPE.exotic); amp = 0.065; mountain = rrange(rng, 0.5, 1.1); contFreq = rrange(rng, 0.5, 1.0); islands = 0.25; tempBias = rrange(rng, -0.2, 0.3); snowLine = rrange(rng, 0.55, 0.9); beachW = 0.03; floraDensity = FLORA_DENSITY_BY_TYPE.exotic; cloudCount = Math.round(rrange(rng, 25, 60)); break;
   }
   world.amp = amp; world.land = land;
   world.hasOcean = land < 1;

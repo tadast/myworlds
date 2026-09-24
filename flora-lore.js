@@ -23,10 +23,25 @@ import { Lore } from './lore.js';
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const round1 = (x) => Math.round(x * 10) / 10;
 
-  // The kind codes. They must match FLORA in flora-geometry.js and in generate.js.
+  // The kind codes. They must match FLORA in flora-geometry.js; generate.js and world-types.js take
+  // them from here.
   const K = {
     TREE: 0, PINE: 1, CACTUS: 2, CRYSTAL: 3, MUSHROOM: 4, BOULDER: 5, PALM: 6,
     TOWER: 7, SPINDLE: 8, PUFF: 9, SHARD: 10, GRASS: 11, COLOSSUS: 12, FAN: 13, POD: 14, STACK: 15,
+  };
+
+  // What each plant kind of the globe means to the text of the world: the tag the lore engine tests,
+  // and the word for one plant, which a sentence uses where it points at a standing plant. The
+  // engine takes resolved tags and not kind codes, so this is the only table that knows both.
+  // generate.js reads it for the tags of a world, and tools/lore-audit sweeps it.
+  export const FLORA_LORE = {
+    [K.TREE]: { tag: 'woody', word: 'tree' },
+    [K.PINE]: { tag: 'woody', word: 'pine' },
+    [K.CACTUS]: { tag: 'cactus', word: 'cactus' },
+    [K.CRYSTAL]: { tag: 'crystalflora', word: 'crystal' },
+    [K.MUSHROOM]: { tag: 'fungal', word: 'mushroom' },
+    [K.BOULDER]: { tag: 'stoneflora', word: 'stone' },
+    [K.PALM]: { tag: 'woody', word: 'palm' },
   };
 
   // ---------------------------------------------------------------- one row per plant kind

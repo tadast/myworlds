@@ -18,6 +18,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 |---|---|
 | `generate.js` | Generation. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map, the source, and the patch. Two exported calls: `world(seed, opts, onProgress)` and `patch(seed, site, opts, onProgress)`. Each returns its result. No three.js and no DOM. Imports the lore files. |
 | `cell-grid.js` | The cell grid, the map of the ground box and its inverse, and the frame of a site, as plain arrays. The one copy: `generate.js`, `site.js`, `ground-sky.js`, `carrier-globe.js`, and the tools import it. No three.js and no DOM. `tools/cell-grid-check.mjs` tests it. |
+| `world-types.js` | The seven world types, their weights and labels, and the ranges each type rolls in: temperature, land, globe flora, and flora density. `generate.js` rolls from these tables and `tools/lore-audit` sweeps them. No three.js. |
 | `worker.js` | The module worker, a small adapter over `generate.js`. Protocol: `postMessage({type:'generate', seed, opts})` or `{type:'patch', seed, lat, lon, opts}`, replies `progress` then `done`, `patch-done`, or `error`. It transfers every buffer of a result. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `tiers.js` | The two device tiers, HIGH and LOW, and `RIM`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |

@@ -178,7 +178,7 @@ texture. It is no longer that many metres of the planet. `patch.metresAcross` an
 
 A tide needs a moon, a sea, and liquid water. Rain needs liquid water and a sea. A fact the caller does not know adds no tag, so no line can claim it.
 
-The engine does not know what a plant kind is. `makeEnv` takes `floraTags` already resolved, and `plantWord` for the lines that name one plant. `FLORA_LORE` in `generate.js` is the one table that maps a kind code to both, and it sits next to `FLORA` so the two cannot drift. The flora file will read the same table.
+The engine does not know what a plant kind is. `makeEnv` takes `floraTags` already resolved, and `plantWord` for the lines that name one plant. `FLORA_LORE` in `flora-lore.js` is the one table that maps a kind code to both, and it sits next to the kind codes `K` of that file, so the two cannot drift. `generate.js` reads it for the tags of a world.
 
 **Gates.** A line is `{ t, tags, if, w }`. `tags` is a string of terms tested against the tag set: `cold` requires, `!gas` forbids, `woody|fungal` takes either. `if(ctx)` tests the organism, where `ctx` holds `G`, `env`, `tags`, and `world`. `w` is the weight.
 
@@ -232,7 +232,7 @@ The lore draws from `seed + '|lore'`, its own stream. Adding or removing a line 
 
 `node tools/lore-audit/audit.mjs` runs without a browser and exits non-zero on a finding.
 
-- **Coverage.** It sweeps every world type against every value it can reach — 11,616 worlds — times every class, every sociality, every locomotion, every head, and every part, and asserts that no pool is ever empty. A slot that is full on one planet and empty on the next is a dropped sentence. The grid is not written in the tool: `generate.js` exports `PLANET_RANGES`, so the sweep cannot drift from the ranges the generator rolls.
+- **Coverage.** It sweeps every world type against every value it can reach — 11,616 worlds — times every class, every sociality, every locomotion, every head, and every part, and asserts that no pool is ever empty. A slot that is full on one planet and empty on the next is a dropped sentence. The grid is not written in the tool: `world-types.js` holds the ranges `generate.js` rolls in, and the tool imports the same tables, so the sweep cannot drift from the ranges the generator rolls.
 - **Reachability.** The other side of coverage: a line no world in the sweep can reach is dead text, usually a gate naming two tags no planet carries together.
 - **Relations.** Every rule is run against every pair of genome shapes, under a sky with moons and one without, and each pair it accepts must satisfy `RELATION_CONTRACT`. This is the check that catches a blind burrower gathering at a light, or a flyer whose feet turn up food. It also reports a rule no pair can reach, and a rule that fits more than a quarter of all pairs.
 - **The lexicon.** A word that claims a fact may only appear where the world has that fact: "rain" needs `rainy`, "tide" needs `tides`, "bark" needs `woody`, "drinks" needs `waterliquid`. Add a rule to `LEXICON` whenever you write a line that leans on the world.

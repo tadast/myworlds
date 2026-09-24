@@ -1960,7 +1960,7 @@ import { Species } from './species.js';
   }
 
   // The plural of the plant word. The worker offers seven words and only one of them is irregular.
-  // See FLORA_LORE in generate.js. flora-lore.js holds its own copy of this rule, because the two
+  // See FLORA_LORE in flora-lore.js. flora-lore.js holds its own copy of this rule, because the two
   // vocabulary files do not read each other.
   const PLANT_PLURAL = { cactus: 'cacti' };
   const manyOf = (w) => PLANT_PLURAL[w] || (/(s|x|sh|ch)$/.test(w) ? w + 'es' : w + 's');

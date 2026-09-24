@@ -20,15 +20,16 @@
 //    rule needs of each side, and the sweep runs every rule against every pair of genome shapes.
 // 5. Diet exclusivity, and, with --seeds, whole stories from real generated worlds.
 //
-// The world grid is not written here. generate.js exports PLANET_RANGES, so the sweep cannot drift
-// from the ranges the generator actually rolls.
+// The world grid is not written here. world-types.js holds the ranges generate.js rolls in, so the
+// sweep cannot drift from the ranges the generator actually rolls.
 import { Lore } from '../../lore.js';
 import { Species } from '../../species.js';
-import { FloraLore } from '../../flora-lore.js';
+import { FloraLore, FLORA_LORE } from '../../flora-lore.js';
 import { SourceLore } from '../../source-lore.js';
 import * as generate from '../../generate.js';
-
-const { PLANET_RANGES, FLORA_LORE } = generate;
+import {
+  TEMP_BY_TYPE as TYPE_TEMP, LAND_BY_TYPE as LAND, FLORA_BY_TYPE as TYPE_FLORA, FLORA_DENSITY_BY_TYPE as FLORA_DENSITY,
+} from '../../world-types.js';
 
 const arg = (name, dflt) => {
   const i = process.argv.indexOf('--' + name);
@@ -38,9 +39,8 @@ const SHOW = arg('show', 0);
 const SEEDS = arg('seeds', 0);
 
 // ---------------------------------------------------------------- the worlds to test
-// Every value a world can reach, from generate.js. The grid is the product of them, so a line gated
-// on "frozen highgrav longday" is reached if any world can reach it.
-const { TEMP_BY_TYPE: TYPE_TEMP, LAND_BY_TYPE: LAND, FLORA_BY_TYPE: TYPE_FLORA, FLORA_DENSITY_BY_TYPE: FLORA_DENSITY } = PLANET_RANGES;
+// Every value a world can reach, from world-types.js. The grid is the product of them, so a line
+// gated on "frozen highgrav longday" is reached if any world can reach it.
 const ACTIVITY = [null, 'volcano', 'geyser', 'fissure', 'aurora', 'lightning'];
 const floraTagsOf = (kinds) => kinds.map((k) => FLORA_LORE[k].tag);
 const plantWordOf = (kinds) => (kinds.length ? FLORA_LORE[kinds[0]].word : null);

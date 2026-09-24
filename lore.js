@@ -208,7 +208,7 @@
     if (f.moons > 0 && tags.has('hasocean') && tags.has('waterliquid')) add('tides');
 
     // Plants. The caller resolves its own kinds into tags, because a plant kind is generator
-    // knowledge and this file holds none. See FLORA_LORE in generate.js.
+    // knowledge and this file holds none. See FLORA_LORE in flora-lore.js.
     if (!env.floraTags.length) add('noflora');
     else {
       add('flora');
