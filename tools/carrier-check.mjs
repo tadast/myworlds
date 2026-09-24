@@ -17,16 +17,16 @@
 // 4. The six faces, in the frame of the box. The needle stands on the terrain and not in the sky,
 //    because the reader walks the terrain and the wreck of slice 3 stands on it. On a site in each
 //    face of the cube grid, with a twist that is not zero:
-//    a. boxPoint() is the exact inverse of the map patch() in worker.js builds the box with. A
+//    a. boxPoint() is the exact inverse of the map patch() in generate.js builds the box with. A
 //       source seated at a known point of the box comes back as that point, and the needle, with
 //       the offset of the wedge taken out, lies along it.
 //    b. For a far source, a short step of the globe from the site along the stated bearing lands
 //       on the box along the needle.
-// 5. The mirror. The box of patch() in worker.js and the frame of groundBasis() must be the same
+// 5. The mirror. The box of patch() in generate.js and the frame of groundBasis() must be the same
 //    hand. The box was the mirror of that frame once, and the needle then had to take the mirror
 //    too. A step along box +x must read (1, 0) in the ground frame and a step along box +z must
 //    read toward (0, 1), and the needle must stand where the sky frame holds the source. The map
-//    of the box is boxTanX() and boxTanZ() of worker.js itself, and not a copy.
+//    of the box is boxTanX() and boxTanZ() of generate.js itself, and not a copy.
 //
 // site.js and ground-sky.js take three.js by the bare name `three`, which the import map of
 // index.html resolves in the browser. Node has no import map, so a resolve hook points the same
@@ -214,26 +214,13 @@ let reachRow = '';
   if (Math.abs(wrap180(sbrg - 180)) > 1e-9) fail('south', `a step along the south of groundBasis() reads bearing ${sbrg.toFixed(6)}`);
 }
 
-// ---------------------------------------------------------------- the map of the worker
-// patch() in worker.js builds the box with boxTanX() and boxTanZ(). The checks below take the map
+// ---------------------------------------------------------------- the map of generate.js
+// patch() in generate.js builds the box with boxTanX() and boxTanZ(). The checks below take the map
 // from that file and hold no copy of it, so a change of the box fails here and not on the ground.
-{
-  const { createRequire } = await import('node:module');
-  const { readFileSync } = await import('node:fs');
-  const require = createRequire(import.meta.url);
-  const dir = fileURLToPath(new URL('.', root));
-  globalThis.self = globalThis;
-  require(path.join(dir, 'lore.js'));
-  require(path.join(dir, 'species.js'));
-  require(path.join(dir, 'flora-lore.js'));
-  globalThis.importScripts = () => {};
-  globalThis.postMessage = () => {};
-  new Function('self', readFileSync(path.join(dir, 'worker.js'), 'utf8')
-    + '\n;self.__w = { cellDirT, boxTanX, boxTanZ };')(globalThis);
-}
-// dirOn() of patch() in worker.js, for a cell: the globe direction under a point of the box
-const dirOn = (cell, xu, zu, size) => new THREE.Vector3(...globalThis.__w.cellDirT(
-  cell, globalThis.__w.boxTanX(cell, xu, size), globalThis.__w.boxTanZ(cell, zu, size), [0, 0, 0]));
+const W = await import(root + 'generate.js');
+// dirOn() of patch() in generate.js, for a cell: the globe direction under a point of the box
+const dirOn = (cell, xu, zu, size) => new THREE.Vector3(...W.cellDirT(
+  cell, W.boxTanX(cell, xu, size), W.boxTanZ(cell, zu, size), [0, 0, 0]));
 
 // ---------------------------------------------------------------- 4: one site in each face
 // The needle in the frame of the box, on a site in each face of the cube grid with a twist.
@@ -299,7 +286,7 @@ const faceRows = [];
 }
 
 // ---------------------------------------------------------------- 5: the mirror
-// The sky against the box. patch() in worker.js lays the box on the axes of the cell of the cube
+// The sky against the box. patch() in generate.js lays the box on the axes of the cell of the cube
 // grid, and groundBasis() builds the frame the sun, the moons, and the ring stand in: x east, y up,
 // z south. The two were a mirror of each other once, with box z along the v axis of the cell, and
 // no turn carries a mirror onto its image. So this is a check and not a note. A step along box +x

@@ -4,37 +4,25 @@
 //   node tools/lore-audit/patch-sample.mjs Auralis 12.5 -73.25    the cell of a site
 //   node tools/lore-audit/patch-sample.mjs --seeds 6
 //
-// It runs worker.js in this process: generate() for the world, then patch() for one site, and it
+// It runs generate.js in this process: the world call, then the patch call for one site, and it
 // prints every plant the patch grew. Use it to read whole stories after a change to flora-lore.js.
 // The world and the patch take the LOW row of tiers.js, and the site snaps to its cell, so the
 // patch is one a reader on a phone could land on.
-import { createRequire, register } from 'module';
-import { readFileSync } from 'fs';
-import { fileURLToPath, pathToFileURL } from 'url';
-import path from 'path';
+import { register } from 'node:module';
+import { Lore } from '../../lore.js';
+import * as generate from '../../generate.js';
+import { TIERS, worldOpts } from '../../tiers.js';
 
-const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const rootUrl = pathToFileURL(root + '/').href;
 // site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
 // the browser. Node has no import map, so a resolve hook points the same name at vendor/.
+const three = new URL('../../vendor/three.module.js', import.meta.url).href;
 register('data:text/javascript,' + encodeURIComponent(`
 export async function resolve(spec, ctx, next) {
-  if (spec === 'three') return { url: ${JSON.stringify(rootUrl + 'vendor/three.module.js')}, shortCircuit: true };
+  if (spec === 'three') return { url: ${JSON.stringify(three)}, shortCircuit: true };
   return next(spec, ctx);
 }`));
-const { TIERS, worldOpts } = await import(rootUrl + 'tiers.js');
-const { patchOpts, snapSite, sourceSite } = await import(rootUrl + 'site.js');
+const { patchOpts, snapSite, sourceSite } = await import('../../site.js');
 const TIER = TIERS.LOW;
-
-globalThis.self = globalThis;
-require(path.join(root, 'lore.js'));
-require(path.join(root, 'species.js'));
-require(path.join(root, 'flora-lore.js'));
-globalThis.importScripts = () => {};
-globalThis.postMessage = () => {};
-new Function('self', readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\n;self.__generate = generate; self.__patch = patch;')(globalThis);
 
 const argv = process.argv.slice(2);
 const seedsFlag = argv.indexOf('--seeds');
@@ -49,23 +37,17 @@ if (seedsFlag >= 0) {
 
 let bad = 0;
 for (const [seed, lat, lon] of runs) {
-  let world = null, patch = null;
-  globalThis.postMessage = (m) => {
-    if (m.type === 'done') world = m.result.world;
-    if (m.type === 'patch-done') patch = m.result.patch;
-  };
-  globalThis.__generate(seed, worldOpts(TIER));
-  if (!world || world.type === 'gas') { console.log(`--- ${seed}: gas giant, no ground`); continue; }
+  const { world } = generate.world(seed, worldOpts(TIER));
+  if (world.type === 'gas') { console.log(`--- ${seed}: gas giant, no ground`); continue; }
   const site = lat === null ? sourceSite(world) : snapSite({ lat, lon });
-  globalThis.__patch(seed, site.lat, site.lon, patchOpts(world, site, TIER.ground));
-  if (!patch) { console.log(`--- ${seed}: no patch`); bad++; continue; }
+  const { patch } = generate.patch(seed, site, patchOpts(world, site, TIER.ground));
   console.log(`\n=== ${seed} @ ${site.lat},${site.lon} · ${world.typeLabel} · ${patch.biome} · ${patch.plants.length} plant kinds`);
   for (const p of patch.plants) {
     const l = p.lore;
     console.log(`\n  ${l.name} (${l.latin})  [kind ${p.kind}, ${p.count} on this ground]`);
     console.log(`  ${l.habitat} · ${l.size} · ${l.food} · ${l.spread}`);
     console.log(`  ${l.story}`);
-    for (const tok of globalThis.Lore.tokensIn(l.story + l.food + l.spread)) {
+    for (const tok of Lore.tokensIn(l.story + l.food + l.spread)) {
       console.log(`  !! unfilled {${tok}}`); bad++;
     }
     const s = l.story.split(/(?<=[.!?]) /).map((x) => x.trim()).filter(Boolean);

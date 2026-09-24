@@ -1,4 +1,4 @@
-// A checksum of the worlds and the patches worker.js builds, with no browser.
+// A checksum of the worlds and the patches the worker builds, with no browser.
 //
 //   node tools/world-checksum.mjs                 print one line per world and per patch
 //   node tools/world-checksum.mjs --check         compare against the baseline file
@@ -23,12 +23,10 @@
 // Six seeds cover the seven planet types but one. Meridian is the ice world the acceptance criteria
 // of issue 34 ask for, and Mire is a gas giant, which takes the other path through generate().
 import { register } from 'node:module';
-import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rootUrl = pathToFileURL(root + '/').href;
 const BASELINE = path.join(root, 'tools', 'world-checksum.baseline.txt');
@@ -46,30 +44,25 @@ const { patchOpts, snapSite, sourceSite, activitySite } = await import(rootUrl +
 const SEEDS = ['Auralis', 'Vesper', 'Meridian', 'Tessaly', 'Orin', 'Mire'];
 const FIXED_SITE = { lat: 20, lon: 40, kind: 0 };
 
-// worker.js is a classic worker script, not a module. It is evaluated here in this scope, the way
-// tools/lore-audit/audit.mjs does it. All four lore files load, so the log of the source is part
-// of the hash. Nothing runs until generate() is called.
-globalThis.self = globalThis;
-for (const f of ['lore.js', 'species.js', 'flora-lore.js', 'source-lore.js']) require(path.join(root, f));
-globalThis.importScripts = () => {};
-let posted = null;
-globalThis.postMessage = (msg) => { if (msg && (msg.type === 'done' || msg.type === 'patch-done')) posted = msg.result; };
-new Function('self', readFileSync(path.join(root, 'worker.js'), 'utf8')
-  + '\n;self.__generate = generate; self.__patch = patch;')(globalThis);
+// The check runs generation through worker.js, the adapter the page talks to, so it measures what
+// the page receives. The stub of self below clones each reply and transfers its buffers, as a
+// browser does. A buffer that generate.js kept for a later call would then come back detached, and
+// the hash of that later call would change.
+let reply = null;
+globalThis.self = {
+  postMessage(msg, transfer) { if (msg.type !== 'progress') reply = structuredClone(msg, { transfer }); },
+};
+await import(rootUrl + 'worker.js');
 
-function world(seed, tier) {
-  posted = null;
-  globalThis.__generate(seed, worldOpts(tier));
-  if (!posted) throw new Error(`generate("${seed}") posted no result`);
-  return posted;
+function ask(data) {
+  reply = null;
+  globalThis.self.onmessage({ data });
+  if (!reply) throw new Error(`${data.type} "${data.seed}" sent no reply`);
+  if (reply.type === 'error') throw new Error(reply.message);
+  return reply.result;
 }
-
-function patch(w, site, tier) {
-  posted = null;
-  globalThis.__patch(w.seed, site.lat, site.lon, patchOpts(w, site, tier.ground));
-  if (!posted) throw new Error(`patch("${w.seed}", ${site.lat}, ${site.lon}) posted no result`);
-  return posted;
-}
+const world = (seed, tier) => ask({ type: 'generate', seed, opts: worldOpts(tier) });
+const patch = (w, site, tier) => ask({ type: 'patch', seed: w.seed, lat: site.lat, lon: site.lon, opts: patchOpts(w, site, tier.ground) });
 
 // FNV-1a over the bytes of an array, with an avalanche at the end. One word is enough: a slipped
 // stream moves thousands of floats, not one bit.

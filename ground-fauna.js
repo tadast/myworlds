@@ -35,6 +35,7 @@
 // Ground frame: x east, y up, z south. One unit is one metre.
 import * as THREE from 'three';
 import { buildCreature, faunaMaterial, makeMover, makeAnyMover, stepAny, impulseBlocked, moverActivity, speedActivity, turnCap, turnLean, makeGait, stepGait, gaitLocked, anchorFits, anchorLocal } from './fauna.js';
+import { Species } from './species.js';
 
 export const LEASH = [60, 200];        // metres: how far a group roams from its anchor
 export const AIR_HOVER = [12, 40];     // metres above the ground for an air group
@@ -132,8 +133,7 @@ function hashSeed(s) {
 // bodyMetres() gives the number and the axis; the bounding box gives the extent the number must
 // match. A height measures along y, a length along z, because a creature faces +z in its own frame.
 export function metreScale(G, geo) {
-  const B = self.Species ? self.Species.bodyMetres(G) : null;
-  if (!B) { console.warn('[myworlds] species.js is not on the page: the ground cannot scale a creature'); return 1; }
+  const B = Species.bodyMetres(G);
   geo.computeBoundingBox();
   const b = geo.boundingBox;
   const extent = B.axis === 'height' ? b.max.y - b.min.y : b.max.z - b.min.z;
@@ -159,8 +159,7 @@ export function groundMove(G) {
 // sideways out of it: a long animal turns wide, and a turn tighter than this asks it to slow down.
 // A flyer banks round a wider circle still, because it cannot stop in the air.
 export function turnRadius(G) {
-  const B = self.Species ? self.Species.bodyMetres(G) : null;
-  const m = B ? B.metres : 3;
+  const m = Species.bodyMetres(G).metres;
   return Math.max(2, m * TURN_RADIUS * (G.cls === 'air' ? 3 : 1));
 }
 

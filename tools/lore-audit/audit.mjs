@@ -2,7 +2,7 @@
 //
 //   node tools/lore-audit/audit.mjs            every permutation, report only
 //   node tools/lore-audit/audit.mjs --show 12  also print 12 sample stories
-//   node tools/lore-audit/audit.mjs --seeds 40 also run 40 real worlds through worker.js
+//   node tools/lore-audit/audit.mjs --seeds 40 also run 40 real worlds through generate.js
 //
 // Five checks run over the text.
 //
@@ -20,27 +20,15 @@
 //    rule needs of each side, and the sweep runs every rule against every pair of genome shapes.
 // 5. Diet exclusivity, and, with --seeds, whole stories from real generated worlds.
 //
-// The world grid is not written here. worker.js exports self.PLANET_RANGES, so the sweep cannot
-// drift from the ranges the generator actually rolls.
-import { createRequire } from 'module';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import path from 'path';
+// The world grid is not written here. generate.js exports PLANET_RANGES, so the sweep cannot drift
+// from the ranges the generator actually rolls.
+import { Lore } from '../../lore.js';
+import { Species } from '../../species.js';
+import { FloraLore } from '../../flora-lore.js';
+import { SourceLore } from '../../source-lore.js';
+import * as generate from '../../generate.js';
 
-const require = createRequire(import.meta.url);
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-globalThis.self = globalThis;
-require(path.join(root, 'lore.js'));
-require(path.join(root, 'species.js'));
-require(path.join(root, 'flora-lore.js'));
-require(path.join(root, 'source-lore.js'));
-// worker.js is a classic worker script, not a module. It is evaluated here in this scope so the
-// sweep can read PLANET_RANGES and FLORA_LORE, and so --seeds can call generate(). Nothing runs
-// until it is called; the file is definitions down to the onmessage handler at the end.
-globalThis.importScripts = () => {};
-globalThis.postMessage = () => {};
-new Function('self', readFileSync(path.join(root, 'worker.js'), 'utf8') + '\n;self.__generate = generate;')(globalThis);
-const { Lore, Species, FloraLore, SourceLore, PLANET_RANGES, FLORA_LORE } = globalThis;
+const { PLANET_RANGES, FLORA_LORE } = generate;
 
 const arg = (name, dflt) => {
   const i = process.argv.indexOf('--' + name);
@@ -50,7 +38,7 @@ const SHOW = arg('show', 0);
 const SEEDS = arg('seeds', 0);
 
 // ---------------------------------------------------------------- the worlds to test
-// Every value a world can reach, from worker.js. The grid is the product of them, so a line gated
+// Every value a world can reach, from generate.js. The grid is the product of them, so a line gated
 // on "frozen highgrav longday" is reached if any world can reach it.
 const { TEMP_BY_TYPE: TYPE_TEMP, LAND_BY_TYPE: LAND, FLORA_BY_TYPE: TYPE_FLORA, FLORA_DENSITY_BY_TYPE: FLORA_DENSITY } = PLANET_RANGES;
 const ACTIVITY = [null, 'volcano', 'geyser', 'fissure', 'aurora', 'lightning'];
@@ -373,7 +361,7 @@ for (const f of worlds()) {
   auditLines(env, f);
   const key = f.type + '|' + [...env.tags].filter((t) => FLORA_SKY_TAGS.has(t)).sort().join(',');
   if (!skies.has(key)) skies.set(key, { env, f });
-  // A gas giant takes no probe, so it carries no source and no log. See makeSource() in worker.js.
+  // A gas giant takes no probe, so it carries no source and no log. See makeSource() in generate.js.
   if (f.type !== 'gas') {
     for (const obliquityDeg of SOURCE_TILT) {
       for (const latDeg of SOURCE_LATS) {
@@ -1076,9 +1064,7 @@ if (SEEDS > 0) {
   for (let i = 0; i < SEEDS; i++) {
     const seed = 'audit-' + i;
     let world = null;
-    globalThis.postMessage = (m) => { if (m.type === 'done') world = m.result.world; };
-    try { globalThis.__generate(seed, { detail: 24, maxFlora: 200, maxFauna: 40 }); } catch (e) { holes.push(`seed ${seed}: ${e.message}`); continue; }
-    if (!world) continue;
+    try { world = generate.world(seed, { detail: 24, maxFlora: 200, maxFauna: 40 }).world; } catch (e) { holes.push(`seed ${seed}: ${e.message}`); continue; }
     const env = Lore.makeEnv(world.env);
     // The log of the source, issue 34 slice 4. A world with no source carries no log, which is
     // the right answer for a gas giant and for a world where no vertex passed the tests.

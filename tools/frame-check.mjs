@@ -2,7 +2,7 @@
 //
 //   node tools/frame-check.mjs
 //
-// patch() in worker.js lays the ground box on a cell of the cube grid. groundBasis() in
+// patch() in generate.js lays the ground box on a cell of the cube grid. groundBasis() in
 // ground-sky.js turns the sun, the moons, and the ring into the ground frame: x east, y up,
 // z south, a right-handed set. Until this check the box ran z along the v axis of the cell, and
 // (u, up, v) is a left-handed set, so the terrain was the mirror of its cell and the sky stood
@@ -17,17 +17,16 @@
 //    slack hides it.
 // 2. The hand of the box. In the ground frame x cross z is -y. The cross of the two steps must
 //    point down, on every site.
-// 3. The patch with no cell. The east and the south of tangentFrame() in worker.js read (1, 0, 0)
+// 3. The patch with no cell. The east and the south of tangentFrame() in generate.js read (1, 0, 0)
 //    and (0, 0, 1) through groundBasis() with no twist.
 //
-// The map under test is boxTanX(), boxTanZ(), and tangentFrame() of worker.js itself, not a copy.
+// The map under test is boxTanX(), boxTanZ(), and tangentFrame() of generate.js itself, not a copy.
 //
 // site.js and ground-sky.js take three.js by the bare name `three`, which the import map of
 // index.html resolves in the browser. Node has no import map, so a resolve hook points the same
 // two names at vendor/.
-import { register, createRequire } from 'node:module';
+import { register } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,15 +45,8 @@ const THREE = await import('three');
 const S = await import(root + 'site.js');
 const { groundBasis } = await import(root + 'ground-sky.js');
 
-// The worker, as a classic script. The three lore files hang their tables on self first.
-const require = createRequire(import.meta.url);
-globalThis.self = globalThis;
-for (const f of ['lore.js', 'species.js', 'flora-lore.js']) require(path.join(dir, f));
-globalThis.importScripts = () => {};
-globalThis.postMessage = () => {};
-new Function('self', readFileSync(path.join(dir, 'worker.js'), 'utf8')
-  + '\n;self.__w = { cellDirT, boxTanX, boxTanZ, tangentFrame };')(globalThis);
-const W = globalThis.__w;
+// The map of the box, from generate.js itself.
+const W = await import(root + 'generate.js');
 
 const SIZE = 1500;          // units, the side of the box
 const STEP = 300;           // units of the box: the step along an axis

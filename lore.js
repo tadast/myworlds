@@ -1,6 +1,6 @@
 // myworlds — the lore engine. It turns facts about a world and facts about an organism into text.
-// The worker loads it with importScripts(); the page loads it with a script tag. It exposes
-// self.Lore.
+// It is an ES module that exports Lore. generate.js imports it, and so does every vocabulary
+// file.
 //
 // The engine holds no animal words and no plant words. species.js brings the fauna vocabulary,
 // and the flora file will bring its own. Keep it that way, so one engine serves both.
@@ -13,9 +13,6 @@
 //    rain never reaches a world that has no liquid water, because the line is gated on "rainy".
 // 3. Slots. A story is an ordered set of named parts. A later pass can fill a part or replace a
 //    part, and the story is joined again. Nothing rewrites text by searching it.
-'use strict';
-
-(function () {
   // ---------------------------------------------------------------- small helpers
   const pick = (rng, a) => a[Math.floor(rng() * a.length)];
   const rr = (rng, a, b) => a + rng() * (b - a);
@@ -211,7 +208,7 @@
     if (f.moons > 0 && tags.has('hasocean') && tags.has('waterliquid')) add('tides');
 
     // Plants. The caller resolves its own kinds into tags, because a plant kind is generator
-    // knowledge and this file holds none. See FLORA_LORE in worker.js.
+    // knowledge and this file holds none. See FLORA_LORE in generate.js.
     if (!env.floraTags.length) add('noflora');
     else {
       add('flora');
@@ -262,10 +259,9 @@
     return out;
   }
 
-  self.Lore = {
+  export const Lore = {
     pick, num,
     pool, choose, line, candidates, gateOf, matchTags, parseGate,
     fill, tokensIn, assemble, unique,
     makeEnv, relate, ACTIVITY_TAG,
   };
-})();

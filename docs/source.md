@@ -1,7 +1,7 @@
 # The log of the source: architecture
 
 This document describes how myworlds writes the log of a source. Read it before you change
-`source-lore.js`, the source parts of `worker.js`, or the source pass of `tools/lore-audit`.
+`source-lore.js`, the source parts of `generate.js`, or the source pass of `tools/lore-audit`.
 
 Read `docs/fauna.md` and `docs/flora.md` first. The three systems share one engine, `lore.js`, and
 the differences between them are the point of this file.
@@ -25,8 +25,8 @@ log does not read that bound: a source stands where `makeSource()` put it, whoev
 
 | Stage | File | Runs in | Output |
 |---|---|---|---|
-| 0. The lore engine | `lore.js` | Web Worker, page | `self.Lore`: tags, gated pools, weights |
-| 1. Place the source | `worker.js`, `makeSource()` | Web Worker | `world.source = { kind, dir }` |
+| 0. The lore engine | `lore.js` | Web Worker, page | `Lore`: tags, gated pools, weights |
+| 1. Place the source | `generate.js`, `makeSource()` | Web Worker | `world.source = { kind, dir }` |
 | 2. Write the log | `source-lore.js` | Web Worker | `world.source.log` |
 | 3. Show the log | `ground-source.js`, `SourceInspector` | Main thread | the card of the wreck |
 
@@ -582,9 +582,8 @@ The motion lexicon does not run again here. The pool sweep already reads every w
 every way of moving, which is complete, and the filled text has lost the tokens the subject-scoped
 rules read.
 
-## A tool that loads the worker by hand
+## A tool that runs the worker in Node
 
-`generate()` tests `self.SourceLore` before it writes the log, so a tool that evaluates `worker.js`
-in Node without `source-lore.js` gets a source with no log. `tools/world-checksum.mjs` loads all
-four lore files, so its hash of the world covers the log. A tool that needs the log must require
-`source-lore.js`, as `tools/lore-audit/audit.mjs` does.
+`generate.js` imports `source-lore.js`, so every world call writes the log, in the browser and in
+Node alike. `tools/world-checksum.mjs` runs `worker.js` itself with a stub of `self`, so its hash of
+the world covers the log, and a result that `worker.js` cannot clone or transfer fails the check.

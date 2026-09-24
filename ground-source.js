@@ -2,7 +2,7 @@
 //
 // A world holds one source, in one cell. The instrument of the probe reads a bearing to it from
 // every landing, and a landing on that cell shows the thing itself. The worker picked the place,
-// flattened a disc under it, and scorched the ground; see patchSource() in worker.js. This module
+// flattened a disc under it, and scorched the ground; see patchSource() in generate.js. This module
 // draws the wreck, blinks its lamp, answers a tap, and builds the body the study card turns.
 //
 // The frame is the frame of the patch: the origin at the site, y up, and x and z in units of the

@@ -32,7 +32,7 @@ export const SKY_RADIUS = 5000;      // metres, the sky dome
 //
 // The plants, and not the fog, set the true limit. The terrain is already seamless past the box,
 // because the rim carries it and the patch fades its knolls into the rim. The plants stop:
-// worker.js thins them to nothing over the last FLORA_EDGE units of the box, so dense flora ends
+// generate.js thins them to nothing over the last FLORA_EDGE units of the box, so dense flora ends
 // at a square of half width half - FLORA_EDGE. The reach stands on that line. The reader stops
 // where the plants begin to thin, and the band that is left carries the fade. Measured on
 // Aurora@18.91,129.00 at a half width of 750, the plant count in a disc of radius 90 at the four

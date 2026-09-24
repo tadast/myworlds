@@ -1,6 +1,6 @@
 # Fauna generation: architecture and topology
 
-This document describes how myworlds makes its fauna. Read it before you change `species.js`, `fauna.js`, the fauna parts of `worker.js`, or the fauna parts of `app.js`.
+This document describes how myworlds makes its fauna. Read it before you change `species.js`, `fauna.js`, the fauna parts of `generate.js`, or the fauna parts of `app.js`.
 
 ## What "fauna" means here
 
@@ -47,9 +47,9 @@ The fauna pipeline has four stages. Each stage lives in one file.
 
 | Stage | File | Runs in | Output |
 |---|---|---|---|
-| 0. The lore engine | `lore.js` | Web Worker, page | `self.Lore`: tags, gated text pools, story slots, relations |
+| 0. The lore engine | `lore.js` | Web Worker, page | `Lore`: tags, gated text pools, story slots, relations |
 | 1. Roll the species | `species.js` | Web Worker | `world.species`: an array of genomes with lore |
-| 2. Place the creatures | `worker.js` | Web Worker | `fauna`: a `Float32Array`, 9 floats per creature |
+| 2. Place the creatures | `generate.js` | Web Worker | `fauna`: a `Float32Array`, 9 floats per creature |
 | 3. Build and animate | `fauna.js` | Main thread | One `InstancedMesh` per species on the globe, two on the ground, one rig shader |
 | 4. Steer and inspect | `app.js`, `fauna.js` | Main thread | Roaming on the height map, the inspector card |
 
@@ -57,7 +57,7 @@ The same seed always gives the same species, the same names, and the same placem
 
 ## Stage 1: genomes (`species.js`)
 
-`species.js` is a classic script. The worker loads it with `importScripts('./species.js')`, after `lore.js`. It sets `self.Species = { makeSpeciesSet, describe, bodyMetres, NICHE, RELATIONS, POOLS }`. It does not use three.js. Keep it that way, so the worker stays free of rendering code.
+`species.js` is an ES module. It imports `Lore` from `lore.js`, and `generate.js` and `ground-fauna.js` import it. It exports `Species = { makeSpeciesSet, describe, bodyMetres, NICHE, RELATIONS, POOLS }`. It does not use three.js. Keep it that way, so the worker stays free of rendering code.
 
 `makeSpeciesSet(rng, type, world, P)` returns two to four genomes for one world, with their sociality, and no text. `P` is the raw palette from `makePalette()` in the worker.
 
@@ -162,7 +162,7 @@ texture. It is no longer that many metres of the planet. `patch.metresAcross` an
 
 ### The lore engine (`lore.js`)
 
-`lore.js` holds the machinery and no vocabulary. It exposes `self.Lore`. The flora will use the same engine, so never put an animal word in it.
+`lore.js` holds the machinery and no vocabulary. It exports `Lore`. The flora will use the same engine, so never put an animal word in it.
 
 **Tags.** `Lore.makeEnv(facts)` turns the raw numbers of a planet into `env.tags`, a `Set` of short words. The bands are:
 
@@ -178,7 +178,7 @@ texture. It is no longer that many metres of the planet. `patch.metresAcross` an
 
 A tide needs a moon, a sea, and liquid water. Rain needs liquid water and a sea. A fact the caller does not know adds no tag, so no line can claim it.
 
-The engine does not know what a plant kind is. `makeEnv` takes `floraTags` already resolved, and `plantWord` for the lines that name one plant. `FLORA_LORE` in `worker.js` is the one table that maps a kind code to both, and it sits next to `FLORA` so the two cannot drift. The flora file will read the same table.
+The engine does not know what a plant kind is. `makeEnv` takes `floraTags` already resolved, and `plantWord` for the lines that name one plant. `FLORA_LORE` in `generate.js` is the one table that maps a kind code to both, and it sits next to `FLORA` so the two cannot drift. The flora file will read the same table.
 
 **Gates.** A line is `{ t, tags, if, w }`. `tags` is a string of terms tested against the tag set: `cold` requires, `!gas` forbids, `woody|fungal` takes either. `if(ctx)` tests the organism, where `ctx` holds `G`, `env`, `tags`, and `world`. `w` is the weight.
 
@@ -232,16 +232,16 @@ The lore draws from `seed + '|lore'`, its own stream. Adding or removing a line 
 
 `node tools/lore-audit/audit.mjs` runs without a browser and exits non-zero on a finding.
 
-- **Coverage.** It sweeps every world type against every value it can reach — 11,616 worlds — times every class, every sociality, every locomotion, every head, and every part, and asserts that no pool is ever empty. A slot that is full on one planet and empty on the next is a dropped sentence. The grid is not written in the tool: `worker.js` exports `PLANET_RANGES`, so the sweep cannot drift from the ranges the generator rolls.
+- **Coverage.** It sweeps every world type against every value it can reach — 11,616 worlds — times every class, every sociality, every locomotion, every head, and every part, and asserts that no pool is ever empty. A slot that is full on one planet and empty on the next is a dropped sentence. The grid is not written in the tool: `generate.js` exports `PLANET_RANGES`, so the sweep cannot drift from the ranges the generator rolls.
 - **Reachability.** The other side of coverage: a line no world in the sweep can reach is dead text, usually a gate naming two tags no planet carries together.
 - **Relations.** Every rule is run against every pair of genome shapes, under a sky with moons and one without, and each pair it accepts must satisfy `RELATION_CONTRACT`. This is the check that catches a blind burrower gathering at a light, or a flyer whose feet turn up food. It also reports a rule no pair can reach, and a rule that fits more than a quarter of all pairs.
 - **The lexicon.** A word that claims a fact may only appear where the world has that fact: "rain" needs `rainy`, "tide" needs `tides`, "bark" needs `woody`, "drinks" needs `waterliquid`. Add a rule to `LEXICON` whenever you write a line that leans on the world.
 - **Diet exclusivity.** Two `src` values in one candidate set is a finding, because a weighted roll could then hand a predator leaf litter.
 - **The lexicon exemptions** are scoped to one rule each. `LEX_SKIP` used to be matched against the whole sentence, so a line that happened to contain "sky whale" skipped every rule; an entry now names the gate it relaxes.
-- `--seeds N` runs N real worlds through `worker.js` and checks the finished stories for unfilled tokens, repeated sentences, sociality claims that contradict `G.social`, and mobility claims on an animal that never moves.
+- `--seeds N` runs N real worlds through `generate.js` and checks the finished stories for unfilled tokens, repeated sentences, sociality claims that contradict `G.social`, and mobility claims on an animal that never moves.
 - `--show N` prints N sample stories with their planet.
 
-## Stage 2: placement (`worker.js`)
+## Stage 2: placement (`generate.js`)
 
 `makeFauna()` visits every terrain vertex. It computes which niches the vertex belongs to from height, temperature, moisture, and the flora noise. For each species whose niche matches, it places a creature when:
 
@@ -583,7 +583,7 @@ scales each species to its lore size, and one mover carries the whole group.
 
 ### The group model
 
-`patchFauna()` in `worker.js` fills two arrays of the patch result:
+`patchFauna()` in `generate.js` fills two arrays of the patch result:
 
 | Array | Floats per row | Fields |
 |---|---|---|
@@ -756,12 +756,12 @@ holds none of it.
 
 - Add a locomotion: add it to `LOCO`, `PLAN`, `HEAD`, `EXTRAS`, `MOVE`, and `NOUN`, `GENUS`, `ORIGIN` in `species.js`. Add its legs or body in `buildCreature()`, and a carriage in `rigConstants()` if it moves in a new way. Its `ORIGIN` pool needs at least one line with no gate, or a world will find it empty.
 - Add a line of lore: put it in the pool it belongs to, gate it on the tags it needs, and run `node tools/lore-audit/audit.mjs --seeds 200`. If the line leans on a fact of the world, add the word to `LEXICON` in the audit tool as well, so the next line that uses it is checked too.
-- Add a world fact: add the tag in `makeEnv()` in `lore.js`, the raw value in `world.env` in `worker.js`, and the axis to the grid in the audit tool.
+- Add a world fact: add the tag in `makeEnv()` in `lore.js`, the raw value in `world.env` in `generate.js`, and the axis to the grid in the audit tool.
 - Add a legged locomotion: add it to `LEG_SWING`, `LEG_DUTY`, `BOB_BEATS`, and `ROCK_K` in `fauna.js`, and give its legs a footfall order in `legPlan()`. Without an entry in `LEG_SWING` the gait clock does not lock and the feet slide.
 - Add an impulse locomotion: set `mode: 'impulse'` on its `MOVE` row, add its row to `IMPULSE`, its carriage to `IMPULSE_CARRY`, and its case to `impulseCycle()` in `fauna.js`, and write a carriage that reads `aBurst`. Push every constant the carriage needs on to the `rows` array in `rigConstants()`, so they sit in the program key. A niche or a world that must shut it out takes one row in `LOCO_GATE` in `species.js`. Change no caller: the three of them read `G.move.mode` and nothing else.
 - Add a locomotion of any kind: add it to `LOCOS` and `CLASSES` in `tools/lore-audit/audit.mjs` as well. Without those two rows the sweep never asks its pools a question and never runs a relation rule that names it.
 - Draw a number for one locomotion only: put the draw in a branch of its own in `rollGenome()`, and never as a row in one of the `{...}[loco]` tables there. Each of those tables is one object literal, so every entry in it draws from the generator for every species of every world, and one more row would move every animal of every seed.
 - Change how far a leg swings, or how long its foot stays down: the gait clock reads both, so the stride and the rate follow on their own. Check the new stride against the body size before you keep it.
-- Add a niche: add it to `NICHE` and `WORLD_NICHES` in `species.js`, and a test in `makeFauna()` in `worker.js`.
-- Test the worker without a browser: run `node tools/lore-audit/audit.mjs --seeds 200 --show 8`. It loads `worker.js` in Node with a fake `self` and reports every finding with an example world.
+- Add a niche: add it to `NICHE` and `WORLD_NICHES` in `species.js`, and a test in `makeFauna()` in `generate.js`.
+- Test generation without a browser: run `node tools/lore-audit/audit.mjs --seeds 200 --show 8`. It imports `generate.js` in Node and reports every finding with an example world.
 - Test the geometry in Chrome: open the page, then call `__mw.inspect(k)` for each species index and look at the card.

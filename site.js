@@ -16,7 +16,7 @@ export const PULL_REACH = 0.5;       // parts of a cell: how far the pull to lif
 // sit inside one facet and the coast the reader aims at would not be where the field puts it.
 //
 // The cell is far wider than the box it draws into, so the ground holds an artificial scale.
-// worker.js gives the two numbers back as patch.metresAcross and patch.metresUp. A plant and a
+// generate.js gives the two numbers back as patch.metresAcross and patch.metresUp. A plant and a
 // creature keep their lore size in units, so they read as normal against the ground and they are
 // no longer the metres the lore text says.
 //
@@ -36,7 +36,7 @@ export const CELL = 0.01;
 // a corner cell at about half the arc of a middle one. A coordinate past the face is legal and
 // the map stays true there, which is what the rim of a patch needs.
 //
-// worker.js holds the same map, because a Web Worker cannot import a module. Keep the two in step.
+// generate.js holds the same map. Keep the two in step.
 // Each row is the face normal, then the u axis, then the v axis, and u cross v is the normal.
 const FACES = [
   [1, 0, 0, 0, 0, -1, 0, 1, 0],
@@ -87,7 +87,7 @@ export function siteCell(site) {
 // same turn or the sun stands in the wrong quarter of it. See groundBasis() in ground-sky.js.
 //
 // East is the east of groundBasis(): the direction of falling lon. The turn is the angle of the u
-// axis from east toward south, which is the turn groundBasis() makes. patch() in worker.js builds
+// axis from east toward south, which is the turn groundBasis() makes. patch() in generate.js builds
 // a right-handed box, so one turn about the up axis brings the two frames together and the sky
 // holds no mirror of the terrain.
 export function cellTwist(site) {
@@ -322,7 +322,7 @@ export function activitySite(world) {
 // (sin lon, 0, -cos lon). Bearing 90 is then the east the globe holds, and a wedge that runs out
 // on 90 runs east over the globe.
 //
-// cellTwist() above takes the same east, and patch() in worker.js builds the box of the ground as
+// cellTwist() above takes the same east, and patch() in generate.js builds the box of the ground as
 // a right-handed set: x along the u axis of the cell and z against the v axis. The box was the
 // mirror of that until 2026-09-19, with z along v; see "The box is right-handed" in docs/probe.md.
 //
@@ -379,7 +379,7 @@ function hash01(s) {
 }
 
 // The site of the source of a world, or null. A gas giant and a world where no vertex passed the
-// tests of makeSource() both give null. See makeSource() in worker.js.
+// tests of makeSource() both give null. See makeSource() in generate.js.
 export function sourceSite(world) {
   const src = world && world.source;
   return src && src.dir ? snapSite(dirToSite({ x: src.dir[0], y: src.dir[1], z: src.dir[2] })) : null;
@@ -493,7 +493,7 @@ export function carrierDir(world, site, carrier, out = new THREE.Vector3()) {
 
 // The point of the ground box under a direction of the globe, in units of the box, or null.
 //
-// It is the exact inverse of the map patch() in worker.js builds the box with, boxTanX() and
+// It is the exact inverse of the map patch() in generate.js builds the box with, boxTanX() and
 // boxTanZ(): that map reads the two gnomonic coordinates of the cell at a point of the box and
 // takes the direction, and this reads the two coordinates of a direction and takes the point. The
 // box runs x along u and z against v, so z takes the sign the other way. So a direction inside the cell

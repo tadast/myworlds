@@ -1,7 +1,7 @@
 # Flora lore: architecture
 
 This document describes how myworlds writes the text of its flora. Read it before you change
-`flora-lore.js`, `flora-card.js`, the flora parts of `worker.js`, or the flora parts of
+`flora-lore.js`, `flora-card.js`, the flora parts of `generate.js`, or the flora parts of
 `ground-flora.js` and `app.js`.
 
 Read `docs/fauna.md` first. The two systems share one engine and one card, and the differences
@@ -53,8 +53,8 @@ writes one line that names a body from each side.
 
 | Stage | File | Runs in | Output |
 |---|---|---|---|
-| 0. The lore engine | `lore.js` | Web Worker, page | `self.Lore`: tags, gated text pools, story slots, relations |
-| 1. Grow the plants | `worker.js` | Web Worker | `flora`: a `Float32Array`, 8 floats per plant |
+| 0. The lore engine | `lore.js` | Web Worker, page | `Lore`: tags, gated text pools, story slots, relations |
+| 1. Grow the plants | `generate.js` | Web Worker | `flora`: a `Float32Array`, 8 floats per plant |
 | 2. Write the lore | `flora-lore.js` | Web Worker | `patch.plants`: one entry per kind, with its lore |
 | 3. Build the shape | `flora-geometry.js` | Main thread | one geometry per kind, from the flora signature |
 | 4. Draw and inspect | `ground-flora.js`, `flora-card.js` | Main thread | the plants of the patch, the mark, the study card |
@@ -107,7 +107,7 @@ that the ground holds water. Every wet ground is also moist.
 ## The temperature of the site
 
 The stats card states the mean temperature of the planet. A patch is not the mean. `siteTempC()` in
-`worker.js` reads `siteT`, the temperature field of `fieldFrom()`, which falls with the latitude and
+`generate.js` reads `siteT`, the temperature field of `fieldFrom()`, which falls with the latitude and
 with the height of the ground, and turns it into degrees:
 
 ```

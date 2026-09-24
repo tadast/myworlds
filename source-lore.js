@@ -1,8 +1,8 @@
 // myworlds — the log of the source. It turns the facts of a world into the log a small crewed
 // survey ship left behind in its wreck.
 //
-// The worker loads it with importScripts(), after lore.js and species.js. It exposes
-// self.SourceLore. It holds no three.js, and it reads no geometry.
+// It is an ES module that exports SourceLore. generate.js imports it. It holds no three.js, and it
+// reads no geometry.
 //
 // lore.js holds the engine and no words. species.js brings the fauna vocabulary. flora-lore.js
 // brings the plant vocabulary. This file brings the vocabulary of the wreck, and none of the four
@@ -95,10 +95,10 @@
 //
 // The stream is makeRng(seed + '|source-lore') and nothing else draws from it, so the log of a
 // world is the same on every visit and no other part of the world moves when the text changes.
-'use strict';
+import { Lore } from './lore.js';
+import { Species } from './species.js';
 
-(function () {
-  const L = self.Lore;
+  const L = Lore;
   const pool = L.pool;
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const lower = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
@@ -216,7 +216,7 @@
   // The size in metres, from species.js, so the log states the number the fauna card states. No
   // species of this generator is under about 1.7 metres, so "small" here means small enough for
   // two people to take hold of, and not small enough to fit in a hand.
-  const metres = (G) => (self.Species ? self.Species.bodyMetres(G).metres : 1);
+  const metres = (G) => Species.bodyMetres(G).metres;
   const BIG_M = 3;
   const g = (fn) => (c) => !!c.G && fn(c.G);
   const bigBody = (G) => metres(G) >= BIG_M;
@@ -1960,7 +1960,7 @@
   }
 
   // The plural of the plant word. The worker offers seven words and only one of them is irregular.
-  // See FLORA_LORE in worker.js. flora-lore.js holds its own copy of this rule, because the two
+  // See FLORA_LORE in generate.js. flora-lore.js holds its own copy of this rule, because the two
   // vocabulary files do not read each other.
   const PLANT_PLURAL = { cactus: 'cacti' };
   const manyOf = (w) => PLANT_PLURAL[w] || (/(s|x|sh|ch)$/.test(w) ? w + 'es' : w + 's');
@@ -2326,7 +2326,7 @@
     };
   }
 
-  self.SourceLore = {
+  export const SourceLore = {
     writeLog, sourceTags, sourceLatDeg, motionOf, salienceOf,
     TOKENS, BEAST_TOKENS, NAMING_TOKENS, ENDING_KINDS, MOTION, LEADS, shortNoun,
     NAMES, ROLES, PET_NAME,
@@ -2334,4 +2334,3 @@
     THREADS: { world: WORLD_THREADS, crew: CREW_THREADS, fauna: FAUNA_THREADS, strand: STRAND_THREADS },
     LIMITS: { CREW_MIN, CREW_MAX, ENTRY_MIN, ENTRY_MAX, THREAD_MIN_BEATS },
   };
-})();

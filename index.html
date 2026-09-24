@@ -209,17 +209,9 @@
     </div>
   </div>
 
-  <!-- The worker loads lore.js and species.js too. The page needs them for Species.bodyMetres(),
-       because the ground scales a creature to the size its lore states. species.js reads
-       window.Lore, so lore.js goes first. A classic script runs before a module, so both are
-       there when app.js starts.
-       The page does not load flora-lore.js. The plant lore is written in the worker, at patch
-       time, and it crosses to the page as plain data on the patch result. -->
   <!-- The page owns every gesture on it. viewport.js blocks the pinch, the double tap, and the
        rubber band the browser would answer with, so a pinch zooms the world and not the page. -->
   <script src="./viewport.js"></script>
-  <script src="./lore.js"></script>
-  <script src="./species.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

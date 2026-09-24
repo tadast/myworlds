@@ -55,9 +55,6 @@
 <script type="importmap">
   { "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }
 </script>
-<!-- species.js gives the catalogue of forms (Species.CATALOGUE). It reads self.Lore when it loads. -->
-<script src="../lore.js"></script>
-<script src="../species.js"></script>
 </head>
 <body>
 <header>
@@ -76,9 +73,11 @@
 // faunaMaterial(), so a change to fauna.js shows here without a world roll.
 import * as THREE from 'three';
 import { buildCreature, faunaMaterial } from '../fauna.js';
+// species.js gives the catalogue of forms.
+import { Species } from '../species.js';
 
 const q = new URLSearchParams(location.search);
-const CAT = self.Species.CATALOGUE;
+const CAT = Species.CATALOGUE;
 const ALWAYS = CAT.ALWAYS;
 const PAL = { fauna: { sand: '#c8b27f' }, flora: { canopy: '#4f9a52', trunk: '#6b4a2f' } };
 const SKINS = [

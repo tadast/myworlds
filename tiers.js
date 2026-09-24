@@ -12,7 +12,7 @@
 // finds, and a knob that walks to 400 m only walks back down again.
 //
 // Issue 25 raised the flora caps, because the patch now grows plants over a wider dense square:
-// FLORA_EDGE in worker.js fell from 300 to 100. On LOW, where the box stays 1,500, the densest
+// FLORA_EDGE in generate.js fell from 300 to 100. On LOW, where the box stays 1,500, the densest
 // cell measured went from 18,100 plants to 23,004, so 8,400 carries the same head room as 6,000
 // did. The LOD walk of ground-flora.js reads about 6 to 11 ns per plant, so even 120,000 plants
 // cost under 0.7 ms of a 16.7 ms frame; the walk was never the thing to fear.

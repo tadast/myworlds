@@ -1,10 +1,9 @@
 // myworlds — species genomes. Rolls a set of creature species per world and their lore.
-// Loaded into the worker with importScripts(); exposes self.Species.
+// It is an ES module that exports Species. generate.js and ground-fauna.js import it.
 // A genome is plain data: class, niche, body plan, limbs, head, extras, gait, movement, colours.
 // fauna.js turns a genome into geometry and a rig; this file never touches three.js.
-'use strict';
+import { Lore } from './lore.js';
 
-(function () {
   const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
   const rr = (rng, a, b) => a + rng() * (b - a);
   const cap = (s) => s[0].toUpperCase() + s.slice(1);
@@ -247,7 +246,7 @@
   // The world facts a gate reads. The bands come from lore.js, so a gate and a lore line cannot
   // disagree about what "molten" means.
   function worldFacts(type, world) {
-    const tags = self.Lore.makeEnv((world && world.env) || { type }).tags;
+    const tags = Lore.makeEnv((world && world.env) || { type }).tags;
     return { type, waterliquid: tags.has('waterliquid'), molten: tags.has('molten') };
   }
 
@@ -357,7 +356,7 @@
   // A line may carry a gate: `tags` names the world conditions it needs, `if` tests the genome.
   // A gated line outranks a plain line, so the planet shows through. Never write a line that
   // names a part the animal may not have, or a condition the world may not meet. See docs/fauna.md.
-  const L = self.Lore;
+  const L = Lore;
   const pool = L.pool;
 
   // ---------------------------------------------------------------- name parts
@@ -1325,5 +1324,4 @@
   }
 
   // CATALOGUE is for tools/fauna-lab.html. It lists the forms a roll can pick, and it draws nothing.
-  self.Species = { makeSpeciesSet, describe, bodyMetres, CATALOGUE: { LOCO, PLAN, HEAD, EXTRAS, ALWAYS }, NICHE, RELATIONS, RELATION_CONTRACT, POOLS: { ORIGIN, FEATURE, HABIT, CLIMATE, SKY, CLOSE, DIET, PLAIN_FEATURE, PLOUGH_MOUNDS, SWARM_ORIGIN, HERD_STORY, HERD_STILL, PAIR_STORY, ALONE_STORY, WORLD_ADJ, WORLD_EPITHET } };
-})();
+  export const Species = { makeSpeciesSet, describe, bodyMetres, CATALOGUE: { LOCO, PLAN, HEAD, EXTRAS, ALWAYS }, NICHE, RELATIONS, RELATION_CONTRACT, POOLS: { ORIGIN, FEATURE, HABIT, CLIMATE, SKY, CLOSE, DIET, PLAIN_FEATURE, PLOUGH_MOUNDS, SWARM_ORIGIN, HERD_STORY, HERD_STILL, PAIR_STORY, ALONE_STORY, WORLD_ADJ, WORLD_EPITHET } };

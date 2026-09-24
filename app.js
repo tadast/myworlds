@@ -392,7 +392,7 @@ const SLOPE_STEP = 0.02;
   // The mover reads (u, v) through normalize(n + t1 * u + t2 * v), so the way back from a plant on
   // the sphere to those two numbers is the ratio below: the plant seen from the centre, over how
   // far it lies round the curve. It reads only the cells of floraGrid the reach covers; see
-  // buildFloraGrid() in worker.js.
+  // buildFloraGrid() in generate.js.
   const _af = new THREE.Vector3();
   const globeNearAnchor = (x, z, reach, st) => {
     if (!floraGrid || !flora || !(reach > 0)) return null;
@@ -1238,7 +1238,7 @@ function enterGround() {
     onDeselect: () => { markedKind = null; markedPlant = null; markedSource = false; },
   });
   // The plant lore of this patch. It arrives with the patch, because it reads the biome of the
-  // site, and it goes away with the patch. See describePatchFlora() in worker.js.
+  // site, and it goes away with the patch. See describePatchFlora() in generate.js.
   groundPlants = (patchState.result && patchState.result.patch.plants) || [];
   groundVariant = (patchState.result && patchState.result.patch.floraVariant) || 0;
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
@@ -1528,7 +1528,7 @@ let busy = false;
 let genJob = null, patchJob = null;
 function getWorker() {
   if (worker) return worker;
-  worker = new Worker('./worker.js');
+  worker = new Worker('./worker.js', { type: 'module' });
   worker.onmessage = (e) => {
     const msg = e.data;
     if (msg.type === 'done') { if (genJob) genJob.done(msg.result); return; }
@@ -1795,7 +1795,7 @@ export function onSourceFound() {
 //   in orbit                     0 before the find, CARRIER_ORBIT after it
 //
 // The reach is the walk limit of the ground, which is the same reach the worker placed the wreck
-// inside. See patchSource() in worker.js and reachOf() in ground.js.
+// inside. See patchSource() in generate.js and reachOf() in ground.js.
 const CARRIER_NEAR = 40;      // units from the wreck where the motif stands full
 const CARRIER_EDGE = 0.15;    // the level at the edge of the reach
 const CARRIER_ORBIT = 0.6;    // the level in orbit after the find

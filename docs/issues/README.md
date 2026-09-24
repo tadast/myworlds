@@ -16,12 +16,13 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 
 | File | Role |
 |---|---|
-| `worker.js` | Web Worker. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map. Loads `species.js` with `importScripts`. Protocol: `postMessage({type:'generate', seed, opts})`, replies `progress` then `done` or `error`. |
+| `generate.js` | Generation. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map, the source, and the patch. Two exported calls: `world(seed, opts, onProgress)` and `patch(seed, site, opts, onProgress)`. Each returns its result. No three.js and no DOM. Imports the lore files. |
+| `worker.js` | The module worker, a small adapter over `generate.js`. Protocol: `postMessage({type:'generate', seed, opts})` or `{type:'patch', seed, lat, lon, opts}`, replies `progress` then `done`, `patch-done`, or `error`. It transfers every buffer of a result. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `tiers.js` | The two device tiers, HIGH and LOW, and `RIM`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |
-| `species.js` | Classic script. Rolls two to four genomes per world with lore. No three.js. |
-| `flora-lore.js` | Classic script. The plant vocabulary. Writes the lore of every plant kind of a patch. No three.js. See `docs/flora.md`. |
-| `source-lore.js` | Classic script. The vocabulary of the wreck. Writes the crew, the threads, and the 8 to 20 entries of `world.source.log`. Every world thread carries a salience and every fauna thread a way of moving. No three.js. See `docs/source.md`. |
+| `species.js` | ES module. Rolls two to four genomes per world with lore. No three.js. |
+| `flora-lore.js` | ES module. The plant vocabulary. Writes the lore of every plant kind of a patch. No three.js. See `docs/flora.md`. |
+| `source-lore.js` | ES module. The vocabulary of the wreck. Writes the crew, the threads, and the 8 to 20 entries of `world.source.log`. Every world thread carries a salience and every fauna thread a way of moving. No three.js. See `docs/source.md`. |
 | `fauna.js` | Creature geometry from a genome, rig shader, `makeMover`/`stepMover` steering, the inspector card. |
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
@@ -36,7 +37,7 @@ Conventions:
 
 - Write prose, comments, commit messages, and docs in ASD-STE100 Simplified Technical English. Short sentences, active voice, one term per meaning.
 - Branch names start with `tt/`. Commit inside this repository only.
-- Keep the worker free of three.js. Keep `species.js` free of three.js.
+- Keep `generate.js`, `worker.js`, `tiers.js`, and the four lore files free of three.js and of the DOM. A module worker has no import map, so a bare `three` import fails there, and the Node tools import these files with no browser.
 - Flat-shaded vertex colours everywhere. No textures except baked impostor cards.
 - Every issue updates `README.md` "How it works" and the relevant file in `docs/` when it changes behaviour a reader would notice.
 - Every issue verifies the frame rate. See "Verification" below.
@@ -84,7 +85,7 @@ Independent agents must agree on these. Do not change them inside an issue. If a
   its step of longitude changed at every band, so no two bands lined up.
 - `siteCell(site)` gives that quad as `{face, i, j, n}`. `cellDir(cell, u, v)` gives the unit
   direction at `(u, v)` inside it; `u` and `v` run 0 to 1 and may run past the cell, which is what
-  the rim needs. `app.js` passes the quad as `opts.cell` on the patch message, and `worker.js`
+  the rim needs. `app.js` passes the quad as `opts.cell` on the patch message, and `generate.js`
   holds the same map, because a Web Worker cannot import a module. Keep the two in step.
 - `snapSite(site)` puts a site on the cell grid: it takes the middle of the quad the site falls in.
   It is idempotent and it keeps `kind`. The middle stands half a cell from every edge, so two
@@ -94,7 +95,7 @@ Independent agents must agree on these. Do not change them inside an issue. If a
   the relief field; those come from the nominal cell, so two neighbours stay in phase.
 - The box runs x along the u axis of the cell and z against the v axis, so (x, up, z) is a
   right-handed set and the terrain is the true image of the cell, not its mirror. East is the east
-  of `groundBasis()`: the direction of falling lon. `boxTanX()` and `boxTanZ()` in `worker.js` hold
+  of `groundBasis()`: the direction of falling lon. `boxTanX()` and `boxTanZ()` in `generate.js` hold
   the map. Run `node tools/frame-check.mjs` after a change to the map, to `cellTwist()`, or to
   `groundBasis()`; it fails on a mirror.
 - `cellTwist(site)` gives the turn from the frame of the site, x east and z south, to the axes of
@@ -221,12 +222,12 @@ Terrain colours use the globe rules for beach, snow line, and forest mask, evalu
 
 Issue 34. One thing on a world with a surface transmits, and the probe reads a bearing to it.
 
-- The world: `world.source = { kind, dir: [x, y, z], log } | null`. `kind` is `'wreck'` now; later kinds take the same search. `dir` is a unit direction in the planet's local frame, snapped to the middle of its cell of the cube grid. A gas giant and a world where no vertex passed the tests both give null. `makeSource()` in `worker.js` rolls it from `makeRng(seed + '|source')`, and no other stream draws one number more; `tools/world-checksum.mjs` holds the proof.
+- The world: `world.source = { kind, dir: [x, y, z], log } | null`. `kind` is `'wreck'` now; later kinds take the same search. `dir` is a unit direction in the planet's local frame, snapped to the middle of its cell of the cube grid. A gas giant and a world where no vertex passed the tests both give null. `makeSource()` in `generate.js` rolls it from `makeRng(seed + '|source')`, and no other stream draws one number more; `tools/world-checksum.mjs` holds the proof.
 - The log: `world.source.log = { probe, days, species, entries: [{ slot, title, day, text }, ...] }`. The four slots are `arrival`, `survey`, `trouble`, and `last`, in that order. `probe` is the name of the old probe, `days` is the day of the last entry, and `species` is the animal the survey names, or null. `source-lore.js` writes it in `generate()` from `makeRng(seed + '|source-lore')`. The page must not show the log before the reader finds the wreck. See `docs/source.md`.
 - `site.js` gives `sourceSite(world)`, `sourceHere(world, site)`, `bearingTo(site, dir)`, `arcTo(site, dir)`, `carrierAt(world, site)`, `carrierDir(world, site, carrier)`, `carrierBox(world, site, carrier)`, and `boxPoint(site, dir, size)`. `carrierAt` returns `{ brg, err, arc, rangeKm }`: the bearing in degrees from north with east positive, its error in degrees, the arc in radians, and the kilometres to the source inside `CARRIER_RANGE` cells of arc, else null.
 - **The carrier has a reach.** `CARRIER_REACH` in `site.js` is `2 * PI / 3`, a third of the circumference, and `carrierAt()` gives **null** for an arc past it. The landing then shows no carrier block, stores no fix, and draws no wedge, and a silent landing states a fact of its own. Every caller already tests for null. `freshFixes()` in `app.js` drops a stored fix the carrier no longer reaches, so a store from an older build needs no migration.
 - The bearing is 2 degrees wrong at the source and 10 degrees wrong at the edge of the reach, straight in the arc. `CARRIER_ERR` in `site.js` holds the pair. The offset inside that band comes from a hash of the seed and the cell, so one cell always gives one fix and the true bearing always lies inside the wedge. `carrierAt()` is a pure function of the seed and the cell, so a stored fix takes its bearing and its error again on every load; see **The store**.
-- **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `worker.js` lays the box on the axes of the cell of the cube grid, x along u and z against v, which is a right-handed set as the frame of `groundBasis()` is. The box was the mirror of that frame until 2026-09-19; see "The box is right-handed" in `docs/probe.md`. The map of the box still holds no angle, so the needle comes from the slope of that map and not from the bearing less a twist.
+- **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `generate.js` lays the box on the axes of the cell of the cube grid, x along u and z against v, which is a right-handed set as the frame of `groundBasis()` is. The box was the mirror of that frame until 2026-09-19; see "The box is right-handed" in `docs/probe.md`. The map of the box still holds no angle, so the needle comes from the slope of that map and not from the bearing less a twist.
 - `boxPoint(site, dir, size)` is the exact inverse of the map `patch()` builds the box with. It gives `{ x, z }` in units of the box, or null for a direction more than 80 degrees from the face of the cell. Slice 3 takes the range in units from it. `carrierBox()` gives the needle as a unit `{ x, z }` in the same frame, from the slope of that map at the site, so it holds at every arc.
 - `Ground.load(result, { sunDir, view, carrier })`. The app builds `carrier` from `carrierAt()` and adds `carrier.dir`, the `[x, z]` of `carrierBox()` **in the frame of the box**. `telemetry()` then returns `carrier: { brg, err, arc, rel, rangeKm, range } | null`. `rel` runs -180 to 180 degrees from the way the view points to the way the needle points, and a positive `rel` puts the needle to the right of the screen. Do not build `rel` from the digits less an azimuth: the box turns the sense of a bearing over. `range` is the units to the wreck on this patch, or null off its cell.
 - On the cell of the source the needle and `range` stop reading the globe and read the wreck itself: `patch.source` gives its place in the units of the box, and both numbers are measured from the **camera position**, the point the height of the overlay is measured from. So the needle turns and the range falls as the reader walks. Off that cell nothing changes. Issue 34, slice 3.
@@ -288,9 +289,9 @@ There is no test runner. Each issue verifies by hand in the served site and stat
 
 Three traps that make a good build look broken, or a bad one look good:
 
-- **The worker caches `species.js`.** After a merge or an edit, a plain reload can still run the old code, because the worker keeps its `importScripts` copy. Force fresh sources first, then reload:
+- **The worker caches its modules.** After a merge or an edit, a plain reload can still run the old code, because the worker and its imports come from the HTTP cache. A stale `worker.js` from before the module worker fails with "Module scripts don't support importScripts()". Force fresh sources first, then reload:
   ```js
-  for (const f of ["species.js","app.js","worker.js","fauna.js"]) await fetch("/"+f,{cache:"reload"}); location.reload();
+  for (const f of ["worker.js","generate.js","lore.js","species.js","flora-lore.js","source-lore.js","app.js","fauna.js"]) await fetch("/"+f,{cache:"reload"}); location.reload();
   ```
 - **A hidden tab stops `requestAnimationFrame`.** The frame-time snippet returns nothing, or a wrong number, when the tab is not in front. Confirm `document.visibilityState === "visible"` in the same run. On macOS, bring the tab to the front with:
   ```sh

@@ -1,5 +1,5 @@
 // myworlds — the plant vocabulary. It turns a plant kind, a world, and a biome into text.
-// The worker loads it with importScripts(), after lore.js. It exposes self.FloraLore.
+// It is an ES module that exports FloraLore. generate.js imports it.
 //
 // lore.js holds the engine and no words. species.js brings the fauna vocabulary. This file brings
 // the flora vocabulary, and the two never read each other.
@@ -16,15 +16,14 @@
 //   the biome   wetground, dryground, coldground, bare, …     from BIOME below
 // Every line of text names the tags it needs, so a line about frost never reaches a hot world and
 // a line about a cap never reaches a crystal.
-'use strict';
+import { Lore } from './lore.js';
 
-(function () {
-  const L = self.Lore;
+  const L = Lore;
   const pool = L.pool;
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const round1 = (x) => Math.round(x * 10) / 10;
 
-  // The kind codes. They must match FLORA in flora-geometry.js and in worker.js.
+  // The kind codes. They must match FLORA in flora-geometry.js and in generate.js.
   const K = {
     TREE: 0, PINE: 1, CACTUS: 2, CRYSTAL: 3, MUSHROOM: 4, BOULDER: 5, PALM: 6,
     TOWER: 7, SPINDLE: 8, PUFF: 9, SHARD: 10, GRASS: 11, COLOSSUS: 12, FAN: 13, POD: 14, STACK: 15,
@@ -139,7 +138,7 @@
   }
 
   // ---------------------------------------------------------------- the ground under the plant
-  // One row per biome of the patch. The names match BIOME_NAME in worker.js.
+  // One row per biome of the patch. The names match BIOME_NAME in generate.js.
   //   ground   the word a line uses for the surface
   //   tags     what the ground is, for the gates
   //   place    the place words a name may take
@@ -794,7 +793,7 @@
   //
   //   world    the world object, for the designation and for the species list
   //   env      the tag set of the planet, from Lore.makeEnv()
-  //   biome    the biome name at the site, from BIOME_NAME in worker.js
+  //   biome    the biome name at the site, from BIOME_NAME in generate.js
   //   kinds    [{ kind, count, median, tallest }], counted off the plants the patch really placed
   //   rng      a stream of its own, so the text never moves a body
   //
@@ -848,9 +847,8 @@
     return list.map((p) => ({ kind: p.kind, count: p.count, lore: p.lore }));
   }
 
-  self.FloraLore = {
+  export const FloraLore = {
     describePatch, kindTags, plural, BIOME, KIND, FLORA: K,
     RELATIONS, RELATION_CONTRACT, FAUNA_LINKS,
     POOLS: { FORM, FEATURE, PLAIN_FEATURE, HABIT, CLIMATE, SKY, CLOSE, FOOD, SPREAD, STAND_ONE, STAND_FEW, STAND_MANY, WORLD_ADJ, WORLD_EPITHET },
   };
-})();
