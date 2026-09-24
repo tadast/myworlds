@@ -18,6 +18,24 @@ Open <http://localhost:5555/>. Add `#YourName` to the URL to open a specific wor
 
 Push the repository and enable Pages for the branch root. `.nojekyll` keeps Jekyll away from `vendor/`.
 
+## Checks
+
+The checks run in Node, with no browser and no install. Run them after a change to generation, to the cell grid, or to the landing:
+
+```sh
+node tools/world-checksum.mjs --check
+node tools/cell-grid-check.mjs
+node tools/frame-check.mjs
+node tools/carrier-check.mjs
+node tools/carrier-fix-check.mjs
+node tools/lore-audit/audit.mjs
+```
+
+- `world-checksum` drives `worker.js` itself, on both device tiers of `tiers.js`, and hashes every world and every patch against `tools/world-checksum.baseline.txt`. A change that must leave the worlds alone must match it. Record a new baseline only for a change that must move the worlds, and state in the commit which hashes move and why.
+- `cell-grid-check` tests the interface of `cell-grid.js`: the round trip of a cell, the shared edges, the arc of a cell, the box and its inverse, the hand of the box, and the frame of a site.
+- `frame-check` and `carrier-check` test the box against the frame of the sky, the needle, and the bearing. `carrier-fix-check` tests the store and the wedges of the search.
+- `lore-audit/audit.mjs` sweeps every lore permutation. See "Fauna" and "Flora" below.
+
 ## Icons and the share image
 
 `icon.svg` draws the planet mark. `favicon.ico` (16, 32, 48) and `assets/apple-touch-icon.png` (180) come from it:
