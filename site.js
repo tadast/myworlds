@@ -3,6 +3,7 @@
 // A site is a lat and a lon in degrees in the planet's local frame, the frame of the worker's
 // arrays before planet.rotation.y turns them. Lat is asin(y). Lon is atan2(z, x). Two decimals.
 import * as THREE from 'three';
+import { RIM } from './tiers.js';
 
 export const PATCH_SIZE = 1500;      // units, the side of the ground box a patch draws into
 export const PULL_REACH = 0.5;       // parts of a cell: how far the pull to life looks
@@ -301,9 +302,10 @@ export function activityDir(world) {
   return act.dir;
 }
 
-// The cell that holds that phenomenon, or null. app.js compares the landing cell against this
-// cell: the patch shows the phenomenon when the two are the same, so a landing that reaches the
-// cell without the pull shows it too, and one phenomenon can never stand in two patches. Issue 14.
+// The cell that holds that phenomenon, or null. activityHere() compares the landing cell against
+// this cell: the patch shows the phenomenon when the two are the same, so a landing that reaches
+// the cell without the pull shows it too, and one phenomenon can never stand in two patches.
+// Issue 14.
 export function activitySite(world) {
   const dir = activityDir(world);
   return dir ? snapSite(dirToSite({ x: dir[0], y: dir[1], z: dir[2] })) : null;
@@ -384,13 +386,46 @@ export function sourceSite(world) {
 }
 
 // True when the landing cell is the cell of the source. The rule is the cell and not the pull, as
-// activityHere() has it in app.js, so one source can never stand in two patches. Slice 3 of issue
-// 34 puts the wreck on the patch by this test.
+// activityHere() has it, so one source can never stand in two patches. Slice 3 of issue 34 puts
+// the wreck on the patch by this test.
 export function sourceHere(world, site) {
   const at = sourceSite(world);
   if (!at || !site) return false;
   const here = snapSite(site);
   return here.lat === at.lat && here.lon === at.lon;
+}
+
+// ---------------------------------------------------------------- the patch message
+// The phenomenon a landing at the site brings, or null. The rule is the cell and not the pull: a
+// landing that reaches the cell of the phenomenon without the pull shows it too, and one
+// phenomenon can never stand in two patches. The worker builds the patch as before when this gives
+// null. Issue 14.
+function activityHere(world, site) {
+  const cell = activitySite(world);
+  if (!cell) return null;
+  const here = snapSite(site);
+  return here.lat === cell.lat && here.lon === cell.lon ? { kind: world.activity.kind } : null;
+}
+
+// The source a landing at the site brings, or null, by the rule activityHere() holds. Issue 34,
+// slice 3.
+function sourceThere(world, site) {
+  const src = world.source;
+  return src && sourceHere(world, site) ? { kind: src.kind } : null;
+}
+
+// The options of a patch message: the ground row of a device tier, and the facts of the world at
+// the site. app.js sends them, and the Node tools build the same ones, so a check measures the
+// patch a reader gets. `ground` is `TIERS.X.ground` of tiers.js.
+export function patchOpts(world, site, ground) {
+  return {
+    grid: ground.grid, size: ground.size, span: cellSpan(world, site), rim: RIM,
+    // the quad of the cube grid the box lands on. See "the cell grid" above.
+    cell: siteCell(site),
+    maxFlora: ground.maxFlora, maxFauna: ground.maxFauna, pulledKind: site.kind ?? -1,
+    activity: activityHere(world, site),
+    source: sourceThere(world, site),
+  };
 }
 
 // The arc from a site to a direction, in radians on the globe of radius 1.

@@ -79,7 +79,7 @@ reads is settled.
 
 The log rolls from `makeRng(seed + '|source-lore')` and from no other stream. No existing stream
 draws one number more, so no world built before this slice changes. `tools/world-checksum.mjs`
-proves it: the hashes of `heightMap`, `flora`, and `fauna` must stay equal to the baseline file.
+proves it: the hashes of the worlds and the patches must stay equal to the baseline file.
 
 The place of the source, `world.source.dir`, comes from `makeRng(seed + '|source')`, which is a
 different stream. The motif of the source takes a third one in `music.js`. The three never mix.
@@ -584,8 +584,7 @@ rules read.
 
 ## A tool that loads the worker by hand
 
-`tools/world-checksum.mjs` evaluates `worker.js` in Node without `source-lore.js`. `generate()`
-therefore tests `self.SourceLore` before it writes the log, and that tool gets a source with no
-log. This is on purpose: the tool measures the terrain, the flora, and the fauna, and nothing in
-the worker reads the log back. A tool that needs the log must require `source-lore.js`, as
-`tools/lore-audit/audit.mjs` does.
+`generate()` tests `self.SourceLore` before it writes the log, so a tool that evaluates `worker.js`
+in Node without `source-lore.js` gets a source with no log. `tools/world-checksum.mjs` loads all
+four lore files, so its hash of the world covers the log. A tool that needs the log must require
+`source-lore.js`, as `tools/lore-audit/audit.mjs` does.

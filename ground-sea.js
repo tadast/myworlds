@@ -23,7 +23,7 @@ export const MID_STEP = 8;
 // The sea must fill the fog from anywhere the camera stands. At the ceiling of issue 20 the
 // camera sits at most CEILING * tan(1.16), about 1,150 units, from its target,
 // and it sees the ground about 1,227 units out. So 2,400 units are enough. REACH keeps the wider
-// value of the ceiling of 1,200 m, which also holds it inside the rim. See RIM in ground.js.
+// value of the ceiling of 1,200 m, which also holds it inside the rim. See RIM in tiers.js.
 export const REACH = 2700;      // units, the far edge of the sea from the camera target
 export const FAR_STEP = 108;    // metres, the cell of the flat water past MID
 export const BLOCKS = 6;        // the wave zone splits into 6 by 6 meshes, to cull and to mask them

@@ -15,6 +15,7 @@ import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
 import { SourceWreck } from './ground-source.js';
 import { perf } from './perf.js';
+import { TIERS } from './tiers.js';
 
 // metres, the side of the ground box. The tier picks the real one and sends it with the patch
 // request, so this is only the fallback for the moments before a patch arrives. See Q.ground in
@@ -118,21 +119,9 @@ const LOD_MIN = 40;         // metres, the floor of the knob
 const LOD_MAX = 400;
 
 export const CAM_START = 450;        // metres, the height the camera starts at over the site
-// The rim: the ground outside the patch. It must reach past the fog, or its outer edge shows.
-// At the ceiling the camera stands at most the reach + CEILING * tan(1.16),
-// and the fog is solid at FOG_FAR + FOG_LIFT * CEILING. A ray from the ceiling meets the ground
-// sqrt(fog^2 - CEILING^2) further out, and the sum is the reach the ground needs:
-//
-//     1400 + 500 * tan(1.16)          = 1400 + 1148 = 2548 units, the stand-off of the camera
-//     750 + 1.15 * 500                = 1325 units, where the fog is solid
-//     sqrt(1325^2 - 500^2)            = 1227 units, where that fog meets the ground
-//     2548 + 1227                     = 3775 units, what the rim must cover
-//
-// Issue 25 took the reach of the wide tier to 1,400, which took the sum from 3,025 to 3,775 and
-// left the old RIM of 3,150 short. RIM is now 4,000, which keeps 225 units of margin and lands on
-// a whole rim cell: at size 3000 and grid 2 the rim step is 50, and (4000 - 1500) / 50 is exactly
-// 50 cells. The narrow tier asks for less and the same number covers it. See _rimGeometry().
-export const RIM = 4000;             // units, how far the rim reaches from the site
+// The rim: the ground outside the patch. It must reach past the fog, or its outer edge shows. RIM
+// in tiers.js holds the reach, and the sum behind it reads CAM_START, CEILING, FOG_FAR, and
+// FOG_LIFT of this file. Keep the sum there true when one of them changes.
 
 // ---------------------------------------------------------------- the rectangle, issue 20
 // The patch holds a 2 m grid with knolls and rock. The rim outside it holds a 50 m grid with
@@ -215,8 +204,8 @@ const PICK_GRACE = 2;
 const WRECK_GRACE = 20;
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
-// the ground fades out before the rim ends and the reader never sees a cut edge. See RIM. The
-// ceiling of issue 20 keeps the fog under 1,325 m, so FOG_MAX no longer binds.
+// the ground fades out before the rim ends and the reader never sees a cut edge. See RIM in
+// tiers.js. The ceiling of issue 20 keeps the fog under 1,325 m, so FOG_MAX no longer binds.
 // The floor of the camera follows the ground, and the ground of issue 26 carries ridges. A floor
 // that answers every one of them to the millimetre shivers under a moving camera. See update().
 const FLOOR_EASE = 1;       // metres: a lift under this one is spread over time
@@ -301,7 +290,7 @@ export class Ground {
     this.canvas = canvas;
     this.world = world;
     this.site = site;
-    this.tier = tier || { grid: 2, maxFlora: 20000, maxFauna: 300, shadows: true, lodMax: LOD_MAX };
+    this.tier = tier || TIERS.HIGH.ground;
     this.result = null;
     this.carrier = null;    // the reading of issue 34, from the app. See load().
     this.sky = null;

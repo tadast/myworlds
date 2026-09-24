@@ -5,12 +5,13 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellSpan, siteCell, cellTwist, activitySite, carrierAt, carrierBox, sourceHere, sourceSite } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, patchOpts, carrierAt, carrierBox, sourceSite } from './site.js';
 import { loadFixes, addFix, markFound, markBriefed, clearFixes, foundSeeds } from './carrier-store.js';
 import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, showMarker } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
-import { Ground, RIM } from './ground.js';
+import { Ground } from './ground.js';
+import { TIERS, worldOpts } from './tiers.js';
 import { skyView } from './ground-sky.js';
 import { ProbeHud } from './probe-hud.js';
 import { perf, Hud } from './perf.js';
@@ -21,53 +22,11 @@ const isCoarse = matchMedia('(pointer: coarse)').matches;
 const isSmall = Math.min(innerWidth, innerHeight) < 600;
 const LOW = isCoarse || isSmall || (navigator.hardwareConcurrency || 4) <= 4;
 const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet stays visible
-// One object holds the whole device tier. `Q` is the globe, and `Q.ground` is the probe. Every
-// part that must know the tier reads it from here: the worker request, the Ground constructor,
-// and through the Ground the flora, the fauna, the sky, and the LOD knob.
-//
-// The LOW row of the budget table: a 4 m grid, 8,400 plants, 100 animals, and no shadows. It
-// also caps the LOD knob at 250 m, because a weak machine cannot spend the room a fast one
-// finds, and a knob that walks to 400 m only walks back down again.
-//
-// Issue 25 raised the flora caps, because the patch now grows plants over a wider dense square:
-// FLORA_EDGE in worker.js fell from 300 to 100. On LOW, where the box stays 1,500, the densest
-// cell measured went from 18,100 plants to 23,004, so 8,400 carries the same head room as 6,000
-// did. The LOD walk of ground-flora.js reads about 6 to 11 ns per plant, so even 120,000 plants
-// cost under 0.7 ms of a 16.7 ms frame; the walk was never the thing to fear.
-//
-// `size` is the side of the ground box, and the two tiers hold different ones. HIGH draws 3,000
-// units, which gives the reader a walk of 1,400 units from the site in every direction. LOW keeps
-// 1,500. The box costs area: the terrain build is O(area) and the plants are O(area), so 3,000 on
-// a phone would be four times the work and four times the plants for a reader who is holding the
-// thing in one hand. LOW keeps the patch of issue 20 with the wider walk of this issue, which is
-// already 2.1 times the ground it had.
-//
-// `lodMax` stays at 400. Issue 25 took it to 220 for a while, because a wider box puts the reader
-// inside the forest instead of near the edge of it and the LOD sphere then fills with plants the
-// old box could not hold. That was tuned on one world and it was wrong as a rule. What binds is the
-// number of plants the walk sends to the near mesh, and that is a property of the world, not of the
-// distance. Measured walking at eye level, interleaved so the load of the machine cannot colour the
-// order:
-//
-//     Quasar-579@48.13,60.09   lod 220: 741 near, 0 of 200 frames over 20 ms
-//                              lod 400: 2,377 near, 0 of 200 over 20 ms   <- free, and much better
-//     Aurora@18.91,129.00      lod 220: 2,259 near, 0 of 200 over 20 ms
-//                              lod 400: 5,926 near, 21 and 48 of 200 over 20 ms
-//
-// So about 2,300 plants as meshes is free and about 5,900 is not, on the same machine and the same
-// frame. A ceiling of 220 pays that worst case on every world, and on Quasar it drew 252k triangles
-// where 400 drew 2,011k for the same 60 fps. The knob is the right place to answer this, and issue
-// 26 gave it the memory it needed to settle instead of ring. See _driveLod() in ground.js.
-const Q = {
-  detail: LOW ? 64 : 100,
-  maxFlora: LOW ? 2500 : 10500,
-  maxFauna: LOW ? 70 : 160,
-  shadows: !LOW,
-  dpr: Math.min(devicePixelRatio || 1, LOW ? 1.5 : 2),
-  ground: LOW
-    ? { grid: 4, size: 1500, maxFlora: 8400, maxFauna: 100, shadows: false, lodMax: 250 }
-    : { grid: 2, size: 3000, maxFlora: 120000, maxFauna: 300, shadows: true, lodMax: 400 },
-};
+// One object holds the whole device tier: the row of tiers.js this device takes, and the pixel ratio
+// of the display under the cap of that row. `Q` is the globe, and `Q.ground` is the probe. See
+// tiers.js for the numbers and the reasons behind them.
+const Q = { ...(LOW ? TIERS.LOW : TIERS.HIGH) };
+Q.dpr = Math.min(devicePixelRatio || 1, Q.dprMax);
 const STORE_KEY = 'myworlds.v1';
 const MAX_SAVED = 60;
 const CAM_MIN = 1.11, CAM_MAX = 8, CAM_HOME = 3.3;
@@ -1186,33 +1145,8 @@ function requestPatch(target) {
   };
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
-    opts: {
-      grid: Q.ground.grid, size: Q.ground.size, span: cellSpan(current.world, target), rim: RIM,
-      // the quad of the cube grid the box lands on. See "the cell grid" in site.js.
-      cell: siteCell(target),
-      maxFlora: Q.ground.maxFlora, maxFauna: Q.ground.maxFauna, pulledKind: target.kind ?? -1,
-      activity: activityHere(target),
-      source: sourceThere(target),
-    },
+    opts: patchOpts(current.world, target, Q.ground),
   });
-}
-
-// The source this landing brings, or null. The rule is the one activityHere() holds: the cell and
-// not the pull, so one source can never stand in two patches and a landing that reaches the cell
-// without a pull shows it too. sourceHere() in site.js owns the test. Issue 34, slice 3.
-function sourceThere(target) {
-  const src = current.world.source;
-  return src && sourceHere(current.world, target) ? { kind: src.kind } : null;
-}
-
-// The phenomenon this landing brings, or null. The rule is the cell and not the pull: a landing
-// that reaches the cell of the phenomenon without the pull shows it too, and one phenomenon can
-// never stand in two patches. The worker builds the patch as before when this gives null. Issue 14.
-function activityHere(target) {
-  const cell = activitySite(current.world);
-  if (!cell) return null;
-  const here = snapSite(target);
-  return here.lat === cell.lat && here.lon === cell.lon ? { kind: current.world.activity.kind } : null;
 }
 
 // The point over the site in world space, at the ground radius plus an extra height.
@@ -1670,7 +1604,7 @@ function generate(seed, { save = true } = {}) {
     overlayLabel.textContent = 'Worker failed to load. Serve over http, not file://.';
     setTimeout(() => { overlay.classList.remove('show'); busy = false; }, 2500);
   };
-  w.postMessage({ type: 'generate', seed, opts: { detail: Q.detail, maxFlora: Q.maxFlora, maxFauna: Q.maxFauna } });
+  w.postMessage({ type: 'generate', seed, opts: worldOpts(Q) });
 }
 
 function resetCamera() {

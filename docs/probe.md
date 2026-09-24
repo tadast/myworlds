@@ -386,7 +386,7 @@ Added with issue 11, the adaptive LOD. The numbers come from a timer query of th
 
 Added with issue 13. The numbers come from the same timer query of the graphics card around one `Ground.render`, on an Apple M2 with a 60 Hz display, at least 40 samples per run.
 
-**One object holds the tier.** `Q.ground` in `app.js` carries the grid step, the plant cap, the animal cap, the shadow flag, and the LOD ceiling. The worker request, the `Ground` constructor, the flora, the fauna, the sky, and the knob all read that one object, so a change to the budget table is a change to one line.
+**One file holds the tier.** `tiers.js` holds a HIGH row and a LOW row, and `app.js` picks one into `Q`. `Q.ground` carries the grid step, the plant cap, the animal cap, the shadow flag, and the LOD ceiling. The worker request, the `Ground` constructor, the flora, the fauna, the sky, the knob, and the Node tools all read those rows, so a change to the budget table is a change to one line.
 
 **The knob takes a lower ceiling on LOW.** The ceiling is 400 m on HIGH and 250 m on LOW. A weak machine cannot hold the frame at 400 m, so a knob that walks out to 400 m only walks back down again, and the reader sees the plants swap twice for nothing. The `localStorage` key of issue 11 now carries the ceiling as well, so a value that settled at 400 m on HIGH cannot come back into a LOW session; the constructor also clamps whatever it reads, which repairs an entry that a build before this issue wrote.
 

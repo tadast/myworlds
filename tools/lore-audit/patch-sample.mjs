@@ -1,17 +1,32 @@
 // Prints the flora lore of a few real patches, without a browser.
 //
-//   node tools/lore-audit/patch-sample.mjs Auralis 12.5 -73.25
+//   node tools/lore-audit/patch-sample.mjs Auralis                the cell of the source
+//   node tools/lore-audit/patch-sample.mjs Auralis 12.5 -73.25    the cell of a site
 //   node tools/lore-audit/patch-sample.mjs --seeds 6
 //
 // It runs worker.js in this process: generate() for the world, then patch() for one site, and it
 // prints every plant the patch grew. Use it to read whole stories after a change to flora-lore.js.
-import { createRequire } from 'module';
+// The world and the patch take the LOW row of tiers.js, and the site snaps to its cell, so the
+// patch is one a reader on a phone could land on.
+import { createRequire, register } from 'module';
 import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import path from 'path';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const rootUrl = pathToFileURL(root + '/').href;
+// site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
+// the browser. Node has no import map, so a resolve hook points the same name at vendor/.
+register('data:text/javascript,' + encodeURIComponent(`
+export async function resolve(spec, ctx, next) {
+  if (spec === 'three') return { url: ${JSON.stringify(rootUrl + 'vendor/three.module.js')}, shortCircuit: true };
+  return next(spec, ctx);
+}`));
+const { TIERS, worldOpts } = await import(rootUrl + 'tiers.js');
+const { patchOpts, snapSite, sourceSite } = await import(rootUrl + 'site.js');
+const TIER = TIERS.LOW;
+
 globalThis.self = globalThis;
 require(path.join(root, 'lore.js'));
 require(path.join(root, 'species.js'));
@@ -28,7 +43,8 @@ if (seedsFlag >= 0) {
   const n = Number(argv[seedsFlag + 1] || 5);
   for (let i = 0; i < n; i++) runs.push([`sample-${i}`, (i * 37) % 70 - 35, (i * 53) % 300 - 150]);
 } else {
-  runs.push([argv[0] || 'Auralis', Number(argv[1] ?? 12.5), Number(argv[2] ?? -73.25)]);
+  // With no site, the patch lands on the cell of the source, which always stands on dry land.
+  runs.push([argv[0] || 'Auralis', argv[1] === undefined ? null : Number(argv[1]), argv[2] === undefined ? null : Number(argv[2])]);
 }
 
 let bad = 0;
@@ -38,11 +54,12 @@ for (const [seed, lat, lon] of runs) {
     if (m.type === 'done') world = m.result.world;
     if (m.type === 'patch-done') patch = m.result.patch;
   };
-  globalThis.__generate(seed, { detail: 24, maxFlora: 400, maxFauna: 40 });
+  globalThis.__generate(seed, worldOpts(TIER));
   if (!world || world.type === 'gas') { console.log(`--- ${seed}: gas giant, no ground`); continue; }
-  globalThis.__patch(seed, lat, lon, { grid: 4, size: 1500, span: 74000, rim: 3150, maxFlora: 3000, maxFauna: 60, pulledKind: -1 });
+  const site = lat === null ? sourceSite(world) : snapSite({ lat, lon });
+  globalThis.__patch(seed, site.lat, site.lon, patchOpts(world, site, TIER.ground));
   if (!patch) { console.log(`--- ${seed}: no patch`); bad++; continue; }
-  console.log(`\n=== ${seed} @ ${lat},${lon} · ${world.typeLabel} · ${patch.biome} · ${patch.plants.length} plant kinds`);
+  console.log(`\n=== ${seed} @ ${site.lat},${site.lon} · ${world.typeLabel} · ${patch.biome} · ${patch.plants.length} plant kinds`);
   for (const p of patch.plants) {
     const l = p.lore;
     console.log(`\n  ${l.name} (${l.latin})  [kind ${p.kind}, ${p.count} on this ground]`);

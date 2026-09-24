@@ -18,6 +18,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 |---|---|
 | `worker.js` | Web Worker. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map. Loads `species.js` with `importScripts`. Protocol: `postMessage({type:'generate', seed, opts})`, replies `progress` then `done` or `error`. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
+| `tiers.js` | The two device tiers, HIGH and LOW, and `RIM`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |
 | `species.js` | Classic script. Rolls two to four genomes per world with lore. No three.js. |
 | `flora-lore.js` | Classic script. The plant vocabulary. Writes the lore of every plant kind of a patch. No three.js. See `docs/flora.md`. |
 | `source-lore.js` | Classic script. The vocabulary of the wreck. Writes the crew, the threads, and the 8 to 20 entries of `world.source.log`. Every world thread carries a salience and every fauna thread a way of moving. No three.js. See `docs/source.md`. |
@@ -65,7 +66,7 @@ Budgets:
 The grass of issue 21 is not part of the flora cap. It is a lattice that the camera carries; see
 `GrassField` in `ground-flora.js`.
 
-`LOW` is already defined in `app.js` from pointer type, screen size, and core count. Since issue 13 the whole row lives in one object, `Q.ground` in `app.js`, which also holds `lodMax`.
+`LOW` is defined in `app.js` from pointer type, screen size, and core count. The two rows live in `tiers.js`, and `app.js` puts the row it picks in `Q`. `Q.ground` also holds `lodMax`.
 
 ## Shared contracts
 
@@ -143,8 +144,8 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 - A site is a lat and lon in degrees in the planet's local frame, the frame of the worker's `pos` arrays before `planet.rotation.y` is applied. Lat is `asin(y)`. Lon is `atan2(z, x)`. Both in degrees, two decimals. Lat in [-90, 90], lon in [-180, 180].
 - URL format: `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Without `@` the URL means orbit. The seed part is URL-encoded as today; the site part is plain.
 - Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
-- Patch message options: `{ grid, size, span, rim, maxFlora, maxFauna, pulledKind, activity, source }`.
-  `activity` is `{ kind }` when the landing cell holds the phenomenon of the world, else null. `source` is `{ kind }` when the landing cell holds the source of the world, else null; issue 34 added it and the rule is the cell and not the pull, as it is for `activity`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `ground.js` exports the value as `RIM`.
+- Patch message options: `{ grid, size, span, rim, cell, maxFlora, maxFauna, pulledKind, activity, source }`. `patchOpts()` in `site.js` builds them for `app.js` and for the Node tools.
+  `activity` is `{ kind }` when the landing cell holds the phenomenon of the world, else null. `source` is `{ kind }` when the landing cell holds the source of the world, else null; issue 34 added it and the rule is the cell and not the pull, as it is for `activity`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `tiers.js` exports the value as `RIM`.
 
 ### The gestures of the ground
 
