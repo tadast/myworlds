@@ -40,7 +40,7 @@ for (const [seed, lat, lon] of runs) {
   const { world } = generate.world(seed, worldOpts(TIER));
   if (world.type === 'gas') { console.log(`--- ${seed}: gas giant, no ground`); continue; }
   const site = lat === null ? sourceSite(world) : snapSite({ lat, lon });
-  const { patch } = generate.patch(seed, site, patchOpts(world, site, TIER.ground));
+  const { patch } = generate.patch(seed, site, patchOpts(world, site, TIER));
   console.log(`\n=== ${seed} @ ${site.lat},${site.lon} · ${world.typeLabel} · ${patch.biome} · ${patch.plants.length} plant kinds`);
   for (const p of patch.plants) {
     const l = p.lore;

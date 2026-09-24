@@ -62,7 +62,7 @@ function ask(data) {
   return reply.result;
 }
 const world = (seed, tier) => ask({ type: 'generate', seed, opts: worldOpts(tier) });
-const patch = (w, site, tier) => ask({ type: 'patch', seed: w.seed, lat: site.lat, lon: site.lon, opts: patchOpts(w, site, tier.ground) });
+const patch = (w, site, tier) => ask({ type: 'patch', seed: w.seed, lat: site.lat, lon: site.lon, opts: patchOpts(w, site, tier) });
 
 // FNV-1a over the bytes of an array, with an avalanche at the end. One word is enough: a slipped
 // stream moves thousands of floats, not one bit.
@@ -75,6 +75,16 @@ function hashBytes(bytes) {
 }
 const hashArray = (arr) => (arr ? hashBytes(new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength)) : '-');
 const hashJson = (obj) => hashBytes(new TextEncoder().encode(JSON.stringify(obj)));
+
+const patchLine = (seed, name, label, p) => [seed, name, 'patch', label, p.patch.biome.replace(/ /g, '_'),
+  hashArray(p.heights), hashArray(p.colors), hashArray(p.flora), hashArray(p.grass),
+  hashArray(p.groups), hashArray(p.members), hashArray(p.rimHeights), hashArray(p.rimColors),
+  hashJson(p.patch)].join(' ');
+
+// A patch depends only on its arguments. On the LOW tier the source patch of each world is built a
+// second time after the world of another seed, so generate.js holds another world in its cache and
+// must build this one again. The two patches must be equal.
+const COLD_SEED = 'Cold';
 
 function linesFor(seed) {
   const lines = [];
@@ -89,11 +99,13 @@ function linesFor(seed) {
     const sites = [['fixed', snapSite(FIXED_SITE)], ['source', sourceSite(w)], ['activity', activitySite(w)]];
     for (const [label, site] of sites) {
       if (!site) { lines.push(`${seed} ${name} patch ${label} -`); continue; }
-      const p = patch(w, site, tier);
-      lines.push([seed, name, 'patch', label, p.patch.biome.replace(/ /g, '_'),
-        hashArray(p.heights), hashArray(p.colors), hashArray(p.flora), hashArray(p.grass),
-        hashArray(p.groups), hashArray(p.members), hashArray(p.rimHeights), hashArray(p.rimColors),
-        hashJson(p.patch)].join(' '));
+      const line = patchLine(seed, name, label, patch(w, site, tier));
+      lines.push(line);
+      if (name === 'LOW' && label === 'source') {
+        world(COLD_SEED, tier);
+        const cold = patchLine(seed, name, label, patch(w, site, tier));
+        if (cold !== line) throw new Error(`a patch after another world differs:\n  warm ${line}\n  cold ${cold}`);
+      }
     }
   }
   return lines;

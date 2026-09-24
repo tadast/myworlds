@@ -8,9 +8,11 @@
 //   patch(seed, site, opts, onProgress)   the ground of one landing at a site { lat, lon }
 //
 // Each call returns its result and throws on a failure. onProgress(pct, label) reports the build,
-// and a caller may leave it out. Every typed array in a result is new and belongs to the caller,
-// so worker.js can transfer them all. worker.js runs the two calls off the main thread, and the
-// Node tools import this file and call them directly.
+// and a caller may leave it out. A patch takes the options of its world call as opts.world, and it
+// depends only on its arguments: see contextFor(). Every typed array in a result is new and belongs
+// to the caller, so worker.js can transfer them all. The world object of a result is the one a
+// later patch of that world reads, so a caller in the same thread must not change it. worker.js
+// runs the two calls off the main thread, and the Node tools import this file and call them.
 //
 // This file holds no three.js and no DOM, because a module worker has no import map.
 import { Species } from './species.js';           // species genomes and lore
@@ -542,9 +544,18 @@ function climateAt(ctx, y) {
 }
 
 // ---------------------------------------------------------------- the world context
-// The last context the worker built. A patch reuses it, so the ground sits at the sea level of
-// the globe the reader looked at, and no globe work runs twice.
-let cachedCtx = null;
+// The last context generation built, and the key of the world call that built it. A patch of the
+// same world reuses it, so no globe work runs twice. It is only a cache: see contextFor().
+let cachedCtx = null, cachedKey = null;
+
+// The options of a world call, with the defaults for a caller that passes none.
+function worldOptions(opts = {}) {
+  return { detail: opts.detail || 96, maxFlora: opts.maxFlora || 6000, maxFauna: opts.maxFauna || 140 };
+}
+const worldKey = (seed, opts) => {
+  const o = worldOptions(opts);
+  return `${seed}|${o.detail}|${o.maxFlora}|${o.maxFauna}`;
+};
 
 // Everything a world needs before its mesh: the type, the palette, the noise, and the terrain
 // parameters. generate() builds the globe from it. patch() builds a ground patch from it without
@@ -603,8 +614,8 @@ function worldContext(seed) {
     moons: null, moonNames: [], rings: false, activity: null,
   };
 
-  // seaLevel stays at -2 until the globe build, or until patch() samples it. A world with no
-  // ocean keeps -2, because no vertex ever reaches it.
+  // seaLevel stays at -2 until the globe build. A world with no ocean keeps -2, because no vertex
+  // ever reaches it.
   const ctx = { seed, type, rng, noise, P, frng, world, radiusKm: planet.radiusKm, seaLevel: -2 };
   if (type === 'gas') { initLife(ctx); return ctx; }
 
@@ -829,13 +840,16 @@ function worldReliefH(ctx) {
 
 // ---------------------------------------------------------------- generation
 function generate(seed, opts = {}, post = () => {}) {
-  const detail = opts.detail || 96;
-  const maxFlora = opts.maxFlora || 6000;
-  const maxFauna = opts.maxFauna || 140;
+  const { detail, maxFlora, maxFauna } = worldOptions(opts);
+  cachedCtx = null; cachedKey = null;   // a world call that fails leaves no context behind
 
   const ctx = worldContext(seed);
   const { type, rng, noise, P, frng, world } = ctx;
-  if (type === 'gas') { cachedCtx = ctx; return generateGas(world, rng, noise, P, detail, post, frng, maxFauna); }
+  if (type === 'gas') {
+    const result = generateGas(world, rng, noise, P, detail, post, frng, maxFauna);
+    cachedCtx = ctx; cachedKey = worldKey(seed, opts);
+    return result;
+  }
   const { amp, mountain, snowLine, beachW, floraDensity, cloudCount } = ctx;
 
   post(5, 'Shaping the sphere');
@@ -867,7 +881,6 @@ function generate(seed, opts = {}, post = () => {}) {
   }
   ctx.seaLevel = seaLevel;
   world.seaLevel = seaLevel;
-  cachedCtx = ctx;    // a patch for this seed reuses the context and this exact sea level
 
   // Pass 2: elevation, temperature, moisture
   const fld = { h: 0, t: 0, m: 0, fm: 0, r: 0 };
@@ -1007,6 +1020,7 @@ function generate(seed, opts = {}, post = () => {}) {
 
   post(98, 'Almost there');
   const result = { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna, heightMap, floraGrid };
+  cachedCtx = ctx; cachedKey = worldKey(seed, opts);   // a patch of this world reuses the context
   return result;
 }
 
@@ -1456,8 +1470,8 @@ function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW) {
 // One input of the tests does follow the tier, and that is the sea level: generate() takes it as a
 // quantile of the continent field over the vertices. sampledSeaLevel() reads a fixed grid of
 // 60,000 directions instead and gives one number for every tier, so the tests take that one.
-// contextFor() already takes it for the patch path, so the source and the ground the reader walks
-// now read one sea level.
+// The patch takes the sea level of the globe the reader looked at, so near a coast the ground and
+// these tests can read two sea levels a little apart.
 //
 // The activity still reads the vertices, so it may differ between the two tiers. That is older
 // than this issue and it stays. On the rare candidate that stands near the activity, the rule of
@@ -1797,13 +1811,13 @@ function sampledSeaLevel(ctx) {
   return c[Math.min(N - 1, Math.floor((1 - ctx.land) * N))];
 }
 
-function contextFor(seed) {
-  if (cachedCtx && cachedCtx.seed === seed) return cachedCtx;
-  const ctx = worldContext(seed);
-  if (ctx.type !== 'gas' && ctx.land < 1) ctx.seaLevel = sampledSeaLevel(ctx);
-  ctx.world.seaLevel = ctx.seaLevel;
-  cachedCtx = ctx;
-  return ctx;
+// The context of a patch: the one the world call of the same seed and the same world options
+// built. It is a cache. When it holds another world, the world call runs again first, so the sea
+// level and the facts of the world are the ones of the globe the reader looked at, and a patch
+// depends only on the arguments of the call.
+function contextFor(seed, worldOpts) {
+  if (cachedKey !== worldKey(seed, worldOpts)) generate(seed, worldOpts);
+  return cachedCtx;
 }
 
 // ---------------------------------------------------------------- the flora of the patch
@@ -2714,8 +2728,9 @@ function patchSource(ctx, kind, s) {
 // x east, y up, z south, with the origin at the site at sea level.
 function patch(seed, site, opts = {}, post = () => {}) {
   const { lat, lon } = site;
+  if (!opts.world) throw new Error('patch: opts.world is required; pass the options of the world call');
   post(4, 'Reading the site');
-  const ctx = contextFor(seed);
+  const ctx = contextFor(seed, opts.world);
   if (ctx.type === 'gas') throw new Error('a gas giant has no ground');
   const P = ctx.P;
 

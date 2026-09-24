@@ -1145,7 +1145,7 @@ function requestPatch(target) {
   };
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
-    opts: patchOpts(current.world, target, Q.ground),
+    opts: patchOpts(current.world, target, Q),
   });
 }
 

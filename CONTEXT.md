@@ -11,7 +11,7 @@ One of the seven kinds of planet a seed can roll: terran, ocean, desert, ice, la
 _Avoid_: archetype, planet type, planet kind
 
 **Sea level**:
-The terrain value that leaves the land fraction of the world dry. The world call sets it from the globe, and the page passes it to the patch call, so the ground and the globe meet the sea at the same height.
+The terrain value that leaves the land fraction of the world dry. The world call sets it from the vertices of the globe, so it follows the device tier. A patch reads the sea level of the world call with the same options, so the ground and the globe meet the sea at the same height.
 _Avoid_: water line, ocean level
 
 ### The globe and the ground
@@ -45,5 +45,5 @@ _Avoid_: worldgen, the worker (the worker is only the adapter that runs generati
 _Avoid_: generate message
 
 **Patch call**:
-`generate.patch()`: the seed, a site, the sea level, and the options in, one patch out.
+`generate.patch()`: the seed, a site, and the options in, one patch out. The options carry the options of the world call as `world`, and the patch reads the world that call builds.
 _Avoid_: patch message

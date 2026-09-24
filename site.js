@@ -3,7 +3,7 @@
 // A site is a lat and a lon in degrees in the planet's local frame, the frame of the worker's
 // arrays before planet.rotation.y turns them. Lat is asin(y). Lon is atan2(z, x). Two decimals.
 import * as THREE from 'three';
-import { RIM } from './tiers.js';
+import { RIM, worldOpts } from './tiers.js';
 
 export const PATCH_SIZE = 1500;      // units, the side of the ground box a patch draws into
 export const PULL_REACH = 0.5;       // parts of a cell: how far the pull to life looks
@@ -414,11 +414,15 @@ function sourceThere(world, site) {
   return src && sourceHere(world, site) ? { kind: src.kind } : null;
 }
 
-// The options of a patch message: the ground row of a device tier, and the facts of the world at
-// the site. app.js sends them, and the Node tools build the same ones, so a check measures the
-// patch a reader gets. `ground` is `TIERS.X.ground` of tiers.js.
-export function patchOpts(world, site, ground) {
+// The options of a patch message: the row of a device tier, and the facts of the world at the
+// site. app.js sends them, and the Node tools build the same ones, so a check measures the patch a
+// reader gets. `tier` is a row of TIERS in tiers.js.
+export function patchOpts(world, site, tier) {
+  const ground = tier.ground;
   return {
+    // the options of the world call, so the patch reads the world the reader looked at. See
+    // contextFor() in generate.js.
+    world: worldOpts(tier),
     grid: ground.grid, size: ground.size, span: cellSpan(world, site), rim: RIM,
     // the quad of the cube grid the box lands on. See "the cell grid" above.
     cell: siteCell(site),
