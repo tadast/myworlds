@@ -4,82 +4,31 @@
 // arrays before planet.rotation.y turns them. Lat is asin(y). Lon is atan2(z, x). Two decimals.
 import * as THREE from 'three';
 import { RIM, worldOpts } from './tiers.js';
+import * as grid from './cell-grid.js';
 
-export const PATCH_SIZE = 1500;      // units, the side of the ground box a patch draws into
 export const PULL_REACH = 0.5;       // parts of a cell: how far the pull to life looks
 
-// The patch cell. The reader picks a square of the globe and the whole square becomes the
-// ground. CELL is the arc of that square in globe units, so it is the same size on the screen
-// for every planet: about 62 px at the closest zoom, which the reader can see and aim at.
-// A finer square would be false precision. The globe draws its surface from an icosphere at
-// detail 100, which puts about 0.011 units between two vertices, so a square under CELL would
-// sit inside one facet and the coast the reader aims at would not be where the field puts it.
+// The patch cell. The reader picks a cell of the globe and the whole cell becomes the ground.
+// cell-grid.js holds the grid and CELL, the arc of a cell in globe units.
 //
 // The cell is far wider than the box it draws into, so the ground holds an artificial scale.
 // generate.js gives the two numbers back as patch.metresAcross and patch.metresUp. A plant and a
 // creature keep their lore size in units, so they read as normal against the ground and they are
 // no longer the metres the lore text says.
-//
-// CELL is the nominal arc: the cell grid below divides a face of a cube into whole cells, so a
-// true cell stands a little under it.
-export const CELL = 0.01;
+export { CELL, FACE_CELLS, dirCell } from './cell-grid.js';
 
 // ---------------------------------------------------------------- the cell grid, issue 30
-// A cell is a quad of a cube grid and no longer a square of a band of latitude. A band grid
-// changes its step of longitude at every band, so two cells in two bands do not share an edge,
-// and their two patches could never be stitched. A cube grid tiles the whole globe with quads
-// that share their edges exactly, and it holds no pole.
-//
-// Each face carries FACE_CELLS by FACE_CELLS cells. The grid coordinate w runs -1 to 1 across a
-// face, and the gnomonic coordinate of the cube is tan(w * PI / 4). The tangent holds the arc of
-// a cell nearly equal from the middle of a face to its corner; a plain gnomonic grid would leave
-// a corner cell at about half the arc of a middle one. A coordinate past the face is legal and
-// the map stays true there, which is what the rim of a patch needs.
-//
-// generate.js holds the same map. Keep the two in step.
-// Each row is the face normal, then the u axis, then the v axis, and u cross v is the normal.
-const FACES = [
-  [1, 0, 0, 0, 0, -1, 0, 1, 0],
-  [-1, 0, 0, 0, 0, 1, 0, 1, 0],
-  [0, 1, 0, 1, 0, 0, 0, 0, -1],
-  [0, -1, 0, 1, 0, 0, 0, 0, 1],
-  [0, 0, 1, 1, 0, 0, 0, 1, 0],
-  [0, 0, -1, -1, 0, 0, 0, 1, 0],
-];
-// The arc of a face is PI / 2, so this many cells hold the arc of CELL each. The reader sees the
-// same square at the same size on every planet, which is what issue 19 asked for.
-export const FACE_CELLS = Math.round(Math.PI / 2 / CELL);
-
-// The unit direction at (u, v) inside a cell. u and v run 0 to 1 across the cell and may run
-// past it.
+// The unit direction at (u, v) inside a cell, as a vector. cell-grid.js holds the map; this is the
+// adapter of the page, which works in THREE.Vector3.
+const _cell = [0, 0, 0];
 export function cellDir(cell, u, v, out = new THREE.Vector3()) {
-  const F = FACES[cell.face];
-  const a = Math.tan(((cell.i + u) * 2 / cell.n - 1) * Math.PI / 4);
-  const b = Math.tan(((cell.j + v) * 2 / cell.n - 1) * Math.PI / 4);
-  return out.set(
-    F[0] + F[3] * a + F[6] * b,
-    F[1] + F[4] * a + F[7] * b,
-    F[2] + F[5] * a + F[8] * b,
-  ).normalize();
-}
-
-// The cell a unit direction falls in.
-export function dirCell(x, y, z) {
-  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
-  const face = ax >= ay && ax >= az ? (x >= 0 ? 0 : 1) : ay >= az ? (y >= 0 ? 2 : 3) : (z >= 0 ? 4 : 5);
-  const F = FACES[face];
-  const d = x * F[0] + y * F[1] + z * F[2];
-  const wa = Math.atan((x * F[3] + y * F[4] + z * F[5]) / d) * 4 / Math.PI;
-  const wb = Math.atan((x * F[6] + y * F[7] + z * F[8]) / d) * 4 / Math.PI;
-  const n = FACE_CELLS;
-  const q = (w) => THREE.MathUtils.clamp(Math.floor((w + 1) * 0.5 * n), 0, n - 1);
-  return { face, i: q(wa), j: q(wb), n };
+  return out.fromArray(grid.cellDir(cell, u, v, _cell));
 }
 
 // The cell a site falls in. The worker takes it as patch.cell and lays its box on the quad.
 export function siteCell(site) {
   const d = siteDir(site.lat, site.lon, _local);
-  return dirCell(d.x, d.y, d.z);
+  return grid.dirCell(d.x, d.y, d.z);
 }
 
 // The turn from the frame of the site, x east and z south, to the frame of the box. The box of
@@ -94,11 +43,10 @@ export function cellTwist(site) {
   const cell = siteCell(site);
   const mid = cellDir(cell, 0.5, 0.5, _corner);
   const along = cellDir(cell, 1, 0.5, _dir).sub(mid);      // the u axis of the cell, at the middle
-  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
-  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
-  _east.set(slo, 0, -clo);
-  _north.set(-sla * clo, cla, -sla * slo);
-  return Math.atan2(-along.dot(_north), along.dot(_east));  // south is the opposite of north
+  const f = grid.tangentFrame(site.lat, site.lon);
+  _east.fromArray(f.east);
+  _south.fromArray(f.south);
+  return Math.atan2(along.dot(_south), along.dot(_east));
 }
 
 const CENTRE = new THREE.Vector2(0, 0);
@@ -108,7 +56,7 @@ const _hit = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _local = new THREE.Vector3();
 const _east = new THREE.Vector3();
-const _north = new THREE.Vector3();
+const _south = new THREE.Vector3();
 const _corner = new THREE.Vector3();
 
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -125,7 +73,7 @@ export function snapSite(site) {
 // The metres of the globe across one cell, at its middle. The worker takes this as patch.span.
 // A cell of the cube grid is not exactly CELL of arc, so the width comes from the cell itself.
 export function cellSpan(world, site) {
-  if (!site) return CELL * radiusKm(world) * 1000;
+  if (!site) return grid.CELL * radiusKm(world) * 1000;
   const cell = siteCell(site);
   const a = cellDir(cell, 0, 0.5, _corner), b = cellDir(cell, 1, 0.5, _dir);
   return 2 * Math.asin(THREE.MathUtils.clamp(a.distanceTo(b) / 2, 0, 1)) * radiusKm(world) * 1000;
@@ -202,8 +150,8 @@ export function pickDirs(camera, current, ndc = CENTRE) {
 // a facet goes into the bucket of each of its three corners. The ray then tests only the facets in
 // the buckets it passes through inside the shell of the terrain.
 const BUCKET = 8;
-const BUCKET_N = Math.ceil(FACE_CELLS / BUCKET);
-const RAY_STEP = CELL / 2;           // globe units: the step of the walk along the ray
+const BUCKET_N = Math.ceil(grid.FACE_CELLS / BUCKET);
+const RAY_STEP = grid.CELL / 2;           // globe units: the step of the walk along the ray
 const facetIndex = new WeakMap();
 const _lray = new THREE.Ray();
 const _inv = new THREE.Matrix4();
@@ -211,7 +159,7 @@ const _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _pc = new THREE.Vect
 const _at = new THREE.Vector3(), _best = new THREE.Vector3();
 
 const bucketOf = (x, y, z) => {
-  const c = dirCell(x, y, z);
+  const c = grid.dirCell(x, y, z);
   return (c.face * BUCKET_N + Math.floor(c.i / BUCKET)) * BUCKET_N + Math.floor(c.j / BUCKET);
 };
 
@@ -358,10 +306,7 @@ export const CARRIER_REACH = 2 * Math.PI / 3;
 const _up = new THREE.Vector3();
 const _to = new THREE.Vector3();
 const _aim = new THREE.Vector3();
-const _mid = new THREE.Vector3();
-// A direction this far off the face of its cell has no point on the box: the gnomonic map of the
-// cube grid runs to infinity at a quarter turn from the face. See boxPoint().
-const BOX_FACE_MIN = Math.cos(80 * Math.PI / 180);
+const _arr = [0, 0, 0];
 
 // A direction argument as a vector. The worker writes a direction as three numbers in an array.
 function asDir(dir, out = _to) {
@@ -441,12 +386,11 @@ export function arcTo(site, dir) {
 // The bearing from a site to a direction: the angle from north, 0 to 360 degrees, east positive.
 // East and north stand in the tangent plane, so the two dots take the tangent part on their own.
 export function bearingTo(site, dir) {
-  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
-  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
-  _east.set(slo, 0, -clo);                        // the east of groundBasis(): falling lon
-  _north.set(-sla * clo, cla, -sla * slo);        // the part of +y in the tangent plane
+  const f = grid.tangentFrame(site.lat, site.lon);
+  _east.fromArray(f.east);
+  _south.fromArray(f.south);
   const d = asDir(dir);
-  const e = d.dot(_east), n = d.dot(_north);
+  const e = d.dot(_east), n = -d.dot(_south);     // north is the opposite of south
   if (e === 0 && n === 0) return 0;               // the direction stands under the site or opposite it
   return (THREE.MathUtils.radToDeg(Math.atan2(e, n)) + 360) % 360;
 }
@@ -474,7 +418,7 @@ export function carrierAt(world, site) {
   const off = hash01(`${world.seed}|carrier|${cell.face}|${cell.i}|${cell.j}`) * 2 - 1;
   const brg = (bearingTo(at, src.dir) + off * err + 360) % 360;
   // Decision 7: the range states nothing until the reader stands near the source.
-  const rangeKm = arc <= CARRIER_RANGE * CELL ? arc * radiusKm(world) : null;
+  const rangeKm = arc <= CARRIER_RANGE * grid.CELL ? arc * radiusKm(world) : null;
   return { brg, err, arc, rangeKm };
 }
 
@@ -495,68 +439,30 @@ export function carrierDir(world, site, carrier, out = new THREE.Vector3()) {
   return out.applyAxisAngle(siteDir(at.lat, at.lon, _up), -off);
 }
 
-// The point of the ground box under a direction of the globe, in units of the box, or null.
-//
-// It is the exact inverse of the map patch() in generate.js builds the box with, boxTanX() and
-// boxTanZ(): that map reads the two gnomonic coordinates of the cell at a point of the box and
-// takes the direction, and this reads the two coordinates of a direction and takes the point. The
-// box runs x along u and z against v, so z takes the sign the other way. So a direction inside the cell
-// comes back as the place on the ground the reader can walk to. The cell of the site carries the
-// map, and a direction outside that cell is legal: the gnomonic map stays true past the edge of a
-// face, which is what the rim of a patch already needs.
-//
-// Gives null for a direction more than 80 degrees from the face of the cell. The map runs to
-// infinity at a quarter turn from the face, and the far side of the globe has no point on the box.
-// Slice 3 takes the range to the wreck from this. The needle takes carrierBox() below, which holds
-// at every arc.
-export function boxPoint(site, dir, size = PATCH_SIZE) {
+// The point of the ground box of a landing at the site under a direction of the globe, in units of
+// a box `size` units on a side, or null. The cell of the site carries the map; boxPoint() in
+// cell-grid.js holds it, and it gives null for a direction more than 80 degrees from the face of the
+// cell. Slice 3 takes the range to the wreck from this. The needle takes carrierBox() below, which
+// holds at every arc.
+export function boxPoint(site, dir, size) {
   if (!site) return null;
-  const cell = siteCell(snapSite(site));
-  const F = FACES[cell.face];
   const d = asDir(dir);
-  const n = d.x * F[0] + d.y * F[1] + d.z * F[2];
-  if (n <= BOX_FACE_MIN) return null;
-  const a = (d.x * F[3] + d.y * F[4] + d.z * F[5]) / n;
-  const b = (d.x * F[6] + d.y * F[7] + d.z * F[8]) / n;
-  const u = (Math.atan(a) * 4 / Math.PI + 1) * 0.5 * cell.n - cell.i;
-  const v = (Math.atan(b) * 4 / Math.PI + 1) * 0.5 * cell.n - cell.j;
-  return { x: (u - 0.5) * size, z: (0.5 - v) * size };
+  _arr[0] = d.x; _arr[1] = d.y; _arr[2] = d.z;
+  return grid.boxPoint(siteCell(snapSite(site)), _arr, size);
 }
 
-// The way the needle points, as a unit vector (x, z) in the frame of the box, or null.
+// The way the needle points, as a unit vector (x, z) in the frame of the box, or null when the
+// source stands under the site or at its antipode.
 //
-// It is the step the box takes for a step of the globe toward the source: the slope of boxPoint()
-// at the site. A plain projection on two axes of the cell will not do, because the map of the box
-// holds no angle. It is a gnomonic map of a face of the cube with a tangent over it, and both
-// stretch one way more than the other away from the middle of the face. Measured on the six faces,
-// a projection stood up to 22 degrees off the true way.
-//
-// The slope, for a step from the site along a tangent t:
-//
-//   n = d . N, a = (d . U) / n, b = (d . V) / n      the gnomonic coordinates of boxPoint()
-//   x runs with atan(a), so dx/da is 1 / (1 + a * a), and z runs against atan(b) the same way
-//   da for a step t is ((t . U) - a * (t . N)) / n, and db is ((t . V) - b * (t . N)) / n
-//
-// Every factor the two share falls out when the pair is made a unit vector, and the part of the
-// direction that stands along the site falls out on its own: it gives da and db of nothing. So the
-// whole direction of carrierDir() goes in, at any arc, and the needle holds even where boxPoint()
-// gives null. The needle may not come through the matrix of groundBasis() with the twist: that
-// frame is square and the box is not, so the needle would stand off the wreck by the same angle.
+// It is the step the box takes for a step of the globe toward the source: boxHeading() in
+// cell-grid.js, the slope of boxPoint() at the site. The whole direction of carrierDir() goes in, at
+// any arc, and the needle holds even where boxPoint() gives null. The needle may not come through
+// the matrix of groundBasis() with the twist: that frame is square and the box is not, so the
+// needle would stand off the wreck by the same angle.
 export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }) {
   if (!carrierDir(world, site, carrier, _aim)) return null;
-  const cell = siteCell(snapSite(site));
-  const F = FACES[cell.face];
-  cellDir(cell, 0.5, 0.5, _mid);
-  const n = _mid.x * F[0] + _mid.y * F[1] + _mid.z * F[2];
-  const a = (_mid.x * F[3] + _mid.y * F[4] + _mid.z * F[5]) / n;
-  const b = (_mid.x * F[6] + _mid.y * F[7] + _mid.z * F[8]) / n;
-  const vn = _aim.x * F[0] + _aim.y * F[1] + _aim.z * F[2];
-  const x = (_aim.x * F[3] + _aim.y * F[4] + _aim.z * F[5] - a * vn) / (1 + a * a);
-  const z = -(_aim.x * F[6] + _aim.y * F[7] + _aim.z * F[8] - b * vn) / (1 + b * b);   // z runs against v
-  const l = Math.hypot(x, z);
-  if (l < 1e-12) return null;     // the source stands under the site or at its antipode
-  out.x = x / l; out.z = z / l;
-  return out;
+  _arr[0] = _aim.x; _arr[1] = _aim.y; _arr[2] = _aim.z;
+  return grid.boxHeading(siteCell(snapSite(site)), _arr, out);
 }
 
 // The pull to life. A creature home inside the cell under the pick takes the site. The nearest
@@ -568,12 +474,12 @@ export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }) {
 // at most one phenomenon, and the cell the pull lands on can still hold homes. Issue 14.
 export function pullSite(site, current) {
   if (!site || !current) return site;
-  const limit = CELL * PULL_REACH;                              // globe units, the radius is 1
+  const limit = grid.CELL * PULL_REACH;                              // globe units, the radius is 1
   const dir = siteDir(site.lat, site.lon, _local);
   // A home half a cell away can stand in the cell next door, and a pull there moved the landing off
   // the square under the pointer. So a pull stays inside the cell of the pick.
-  const cell = dirCell(dir.x, dir.y, dir.z);
-  const inCell = (x, y, z) => { const c = dirCell(x, y, z); return c.face === cell.face && c.i === cell.i && c.j === cell.j; };
+  const cell = grid.dirCell(dir.x, dir.y, dir.z);
+  const inCell = (x, y, z) => { const c = grid.dirCell(x, y, z); return c.face === cell.face && c.i === cell.i && c.j === cell.j; };
   const act = activityDir(current.world);
   if (act) {
     const dx = act[0] - dir.x, dy = act[1] - dir.y, dz = act[2] - dir.z;

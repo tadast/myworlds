@@ -19,6 +19,7 @@ import { Species } from './species.js';           // species genomes and lore
 import { FloraLore } from './flora-lore.js';       // the plant vocabulary, written per patch
 import { SourceLore } from './source-lore.js';     // the log of the source, written per world
 import { Lore } from './lore.js';                 // the lore engine, shared with the flora
+import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, tangentFrame } from './cell-grid.js';
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -1668,97 +1669,8 @@ const BEACH_M = 1.5;
 const DEEP_M = 12;
 
 // ---------------------------------------------------------------- the cell grid, issue 30
-// A landing cell is a quad of a cube grid and no longer a square of a band of latitude. A band
-// grid changes its step of longitude at every band, so two cells in two bands do not share an
-// edge and no stream could ever stitch them. A cube grid tiles the whole globe with quads that
-// share their edges exactly, and it holds no pole.
-//
-// Each face carries `n` by `n` cells. The grid coordinate w runs from -1 to 1 across a face, and
-// the gnomonic coordinate of the cube is tan(w * PI / 4). The tangent holds the arc of a cell
-// nearly equal from the middle of a face to its corner; the plain gnomonic grid would make a
-// corner cell half the arc of a middle one. A coordinate past the face is legal and the map stays
-// true there, which is what the rim of a patch needs.
-//
-// site.js holds the same map for the marker and for the snap. Keep the two in step.
-// Each row is the face normal, then the u axis, then the v axis, and u cross v is the normal.
-const FACES = [
-  [1, 0, 0, 0, 0, -1, 0, 1, 0],
-  [-1, 0, 0, 0, 0, 1, 0, 1, 0],
-  [0, 1, 0, 1, 0, 0, 0, 0, -1],
-  [0, -1, 0, 1, 0, 0, 0, 0, 1],
-  [0, 0, 1, 1, 0, 0, 0, 1, 0],
-  [0, 0, -1, -1, 0, 0, 0, 1, 0],
-];
-
-// The nominal arc of a cell, and the cells one face carries. site.js exports the same two numbers
-// as CELL and FACE_CELLS. Keep the two in step. app.js sends the cell of a landing on the patch
-// message, so the patch path never needs them; the source of issue 34 does, because it picks a
-// cell of its own.
-const CELL = 0.01;
-const FACE_CELLS = Math.round(Math.PI / 2 / CELL);
-
-// The unit direction at (u, v) inside a cell. u and v run 0 to 1 across the cell and may run past
-// it. Writes x, y, z into out.
-function cellDir(cell, u, v, out) {
-  return cellDirT(cell, cellTan(cell.i, u, cell.n), cellTan(cell.j, v, cell.n), out);
-}
-
-// The cell a unit direction falls in. The mirror of cellDir(), and the same map dirCell() holds in
-// site.js.
-function dirCell(x, y, z) {
-  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
-  const face = ax >= ay && ax >= az ? (x >= 0 ? 0 : 1) : ay >= az ? (y >= 0 ? 2 : 3) : (z >= 0 ? 4 : 5);
-  const F = FACES[face];
-  const d = x * F[0] + y * F[1] + z * F[2];
-  const wa = Math.atan((x * F[3] + y * F[4] + z * F[5]) / d) * 4 / Math.PI;
-  const wb = Math.atan((x * F[6] + y * F[7] + z * F[8]) / d) * 4 / Math.PI;
-  const n = FACE_CELLS;
-  const q = (w) => clamp(Math.floor((w + 1) * 0.5 * n), 0, n - 1);
-  return { face, i: q(wa), j: q(wb), n };
-}
-
-// The gnomonic coordinate of a cell coordinate. A row of the patch grid holds one of these for
-// every column and one for the whole row, so the build takes two tangents a row and not two a
-// vertex. A tangent costs more than the rest of the map together.
-function cellTan(ci, u, n) {
-  return Math.tan(((ci + u) * 2 / n - 1) * Math.PI / 4);
-}
-
-// The two gnomonic coordinates under a point of the ground box. xu and zu are units of the box from
-// its middle, and size is the side of the box.
-//
-// The box runs x along the u axis of the cell and z against the v axis. For every face u cross v
-// is the outward normal, so (u, up, v) is a left-handed set and (u, up, -v) is a right-handed
-// one. A box with z along v drew the mirror of the cell: the coast turned the wrong way against
-// the globe, and the sky of groundBasis() in ground-sky.js stood mirrored against the terrain. On
-// the four faces of the equator u runs east and v runs north, so the box there has x east and z
-// south with no twist. cellTwist() in site.js reads the same axes, and tools/frame-check.mjs
-// fails on a mirror. Keep them in step.
-function boxTanX(cell, xu, size) { return cellTan(cell.i, 0.5 + xu / size, cell.n); }
-function boxTanZ(cell, zu, size) { return cellTan(cell.j, 0.5 - zu / size, cell.n); }
-
-// The frame of a patch with no cell, at a site: up, then east, then south. East is the direction
-// of falling lon, as groundBasis() has it, so (east, up, south) is a right-handed set.
-function tangentFrame(lat, lon) {
-  const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
-  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
-  return {
-    up: [cla * clo, sla, cla * slo],
-    east: [slo, 0, -clo],                    // east has no y part
-    south: [sla * clo, -cla, sla * slo],     // south is the opposite of north
-  };
-}
-
-// The unit direction at two gnomonic coordinates of a face.
-function cellDirT(cell, a, b, out) {
-  const F = FACES[cell.face];
-  const x = F[0] + F[3] * a + F[6] * b;
-  const y = F[1] + F[4] * a + F[7] * b;
-  const z = F[2] + F[5] * a + F[8] * b;
-  const l = Math.sqrt(x * x + y * y + z * z) || 1;
-  out[0] = x / l; out[1] = y / l; out[2] = z / l;
-  return out;
-}
+// cell-grid.js holds the grid, the map of the ground box, and the frame of a site. app.js sends the
+// cell of a landing on the patch message; the source of issue 34 picks a cell of its own.
 
 // The biome of one point, by the rules the globe paints with. beachW carries the width of the
 // beach band, so the patch can ask for a strip in metres where the globe asks for its own band.
@@ -3137,5 +3049,3 @@ function patch(seed, site, opts = {}, post = () => {}) {
 
 // ---------------------------------------------------------------- the interface
 export { generate as world, patch };
-// The map of the patch box, for tools/frame-check.mjs and tools/carrier-check.mjs.
-export { cellDirT, boxTanX, boxTanZ, tangentFrame };

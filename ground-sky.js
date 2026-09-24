@@ -11,6 +11,7 @@
 // The sky ignores the fog. The fog colour is the horizon colour of the dome, so the far terrain and
 // the dome end at the same colour and no seam shows.
 import * as THREE from 'three';
+import { tangentFrame } from './cell-grid.js';
 
 const DEG = Math.PI / 180;
 
@@ -78,20 +79,19 @@ function hashSeed(s) {
 
 // The turn from globe space into the ground frame at a site.
 //
-// East is the direction the planet turns to. A positive planet.rotation.y takes +x toward -z, and
-// lon counts from +x toward +z, so east is the direction of falling lon. South is east cross up.
-// The three axes then make a right-handed frame, and the sky is not mirrored.
+// The frame of the site comes from tangentFrame() in cell-grid.js: east is the direction of falling
+// lon, and south is east cross up. The three axes make a right-handed frame, and the sky is not
+// mirrored.
 // `twist` turns the frame about the up axis. Since issue 30 the box of the patch runs along the
 // axes of its cell of the cube grid and not along east and south, so the sky takes the same turn
 // or the sun stands in the wrong quarter of it. See cellTwist() in site.js. The box is a
 // right-handed set too, x along the u axis of the cell and z against the v axis, so a turn is all
 // the sky needs. tools/frame-check.mjs fails when either side becomes a mirror.
 export function groundBasis(planet, site, twist = 0) {
-  const lat = site.lat * DEG, lon = site.lon * DEG;
-  const cl = Math.cos(lat), sl = Math.sin(lat), co = Math.cos(lon), so = Math.sin(lon);
-  const up = new THREE.Vector3(cl * co, sl, cl * so);
-  const east0 = new THREE.Vector3(so, 0, -co);
-  const south0 = new THREE.Vector3().crossVectors(east0, up).normalize();
+  const f = tangentFrame(site.lat, site.lon);
+  const up = new THREE.Vector3().fromArray(f.up);
+  const east0 = new THREE.Vector3().fromArray(f.east);
+  const south0 = new THREE.Vector3().fromArray(f.south);
   const ct = Math.cos(twist), st = Math.sin(twist);
   const east = east0.clone().multiplyScalar(ct).addScaledVector(south0, st).normalize();
   const south = south0.clone().multiplyScalar(ct).addScaledVector(east0, -st).normalize();

@@ -26,7 +26,7 @@
 //    hand. The box was the mirror of that frame once, and the needle then had to take the mirror
 //    too. A step along box +x must read (1, 0) in the ground frame and a step along box +z must
 //    read toward (0, 1), and the needle must stand where the sky frame holds the source. The map
-//    of the box is boxTanX() and boxTanZ() of generate.js itself, and not a copy.
+//    of the box is boxTanX() and boxTanZ() of cell-grid.js, the one copy generate.js builds with.
 //
 // site.js and ground-sky.js take three.js by the bare name `three`, which the import map of
 // index.html resolves in the browser. Node has no import map, so a resolve hook points the same
@@ -214,17 +214,18 @@ let reachRow = '';
   if (Math.abs(wrap180(sbrg - 180)) > 1e-9) fail('south', `a step along the south of groundBasis() reads bearing ${sbrg.toFixed(6)}`);
 }
 
-// ---------------------------------------------------------------- the map of generate.js
-// patch() in generate.js builds the box with boxTanX() and boxTanZ(). The checks below take the map
-// from that file and hold no copy of it, so a change of the box fails here and not on the ground.
-const W = await import(root + 'generate.js');
+// ---------------------------------------------------------------- the map of the box
+// patch() in generate.js builds the box with boxTanX() and boxTanZ() of cell-grid.js. The checks
+// below take the map from that file and hold no copy of it, so a change of the box fails here and
+// not on the ground.
+const W = await import(root + 'cell-grid.js');
 // dirOn() of patch() in generate.js, for a cell: the globe direction under a point of the box
 const dirOn = (cell, xu, zu, size) => new THREE.Vector3(...W.cellDirT(
   cell, W.boxTanX(cell, xu, size), W.boxTanZ(cell, zu, size), [0, 0, 0]));
 
 // ---------------------------------------------------------------- 4: one site in each face
 // The needle in the frame of the box, on a site in each face of the cube grid with a twist.
-const BOX = 1500;             // units, the side of the box. PATCH_SIZE in site.js.
+const BOX = 1500;             // units, the side of the box on LOW
 const SEAT = [[300, -200], [-450, 380], [60, 700], [-680, -40]];   // places in the box, in units
 const STEP = 0.01;            // radians: the step of the far check, which is one cell
 const PARALLEL_TOL = 0.5;     // degrees: how far two vectors of the box may stand apart

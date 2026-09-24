@@ -34,6 +34,7 @@
 // from, and reads them back through bearingTo() and carrierAt() of site.js.
 import * as THREE from 'three';
 import { CELL, cellDir, groundRadius, siteCell, siteDir, sourceSite } from './site.js';
+import { tangentFrame } from './cell-grid.js';
 // The mini wreck of a find is the wreck of the ground, at the scale of the globe. ground-source.js
 // builds that body in wreckGeometry(), which takes no DOM and does nothing at import, so the two
 // models come from one builder and they cannot drift apart.
@@ -148,11 +149,10 @@ const _yUp = new THREE.Vector3(0, 1, 0);   // the up axis of wreckGeometry(), in
 // is drawn on the globe, so it keeps the bearing of the globe. The needle of the overlay keeps the
 // frame of the box instead, because the reader walks the terrain. See "the carrier" in site.js.
 function frameAt(site) {
-  const la = THREE.MathUtils.degToRad(site.lat), lo = THREE.MathUtils.degToRad(site.lon);
-  const cla = Math.cos(la), sla = Math.sin(la), clo = Math.cos(lo), slo = Math.sin(lo);
-  _east.set(slo, 0, -clo);                        // the east of groundBasis(): falling lon
-  _north.set(-sla * clo, cla, -sla * slo);        // the part of +y in the tangent plane
-  _up.set(cla * clo, sla, cla * slo);             // siteDir(lat, lon)
+  const f = tangentFrame(site.lat, site.lon);
+  _east.fromArray(f.east);                        // the east of groundBasis(): falling lon
+  _north.fromArray(f.south).negate();             // the part of +y in the tangent plane
+  _up.fromArray(f.up);                            // siteDir(lat, lon)
 }
 
 // The unit tangent at the site along a bearing in degrees. North is 0 and east is 90.

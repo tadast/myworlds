@@ -17,6 +17,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | File | Role |
 |---|---|
 | `generate.js` | Generation. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map, the source, and the patch. Two exported calls: `world(seed, opts, onProgress)` and `patch(seed, site, opts, onProgress)`. Each returns its result. No three.js and no DOM. Imports the lore files. |
+| `cell-grid.js` | The cell grid, the map of the ground box and its inverse, and the frame of a site, as plain arrays. The one copy: `generate.js`, `site.js`, `ground-sky.js`, `carrier-globe.js`, and the tools import it. No three.js and no DOM. `tools/cell-grid-check.mjs` tests it. |
 | `worker.js` | The module worker, a small adapter over `generate.js`. Protocol: `postMessage({type:'generate', seed, opts})` or `{type:'patch', seed, lat, lon, opts}`, replies `progress` then `done`, `patch-done`, or `error`. It transfers every buffer of a result. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `tiers.js` | The two device tiers, HIGH and LOW, and `RIM`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |
@@ -75,18 +76,20 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 
 ### The patch cell
 
-- `CELL = 0.01` globe units of arc, in `site.js`. It is the nominal width of the square the reader
+- `CELL = 0.01` globe units of arc, in `cell-grid.js`. It is the nominal width of the square the reader
   picks and of the ground the probe brings back. It is the same size on the screen for every
   planet, about 62 px at `CAM_MIN`.
 - Since issue 30 the cells are the quads of a cube grid: six faces of `FACE_CELLS` by `FACE_CELLS`,
   where `FACE_CELLS = round(PI / 2 / CELL)`, with the gnomonic coordinate warped through a tangent
-  so a corner quad holds about the arc of a middle one. The cells tile the whole globe, they share
+  so a corner quad holds about the arc of a middle one: across its middle a cell spans 0.71 to 1.00 of
+  `CELL`. The cells tile the whole globe, they share
   their edges exactly, and the grid holds no pole. A band of latitude carried the cells before, and
   its step of longitude changed at every band, so no two bands lined up.
 - `siteCell(site)` gives that quad as `{face, i, j, n}`. `cellDir(cell, u, v)` gives the unit
   direction at `(u, v)` inside it; `u` and `v` run 0 to 1 and may run past the cell, which is what
-  the rim needs. `app.js` passes the quad as `opts.cell` on the patch message, and `generate.js`
-  holds the same map, because a Web Worker cannot import a module. Keep the two in step.
+  the rim needs. `app.js` passes the quad as `opts.cell` on the patch message. `cell-grid.js` holds the
+  map as arrays, and `generate.js`, `site.js`, `ground-sky.js`, and `carrier-globe.js` import it;
+  `site.js` is the adapter of the page and gives `THREE.Vector3`.
 - `snapSite(site)` puts a site on the cell grid: it takes the middle of the quad the site falls in.
   It is idempotent and it keeps `kind`. The middle stands half a cell from every edge, so two
   decimals of a degree cannot move it into the cell next door.
@@ -95,9 +98,10 @@ Independent agents must agree on these. Do not change them inside an issue. If a
   the relief field; those come from the nominal cell, so two neighbours stay in phase.
 - The box runs x along the u axis of the cell and z against the v axis, so (x, up, z) is a
   right-handed set and the terrain is the true image of the cell, not its mirror. East is the east
-  of `groundBasis()`: the direction of falling lon. `boxTanX()` and `boxTanZ()` in `generate.js` hold
-  the map. Run `node tools/frame-check.mjs` after a change to the map, to `cellTwist()`, or to
-  `groundBasis()`; it fails on a mirror.
+  of `groundBasis()`: the direction of falling lon. `boxTanX()` and `boxTanZ()` in `cell-grid.js` hold
+  the map, and `boxPoint()` its inverse. Run `node tools/cell-grid-check.mjs` and
+  `node tools/frame-check.mjs` after a change to the map, to `cellTwist()`, or to `groundBasis()`;
+  both fail on a mirror.
 - `cellTwist(site)` gives the turn from the frame of the site, x east and z south, to the axes of
   the box. The box runs along the axes of the cell, so `groundBasis()` takes the same turn and the
   sky stands in the right quarter.

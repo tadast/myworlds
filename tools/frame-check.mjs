@@ -2,9 +2,9 @@
 //
 //   node tools/frame-check.mjs
 //
-// patch() in generate.js lays the ground box on a cell of the cube grid. groundBasis() in
-// ground-sky.js turns the sun, the moons, and the ring into the ground frame: x east, y up,
-// z south, a right-handed set. Until this check the box ran z along the v axis of the cell, and
+// patch() in generate.js lays the ground box on a cell of the cube grid, by the map of
+// cell-grid.js. groundBasis() in ground-sky.js turns the sun, the moons, and the ring into the
+// ground frame: x east, y up, z south, a right-handed set. Until this check the box ran z along the v axis of the cell, and
 // (u, up, v) is a left-handed set, so the terrain was the mirror of its cell and the sky stood
 // mirrored against it. No turn about the up axis hides a mirror, so nothing here trusts a comment.
 // Three checks run:
@@ -17,10 +17,12 @@
 //    slack hides it.
 // 2. The hand of the box. In the ground frame x cross z is -y. The cross of the two steps must
 //    point down, on every site.
-// 3. The patch with no cell. The east and the south of tangentFrame() in generate.js read (1, 0, 0)
-//    and (0, 0, 1) through groundBasis() with no twist.
+// 3. The patch with no cell. The east, the up, and the south of tangentFrame() read (1, 0, 0),
+//    (0, 1, 0), and (0, 0, 1) through groundBasis() with no twist, so the rows of its matrix stand
+//    in the right order.
 //
-// The map under test is boxTanX(), boxTanZ(), and tangentFrame() of generate.js itself, not a copy.
+// The map under test is boxTanX(), boxTanZ(), and tangentFrame() of cell-grid.js, the one copy that
+// generate.js builds the box with. tools/cell-grid-check.mjs tests the map on its own.
 //
 // site.js and ground-sky.js take three.js by the bare name `three`, which the import map of
 // index.html resolves in the browser. Node has no import map, so a resolve hook points the same
@@ -45,8 +47,8 @@ const THREE = await import('three');
 const S = await import(root + 'site.js');
 const { groundBasis } = await import(root + 'ground-sky.js');
 
-// The map of the box, from generate.js itself.
-const W = await import(root + 'generate.js');
+// The map of the box, from cell-grid.js itself.
+const W = await import(root + 'cell-grid.js');
 
 const SIZE = 1500;          // units, the side of the box
 const STEP = 300;           // units of the box: the step along an axis
