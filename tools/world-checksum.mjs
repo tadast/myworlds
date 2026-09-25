@@ -84,21 +84,21 @@ function hashBytes(bytes) {
 const hashArray = (arr) => (arr ? hashBytes(new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength)) : '-');
 const hashJson = (obj) => hashBytes(new TextEncoder().encode(JSON.stringify(obj)));
 
-// The lore of a world: the story of every species, the log of the source, the two lines of the
-// stats card the lore writes, and the plant words of flora-lore.js. The facts are the rest. A key
+// The lore of a world: the story of every species, the log of the source, the fauna line of the
+// stats, and the plant words of flora-lore.js. The facts are the rest. A key
 // set to undefined drops out of JSON.stringify, so the facts keep the order of the keys they had.
 function splitWorld(w) {
   const lore = {
     species: (w.species || []).map((g) => g.lore),
     log: w.source ? w.source.log : null,
-    life: w.stats && w.stats.life, fauna: w.stats && w.stats.fauna,
+    fauna: w.stats && w.stats.fauna,
     floraTags: w.env && w.env.floraTags, plantWord: w.env && w.env.plantWord,
   };
   const facts = {
     ...w,
     species: (w.species || []).map((g) => ({ ...g, lore: undefined })),
     source: w.source && { ...w.source, log: undefined },
-    stats: w.stats && { ...w.stats, life: undefined, fauna: undefined },
+    stats: w.stats && { ...w.stats, fauna: undefined },
     env: w.env && { ...w.env, floraTags: undefined, plantWord: undefined },
   };
   return [hashJson(facts), hashJson(lore)];

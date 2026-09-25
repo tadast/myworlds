@@ -1833,7 +1833,6 @@ function renderInfo(w) {
       ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrier.n === 0 && !carrier.found ? `<button type="button" class="carrier-lost" title="Read the record of the incident">${carrier.text}</button>` : carrier.text}${carrier.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this world">Clear</button>' : ''}${carrier.found && mode !== 'ground' ? '<button type="button" class="chip carrier-aim" title="Aim the probe at the wreck">Aim</button>' : ''}</dd>` : ''}
       ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
-      <dt>Life</dt><dd>${escapeHtml(s.life)}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
       ${groundPlants.length ? `<dt>Flora</dt><dd class="chips">${groundPlants.map((p) => `<button type="button" class="chip" data-plant="${p.kind}">${escapeHtml(p.lore.name)}</button>`).join('')}</dd>` : ''}
     </dl>`;

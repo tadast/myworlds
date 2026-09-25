@@ -379,7 +379,7 @@ function moonName(rng) {
 // The numbers that describe the planet itself. They are drawn from the flavour stream, straight
 // after the designation, because three readers need them before the globe exists: the ground turns
 // globe units into metres with the radius, the creature rig uses the gravity, and the lore reads
-// all four. makeStats() formats the same values later and draws nothing more except the life text.
+// all four. makeStats() formats the same values later and draws nothing.
 function rollPlanet(frng, type) {
   const radiusKm = type === 'gas' ? Math.round(rrange(frng, 24000, 75000)) : Math.round(rrange(frng, 3200, 9800));
   const gravity = type === 'gas' ? rrange(frng, 0.9, 2.6) : (radiusKm / 6371) * rrange(frng, 0.8, 1.2);
@@ -585,7 +585,7 @@ function worldContext(seed) {
 
   // seaLevel stays at -2 until the globe build. A world with no ocean keeps -2, because no vertex
   // ever reaches it.
-  const ctx = { seed, type, rng, noise, P, frng, world, radiusKm: planet.radiusKm, seaLevel: -2 };
+  const ctx = { seed, type, rng, noise, P, world, radiusKm: planet.radiusKm, seaLevel: -2 };
   if (type === 'gas') { initLife(ctx); return ctx; }
 
   // ---- terrain parameters per type
@@ -814,9 +814,9 @@ function generate(seed, opts = {}, post = () => {}) {
   cachedCtx = null; cachedKey = null;   // a world call that fails leaves no context behind
 
   const ctx = worldContext(seed);
-  const { type, rng, noise, P, frng, world } = ctx;
+  const { type, rng, noise, P, world } = ctx;
   if (type === 'gas') {
-    const result = generateGas(world, rng, noise, P, detail, post, frng, maxFauna);
+    const result = generateGas(world, rng, noise, P, detail, post, maxFauna);
     cachedCtx = ctx; cachedKey = worldKey(seed, opts);
     return result;
   }
@@ -983,7 +983,7 @@ function generate(seed, opts = {}, post = () => {}) {
   // The sky is the last thing the world learns about itself, so the lore is written again here,
   // with the moons, the rings, and the activity in hand. Same stream, same seed, same text.
   describeLife(ctx);
-  world.stats = makeStats(frng, type, world, fc);
+  world.stats = makeStats(type, world, fc);
   // Issue 34, slice 4. The log of the source stands last, because it names a species of this world
   // and it reads the moons, the rings, and the activity that the lines above have only now settled.
   // It rolls from a stream of its own, so no other stream draws one number more.
@@ -1161,21 +1161,10 @@ function makeGasFauna(rng, maxFauna, world) {
 }
 
 // The four planet numbers were drawn in worldContext(), by rollPlanet(), so the lore could read
-// them. makeStats() formats them and draws only the life text, which keeps the flavour stream in
-// the order it has always had: designation, radius, gravity, day, temperature, life.
-function makeStats(rng, type, world, floraCount) {
+// them. makeStats() formats them and draws nothing.
+function makeStats(type, world, floraCount) {
   const { radiusKm: km, gravity: g, dayHours: day, tempC: temp } = world.env;
   const obl = world.axis ? world.axis.obliquity * 180 / Math.PI : null;
-  let life;
-  switch (type) {
-    case 'terran': life = pick(rng, ['Forests and grazing herds', 'Dense woodland, birdsong', 'Rolling meadows, shy fauna', 'Old forests, quiet rivers']); break;
-    case 'ocean': life = pick(rng, ['Reefs and palm islands', 'Kelp forests, seabirds', 'Coral atolls, gentle tides']); break;
-    case 'desert': life = pick(rng, ['Cacti in hidden oases', 'Hardy scrub, sand lizards', 'Dust storms, stubborn cactus']); break;
-    case 'ice': life = pick(rng, ['Crystal fields, lantern light at dusk', 'Frozen seas, slow shelled crawlers', 'Snow pines cling to the equator']); break;
-    case 'lava': life = pick(rng, ['Armoured crawlers on the cooler ridges', 'Molten oceans, ash plains', 'Glowing crystal spires']); break;
-    case 'gas': life = pick(rng, ['Endless storms', 'Ammonia cloud bands', 'Winds of 1,400 km/h']); break;
-    case 'exotic': life = pick(rng, ['Glowing mushroom groves', 'Singing crystals', 'Luminous alien flora']); break;
-  }
   const fauna = (world.faunaKinds || []).map((k) => world.species[k].lore.plural);
   const faunaText = fauna.length ? fauna.slice(0, 3).join(", ") : "none seen";
   return {
@@ -1185,7 +1174,7 @@ function makeStats(rng, type, world, floraCount) {
     tilt: obl == null ? null : `${obl.toFixed(0)}°${obl > 135 ? ' retrograde' : obl > 54 ? ' on its side' : ''}`,
     land: type === 'gas' ? null : `${Math.round(world.land * 100)}%`,
     activity: world.activity ? world.activity.label : null,
-    temp: `${temp} °C`, moons: world.moons.length, life, fauna: faunaText[0].toUpperCase() + faunaText.slice(1), floraCount,
+    temp: `${temp} °C`, moons: world.moons.length, fauna: faunaText[0].toUpperCase() + faunaText.slice(1), floraCount,
   };
 }
 
@@ -1532,7 +1521,7 @@ function makeSource(rng, ctx, world, beachW) {
 }
 
 // ---------------------------------------------------------------- gas giant
-function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
+function generateGas(world, rng, noise, P, detail, post, maxFauna) {
   const gdetail = Math.max(24, Math.round(detail * 0.6));
   post(10, 'Stirring the storms');
   const { pos, idx, vCount, triCount } = icosphere(gdetail);
@@ -1596,7 +1585,7 @@ function generateGas(world, rng, noise, P, detail, post, frng, maxFauna) {
   world.moons = makeMoons(rng, "gas", !!world.rings);
   describeLife({ seed: world.seed, world });
   const fauna = makeGasFauna(makeRng(world.seed + '|fauna'), maxFauna, world);
-  world.stats = makeStats(frng, 'gas', world, 0);
+  world.stats = makeStats('gas', world, 0);
   post(96, 'Almost there');
   const flora = new Float32Array(0), clouds = new Float32Array(0);
   return { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna };
