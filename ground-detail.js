@@ -143,6 +143,11 @@ vSurf = DET_FAMILY[clamp(int(aSurface + 0.5), 0, 10)];
 // The patterns. Every function takes the ground position p in metres, the same position turned
 // into the frame of the wind (q: x along the wind, y across it), the screen derivatives of p, and
 // fp, the metres one pixel covers. Each returns the colour and writes the height in metres.
+//
+// A layer samples only while its fade is above zero. Most of the pixels of a view near the ground
+// lie tens of metres out, where every fine layer has faded, so this skips most of the samples. The
+// branches are safe for the samples, because every sample reads its derivatives through
+// textureGrad from values taken before the first branch.
 const FRAGMENT_PARS = `
 uniform sampler2D uDetTex;
 uniform float uDetOn;
@@ -193,114 +198,153 @@ vec3 detTint(vec3 base, vec3 t) { return t * (detLum(base) / max(detLum(t), 1e-3
 
 vec3 detCover(vec2 p, vec2 q, vec2 gx, vec2 gy, float fp, float big, vec3 base, out float h) {
   vec3 c = base;
+  h = 0.0;
   // dry patches tens of metres wide, which still read from the ceiling
   c = mix(c, detHue(c, uDetDryHue) * 1.06, smoothstep(0.5, 0.78, big) * 0.55);
   // lighter and darker swathes a few metres wide
-  float sw = detNoise(p + 60.0, 3.0, gx, gy);
-  c *= 1.0 + (sw - 0.5) * 0.22 * detFade(3.0, fp);
+  float fs = detFade(3.0, fp);
+  if (fs > 0.0) c *= 1.0 + (detNoise(p + 60.0, 3.0, gx, gy) - 0.5) * 0.22 * fs;
   // soft lumps about 0.6 m wide
-  float lump = detNoise(p - 23.0, 0.6, gx, gy);
   float fl = detFade(0.6, fp);
-  c *= 1.0 + (lump - 0.5) * 0.16 * fl;
-  h = lump * 0.03 * fl;
+  if (fl > 0.0) {
+    float lump = detNoise(p - 23.0, 0.6, gx, gy);
+    c *= 1.0 + (lump - 0.5) * 0.16 * fl;
+    h = lump * 0.03 * fl;
+  }
   #ifndef DETAIL_LOW
   // leaves: a fine speckle about 6 cm across
-  float lf = detNoise(p + 91.0, 0.06, gx, gy);
   float fb = detFade(0.06, fp);
-  c *= 1.0 + (lf - 0.5) * 0.36 * fb;
-  h += lf * 0.012 * fb;
+  if (fb > 0.0) {
+    float lf = detNoise(p + 91.0, 0.06, gx, gy);
+    c *= 1.0 + (lf - 0.5) * 0.36 * fb;
+    h += lf * 0.012 * fb;
+  }
   #endif
   #if DETAIL_STYLE == 4
   // rosettes of another colour, from 0.3 to 1.5 m wide, with ragged rims
-  vec4 s = detCellWarp(p, 2.6, 2.1, gx, gy);
-  float rag = (detNoise(p + 5.0, 0.12, gx, gy) - 0.5) * 0.12;
-  float r0 = 0.08 + 0.22 * fract(s.a * 7.13);
-  float spot = (1.0 - smoothstep(r0 - 0.02, r0 + 0.03, s.g + rag)) * step(0.62, s.a) * detFade(0.4, fp);
-  float rim = spot * smoothstep(r0 - 0.08, r0, s.g + rag);
-  c = mix(c, detTint(c, uDetSpot) * (1.05 - rim * 0.25), spot * 0.65);
-  h += spot * 0.04;
+  float fr = detFade(0.4, fp);
+  if (fr > 0.0) {
+    vec4 s = detCellWarp(p, 2.6, 2.1, gx, gy);
+    float rag = (detNoise(p + 5.0, 0.12, gx, gy) - 0.5) * 0.12;
+    float r0 = 0.08 + 0.22 * fract(s.a * 7.13);
+    float spot = (1.0 - smoothstep(r0 - 0.02, r0 + 0.03, s.g + rag)) * step(0.62, s.a) * fr;
+    float rim = spot * smoothstep(r0 - 0.08, r0, s.g + rag);
+    c = mix(c, detTint(c, uDetSpot) * (1.05 - rim * 0.25), spot * 0.65);
+    h += spot * 0.04;
+  }
   #endif
   return c;
 }
 
 vec3 detLoose(vec2 p, vec2 q, vec2 gx, vec2 gy, float fp, float big, vec3 base, out float h, inout vec3 emit) {
   vec3 c = base * (1.0 + (big - 0.5) * 0.2);
+  h = 0.0;
   // ripples across the wind, 42 cm apart, that meander and die out in patches
   const float LAM = 0.42;
-  float warp = detNoise(p + 17.0, 1.6, gx, gy) - 0.5;
-  float ph = q.x / LAM * 6.2831 + warp * 9.0;
-  float amp = smoothstep(0.3, 0.55, detNoise(p - 71.0, 7.0, gx, gy)) * detFade(LAM, fp);
-  float r = sin(ph) - 0.3 * sin(2.0 * ph);
-  h = r * 0.022 * amp;
-  c *= 1.0 + r * 0.05 * amp;
+  float fr = detFade(LAM, fp);
+  if (fr > 0.0) {
+    float warp = detNoise(p + 17.0, 1.6, gx, gy) - 0.5;
+    float ph = q.x / LAM * 6.2831 + warp * 9.0;
+    float amp = smoothstep(0.3, 0.55, detNoise(p - 71.0, 7.0, gx, gy)) * fr;
+    float r = sin(ph) - 0.3 * sin(2.0 * ph);
+    h = r * 0.022 * amp;
+    c *= 1.0 + r * 0.05 * amp;
+  }
   #ifndef DETAIL_LOW
   // grains
-  float gr = detNoise(p + 29.0, 0.03, gx, gy);
-  c *= 1.0 + (gr - 0.5) * 0.3 * detFade(0.03, fp);
+  float fg = detFade(0.03, fp);
+  if (fg > 0.0) c *= 1.0 + (detNoise(p + 29.0, 0.03, gx, gy) - 0.5) * 0.3 * fg;
   // pebbles
-  vec4 pb = detCell(p, 0.3, 1.9, gx, gy);
-  float peb = (1.0 - smoothstep(0.16, 0.28, pb.g)) * step(0.78, pb.a) * detFade(0.1, fp);
-  c = mix(c, c * 0.72, peb);
-  h += peb * 0.03;
+  float fb = detFade(0.1, fp);
+  if (fb > 0.0) {
+    vec4 pb = detCell(p, 0.3, 1.9, gx, gy);
+    float peb = (1.0 - smoothstep(0.16, 0.28, pb.g)) * step(0.78, pb.a) * fb;
+    c = mix(c, c * 0.72, peb);
+    h += peb * 0.03;
+  }
   #endif
   #if DETAIL_STYLE == 3
-  // a crust of ash, cracked into plates 3 m wide, and a few of the seams still glow
-  vec4 k = detCellWarp(p, 3.2, 0.4, gx, gy);
-  vec2 cr = detCrack(p, k, 3.2, fp, gx, gy);
-  c *= 1.0 - cr.x * 0.6;
-  h -= cr.y * 0.04;
-  float heat = smoothstep(0.6, 0.85, detNoise(p + 211.0, 11.0, gx, gy));
-  emit += vec3(1.0, 0.32, 0.06) * cr.x * heat * 0.8;
+  // a crust of ash, cracked into plates 3 m wide, and a few of the seams still glow. The groove is
+  // the widest part of a crack, so it decides where the crack is worth a sample.
+  if (detFade(0.3 * 3.2, fp) > 0.0) {
+    vec4 k = detCellWarp(p, 3.2, 0.4, gx, gy);
+    vec2 cr = detCrack(p, k, 3.2, fp, gx, gy);
+    c *= 1.0 - cr.x * 0.6;
+    h -= cr.y * 0.04;
+    if (cr.x > 0.0) {
+      float heat = smoothstep(0.6, 0.85, detNoise(p + 211.0, 11.0, gx, gy));
+      emit += vec3(1.0, 0.32, 0.06) * cr.x * heat * 0.8;
+    }
+  }
   #endif
   return c;
 }
 
 vec3 detRock(vec2 p, vec3 wp, vec2 gx, vec2 gy, float fp, vec3 base, out float h) {
   vec3 c = base;
+  h = 0.0;
+  float edge = 0.0;
   // blocks about 1.6 m wide, each a shade of its own, split by broken cracks
-  vec4 pl = detCellWarp(p, 1.6, 0.9, gx, gy);
   float fpl = detFade(1.6, fp);
-  vec2 cr = detCrack(p, pl, 1.6, fp, gx, gy);
-  float edge = cr.x;
-  c *= (1.0 + (pl.a - 0.5) * 0.22 * fpl) * (1.0 - cr.x * 0.45);
+  if (fpl > 0.0) {
+    vec4 pl = detCellWarp(p, 1.6, 0.9, gx, gy);
+    vec2 cr = detCrack(p, pl, 1.6, fp, gx, gy);
+    edge = cr.x;
+    c *= (1.0 + (pl.a - 0.5) * 0.22 * fpl) * (1.0 - cr.x * 0.45);
+    h = -cr.y * 0.05;
+  }
   // rough relief
-  float ro = detNoise(p + 44.0, 0.5, gx, gy);
   float fro = detFade(0.5, fp);
-  c *= 1.0 + (ro - 0.5) * 0.18 * fro;
-  h = ro * 0.07 * fro - cr.y * 0.05;
+  if (fro > 0.0) {
+    float ro = detNoise(p + 44.0, 0.5, gx, gy);
+    c *= 1.0 + (ro - 0.5) * 0.18 * fro;
+    h += ro * 0.07 * fro;
+  }
   #ifndef DETAIL_LOW
   // strata along the height, and a fine speckle
-  float st = sin(wp.y / 0.55 * 6.2831 + (detNoise(p, 3.0, gx, gy) - 0.5) * 5.0);
-  c *= 1.0 + st * 0.07 * detFade(0.55, fp);
-  float sp = detNoise(p + 7.0, 0.04, gx, gy);
-  c *= 1.0 + (sp - 0.5) * 0.3 * detFade(0.04, fp);
+  float fst = detFade(0.55, fp);
+  if (fst > 0.0) c *= 1.0 + sin(wp.y / 0.55 * 6.2831 + (detNoise(p, 3.0, gx, gy) - 0.5) * 5.0) * 0.07 * fst;
+  float fsp = detFade(0.04, fp);
+  if (fsp > 0.0) c *= 1.0 + (detNoise(p + 7.0, 0.04, gx, gy) - 0.5) * 0.3 * fsp;
   #endif
   #ifdef DETAIL_LICHEN
-  float li = smoothstep(0.6, 0.72, detNoise(p + 300.0, 0.35, gx, gy)) * (1.0 - edge) * detFade(0.15, fp);
-  c = mix(c, detTint(c, uDetLichen), li * 0.6);
+  float fli = detFade(0.15, fp);
+  if (fli > 0.0) {
+    float li = smoothstep(0.6, 0.72, detNoise(p + 300.0, 0.35, gx, gy)) * (1.0 - edge) * fli;
+    c = mix(c, detTint(c, uDetLichen), li * 0.6);
+  }
   #endif
   return c;
 }
 
 vec3 detSnow(vec2 p, vec2 q, vec2 gx, vec2 gy, float fp, float big, vec3 base, out float h) {
   vec3 c = base * (1.0 + (big - 0.5) * 0.08);
+  h = 0.0;
+  float hollow = 0.0;
   // drifts: crests 1.6 m apart that the wind sharpens, bent and broken by noise
   const float LAM = 1.6;
-  float warp = detNoise(p + 3.0, 3.5, gx, gy) - 0.5;
-  float ph = q.x / LAM * 6.2831 + warp * 10.0;
-  float amp = smoothstep(0.25, 0.6, detNoise(p - 13.0, 9.0, gx, gy)) * detFade(LAM, fp);
-  float crest = 1.0 - abs(sin(ph));
-  crest = crest * crest;
+  float fr = detFade(LAM, fp);
+  if (fr > 0.0) {
+    float warp = detNoise(p + 3.0, 3.5, gx, gy) - 0.5;
+    float ph = q.x / LAM * 6.2831 + warp * 10.0;
+    float amp = smoothstep(0.25, 0.6, detNoise(p - 13.0, 9.0, gx, gy)) * fr;
+    float crest = 1.0 - abs(sin(ph));
+    crest = crest * crest;
+    h = crest * 0.07 * amp;
+    hollow = (1.0 - crest) * amp * 0.6;
+  }
   // soft lumps 1 m wide
-  float lump = detNoise(p + 71.0, 1.0, gx, gy);
   float fl = detFade(1.0, fp);
-  h = crest * 0.07 * amp + lump * 0.05 * fl;
+  if (fl > 0.0) {
+    float lump = detNoise(p + 71.0, 1.0, gx, gy);
+    h += lump * 0.05 * fl;
+    hollow += (0.5 - lump) * fl * 0.8;
+  }
   // the hollows hold a blue shade
-  float hollow = (1.0 - crest) * amp * 0.6 + (0.5 - lump) * fl * 0.8;
   c = mix(c, c * vec3(0.84, 0.91, 1.05), clamp(hollow, 0.0, 1.0) * 0.6);
   #ifndef DETAIL_LOW
-  float gl = detNoise(p + 13.0, 0.025, gx, gy);
-  c *= 1.0 + (gl - 0.5) * 0.14 * detFade(0.025, fp);
+  float fg = detFade(0.025, fp);
+  if (fg > 0.0) c *= 1.0 + (detNoise(p + 13.0, 0.025, gx, gy) - 0.5) * 0.14 * fg;
   #endif
   return c;
 }
