@@ -161,10 +161,13 @@ function siteHearing(world, what) {
   // a reload reads the same record back
   ok('store', C.loadFixes('Auralis').fixes.length === 2, 'the record did not survive a read');
 
-  // the brief: a record with no flag reads as not briefed, and the mark stands after a reload
-  ok('store', C.loadFixes('Auralis').briefed === false, 'a record with no flag read as briefed');
-  ok('store', C.markBriefed('Auralis').briefed === true, 'markBriefed() did not mark the brief');
-  ok('store', C.loadFixes('Auralis').briefed === true, 'the brief did not survive a read');
+  // the brief: a record with no flag reads as stage 0, the mark stands after a reload, and it rises
+  // to a later stage and never falls back
+  ok('store', C.loadFixes('Auralis').briefed === 0, 'a record with no flag read as briefed');
+  ok('store', C.markBriefed('Auralis').briefed === 1, 'markBriefed() did not mark the brief');
+  ok('store', C.loadFixes('Auralis').briefed === 1, 'the brief did not survive a read');
+  ok('store', C.markBriefed('Auralis', 3).briefed === 3, 'markBriefed() did not rise to a later stage');
+  ok('store', C.markBriefed('Auralis', 2).briefed === 3, 'markBriefed() fell back to an earlier stage');
   ok('store', C.loadFixes('Auralis').fixes.length === 2, 'the brief took the fixes with it');
 
   // the find. It drops the fixes of that seed, because the search is over.
@@ -180,7 +183,7 @@ function siteHearing(world, what) {
   // the clear keeps the find and the brief
   rec = C.clearFixes('Auralis');
   ok('store', rec.fixes.length === 0 && rec.found === true, 'the clear took the find with the fixes');
-  ok('store', rec.briefed === true, 'the clear took the brief with the fixes');
+  ok('store', rec.briefed === 3, 'the clear took the brief with the fixes');
   ok('store', C.foundSeeds().has('Auralis'), 'foundSeeds() missed a found world');
 
   // the bound on the fixes of one seed: the oldest goes first
@@ -207,9 +210,10 @@ function siteHearing(world, what) {
   ok('store', store.get(WORLDS_KEY) === '[{"seed":"Auralis"}]', 'the store of the saved worlds lost its key');
 
   // a record of garbage reads as empty and throws nothing
-  store.set(C.CARRIER_KEY, '{"Bad": {"fixes": [1, {"lat": "x"}], "found": "yes", "briefed": 3}}');
+  store.set(C.CARRIER_KEY, '{"Bad": {"fixes": [1, {"lat": "x"}], "found": "yes", "briefed": 9}, "Old": {"fixes": [], "briefed": true}}');
   rec = C.loadFixes('Bad');
-  ok('store', rec.fixes.length === 0 && rec.found === true && rec.briefed === true, 'a record of garbage did not clean up');
+  ok('store', rec.fixes.length === 0 && rec.found === true && rec.briefed === C.BRIEF_STAGES, 'a record of garbage did not clean up');
+  ok('store', C.loadFixes('Old').briefed === 1, 'the flag of an older build did not read as stage 1');
   store.set(C.CARRIER_KEY, 'not json at all');
   ok('store', C.loadFixes('Bad').fixes.length === 0, 'a key of rubbish did not read as empty');
   store.clear();

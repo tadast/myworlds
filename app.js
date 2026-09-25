@@ -5,9 +5,10 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, carrierAt, carrierBox, sourceSite } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, carrierAt, carrierBox, sourceSite, siteCell, CELL } from './site.js';
 import { loadFixes, addFix, markFound, markBriefed, clearFixes, foundSeeds } from './carrier-store.js';
-import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, showMarker } from './carrier-globe.js';
+import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, showMarker, wedgePlanes, inWedge, goalCell } from './carrier-globe.js';
+import { sameCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
 import { Ground } from './ground.js';
@@ -215,6 +216,7 @@ let current = null; // { group, spin, oceanMat, cloudGroup, moons, ringMesh, dat
 let carrierRecord = null;
 let carrierGroup = null;
 let pendingFix = null;    // the fix of the last landing, waiting for the ascent to end
+let carrierStage = null;  // the stage of the search on this landing, for the brief. See stageAt().
 
 // A record of the store with the bearing and the error of every fix computed again.
 //
@@ -247,7 +249,7 @@ function disposeWorld() {
   // only reach the geometry. The same call takes the wedges out of the uniforms of the shaders, so
   // the next world starts with none. See disposeCarrierGroup() in carrier-globe.js.
   disposeCarrierGroup(carrierGroup);
-  carrierGroup = null; carrierRecord = null; pendingFix = null;
+  carrierGroup = null; carrierRecord = null; pendingFix = null; carrierStage = null;
   current.group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
@@ -1266,11 +1268,16 @@ function enterGround() {
   //
   // A found world takes no fix. The search is over and the globe carries the wreck at the source,
   // so a new wedge would only ask a question the reader has answered. addFix() holds the same rule.
+  //
+  // The stage of the search reads the fixes before this landing, so the wedge of this cell does not
+  // count toward the cross it stands in.
+  const before = carrierRecord ? freshFixes(current.world, carrierRecord).fixes : [];
   if (carrier && carrierGroup && !(carrierRecord && carrierRecord.found)) {
     const at = snapSite(lockedSite);
     pendingFix = { lat: at.lat, lon: at.lon, brg: carrier.brg, err: carrier.err };
     carrierRecord = addFix(current.world.seed, pendingFix);
   }
+  carrierStage = carrier ? stageAt(current.world, lockedSite, carrier, before) : null;
   renderInfo(current.world);   // the sidebar gains its flora row, and the Carrier row counts the fix
   const t0 = performance.now();
   ground.load(patchState.result, { sunDir: view.sunDir, view, carrier });
@@ -1281,9 +1288,10 @@ function enterGround() {
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
   probeHud.show();
   // Risk 4 of issue 34: a reader may never look at the fifth block. The block pulses on every
-  // landing that hears the carrier until the reader opens the brief of this world, and it stands
-  // quiet after the find as well, because a reader who has read the log knows what the block is.
-  probeHud.setPulse(!!carrier && !!carrierRecord && !carrierRecord.briefed && !carrierRecord.found);
+  // landing that hears the carrier until the reader opens the brief of this stage of the search,
+  // and it stands quiet after the find as well, because a reader who has read the log knows what
+  // the block is.
+  setBriefPulse();
   perf.reset();       // the orbit frames say nothing about the ground
   showMarker(null, current);
   writeHash();
@@ -1294,6 +1302,7 @@ function leaveGround() {
   if (plantInspector.open) closeCard();   // the plant of a patch cannot be studied from orbit
   probeHud.hide();
   if (ground) { ground.dispose(); ground = null; }
+  carrierStage = null;
   markedKind = null; markedPlant = null; markedSource = false;  // the marks belong to the patch, and the patch is gone
   setCarrierLevel();  // the probe has left the cell, so the motif takes its orbit level
   perf.reset();       // the ground frames say nothing about the globe
@@ -1316,6 +1325,7 @@ function abortProbe() {
   perf.reset();
   dive = null;
   pendingFix = null;        // the wedge of that landing waited for an ascent that will not come
+  carrierStage = null;
   lockedSite = null;
   pendingView = null;
   patchJob = null;
@@ -1693,17 +1703,69 @@ function carrierState(w) {
 }
 
 // ---------------------------------------------------------------- the brief of the carrier
-// The reader lands, the fifth block pulses, and a press on it opens this. It says what the
-// instrument does and how the three phases of the search work, and it names no control the reader
-// has to find. The first open marks the world briefed and the pulse stops for good on that world.
-// The block stays a control after that, so the reader can read the brief again on any landing.
+// The reader lands, the fifth block pulses, and a press on it opens this. The brief follows the
+// landing, and it names no control the reader has to find. Three stages:
+//
+//   1  far      the probe hears the carrier. The brief says how the wedges find the cell from orbit.
+//   2  cross    the cell lies inside two or more of the earlier wedges, or the range of decision 7
+//               shows, but it is not the cell of the carrier. The brief says what to do in orbit.
+//   3  landing  the cell of the carrier. The wreck stands inside the reach of the probe, and the
+//               brief says to follow the needle.
+//
+// A press on the block marks the stage read, and the pulse stops. A landing of a later stage pulses
+// again, because its brief is new. The block stays a control on every landing, so the reader can
+// read the brief of that landing again.
 //
 // The ground takes no pointer lock, so nothing has to be released here. The overlay itself takes no
 // pointer event except on that one block, so the press never starts a look drag and never picks.
 const briefDlg = $('#carrier-brief');
+const BRIEF_TITLE = ['', 'Distress signal', 'Stronger signal', 'Carrier in reach'];
+const BRIEF_HINT = ['', 'New signal · tap', 'Stronger signal · tap', 'Carrier in reach · tap'];
+
+// The stage of the search on one landing, and the next step of stage 2. `before` holds the fixes
+// of the earlier landings, so the wedge of this cell is not part of the cross.
+//
+// The next step of stage 2 comes from the record after this landing, which is what the globe draws
+// at the end of the ascent: the filled cell of the carrier when the wedges close on it, else the
+// count of cells along the bearing when the range shows, else one more wedge.
+function stageAt(world, site, carrier, before) {
+  const at = snapSite(site);
+  const src = sourceSite(world);
+  if (src && sameCell(siteCell(at), siteCell(src))) return { n: 3 };
+  const dir = siteDir(at.lat, at.lon);
+  const here = siteCell(at);
+  const crossed = before.filter((f) => !sameCell(siteCell(f), here) && inWedge(wedgePlanes(f), dir)).length;
+  const near = carrier.rangeKm != null;
+  if (crossed < 2 && !near) return { n: 1 };
+  const found = carrierRecord && carrierRecord.found;
+  const goal = !found && carrierRecord && goalCell(world, freshFixes(world, carrierRecord).fixes);
+  const next = goal ? 'goal' : near ? 'near' : 'far';
+  return { n: 2, next, cells: Math.max(1, Math.round(carrier.arc / CELL)), brg: carrier.brg };
+}
+
+// The pulse of the fifth block, from the stage of this landing and the stage the reader has read.
+function setBriefPulse() {
+  const st = carrierStage;
+  const on = !!st && !!carrierRecord && !carrierRecord.found && carrierRecord.briefed < st.n;
+  probeHud.setPulse(on, st ? BRIEF_HINT[st.n] : null);
+}
+
+// Show the part of the brief for one stage. A landing with no stage, which only the debug hook can
+// open, gets stage 1.
+function fillBrief(st) {
+  const n = st ? st.n : 1;
+  briefDlg.querySelector('#carrier-brief-title').textContent = BRIEF_TITLE[n];
+  briefDlg.querySelectorAll('[data-stage]').forEach((el) => { el.hidden = +el.dataset.stage !== n; });
+  briefDlg.querySelectorAll('[data-next]').forEach((el) => { el.hidden = !st || el.dataset.next !== st.next; });
+  if (st && st.next === 'near') {
+    briefDlg.querySelector('[data-cells]').textContent = st.cells === 1 ? '1 cell' : `${st.cells} cells`;
+    briefDlg.querySelector('[data-brg]').textContent = `${String(Math.round(st.brg) % 360).padStart(3, '0')}°`;
+  }
+}
 
 function openBrief() {
   if (!briefDlg || briefDlg.open) return;
+  fillBrief(carrierStage);
   // The ground listens for the flight keys on the window, and the keys of a modal dialog still
   // reach it. So the controls of the ground stop while the brief stands open, and the close gives
   // them back. A drag stops with them, which is what a modal asks for.
@@ -1711,7 +1773,7 @@ function openBrief() {
   briefDlg.showModal();
   probeHud.setPulse(false);
   if (current && current.world.source) {
-    carrierRecord = markBriefed(current.world.seed);
+    carrierRecord = markBriefed(current.world.seed, carrierStage ? carrierStage.n : 1);
   }
 }
 
@@ -2147,7 +2209,7 @@ window.__mw = {
   get plants() { return groundPlants; },
   get marked() { return { animal: markedKind, plant: markedPlant, source: markedSource }; },
   // the search of this world: the record of the store and the group of wedges under the planet
-  get carrier() { return { record: carrierRecord, group: carrierGroup, pending: pendingFix }; },
+  get carrier() { return { record: carrierRecord, group: carrierGroup, pending: pendingFix, stage: carrierStage }; },
   onSourceFound,
   briefCarrier: openBrief,       // opens the brief of the distress signal, as the block does
   aimAtSource,

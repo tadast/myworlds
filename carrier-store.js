@@ -8,11 +8,12 @@
 //
 // The shape under the key is one object keyed by seed:
 //
-//   { "Auralis": { fixes: [{ lat, lon, brg, err }], found: false, briefed: false, ts: 1758240000000 } }
+//   { "Auralis": { fixes: [{ lat, lon, brg, err }], found: false, briefed: 1, ts: 1758240000000 } }
 //
-// `briefed` says that the reader has opened the brief of the carrier on this world once. The block
-// of the overlay pulses until then. A record written before the flag reads as not briefed, so the
-// key does not move.
+// `briefed` is the highest stage of the search whose brief the reader has opened on this world, 0
+// to BRIEF_STAGES. The block of the overlay pulses on a landing of a higher stage. A record with no
+// flag reads as 0, and a record of an older build holds `true`, which reads as 1: that reader has
+// read the first brief, and the brief of each later stage is still new. So the key does not move.
 //
 // A shared URL carries no fix. The reader who opens a link starts the search with nothing.
 //
@@ -34,10 +35,17 @@ export const CARRIER_KEY = 'myworlds.carrier.v1';
 // first in both: the oldest fix of a seed, and the seed with the oldest write.
 export const MAX_FIXES = 4;
 export const MAX_SEEDS = 200;
+// The stages of the search, as app.js names them: 1 the probe hears the carrier, 2 the wedges cross
+// over the landing, 3 the landing is the cell of the carrier.
+export const BRIEF_STAGES = 3;
 
-const empty = () => ({ fixes: [], found: false, briefed: false, ts: 0 });
+const empty = () => ({ fixes: [], found: false, briefed: 0, ts: 0 });
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+// A stage as the store keeps it: a whole number in 0 to BRIEF_STAGES. `true` is the flag of an
+// older build.
+const asStage = (v) => (v === true ? 1 : Number.isInteger(v) ? Math.min(BRIEF_STAGES, Math.max(0, v)) : 0);
 
 // A fix holds four numbers and nothing else. A record from an older build, or from a hand that
 // edited the store, gives null here and the reader loses that one line and no more.
@@ -83,7 +91,7 @@ function recordOf(all, seed) {
   if (!r || typeof r !== 'object') return empty();
   const fixes = [];
   if (Array.isArray(r.fixes)) for (const f of r.fixes) { const fix = asFix(f); if (fix) fixes.push(fix); }
-  return { fixes: fixes.slice(-MAX_FIXES), found: !!r.found, briefed: !!r.briefed, ts: num(r.ts) || 0 };
+  return { fixes: fixes.slice(-MAX_FIXES), found: !!r.found, briefed: asStage(r.briefed), ts: num(r.ts) || 0 };
 }
 
 // The fixes of one world. A seed with no record gives an empty one, so no caller tests for null.
@@ -129,15 +137,17 @@ export function markFound(seed) {
   return rec;
 }
 
-// The reader has opened the brief of the carrier on this world. The block of the overlay pulses
-// until this stands, and the block is a control after it as well as before it, so the reader can
-// read the brief again on any landing that hears the carrier.
-export function markBriefed(seed) {
+// The reader has opened the brief of one stage on this world. The block of the overlay pulses on a
+// landing of a higher stage only, and the block is a control on every landing, so the reader can
+// read the brief again. The mark never falls: a reader who read the brief of the cell of the
+// carrier and lands far out again knows the search.
+export function markBriefed(seed, stage = 1) {
   if (!seed) return empty();
   const all = readAll();
   const rec = recordOf(all, seed);
-  if (rec.briefed) return rec;
-  rec.briefed = true;
+  const k = asStage(stage);
+  if (rec.briefed >= k) return rec;
+  rec.briefed = k;
   rec.ts = Date.now();
   all[seed] = rec;
   writeAll(all);

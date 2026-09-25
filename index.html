@@ -116,20 +116,41 @@
 
   <!-- The brief of the distress signal, issue 34. The carrier block of the overlay opens it, and it
        is built the way the about dialog above is built: a native <dialog>, the same card style, a
-       close button, and the Escape key of the browser. It says what the instrument does and how the
-       search works, and it names no key and no button the reader has to find. -->
+       close button, and the Escape key of the browser. It names no key and no button the reader
+       has to find.
+
+       The brief follows the landing. app.js shows one stage and hides the other two, and in the
+       second stage it shows one of the three next steps:
+         1  the probe hears the carrier: how the search finds the cell from orbit
+         2  the wedges cross over this cell, or the range shows, and the carrier is not here:
+            goal  the globe fills the cell of the carrier
+            near  the range gives a count of cells along the bearing
+            far   one more wedge must cut the cross
+         3  this is the cell of the carrier: the needle leads to it -->
   <dialog id="carrier-brief" aria-labelledby="carrier-brief-title">
     <form method="dialog" class="about-card">
       <button type="submit" class="cclose" aria-label="Close">×</button>
       <h2 id="carrier-brief-title">Distress signal</h2>
-      <p>The probe hears a distress signal. Something on this world still transmits.</p>
-      <p>The instrument shows a bearing to the source, with an error. It shows no distance. The signal does not reach the far side of the world.</p>
-      <ol class="brief-steps">
-        <li>Go back to orbit. The globe shows a wedge from this site. The source is inside the wedge.</li>
-        <li>Land at a second site, far to one side. The new wedge crosses the first.</li>
-        <li>Land where the wedges cross. Near the source, the instrument shows a range.</li>
-        <li>Follow the needle and walk to the source.</li>
-      </ol>
+      <div data-stage="1">
+        <p>The probe hears a distress signal. Something on this world still transmits.</p>
+        <p>The instrument shows a bearing to the source, with an error. It shows no distance. The signal does not reach the far side of the world.</p>
+        <ol class="brief-steps">
+          <li>Go back to orbit. The globe shows a wedge from this site. The source is inside the wedge.</li>
+          <li>Land at a second site, far to one side. The new wedge crosses the first.</li>
+          <li>Land where the wedges cross. Near the source, the instrument shows a range.</li>
+          <li>Follow the needle and walk to the source.</li>
+        </ol>
+      </div>
+      <div data-stage="2" hidden>
+        <p>The signal is stronger, but the carrier is not within the reach of the probe.</p>
+        <p data-next="goal">Go back to orbit. The globe fills the cell of the carrier. Land on that cell.</p>
+        <p data-next="near">The carrier is about <b data-cells>1 cell</b> from this cell, on the bearing <b data-brg>000°</b>. Go back to orbit, and land that far along the wedge of this site.</p>
+        <p data-next="far">Go back to orbit. The wedge of this site cuts the cross of the wedges before it. Land again where all the wedges cross. When three wedges close on a few cells, the globe fills the cell of the carrier.</p>
+      </div>
+      <div data-stage="3" hidden>
+        <p>The signal is strong. The carrier is on this ground, within the reach of the probe.</p>
+        <p>Use the needle to navigate to the carrier. The needle points to it, and the range goes down as the probe comes near.</p>
+      </div>
     </form>
   </dialog>
 
@@ -186,7 +207,7 @@
         <b id="hud-brg">—</b>
         <div class="hud-sub"><span class="k" id="hud-err">±0°</span><span class="k" id="hud-strength">Faint</span></div>
         <span class="k" id="hud-range" hidden></span>
-        <span class="k hud-hint">New signal · tap</span>
+        <span class="k hud-hint" id="hud-hint">New signal · tap</span>
       </div>
     </button>
     <div class="hud-link">

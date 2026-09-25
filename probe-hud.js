@@ -74,6 +74,7 @@ export class ProbeHud {
     this.elErr = root.querySelector('#hud-err');
     this.elStrength = root.querySelector('#hud-strength');
     this.elRange = root.querySelector('#hud-range');
+    this.elHint = root.querySelector('#hud-hint');
     if (this.elCarrier && onCarrier) this.elCarrier.addEventListener('click', onCarrier);
     this.bars = [];
     if (this.elBars) {
@@ -101,12 +102,13 @@ export class ProbeHud {
   }
 
   // The pulse of the carrier block. Risk 4 of issue 34: a reader may never look at the fifth block.
-  // The block pulses on every landing that hears the carrier until the reader opens the brief, and
-  // it then stands quiet for good on that world. The pulse runs without end, because one flash on
-  // one landing is a thing a reader can miss. Under prefers-reduced-motion the CSS gives a static
-  // highlight instead of an animation, so the block still stands out and nothing moves.
-  setPulse(on) {
+  // The block pulses on every landing that hears the carrier until the reader opens the brief of
+  // that stage of the search, and `hint` names the stage. The pulse runs without end, because one
+  // flash on one landing is a thing a reader can miss. Under prefers-reduced-motion the CSS gives a
+  // static highlight instead of an animation, so the block still stands out and nothing moves.
+  setPulse(on, hint) {
     if (this.elCarrier) this.elCarrier.classList.toggle('pulse', !!on);
+    if (hint && this.elHint) this.elHint.textContent = hint;
   }
 
   hide() {
