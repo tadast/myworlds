@@ -1412,7 +1412,7 @@ if (probeFloat) probeFloat.addEventListener('click', onProbeClick);
 let markedKind = null;    // the species of the marked animal, or null while nothing is marked
 let markedPlant = null;   // the kind of the marked plant, or null while nothing is marked
 // Issue 34: the wreck takes the same button. One patch holds at most one wreck, so a flag says all
-// there is to say. The button then reads "Read the log" and it opens the card of the source.
+// there is to say. The button then reads "Download the log" and it opens the card of the source.
 let markedSource = false;
 let creatureLabel = '';
 // The plants of the patch the probe is standing on, tallest first, and the flora signature the
@@ -1433,8 +1433,8 @@ function updateCreatureFloat() {
       const p = plantOf(markedPlant);
       if (p) label = `Study the ${p.lore.name}`;   // the same form the animal takes, so one button reads one way
     } else if (markedSource) {
-      // The wreck is not a subject to study but a record to read, so the button says what it does.
-      label = 'Read the log';
+      // The wreck is not a subject to study. The probe pulls the log off its recorder, so the button says that.
+      label = 'Download the log';
     }
   }
   if (label === creatureLabel) return;
@@ -2034,10 +2034,21 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   if (ground) ground.resize(innerWidth, innerHeight);
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
-  if (inspector.open) inspector.resize();
-  if (plantInspector.open) plantInspector.resize();
-  if (sourceInspector.open) sourceInspector.resize();
 });
+// The preview of the card follows the box of its canvas, not the window. Each subject lays the card
+// out in its own way, and the box of the canvas changes after show() measured it: the subject flips
+// the layout, a media query moves it, or the card grows. The observer measures again each time, so
+// the camera keeps the aspect of the box and the preview never stretches.
+if (window.ResizeObserver) {
+  const previews = new Map([[creatureCanvas, inspector], [plantCanvas, plantInspector], [sourceCanvas, sourceInspector]]);
+  const ro = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const ins = previews.get(e.target);
+      if (ins.open && e.contentRect.width > 0) ins.resize();
+    }
+  });
+  for (const cv of previews.keys()) ro.observe(cv);
+}
 
 // pick a creature under a screen point: nearest projected instance on the visible hemisphere
 const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pn = new THREE.Vector3(), _pm = new THREE.Matrix4();
