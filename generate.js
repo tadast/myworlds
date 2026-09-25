@@ -861,7 +861,12 @@ function generate(seed, opts = {}, post = () => {}) {
   }
 
   post(60, 'Stirring the crust');
-  const act = makeActivity(makeRng(seed + '|activity'), type, world, P, pos, vCount, H, T, R, amp, beachW);
+  // The height map of the globe, built once. A fissure reads it inside makeActivity(), and nothing
+  // writes R after the activity, so the world takes the same map. A volcano raises its cone into R
+  // and reads no map, so on its world the map is built after the cone.
+  let survey = null;
+  const surveyed = () => survey || (survey = buildHeightMap(pos, R, vCount));
+  const act = makeActivity(makeRng(seed + '|activity'), type, world, P, pos, vCount, H, T, R, amp, beachW, surveyed);
   const paintAct = act ? act.paint : null;
   const blockV = act ? act.block : null;
   // Issue 34. The source stands after the activity, because a volcano raises the ground it must
@@ -872,7 +877,6 @@ function generate(seed, opts = {}, post = () => {}) {
   // per-face colouring, expanded to non-indexed triangles
   const outPos = new Float32Array(triCount * 9);
   const outCol = new Float32Array(triCount * 9);
-  const faceBiome = new Uint8Array(triCount); // 1 = forestable land
   const tmp = [0, 0, 0];
   const biomeColor = (h, t, m, fi, out) => {
     let c;
@@ -900,7 +904,6 @@ function generate(seed, opts = {}, post = () => {}) {
     outPos[o + 3] = pos[b * 3] * R[b]; outPos[o + 4] = pos[b * 3 + 1] * R[b]; outPos[o + 5] = pos[b * 3 + 2] * R[b];
     outPos[o + 6] = pos[c * 3] * R[c]; outPos[o + 7] = pos[c * 3 + 1] * R[c]; outPos[o + 8] = pos[c * 3 + 2] * R[c];
     for (let k = 0; k < 3; k++) { outCol[o + k] = tmp[k]; outCol[o + 3 + k] = tmp[k]; outCol[o + 6 + k] = tmp[k]; }
-    faceBiome[f] = h > beachW && t > 0.12 && h < snowLine - 0.2 + (t - 0.5) * 0.25 ? 1 : 0;
     if ((f & 32767) === 0) post(62 + (f / triCount) * 18, 'Painting biomes');
   }
 
@@ -964,7 +967,7 @@ function generate(seed, opts = {}, post = () => {}) {
 
   post(86, 'Surveying the ground');
   // coarse lat/lon height map (radius factors) so creatures can follow the terrain on the main thread
-  const { heightMap, HM_W, HM_H } = buildHeightMap(pos, R, vCount);
+  const { heightMap, HM_W, HM_H } = surveyed();
   world.heightMapSize = [HM_W, HM_H];
   world.seaRadius = world.hasOcean ? 1 + amp * 0.004 : 0;
 
@@ -1238,7 +1241,7 @@ function sampleHeightMap(hm, W, Hh, x, y, z) {
   return hm[Math.min(W - 1, Math.floor(u)) + Math.min(Hh - 1, Math.floor(w)) * W];
 }
 
-function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW) {
+function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW, surveyed) {
   world.activity = null;
   if (rng() >= (type === 'lava' ? 0.8 : 0.667)) return null;
   const table = ACTIVITY[type];
@@ -1326,7 +1329,7 @@ function makeActivity(rng, type, world, P, pos, vCount, H, T, R, amp, beachW) {
   } else if (kind === 'fissure') {
     // a long ragged crack walks across the land with a wandering heading, sideways jitter,
     // and a few short branches; every line stops at the shore. The longest of six tries wins.
-    const { heightMap, HM_W, HM_H } = buildHeightMap(pos, R, vCount);
+    const { heightMap, HM_W, HM_H } = surveyed();
     const seaR = world.hasOcean ? 1 + amp * 0.004 : 0;
     const rot = (vec, axis, ang) => {
       const c = Math.cos(ang), s = Math.sin(ang), k = axis, d = dot3(k, vec);
