@@ -26,6 +26,7 @@ const LAMP_R = 0.75;         // units, the lamp itself
 const HALO_R = 2.1;          // units, the glow around it
 const LAMP_FLOOR = 0.14;     // the lamp never goes fully out, so the reader can find it between beats
 const LAMP_TAIL = 0.42;      // the decay of one beat, as a part of one step of the motif
+const LAMP_BREATH = 0.3;     // the swell of the floor over one bar, so the lamp pulses on a motif with few steps too
 const LIGHT_RANGE = 260;     // units, how far the lamp light reaches on HIGH
 const LIGHT_CD = 900;        // candela at the lamp, in the light scale of ground.js
 const PICK_PAD = 6;          // units: the tap box stands this far out from the body
@@ -161,6 +162,23 @@ function lampParts(color) {
   return { core, halo };
 }
 
+// The level of the lamp, 0 to 1, at one point of the four-bar period of the motif. A step lights
+// it for about one step of the grid and it falls away fast, so the eye reads the rhythm the ear
+// hears. Between the beats the floor swells and falls once a bar, so the lamp never holds still: a
+// motif with few steps would otherwise leave a flat dim lamp for most of a bar.
+function lampLevel(m, clock) {
+  let k = 0;
+  for (const s of m.steps) {
+    const age = clock - s * m.stepDur;
+    if (age < 0 || age > m.stepDur * 4) continue;
+    const v = Math.exp(-age / (m.stepDur * LAMP_TAIL));
+    if (v > k) k = v;
+  }
+  const bar = m.period / 4;
+  const floor = LAMP_FLOOR + LAMP_BREATH * (0.5 - 0.5 * Math.cos((2 * Math.PI * clock) / bar));
+  return floor + (1 - floor) * k;
+}
+
 export class SourceWreck {
   // The wreck of this patch, or null when the patch carries none. Every cell but one gives null and
   // costs nothing, the way Phenomena.create() does.
@@ -216,20 +234,7 @@ export class SourceWreck {
     }
   }
 
-  // The level of the lamp, 0 to 1, at one point of the four-bar period of the motif. A step lights
-  // it for about one step of the grid and it falls away fast, so the eye reads the rhythm the ear
-  // hears. The floor keeps a dim lamp between the beats, which is what the reader walks toward.
-  _level(clock) {
-    const m = this.motif;
-    let k = 0;
-    for (const s of m.steps) {
-      const age = clock - s * m.stepDur;
-      if (age < 0 || age > m.stepDur * 4) continue;
-      const v = Math.exp(-age / (m.stepDur * LAMP_TAIL));
-      if (v > k) k = v;
-    }
-    return LAMP_FLOOR + (1 - LAMP_FLOOR) * k;
-  }
+  _level(clock) { return lampLevel(this.motif, clock); }
 
   update(t) {
     // The bar clock of the song when the sound runs, so the eye and the ear agree. With no sound the
@@ -435,14 +440,7 @@ export class SourceInspector {
     if (this.lamp && this.motif) {
       const m = this.motif;
       const clock = ((t % m.period) + m.period) % m.period;
-      let k = 0;
-      for (const s of m.steps) {
-        const age = clock - s * m.stepDur;
-        if (age < 0 || age > m.stepDur * 4) continue;
-        const v = Math.exp(-age / (m.stepDur * LAMP_TAIL));
-        if (v > k) k = v;
-      }
-      this.lamp.material.color.copy(this.lampColor).multiplyScalar(0.3 + 0.7 * (LAMP_FLOOR + (1 - LAMP_FLOOR) * k));
+      this.lamp.material.color.copy(this.lampColor).multiplyScalar(0.3 + 0.7 * lampLevel(m, clock));
     }
     this.renderer.render(this.scene, this.camera);
   }
