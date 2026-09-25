@@ -18,6 +18,9 @@ tank, and a mast of the crew: the parts the log names. `hullOf(world)` in `wreck
 one of four hulls from the seed: a rocket, a spaceplane, a rotor-rocket, or a ring-tank tripod. A
 world with no air takes the rocket or the tripod. The pick is a pure function of the seed, as the
 motif is, so no stream of `generate.js` draws one number more. The log does not read the hull.
+The crew lived beside the ship, in a camp: a half-sphere dome with an airlock, crates, a solar
+array, and the water tank of the fuel maker. Each hull names a free spot for it on the flattened
+disc. `wreckGeometry(hull, { camp: false })` leaves it off, and the mini wreck on the globe does so.
 
 The plan and the terms are in `docs/issues/34-the-carrier.md`. Use the words of that table:
 carrier, source, bearing, fix, wedge, wreck, motif, log.

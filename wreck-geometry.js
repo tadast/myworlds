@@ -50,12 +50,15 @@ export function hullOf(world) {
   return list[(h >>> 0) % list.length];
 }
 
-// The body of one hull, with the place of its lamp in geo.userData.lamp.
-export function wreckGeometry(hull = 'rocket') {
-  if (hull === 'spaceplane') return spaceplane();
-  if (hull === 'rotor') return rotor();
-  if (hull === 'tripod') return tripod();
-  return rocket();
+// The body of one hull and the camp of its crew, with the place of the lamp in geo.userData.lamp.
+// The mini wreck on the globe passes camp: false, because a camp at that size reads as noise.
+export function wreckGeometry(hull = 'rocket', { camp = true } = {}) {
+  const build = hull === 'spaceplane' ? spaceplane : hull === 'rotor' ? rotor : hull === 'tripod' ? tripod : rocket;
+  const body = build();
+  const parts = camp ? [...body.parts, ...campParts(body.camp[0], body.camp[1])] : body.parts;
+  const geo = mergeParts(parts);
+  geo.userData.lamp = body.lamp;
+  return geo;
 }
 
 // ---------------------------------------------------------------- the parts
@@ -193,6 +196,51 @@ function crewMast(x, z, h = MAST_H, guy = 4.5, head = true) {
   return { parts, lamp: [top[0], h + 0.4, top[2]] };
 }
 
+// ---------------------------------------------------------------- the camp
+// The crew did not live in the ship. They lived in a dome beside it: a half sphere on a ring, an
+// airlock tunnel with the door toward the ship, a row of windows, and around it the rest of a
+// camp: crates, a solar array, and the water tank of the fuel maker. Each hull names a spot for
+// it in the free ground of the disc the worker flattened, about 8 to 10 units out, and the door
+// turns to face the ship. The camp stands a little smaller than life, so it fits inside the disc.
+const C_DOOR = '#c0662e';     // the paint of a hatch: a made colour, and not one of the palette
+const C_CRATE = '#7d735c';
+const C_SOLAR = '#27365a';
+const CAMP_K = 0.85;
+
+function campParts(cx, cz) {
+  const p = [];
+  const R = 3;
+  // the dome, its ring, and three windows a third of the way up
+  p.push(part(new THREE.SphereGeometry(R, 12, 5, 0, Math.PI * 2, 0, Math.PI / 2), C_PANEL, 0, 0.3, 0));
+  p.push(part(new THREE.CylinderGeometry(R + 0.1, R + 0.25, 0.5, 12), C_HULL_DARK, 0, 0.25, 0));
+  for (const a of [-0.9, 0.9, Math.PI]) {
+    const e = 0.55;
+    p.push(part(new THREE.BoxGeometry(0.2, 0.5, 1.0), C_GLASS,
+      R * Math.cos(e) * Math.cos(a), 0.3 + R * Math.sin(e), -R * Math.cos(e) * Math.sin(a), 0, a, e));
+  }
+  // the airlock along +x, and its door
+  p.push(part(new THREE.CylinderGeometry(1.0, 1.0, 2.2, 8), C_HULL, R + 0.3, 1.0, 0, 0, 0, Math.PI / 2));
+  p.push(part(new THREE.BoxGeometry(0.2, 1.5, 1.0), C_DOOR, R + 1.45, 0.95, 0));
+  // crates by the door, one on another
+  p.push(part(new THREE.BoxGeometry(1.1, 1.1, 1.1), C_CRATE, R + 1.4, 0.55, 2.0, 0, 0.3, 0));
+  p.push(part(new THREE.BoxGeometry(0.9, 0.8, 0.9), C_CRATE, R + 1.5, 1.5, 1.9, 0, 0.8, 0));
+  p.push(part(new THREE.BoxGeometry(1.2, 0.8, 0.9), C_HULL_DARK, R + 0.6, 0.4, -2.3, 0, -0.4, 0));
+  // the solar array behind, two panels on posts, tilted up
+  for (const x of [-1.6, 1.3]) {
+    p.push(strut([x, 0, 4.0], [x, 1.2, 4.0], 0.1, 0.1, C_LEG, 4));
+    p.push(part(new THREE.BoxGeometry(2.6, 0.12, 1.5), C_SOLAR, x, 1.3, 4.0, 0.55, 0, 0));
+  }
+  p.push(strut([0, 0.06, 3.3], [-0.2, 0.06, R - 0.2], 0.05, 0.05, C_BURN, 3));   // the cable in
+  // the tank of the fuel maker, and a pipe to the dome
+  p.push(part(new THREE.CylinderGeometry(0.8, 0.8, 1.8, 8), C_HULL, -R - 0.9, 0.9, -1.4));
+  p.push(strut([-R - 0.2, 0.5, -1.2], [-R + 0.3, 0.5, -0.9], 0.08, 0.08, C_LEG, 4));
+  // the door turns to face the ship at the origin
+  const yaw = Math.atan2(cz, -cx);
+  const m = new THREE.Matrix4().compose(new THREE.Vector3(cx, 0, cz),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)), new THREE.Vector3(CAMP_K, CAMP_K, CAMP_K));
+  return pose(p, m);
+}
+
 // ---------------------------------------------------------------- the four hulls
 
 // A tall reusable booster with the crew cabin on its nose. It came down on four legs, the leg on
@@ -255,9 +303,7 @@ function rocket() {
   // the crew mast holds the dish and no lamp: the nose is higher
   const mast = crewMast(6.5, -6.5, 10, 3.5, false);
   parts.push(...mast.parts);
-  const geo = mergeParts(parts);
-  geo.userData.lamp = at(m, 0, top + 5.9, 0);
-  return geo;
+  return { parts, lamp: at(m, 0, top + 5.9, 0), camp: [-6, -6] };
 }
 
 // A lifting body that came in on its belly. The nose points to +x. The top is white tile and the
@@ -285,9 +331,7 @@ function spaceplane() {
   parts.push(part(plate([[0, 0], [-4, 0], [-3.4, 4.2]], 0.35), C_PANEL, -3.5, 0.25, -8.5, Math.PI / 2, 0.6, 0));
   const mast = crewMast(5.5, -7);
   parts.push(...mast.parts);
-  const geo = mergeParts(parts);
-  geo.userData.lamp = mast.lamp;
-  return geo;
+  return { parts, lamp: mast.lamp, camp: [6, 7] };
 }
 
 // A gumdrop with a rotor head. The rotors brought it down through the air; the bell under the heat
@@ -319,9 +363,7 @@ function rotor() {
   parts.push(strut([-3.2, 1.5, 2.8], [-6.2, 0.3, 4.8], 0.3, 0.25, C_LEG, 5));
   parts.push(strut([-3.2, 1.5, -2.8], [-6.0, 0.3, -5.0], 0.3, 0.25, C_LEG, 5));
   parts.push(part(new THREE.BoxGeometry(0.8, 0.6, 0.8), C_HULL_DARK, tip[0], tip[1] - 0.2, tip[2]));
-  const geo = mergeParts(parts);
-  geo.userData.lamp = [tip[0], tip[1] + 0.5, tip[2]];
-  return geo;
+  return { parts, lamp: [tip[0], tip[1] + 0.5, tip[2]], camp: [-4.5, -9] };
 }
 
 // A crew sphere on a ring tank, the bell under the sphere, three tall legs. The leg on the -z side
@@ -356,7 +398,5 @@ function tripod() {
   }
   const mast = crewMast(-2.5, -9.2);
   parts.push(...mast.parts);
-  const geo = mergeParts(parts);
-  geo.userData.lamp = mast.lamp;
-  return geo;
+  return { parts, lamp: mast.lamp, camp: [7.4, 4.2] };
 }

@@ -540,7 +540,7 @@ function makeWreckModel(world, hm) {
   };
   obj.add(pin);
 
-  const geo = wreckGeometry(hullOf(world));
+  const geo = wreckGeometry(hullOf(world), { camp: false });
   const bb = geo.boundingBox;
   const foot = Math.min(bb.min.y, 0);                   // the ground under the hull, in patch units
   const unit = MODEL_H / Math.max(bb.max.y - foot, 1e-6); // globe radii per unit of the patch
