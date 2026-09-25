@@ -17,31 +17,15 @@
 //    slack hides it.
 // 2. The hand of the box. In the ground frame x cross z is -y. The cross of the two steps must
 //    point down, on every site.
-// 3. The patch with no cell. The east, the up, and the south of tangentFrame() read (1, 0, 0),
+// 3. The frame of a site. The east, the up, and the south of tangentFrame() read (1, 0, 0),
 //    (0, 1, 0), and (0, 0, 1) through groundBasis() with no twist, so the rows of its matrix stand
-//    in the right order.
+//    in the right order. The bearing of the carrier and the sky both take this frame.
 //
 // The map under test is boxTanX(), boxTanZ(), and tangentFrame() of cell-grid.js, the one copy that
 // generate.js builds the box with. tools/cell-grid-check.mjs tests the map on its own.
 //
-// site.js and ground-sky.js take three.js by the bare name `three`, which the import map of
-// index.html resolves in the browser. Node has no import map, so a resolve hook points the same
-// two names at vendor/.
-import { register } from 'node:module';
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const root = pathToFileURL(dir + '/').href;
-const hook = `
-const root = ${JSON.stringify(root)};
-const ADDONS = 'three/addons/';
-export async function resolve(spec, ctx, next) {
-  if (spec === 'three') return { url: root + 'vendor/three.module.js', shortCircuit: true };
-  if (spec.startsWith(ADDONS)) return { url: root + 'vendor/addons/' + spec.slice(ADDONS.length), shortCircuit: true };
-  return next(spec, ctx);
-}`;
-register('data:text/javascript,' + encodeURIComponent(hook));
+// site.js and ground-sky.js take three.js by a bare name; three-hook.mjs resolves it in Node.
+import { root } from './three-hook.mjs';
 
 const THREE = await import('three');
 const S = await import(root + 'site.js');
@@ -54,7 +38,7 @@ const SIZE = 1500;          // units, the side of the box
 const STEP = 300;           // units of the box: the step along an axis
 const X_TOL = 1e-3;         // how far the +x step may stand off (1, 0)
 const Z_MIN = 0.85;         // the least z part of the +z step: cos of the 30 deg a face corner bends
-const FLAT_TOL = 1e-9;      // the slack on the frame of a patch with no cell
+const FLAT_TOL = 1e-9;      // the slack on the frame of a site
 
 function mulberry32(a) {
   return function () {
@@ -116,7 +100,7 @@ for (const site of sites) {
     + `  +x ${f(ax)}  +z ${f(az)}  hand ${hand.toFixed(3)}`);
 }
 
-// ---------------------------------------------------------------- 3: the patch with no cell
+// ---------------------------------------------------------------- 3: the frame of a site
 let worstFlat = 0;
 for (let i = 0; i < 200; i++) {
   const site = S.dirToSite(randDir());
@@ -127,7 +111,7 @@ for (let i = 0; i < 200; i++) {
   const u = new THREE.Vector3(...t.up).applyMatrix4(basis);
   const off = Math.max(e.distanceTo(new THREE.Vector3(1, 0, 0)), u.distanceTo(new THREE.Vector3(0, 1, 0)),
     s.distanceTo(new THREE.Vector3(0, 0, 1)));
-  if (off > FLAT_TOL) fail('no cell', `site ${site.lat.toFixed(2)},${site.lon.toFixed(2)}: the frame of tangentFrame() stands ${off.toExponential(1)} off the ground frame`);
+  if (off > FLAT_TOL) fail('site frame', `site ${site.lat.toFixed(2)},${site.lon.toFixed(2)}: the frame of tangentFrame() stands ${off.toExponential(1)} off the ground frame`);
   worstFlat = Math.max(worstFlat, off);
 }
 
@@ -135,7 +119,7 @@ for (let i = 0; i < 200; i++) {
 console.log('frame-check: the axes of the ground box, read in the ground frame of groundBasis()');
 console.log(`  +x must read (1, 0) and +z must read toward (0, 1), z part ${Z_MIN} or more. hand must read near -1.`);
 for (const r of rows) console.log(r);
-console.log(`  no cell  the frame of tangentFrame() stood ${worstFlat.toExponential(1)} off the ground frame at worst`);
+console.log(`  site frame  the frame of tangentFrame() stood ${worstFlat.toExponential(1)} off the ground frame at worst`);
 if (fails.length) {
   console.error('\nFAIL');
   for (const f of fails) console.error('  ' + f);

@@ -12,11 +12,16 @@
 // check measures the worlds and the patches a reader gets and cannot drift from them.
 //
 // A world line hashes the arrays the reader would see change: the height map, the position and the
-// colour of the globe, the flora, the clouds, the fauna, and the flora grid. It also hashes the
-// world object as JSON, which carries the species, their lore, and the log of the source.
+// colour of the globe, the flora, the clouds, the fauna, and the flora grid. Then it hashes the
+// world object as JSON in two parts: the facts, which carry the genomes of the species and the
+// place of the source, and last the lore, the words the lore writers give the world.
 //
-// A patch line hashes every array of the patch and the patch object as JSON, which carries the
-// lore of the plants, the biome, and the place of the wreck. Each world with a surface lands at
+// A patch line hashes every array of the patch and the patch object as JSON in the same two parts:
+// the facts, which carry the biome and the place of the wreck, and last the lore of the plants.
+//
+// The lore writers draw from streams of their own, so a change of wording moves the last column of
+// a line and no other. A change of the ground that comes in the same commit still shows in the
+// columns before it. Each world with a surface lands at
 // three sites: a fixed site with a pull to the first species, the cell of the source, and the cell
 // of the phenomenon when the ground can draw it.
 //
@@ -79,10 +84,36 @@ function hashBytes(bytes) {
 const hashArray = (arr) => (arr ? hashBytes(new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength)) : '-');
 const hashJson = (obj) => hashBytes(new TextEncoder().encode(JSON.stringify(obj)));
 
+// The lore of a world: the story of every species, the log of the source, the two lines of the
+// stats card the lore writes, and the plant words of flora-lore.js. The facts are the rest. A key
+// set to undefined drops out of JSON.stringify, so the facts keep the order of the keys they had.
+function splitWorld(w) {
+  const lore = {
+    species: (w.species || []).map((g) => g.lore),
+    log: w.source ? w.source.log : null,
+    life: w.stats && w.stats.life, fauna: w.stats && w.stats.fauna,
+    floraTags: w.env && w.env.floraTags, plantWord: w.env && w.env.plantWord,
+  };
+  const facts = {
+    ...w,
+    species: (w.species || []).map((g) => ({ ...g, lore: undefined })),
+    source: w.source && { ...w.source, log: undefined },
+    stats: w.stats && { ...w.stats, life: undefined, fauna: undefined },
+    env: w.env && { ...w.env, floraTags: undefined, plantWord: undefined },
+  };
+  return [hashJson(facts), hashJson(lore)];
+}
+
+// The lore of a patch: the lore of every plant kind it grows.
+function splitPatch(p) {
+  const plants = p.plants || [];
+  return [hashJson({ ...p, plants: plants.map((x) => ({ ...x, lore: undefined })) }), hashJson(plants.map((x) => x.lore))];
+}
+
 const patchLine = (seed, name, label, p) => [seed, name, 'patch', label, p.patch.biome.replace(/ /g, '_'),
   hashArray(p.heights), hashArray(p.colors), hashArray(p.flora), hashArray(p.grass),
   hashArray(p.groups), hashArray(p.members), hashArray(p.rimHeights), hashArray(p.rimColors),
-  hashJson(p.patch)].join(' ');
+  ...splitPatch(p.patch)].join(' ');
 
 // A patch depends only on its arguments. On the LOW tier the source patch of each world is built a
 // second time after the world of another seed, so generate.js holds another world in its cache and
@@ -97,7 +128,7 @@ function linesFor(seed) {
     const w = r.world;
     lines.push([seed, name, 'world', w.type,
       hashArray(r.heightMap), hashArray(r.terrain.pos), hashArray(r.terrain.col), hashArray(r.flora),
-      hashArray(r.clouds), hashArray(r.fauna), hashArray(r.floraGrid), hashJson(w)].join(' '));
+      hashArray(r.clouds), hashArray(r.fauna), hashArray(r.floraGrid), ...splitWorld(w)].join(' '));
     if (w.type === 'gas') continue;
     const src = cellOf(w.source), act = cellOf(w.activity);
     const sites = [['fixed', FIXED_SITE], ['source', src && cellSite(src)], ['activity', act && cellSite(act)]];

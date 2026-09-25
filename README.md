@@ -31,9 +31,9 @@ node tools/carrier-fix-check.mjs
 node tools/lore-audit/audit.mjs
 ```
 
-- `world-checksum` drives `worker.js` itself, on both device tiers of `tiers.js`, and hashes every world and every patch against `tools/world-checksum.baseline.txt`. It also fails when the cell of the source holds no wreck, when another cell holds one, or when a phenomenon stands off its cell. A change that must leave the worlds alone must match it. Record a new baseline only for a change that must move the worlds, and state in the commit which hashes move and why.
+- `world-checksum` drives `worker.js` itself, on both device tiers of `tiers.js`, and hashes every world and every patch against `tools/world-checksum.baseline.txt`. It also fails when the cell of the source holds no wreck, when another cell holds one, or when a phenomenon stands off its cell. The last column of a line hashes the lore and nothing else, so a change of wording moves that column and a change of the ground moves the others. A change that must leave the worlds alone must match it. Record a new baseline only for a change that must move the worlds, and state in the commit which hashes move and why.
 - `cell-grid-check` tests the interface of `cell-grid.js`: the round trip of a cell, the shared edges, the arc of a cell, the box and its inverse, the hand of the box, the frame of a site, and the site of every cell.
-- `frame-check` and `carrier-check` test the box against the frame of the sky, the needle, and the bearing. `carrier-fix-check` tests the store and the wedges of the search.
+- `frame-check` and `carrier-check` test the box against the frame of the sky, the needle, and the bearing. `carrier-fix-check` tests the store and the wedges of the search. These three import modules of the page, which take three.js by a bare name; `tools/three-hook.mjs` is the one resolve hook that points the name at `vendor/`.
 - `lore-audit/audit.mjs` sweeps every lore permutation. See "Fauna" and "Flora" below.
 
 ## Icons and the share image

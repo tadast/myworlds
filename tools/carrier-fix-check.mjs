@@ -29,23 +29,8 @@
 //    source, and two fixes or three wide ones do not. A find takes the wedges away, keeps the
 //    source cell filled, and stands a pin of PIN_H on it with a model of MODEL_H on top.
 //
-// site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
-// the browser. Node has no import map, so a resolve hook points the same name at vendor/, as
-// tools/carrier-check.mjs does.
-import { register } from 'node:module';
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const root = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') + '/').href;
-const hook = `
-const root = ${JSON.stringify(root)};
-const ADDONS = 'three/addons/';
-export async function resolve(spec, ctx, next) {
-  if (spec === 'three') return { url: root + 'vendor/three.module.js', shortCircuit: true };
-  if (spec.startsWith(ADDONS)) return { url: root + 'vendor/addons/' + spec.slice(ADDONS.length), shortCircuit: true };
-  return next(spec, ctx);
-}`;
-register('data:text/javascript,' + encodeURIComponent(hook));
+// site.js takes three.js by a bare name; three-hook.mjs resolves it in Node.
+import { root } from './three-hook.mjs';
 
 // The store reads localStorage the moment a call runs, so the fake stands before the import.
 const WORLDS_KEY = 'myworlds.v1';
