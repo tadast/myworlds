@@ -14,6 +14,7 @@ import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
 import { SourceWreck } from './ground-source.js';
+import { applyDetail } from './ground-detail.js';
 import { perf } from './perf.js';
 import { TIERS } from './tiers.js';
 
@@ -299,11 +300,13 @@ function hash1(i) {
   return ((i ^ (i >>> 16)) >>> 0) / 4294967296;
 }
 
-// flatShading takes the normal from the derivatives, so the mesh carries no normal attribute
-function makeGeometry(pos, col, idx) {
+// flatShading takes the normal from the derivatives, so the mesh carries no normal attribute. The
+// surface is the biome of each vertex plus one, for the fine pattern of ground-detail.js.
+function makeGeometry(pos, col, idx, sur) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  if (sur) geo.setAttribute('aSurface', new THREE.BufferAttribute(sur, 1));
   if (idx) geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeBoundingSphere();
   return geo;
@@ -478,6 +481,8 @@ export class Ground {
 
     const p = result && result.patch;
     this.heights = p ? result.heights : null;
+    // the biome of every node plus one, which the fine pattern of the terrain reads
+    this.surface = p && result.surface && result.surface.length ? result.surface : null;
     // the ground cover mask of issue 21, on its own grid at twice the terrain step
     this.cover = p && result.grass && result.grass.length ? result.grass : null;
     this.coverN = this.cover && p.cover ? p.cover.n : 0;
@@ -635,6 +640,15 @@ export class Ground {
       sh.vertexShader = sh.vertexShader.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3( 0.0, 1.0, 0.0 );');
     };
     mat.customProgramCacheKey = () => 'terrain-up-normal';
+    // The fine pattern of the ground. The ripples and the snow ridges lie across the wind of the
+    // clouds; a world with no clouds takes a wind from the site.
+    const s = this.site || { lat: 0, lon: 0 };
+    const wind = this.sky && this.sky.wind != null ? this.sky.wind
+      : hash1(Math.round(s.lat * 100) * 73856093 ^ Math.round(s.lon * 100) * 19349663) * Math.PI * 2;
+    applyDetail(mat, {
+      type: this.world && this.world.type, palette: this.world && this.world.palette, wind,
+      low: !this.tier.shadows, anisotropy: Math.min(8, this.renderer.capabilities.getMaxAnisotropy()),
+    });
     this.terrainMat = mat;
     this._addBlocks(0, this.n - 1, 0, this.n - 1, mat);
     // The rim carries the ground out past the fog, in one mesh with the same material.
@@ -725,8 +739,10 @@ export class Ground {
   // between the two rows that use it.
   _gridGeometry(i0, i1, j0, j1) {
     const n = this.n, g = this.grid, half = this.half, H = this.heights, C = this.result.colors;
+    const S = this.surface;
     const w = i1 - i0 + 1, d = j1 - j0 + 1;
     const pos = new Float32Array(w * d * 3), col = new Float32Array(w * d * 3);
+    const sur = S ? new Uint8Array(w * d) : null;
     let o = 0;
     for (let j = j0; j <= j1; j++) {
       const z = -half + j * g, jn = j * n;
@@ -735,6 +751,7 @@ export class Ground {
         pos[o] = -half + i * g; pos[o + 1] = H[k]; pos[o + 2] = z;
         const t = 1 + (hash1(k) - 0.5) * 2 * JITTER;
         col[o] = C[c3] * t; col[o + 1] = C[c3 + 1] * t; col[o + 2] = C[c3 + 2] * t;
+        if (sur) sur[o / 3] = S[k];
         o += 3;
       }
     }
@@ -755,7 +772,7 @@ export class Ground {
         }
       }
     }
-    return makeGeometry(pos, col, idx);
+    return makeGeometry(pos, col, idx, sur);
   }
 
   // ---------------------------------------------------------------- the rim, issue 18
@@ -768,7 +785,8 @@ export class Ground {
     const r = result.patch && result.patch.rim;
     if (!r || !result.rimHeights || !result.rimColors) return;
     const rim = {
-      h: result.rimHeights, c: result.rimColors, n: r.n, step: r.step, out: r.out,
+      h: result.rimHeights, c: result.rimColors, s: result.rimSurface || null,
+      n: r.n, step: r.step, out: r.out,
       d: Math.round((r.out - this.half) / r.step),   // rim cells from the outer edge to the patch
       cols: Math.round(this.half * 2 / r.step),      // rim cells across the patch
       m: Math.round(r.step / this.grid),             // patch steps per rim cell
@@ -777,10 +795,12 @@ export class Ground {
 
     const n = this.n, rn = rim.n, d = rim.d, m = rim.m;
     const H = this.heights, C = result.colors, RH = rim.h, RC = rim.c;
+    const S = this.surface, RS = S ? rim.s : null;
     const take = (ri, rj, pi, pj) => {
       const q = rj * rn + ri, s = pj * n + pi;
       RH[q] = H[s];
       RC[q * 3] = C[s * 3]; RC[q * 3 + 1] = C[s * 3 + 1]; RC[q * 3 + 2] = C[s * 3 + 2];
+      if (RS) RS[q] = S[s];
     };
     for (let a = 0; a <= rim.cols; a++) {
       const p = a * m;
@@ -816,6 +836,8 @@ export class Ground {
     }
     const vCount = rn * rn + 8 * n;                  // the coarse nodes, and two rows per strip
     const pos = new Float32Array(vCount * 3), col = new Float32Array(vCount * 3);
+    const S = this.surface, RS = S && rim.s;
+    const sur = RS ? new Uint8Array(vCount) : null;
     const tris = cells * 2 + 4 * (n - 1) * 2;
     const idx = vCount > 65536 ? new Uint32Array(tris * 3) : new Uint16Array(tris * 3);
 
@@ -826,6 +848,7 @@ export class Ground {
         const k = j * rn + i, c3 = k * 3;
         pos[o] = -out + i * s; pos[o + 1] = rim.h[k]; pos[o + 2] = z;
         col[o] = rim.c[c3]; col[o + 1] = rim.c[c3 + 1]; col[o + 2] = rim.c[c3 + 2];
+        if (sur) sur[k] = RS[k];
         o += 3;
       }
     }
@@ -853,6 +876,7 @@ export class Ground {
         pos[o + 2] = -half + (pj + dj * a) * grid;
         const t = 1 + (hash1(k) - 0.5) * 2 * JITTER;
         col[o] = C[c3] * t; col[o + 1] = C[c3 + 1] * t; col[o + 2] = C[c3 + 2] * t;
+        if (sur) sur[v] = S[k];
         o += 3; v++;
       }
       return first;
@@ -865,6 +889,8 @@ export class Ground {
         pos[o] = x; pos[o + 1] = this._rimAt(x, z); pos[o + 2] = z;
         this._rimColorAt(x, z, _tint);
         col[o] = _tint[0]; col[o + 1] = _tint[1]; col[o + 2] = _tint[2];
+        // a biome does not blend, so the strip takes the one of the nearest rim node
+        if (sur) sur[v] = RS[this._rimNode(x, z)];
         o += 3; v++;
       }
       return first;
@@ -882,7 +908,7 @@ export class Ground {
     bind(patchRow(0, n - 1, 1, 0), rimRow(-half, half + s, grid, 0));       // south
     bind(patchRow(0, 0, 0, 1), rimRow(-half - s, -half, 0, grid));          // west
     bind(rimRow(half + s, -half, 0, grid), patchRow(n - 1, 0, 0, 1));       // east
-    return makeGeometry(pos, col, idx);
+    return makeGeometry(pos, col, idx, sur);
   }
 
   // The height of the rim at a point, bilinear on the coarse grid and clamped to its edge.
@@ -896,6 +922,14 @@ export class Ground {
     const a = H[j0 * n + i0], b = H[j0 * n + i0 + 1];
     const c = H[(j0 + 1) * n + i0], d = H[(j0 + 1) * n + i0 + 1];
     return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
+  }
+
+  // The index of the rim node nearest to a point.
+  _rimNode(x, z) {
+    const r = this.rim, n = r.n, s = r.step, out = r.out;
+    const i = Math.min(n - 1, Math.max(0, Math.round((x + out) / s)));
+    const j = Math.min(n - 1, Math.max(0, Math.round((z + out) / s)));
+    return j * n + i;
   }
 
   _rimColorAt(x, z, out3) {
@@ -1891,6 +1925,7 @@ export class Ground {
     this.scene.clear();
     this.result = null;
     this.heights = null;
+    this.surface = null;
     this.cover = null;
     this.rim = null;
     this.sky = null;

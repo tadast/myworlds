@@ -169,6 +169,7 @@ export class Sky {
     this.moons = [];
     this.clouds = [];
     this.cloudMesh = null;
+    this.wind = null;          // the angle the clouds drift at, or null on a world without clouds
     this._m = new THREE.Matrix4();
     this._v = new THREE.Vector3();
     this._q = new THREE.Quaternion();
@@ -443,6 +444,7 @@ export class Sky {
     inst.renderOrder = 2;
     inst.frustumCulled = false;
     const wind = rng() * Math.PI * 2, speed = 1.5 + rng() * 2;
+    this.wind = wind;     // the ripples and the snow ridges of ground-detail.js lie across it
     for (let i = 0; i < n; i++) {
       this.clouds.push({
         x: (rng() * 2 - 1) * CLOUD_SPAN,

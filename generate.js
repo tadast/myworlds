@@ -2793,6 +2793,9 @@ function patch(seed, site, opts = {}, post = () => {}) {
 
   post(66, 'Painting the ground');
   const colors = new Float32Array(n * n * 3);
+  // The biome of every node, plus one, so 0 stays free for a node that carries no surface. The
+  // terrain shader of ground-detail.js reads it to pick the fine pattern of the ground.
+  const surface = new Uint8Array(n * n);
   const tint = [0, 0, 0];
   const invZ = 1 / (2 * grid);
   const beachH = BEACH_M * H_PER_M;   // the sand strip, in the elevation units biomeIndex reads
@@ -2812,7 +2815,9 @@ function patch(seed, site, opts = {}, post = () => {}) {
       const t = cellT[k];
       // the forest mask lifts the moisture a little, so a cell inside a forest cluster reads green
       const m = cellM[k] - vary[k] * 0.1 + Math.max(cellF[k], 0) * 0.06;
-      biomeTint(ctx, biomeIndex(ctx, hg, t, m, beachH), hg, k, tint);
+      const bi = biomeIndex(ctx, hg, t, m, beachH);
+      surface[k] = bi + 1;
+      biomeTint(ctx, bi, hg, k, tint);
       // Under the water line the bed darkens from the shallow tint to the deep tint over DEEP_M
       // metres, so shallow water reads through the translucent sea plane of ground-sea.js.
       if (h < 0) {
@@ -2929,6 +2934,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
   }
 
   const rimColors = new Float32Array(rimN * rimN * 3);
+  const rimSurface = new Uint8Array(rimN * rimN);
   const rimInvZ = 1 / (2 * rimStep);
   for (let j = 0; j < rimN; j++) {
     const jn = j * rimN;
@@ -2943,7 +2949,9 @@ function patch(seed, site, opts = {}, post = () => {}) {
       const dhz = (rimHeights[j2 + i] - rimHeights[j1 + i]) * iz;
       const t = rimT[k];
       const m = rimMo[k] - rimVary[k] * 0.1 + Math.max(rimFm[k], 0) * 0.06;
-      biomeTint(ctx, biomeIndex(ctx, hg, t, m, beachH), hg, k, tint);
+      const bi = biomeIndex(ctx, hg, t, m, beachH);
+      rimSurface[k] = bi + 1;
+      biomeTint(ctx, bi, hg, k, tint);
       if (h < 0) {
         const dp = smoothstep(0, DEEP_M, -h);
         tint[0] = lerp(P.shallow[0], P.deep[0], dp);
@@ -3007,7 +3015,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
       elevation, radiusKm: ctx.radiusKm,
       seaLevel: 0, hasSea, shore: hasSea && hasLand,
     },
-    heights, colors, flora, grass, groups, members, rimHeights, rimColors,
+    heights, colors, flora, grass, groups, members, rimHeights, rimColors, surface, rimSurface,
   };
   return result;
 }
