@@ -21,8 +21,12 @@ The map that divides the sphere into cells: six faces of a cube, each face cut i
 _Avoid_: band grid, lat/lon grid, tile grid
 
 **Cell**:
-One quad of the cell grid, named by a face and two indices. The reader picks a cell, and the whole cell becomes the ground of a landing.
+One quad of the cell grid, named by a face and two indices. The reader picks a cell, and the whole cell becomes the ground of a landing. Two cells are the same cell when the face and the two indices agree. `sameCell()` in `cell-grid.js` is the only test.
 _Avoid_: tile, square (the square is the marker that shows a cell on the globe)
+
+**Site**:
+A lat and a lon in degrees, to two decimals, in the local frame of the planet. The URL keeps one, a fix keeps one, and the patch call takes one. The site of record is the middle of its cell, and two decimals cannot move it into the cell next door. Many sites fall in one cell, so a site never names a cell by its numbers.
+_Avoid_: location, position
 
 **Patch**:
 The ground of one landing at true scale: the terrain, the plants, the animals, the sea, and the rim of one cell.
@@ -45,5 +49,5 @@ _Avoid_: worldgen, the worker (the worker is only the adapter that runs generati
 _Avoid_: generate message
 
 **Patch call**:
-`generate.patch()`: the seed, a site, and the options in, one patch out. The options carry the options of the world call as `world`, and the patch reads the world that call builds.
+`generate.patch()`: the seed, a site, and the options in, one patch out. The call finds the cell of the site and builds that whole cell, so every site of one cell gives the same patch. From its world it reads the width of the cell and whether the cell holds the phenomenon or the source. The options are the options of the world call as `world`, and the ground row of a device tier; `patchOpts()` in `tiers.js` builds them.
 _Avoid_: patch message

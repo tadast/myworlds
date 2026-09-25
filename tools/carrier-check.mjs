@@ -49,6 +49,7 @@ register('data:text/javascript,' + encodeURIComponent(hook));
 
 const THREE = await import('three');
 const S = await import(root + 'site.js');
+const W = await import(root + 'cell-grid.js');
 const { groundBasis } = await import(root + 'ground-sky.js');
 
 const PAIRS = 1000;         // pairs of a site and a source
@@ -81,7 +82,7 @@ function snapDir(d) {
 
 // A world with nothing but the members carrierAt() reads.
 function worldWith(seed, dir) {
-  return { seed, source: { kind: 'wreck', dir: [dir.x, dir.y, dir.z] }, stats: { radius: '6,000' } };
+  return { seed, source: { kind: 'wreck', dir: [dir.x, dir.y, dir.z] }, env: { radiusKm: 6000 } };
 }
 
 // The three axes of the ground frame at a site, from ground-sky.js. The matrix holds them as its
@@ -170,7 +171,8 @@ for (let i = 0; i < 200; i++) {
   const world = worldWith('Here' + i, snapDir(randDir()));
   const site = S.sourceSite(world);
   const c = S.carrierAt(world, site);
-  if (!S.sourceHere(world, site)) fail('here', `world ${i}: sourceHere() missed its own cell`);
+  const src = world.source.dir;
+  if (!W.sameCell(S.siteCell(site), W.dirCell(src[0], src[1], src[2]))) fail('here', `world ${i}: sourceSite() left the cell of the source`);
   if (c.arc > 0.0005) fail('here', `world ${i}: the arc on the cell of the source is ${c.arc.toFixed(6)} rad`);
   if (c.rangeKm == null) fail('here', `world ${i}: the cell of the source states no range`);
   worstHere = Math.max(worstHere, c.arc);
@@ -218,7 +220,6 @@ let reachRow = '';
 // patch() in generate.js builds the box with boxTanX() and boxTanZ() of cell-grid.js. The checks
 // below take the map from that file and hold no copy of it, so a change of the box fails here and
 // not on the ground.
-const W = await import(root + 'cell-grid.js');
 // dirOn() of patch() in generate.js, for a cell: the globe direction under a point of the box
 const dirOn = (cell, xu, zu, size) => new THREE.Vector3(...W.cellDirT(
   cell, W.boxTanX(cell, xu, size), W.boxTanZ(cell, zu, size), [0, 0, 0]));

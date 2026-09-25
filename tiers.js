@@ -75,3 +75,15 @@ export const RIM = 4000;             // units, how far the rim reaches from the 
 export function worldOpts(tier) {
   return { detail: tier.detail, maxFlora: tier.maxFlora, maxFauna: tier.maxFauna };
 }
+
+// The options of a patch message for one tier: the options of the world call, so the patch reads
+// the world the reader looked at, and the ground row. The patch finds the rest from the site and
+// its world. app.js sends these, and the Node tools build the same ones, so a check measures the
+// patch a reader gets.
+export function patchOpts(tier) {
+  const g = tier.ground;
+  return {
+    world: worldOpts(tier),
+    grid: g.grid, size: g.size, rim: RIM, maxFlora: g.maxFlora, maxFauna: g.maxFauna,
+  };
+}

@@ -3,7 +3,7 @@
 // it as a module worker: new Worker('./worker.js', { type: 'module' }).
 //
 // In:   { type: 'generate', seed, opts }
-//       { type: 'patch', seed, lat, lon, opts }
+//       { type: 'patch', seed, site: { lat, lon, kind }, opts }
 // Out:  { type: 'progress', pct, label }, any number of them
 //       { type: 'done', result } or { type: 'patch-done', result }
 //       { type: 'error', message }
@@ -29,7 +29,7 @@ self.onmessage = (e) => {
       const result = generate.world(msg.seed, msg.opts || {}, progress);
       self.postMessage({ type: 'done', result }, [...buffers(result)]);
     } else if (msg.type === 'patch') {
-      const result = generate.patch(msg.seed, { lat: msg.lat, lon: msg.lon }, msg.opts || {}, progress);
+      const result = generate.patch(msg.seed, msg.site, msg.opts || {}, progress);
       self.postMessage({ type: 'patch-done', result }, [...buffers(result)]);
     }
   } catch (err) {

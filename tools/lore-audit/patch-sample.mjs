@@ -6,22 +6,12 @@
 //
 // It runs generate.js in this process: the world call, then the patch call for one site, and it
 // prints every plant the patch grew. Use it to read whole stories after a change to flora-lore.js.
-// The world and the patch take the LOW row of tiers.js, and the site snaps to its cell, so the
-// patch is one a reader on a phone could land on.
-import { register } from 'node:module';
+// The world and the patch take the LOW row of tiers.js, and the patch call builds the whole cell
+// of the site, so the patch is one a reader on a phone could land on.
 import { Lore } from '../../lore.js';
 import * as generate from '../../generate.js';
-import { TIERS, worldOpts } from '../../tiers.js';
-
-// site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
-// the browser. Node has no import map, so a resolve hook points the same name at vendor/.
-const three = new URL('../../vendor/three.module.js', import.meta.url).href;
-register('data:text/javascript,' + encodeURIComponent(`
-export async function resolve(spec, ctx, next) {
-  if (spec === 'three') return { url: ${JSON.stringify(three)}, shortCircuit: true };
-  return next(spec, ctx);
-}`));
-const { patchOpts, snapSite, sourceSite } = await import('../../site.js');
+import { TIERS, worldOpts, patchOpts } from '../../tiers.js';
+import { dirCell, cellSite } from '../../cell-grid.js';
 const TIER = TIERS.LOW;
 
 const argv = process.argv.slice(2);
@@ -39,9 +29,10 @@ let bad = 0;
 for (const [seed, lat, lon] of runs) {
   const { world } = generate.world(seed, worldOpts(TIER));
   if (world.type === 'gas') { console.log(`--- ${seed}: gas giant, no ground`); continue; }
-  const site = lat === null ? sourceSite(world) : snapSite({ lat, lon });
-  const { patch } = generate.patch(seed, site, patchOpts(world, site, TIER));
-  console.log(`\n=== ${seed} @ ${site.lat},${site.lon} · ${world.typeLabel} · ${patch.biome} · ${patch.plants.length} plant kinds`);
+  const src = world.source && world.source.dir;
+  const site = lat === null ? cellSite(dirCell(src[0], src[1], src[2])) : { lat, lon };
+  const { patch } = generate.patch(seed, site, patchOpts(TIER));
+  console.log(`\n=== ${seed} @ ${patch.lat},${patch.lon} · ${world.typeLabel} · ${patch.biome} · ${patch.plants.length} plant kinds`);
   for (const p of patch.plants) {
     const l = p.lore;
     console.log(`\n  ${l.name} (${l.latin})  [kind ${p.kind}, ${p.count} on this ground]`);

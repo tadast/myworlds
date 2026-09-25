@@ -5,13 +5,13 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, patchOpts, carrierAt, carrierBox, sourceSite } from './site.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, carrierAt, carrierBox, sourceSite } from './site.js';
 import { loadFixes, addFix, markFound, markBriefed, clearFixes, foundSeeds } from './carrier-store.js';
 import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, showMarker } from './carrier-globe.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
 import { Ground } from './ground.js';
-import { TIERS, worldOpts } from './tiers.js';
+import { TIERS, worldOpts, patchOpts } from './tiers.js';
 import { skyView } from './ground-sky.js';
 import { ProbeHud } from './probe-hud.js';
 import { perf, Hud } from './perf.js';
@@ -1144,8 +1144,8 @@ function requestPatch(target) {
     },
   };
   getWorker().postMessage({
-    type: 'patch', seed: current.world.seed, lat: target.lat, lon: target.lon,
-    opts: patchOpts(current.world, target, Q),
+    type: 'patch', seed: current.world.seed,
+    site: { lat: target.lat, lon: target.lon, kind: target.kind ?? -1 }, opts: patchOpts(Q),
   });
 }
 

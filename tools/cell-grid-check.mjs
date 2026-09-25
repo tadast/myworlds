@@ -15,8 +15,13 @@
 // 6. The heading. boxHeading() points the way a short step toward a direction moves on the box.
 // 7. The frame. tangentFrame() gives three unit axes at right angles, east has no y part, and
 //    east cross up is south.
-import { CELL, FACE_CELLS, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, boxPoint, boxHeading, tangentFrame }
-  from '../cell-grid.js';
+// 8. The site. The middle of every cell of the grid, at two decimals of a degree, falls back in
+//    that cell, so the site of record carries its cell and the patch call builds the cell the
+//    reader aimed at. siteDir() is the up axis of tangentFrame(), and cellArc() is the arc of 3.
+import {
+  CELL, FACE_CELLS, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, boxPoint, boxHeading, tangentFrame,
+  siteDir, dirSite, siteCell, cellSite, sameCell, cellArc,
+} from '../cell-grid.js';
 
 const SIZE = 3000;          // units: the side of the box on HIGH
 const RIM = 4000;           // units: how far the rim reaches, RIM of tiers.js
@@ -165,6 +170,34 @@ const report = [];
     if (e > FRAME_TOL) fail('frame', `lat ${lat.toFixed(2)} lon ${lon.toFixed(2)}: the frame is off by ${e.toExponential(1)}`);
   }
   report.push(`  frame       tangentFrame() stood ${worst.toExponential(1)} off a right-handed unit frame at worst`);
+}
+
+// ---------------------------------------------------------------- 8: the site
+{
+  let cells = 0, worstUp = 0, worstArc = 0;
+  for (let face = 0; face < 6; face++) {
+    for (let i = 0; i < FACE_CELLS; i++) {
+      for (let j = 0; j < FACE_CELLS; j++) {
+        const c = { face, i, j, n: FACE_CELLS };
+        const at = cellSite(c);
+        if (!sameCell(siteCell(at.lat, at.lon), c)) fail('site', `${name(c)}: its site ${at.lat},${at.lon} fell in another cell`);
+        const d = cellDir(c, 0.5, 0.5), back = dirSite(...d);
+        if (back.lat !== at.lat || back.lon !== at.lon) fail('site', `${name(c)}: dirSite() and cellSite() disagree`);
+        if (j % 8 === 0) {
+          worstArc = Math.max(worstArc, Math.abs(cellArc(c) - arc(cellDir(c, 0, 0.5), cellDir(c, 1, 0.5))));
+          const { up } = tangentFrame(at.lat, at.lon);
+          worstUp = Math.max(worstUp, arc(siteDir(at.lat, at.lon), up));
+        }
+        cells++;
+      }
+    }
+  }
+  if (worstUp > 1e-7) fail('site', `siteDir() stands ${worstUp.toExponential(1)} rad off the up axis of tangentFrame()`);
+  if (worstArc > 1e-9) fail('site', `cellArc() differs from the arc across the middle by ${worstArc.toExponential(1)} rad`);
+  if (sameCell({ face: 0, i: 1, j: 2 }, { face: 1, i: 1, j: 2 }) || !sameCell({ face: 3, i: 4, j: 5, n: 1 }, { face: 3, i: 4, j: 5, n: 2 })) {
+    fail('site', 'sameCell() reads more or less than the face and the two indices');
+  }
+  report.push(`  site        the sites of all ${cells} cells fell back in their cells; siteDir() and cellArc() agree`);
 }
 
 console.log('cell-grid-check: the properties of cell-grid.js');

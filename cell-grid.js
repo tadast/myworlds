@@ -1,8 +1,8 @@
-// myworlds — the cell grid: the map that divides the sphere into cells, the map of the ground box
-// a patch draws a cell into, and the frame of a site. generate.js, site.js, ground-sky.js,
-// carrier-globe.js, and the Node tools import it, and none of them holds a copy. It holds no
-// three.js and no DOM, because the module worker imports it. A direction is an array [x, y, z] of
-// unit length in the planet's local frame; site.js turns the arrays into THREE.Vector3.
+// myworlds — the cell grid: the map that divides the sphere into cells, the cell of a site, the map
+// of the ground box a patch draws a cell into, and the frame of a site. generate.js, site.js,
+// ground-sky.js, carrier-globe.js, and the Node tools import it, and none of them holds a copy. It
+// holds no three.js and no DOM, because the module worker imports it. A direction is an array
+// [x, y, z] of unit length in the planet's local frame; site.js turns the arrays into THREE.Vector3.
 //
 // ---------------------------------------------------------------- the grid, issue 30
 // A cell is a quad of a cube grid and no longer a square of a band of latitude. A band grid
@@ -81,6 +81,61 @@ export function cellDirT(cell, a, b, out = [0, 0, 0]) {
   const l = Math.sqrt(x * x + y * y + z * z) || 1;
   out[0] = x / l; out[1] = y / l; out[2] = z / l;
   return out;
+}
+
+// Two cells are the same cell when the face and the two indices agree. This is the only test of
+// "same cell": two sites of the same cell can hold two different lats and lons.
+export function sameCell(a, b) {
+  return !!a && !!b && a.face === b.face && a.i === b.i && a.j === b.j;
+}
+
+// The arc across the middle of a cell, from the middle of one u edge to the middle of the other, in
+// radians. A cell of the cube grid is not exactly CELL of arc, so the width comes from the cell.
+// The patch takes this times the radius of the world as patch.span.
+const _arcA = [0, 0, 0], _arcB = [0, 0, 0];
+export function cellArc(cell) {
+  const a = cellDir(cell, 0, 0.5, _arcA), b = cellDir(cell, 1, 0.5, _arcB);
+  const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+  return 2 * Math.asin(clamp(Math.sqrt(dx * dx + dy * dy + dz * dz) / 2, 0, 1));
+}
+
+// ---------------------------------------------------------------- a site and its cell
+// A site is a lat and a lon in degrees in the planet's local frame, the frame of the arrays of
+// generation. Lat is asin(y). Lon is atan2(z, x). Two decimals. The URL keeps a site, a fix keeps
+// one, and the patch call takes one.
+//
+// The two factors are the ones three.js takes in degToRad() and radToDeg(), so site.js, which
+// works in THREE.Vector3, and the worker get the same bits from the same site.
+const DEG = Math.PI / 180, RAD = 180 / Math.PI;
+const round2 = (v) => Math.round(v * 100) / 100;
+
+// The unit direction of a site. Writes x, y, z into out.
+export function siteDir(lat, lon, out = [0, 0, 0]) {
+  const a = lat * DEG, o = lon * DEG;
+  const r = Math.cos(a);
+  out[0] = r * Math.cos(o); out[1] = Math.sin(a); out[2] = r * Math.sin(o);
+  return out;
+}
+
+// The site of a unit direction, to two decimals.
+export function dirSite(x, y, z) {
+  return { lat: round2(Math.asin(clamp(y, -1, 1)) * RAD), lon: round2(Math.atan2(z, x) * RAD) };
+}
+
+// The cell a site falls in.
+const _site = [0, 0, 0];
+export function siteCell(lat, lon) {
+  const d = siteDir(lat, lon, _site);
+  return dirCell(d[0], d[1], d[2]);
+}
+
+// The site at the middle of a cell. The middle carries the cell: it stands half a cell from every
+// edge, and two decimals of a degree cannot move it into the cell next door, so siteCell() of this
+// site gives the cell back. The reader lands on this site, and the source of a world stands on it.
+const _mid0 = [0, 0, 0];
+export function cellSite(cell) {
+  const d = cellDir(cell, 0.5, 0.5, _mid0);
+  return dirSite(d[0], d[1], d[2]);
 }
 
 // ---------------------------------------------------------------- the ground box

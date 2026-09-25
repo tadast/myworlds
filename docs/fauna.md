@@ -594,7 +594,7 @@ The anchor is the point the group holds. It is never drawn. The offsets place th
 group around the anchor on a jittered ring inside `spread`, so no two animals stand in one place.
 
 **Which species are present.** The species the site was pulled to is always present; the app sends
-its id as `opts.pulledKind`, or -1. Any other species is present when its niche is on the patch.
+its id as `site.kind` on the patch message, or -1. Any other species is present when its niche is on the patch.
 `patchNiches()` samples the patch grid within 300 m of the site and runs the tests `makeFauna()`
 runs on the globe, with the temperature and the moisture of the colour pass. A `sea` species and a
 `cloud` flyer are not placed; issue 15 gives them their water and their cloud deck.

@@ -5,21 +5,24 @@
 // Two calls make the interface, and they are exported at the end of this file:
 //
 //   world(seed, opts, onProgress)         the globe, the species, the source, and the sea level
-//   patch(seed, site, opts, onProgress)   the ground of one landing at a site { lat, lon }
+//   patch(seed, site, opts, onProgress)   the ground of the cell of a site { lat, lon, kind }
 //
 // Each call returns its result and throws on a failure. onProgress(pct, label) reports the build,
 // and a caller may leave it out. A patch takes the options of its world call as opts.world, and it
-// depends only on its arguments: see contextFor(). Every typed array in a result is new and belongs
-// to the caller, so worker.js can transfer them all. The world object of a result is the one a
-// later patch of that world reads, so a caller in the same thread must not change it. worker.js
-// runs the two calls off the main thread, and the Node tools import this file and call them.
+// depends only on its arguments: see contextFor(). The patch finds the cell of the site itself, and
+// reads from its world whether that cell holds the phenomenon or the source. The other options are
+// the ground row of a device tier: grid, size, rim, maxFlora, maxFauna. patchOpts() in tiers.js
+// builds them. Every typed array in a result is new and belongs to the caller, so worker.js can
+// transfer them all. The world object of a result is the one a later patch of that world reads, so
+// a caller in the same thread must not change it. worker.js runs the two calls off the main
+// thread, and the Node tools import this file and call them.
 //
 // This file holds no three.js and no DOM, because a module worker has no import map.
 import { Species } from './species.js';           // species genomes and lore
 import { FloraLore, FLORA_LORE } from './flora-lore.js';   // the plant vocabulary, written per patch
 import { SourceLore } from './source-lore.js';     // the log of the source, written per world
 import { Lore } from './lore.js';                 // the lore engine, shared with the flora
-import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, tangentFrame } from './cell-grid.js';
+import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, siteCell, cellSite, sameCell, cellArc } from './cell-grid.js';
 import { TYPES, TYPE_LABEL, TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE } from './world-types.js';
 
 // ---------------------------------------------------------------- hashing / rng
@@ -1504,8 +1507,8 @@ function makeSource(rng, ctx, world, beachW) {
       // is thrown away on a pole.
       const y = (rng() * 2 - 1) * sinLat, a = rng() * Math.PI * 2;
       const r = Math.sqrt(Math.max(0, 1 - y * y));
-      // The middle of the cell carries the cell, as snapSite() does in site.js: the reader lands on
-      // the middle of a cell, so the source stands there too or no landing could ever hold it. The
+      // The middle of the cell carries the cell, as cellSite() in cell-grid.js has it: the reader
+      // lands on the middle of a cell, so the source stands there too or no landing could hold it. The
       // tests run on the middle and not on the draw, because the snap moves a direction most of a
       // cell and that is far enough to reach the sea, a cliff, or the cell of the activity.
       const d = cellDir(dirCell(Math.cos(a) * r, y, Math.sin(a) * r), 0.5, 0.5, _srcDir);
@@ -1611,9 +1614,9 @@ const SHORE_DAMP = 45;                 // units: the band where the patch relief
 const FIELD_N = 65;                    // samples of the globe field across the patch, per side
 // The rim, issue 18. The rim is the ground the patch stands in: it runs from the edge of the box
 // out past the fog, so the reader at the ceiling sees relief in every direction and no square
-// edge. RIM_REACH is the default reach in units; ground.js sends the value it needs. A rim cell
-// is RIM_CELL patch steps, so a low tier draws a coarser rim, and the rim reads the globe field
-// once per RIM_FIELD_CELLS rim cells.
+// edge. RIM_REACH is the default reach in units; RIM in tiers.js is the value the page sends. A
+// rim cell is RIM_CELL patch steps, so a low tier draws a coarser rim, and the rim reads the globe
+// field once per RIM_FIELD_CELLS rim cells.
 const RIM_REACH = 4000;                // units from the site to the outer edge of the rim
 const RIM_CELL = 25;                   // patch grid steps per rim cell
 const RIM_FIELD_CELLS = 2;             // rim cells per sample of the globe field over the rim
@@ -1635,8 +1638,9 @@ const BEACH_M = 1.5;
 const DEEP_M = 12;
 
 // ---------------------------------------------------------------- the cell grid, issue 30
-// cell-grid.js holds the grid, the map of the ground box, and the frame of a site. app.js sends the
-// cell of a landing on the patch message; the source of issue 34 picks a cell of its own.
+// cell-grid.js holds the grid, the cell of a site, the map of the ground box, and the frame of a
+// site. patch() takes the cell of the site it is given; the source of issue 34 picks a cell of its
+// own.
 
 // The biome of one point, by the rules the globe paints with. beachW carries the width of the
 // beach band, so the patch can ask for a strip in metres where the globe asks for its own band.
@@ -2312,17 +2316,15 @@ function patchNiches(ctx, g) {
 //   groups:  x z, kind, count, spread, phase        (6 floats per group)
 //   members: group index, offset x, offset z, phase (4 floats per member)
 // A member offset is the place of the animal in the formation, in metres from the anchor.
-function patchFauna(ctx, opts, g) {
+function patchFauna(ctx, maxFauna = 0, pulled, g) {
   const empty = { groups: new Float32Array(0), members: new Float32Array(0) };
   const species = ctx.world.species || [];
-  const maxFauna = opts.maxFauna || 0;
-  if (!species.length || maxFauna <= 0) return empty;
+  if (!species.length || !(maxFauna > 0)) return empty;
 
   // Which species live here. The site was pulled to one species, so that one is always present.
   // A sea species and a cloud flyer wait for issue 15; this patch has no water and no cloud deck
   // to put them in.
   const niches = patchNiches(ctx, g);
-  const pulled = opts.pulledKind === undefined ? -1 : opts.pulledKind;
   const present = [];
   for (const G of species) {
     if (G.niche === 'sea' || G.niche === 'cloud') continue;
@@ -2385,11 +2387,19 @@ function patchFauna(ctx, opts, g) {
 }
 
 // ---------------------------------------------------------------- the phenomenon of a patch
-// A world holds at most one phenomenon. app.js says whether this landing cell is the cell that
-// holds it, and it names the kind in opts.activity. The worker then raises the shape at the origin
-// of the patch, paints it, and keeps the plants and the animals off it. ground-phenomena.js draws
-// the moving parts. The patch path never runs makeActivity: that function works on the globe mesh,
-// and the patch has no globe mesh. Issue 14.
+// A world holds at most one phenomenon. When the landing cell is the cell that holds it, the patch
+// raises the shape at the origin, paints it, and keeps the plants and the animals off it.
+// ground-phenomena.js draws the moving parts. The patch path never runs makeActivity: that function
+// works on the globe mesh, and the patch has no globe mesh. Issue 14.
+
+// The kind of a thing of the world that stands in a cell, or null. The phenomenon and the source
+// each keep a direction, and the cell of that direction is the one cell that holds the thing. So
+// one thing never stands in two patches, and a landing that reaches the cell without the pull
+// shows it too.
+function kindIn(thing, cell) {
+  const d = thing && thing.dir;
+  return d && sameCell(dirCell(d[0], d[1], d[2]), cell) ? thing.kind : null;
+}
 //
 // The ground shows a set piece and not the true scale. A cone at true scale is tens of kilometres
 // wide, so one flank would fill the whole cell and the reader would never see a volcano. The cone
@@ -2406,7 +2416,8 @@ const POOL_DROP = 1.2;       // units, how far the pool sits under the rim of th
 
 // The shape and the paint of the phenomenon at the origin of the patch. It rewrites the heights in
 // place and gives back the paint pass, the mask the plants read, and the numbers the main thread
-// needs. A kind the ground cannot draw yet gives null, and the patch then builds as before.
+// needs. A kind the ground cannot draw yet gives null, and the patch then builds as before. The
+// pull to life in site.js keeps the same two kinds in GROUND_ACTIVITY.
 function patchActivity(ctx, kind, s) {
   if (kind !== 'volcano' && kind !== 'geyser') return null;
   const { heights, n, grid, half } = s;
@@ -2471,10 +2482,10 @@ function patchActivity(ctx, kind, s) {
 }
 
 // ---------------------------------------------------------------- the source of a patch, issue 34
-// A world holds at most one source. app.js says whether this landing cell is the cell that holds
-// it, and it names the kind in opts.source. The worker then picks a place for the wreck, flattens a
-// disc under it, scorches the ground, and keeps the plants and the animals off that disc, the way
-// patchActivity() does for the phenomenon. ground-source.js draws the wreck itself.
+// A world holds at most one source. When the landing cell is the cell that holds it (see kindIn()),
+// the patch picks a place for the wreck, flattens a disc under it, scorches the ground, and keeps
+// the plants and the animals off that disc, the way patchActivity() does for the phenomenon.
+// ground-source.js draws the wreck itself.
 //
 // The wreck does not stand at the origin, and the phenomenon does. A volcano is the reason the
 // reader picked the cell, so it stands where the probe lands; a wreck is a thing to find on the
@@ -2602,15 +2613,22 @@ function patchSource(ctx, kind, s) {
   };
 }
 
-// A ground patch at one site: a square height grid and a colour per vertex, both in the frame
-// x east, y up, z south, with the origin at the site at sea level.
+// The ground of one landing: a square height grid and a colour per vertex, in the frame of the box
+// of the cell, with the origin at the middle of the cell at sea level.
+//
+// The patch belongs to the cell and not to the site. The call takes the cell the site falls in and
+// builds that whole cell from its middle, so every site of one cell gives the same patch. It reads
+// the rest from the world of its own context: the width of the cell, and whether the cell holds the
+// phenomenon or the source of the world. site.kind is the species the pull took the site to, or -1.
 function patch(seed, site, opts = {}, post = () => {}) {
-  const { lat, lon } = site;
   if (!opts.world) throw new Error('patch: opts.world is required; pass the options of the world call');
   post(4, 'Reading the site');
   const ctx = contextFor(seed, opts.world);
   if (ctx.type === 'gas') throw new Error('a gas giant has no ground');
   const P = ctx.P;
+  const cell = siteCell(site.lat, site.lon);
+  const { lat, lon } = cellSite(cell);
+  const pulled = site.kind ?? -1;
 
   const size = opts.size || 1500;
   const grid = opts.grid || 2;
@@ -2619,38 +2637,26 @@ function patch(seed, site, opts = {}, post = () => {}) {
   const radiusM = ctx.radiusKm * 1000;
   const M_PER_H = ctx.amp * radiusM / EXAGGERATION;   // globe elevation units to metres
   const H_PER_M = 1 / M_PER_H;
-  // K: metres of the globe across one unit of the ground box. The reader picks a cell on the
-  // globe, and the whole cell lands in the box, so K is the width of the cell over the width of
-  // the box. A patch with no span keeps the old behaviour, where one unit is one metre.
-  const span = opts.span > 0 ? opts.span : size;
+  // span: the metres of the globe across the middle of the cell. K: metres of the globe across one
+  // unit of the ground box. The whole cell lands in the box, so K is the width of the cell over the
+  // width of the box.
+  const span = cellArc(cell) * ctx.radiusKm * 1000;
   const K = span / size;
   // The metres of the globe across one unit of the box that the detail field works in. It is the
   // nominal cell of the world and not the true width of this cell: a cube cell is a little wider
   // in the middle of a face than at a corner, and a frequency that followed that width would put
   // the fine waves of two neighbours out of phase and no stream could join them.
-  const detailK = (opts.cell && opts.cell.n > 0
-    ? Math.PI / 2 / opts.cell.n * radiusM : span) / size;
+  const detailK = (Math.PI / 2 / cell.n * radiusM) / size;
 
-  // The direction on the globe under a point of the box, in units of the box from the site. With
-  // a cell the box lands exactly on the quad of the cube grid, so the patch next door reads the
-  // same direction along the edge the two share. Without one the patch keeps the tangent frame of
-  // the site, which is what a caller that knows no cell gets.
-  const cell = opts.cell && opts.cell.n > 0 ? opts.cell : null;
-  const { up: [ux, uy, uz], east: [ex, , ez], south: [sx, sy, sz] } = tangentFrame(lat, lon);
+  // The direction on the globe under a point of the box, in units of the box from the middle. The
+  // box lands exactly on the quad of the cube grid, so the patch next door reads the same direction
+  // along the edge the two share.
   const _d = [0, 0, 0];
   // The two gnomonic coordinates of a point of the box, one per axis. A loop that walks a row
   // takes the second one once for the whole row. See boxTanX().
-  const tanX = cell ? (xu) => boxTanX(cell, xu, size) : null;
-  const tanZ = cell ? (zu) => boxTanZ(cell, zu, size) : null;
-  const dirOn = cell
-    ? (xu, zu) => cellDirT(cell, tanX(xu), tanZ(zu), _d)
-    : (xu, zu) => {
-      const ax = xu * K / radiusM, az = zu * K / radiusM;
-      const dx = ux + ex * ax + sx * az, dy = uy + sy * az, dz = uz + ez * ax + sz * az;
-      const l = Math.hypot(dx, dy, dz) || 1;
-      _d[0] = dx / l; _d[1] = dy / l; _d[2] = dz / l;
-      return _d;
-    };
+  const tanX = (xu) => boxTanX(cell, xu, size);
+  const tanZ = (zu) => boxTanZ(cell, zu, size);
+  const dirOn = (xu, zu) => cellDirT(cell, tanX(xu), tanZ(zu), _d);
 
   const fld = { h: 0, t: 0, m: 0, fm: 0, r: 0, rg: 0 };
   // The globe field at a point of the patch, in units of the box from the site.
@@ -2739,12 +2745,12 @@ function patch(seed, site, opts = {}, post = () => {}) {
   const inland = Math.min(Math.abs(reliefLo), Math.abs(reliefHi)) / V > SHORE_DAMP
     && (reliefLo > 0 || reliefHi < 0);
   // the gnomonic coordinate of every column, so a row takes one tangent and not n of them
-  const colTan = cell ? new Float64Array(n) : null;
-  if (cell) for (let i = 0; i < n; i++) colTan[i] = tanX(-half + i * grid);
+  const colTan = new Float64Array(n);
+  for (let i = 0; i < n; i++) colTan[i] = tanX(-half + i * grid);
   for (let j = 0; j < n; j++) {
     const zm = -half + j * grid;
     const ez = half - Math.abs(zm);
-    const rowTan = cell ? tanZ(zm) : 0;
+    const rowTan = tanZ(zm);
     for (let i = 0; i < n; i++) {
       const xm = -half + i * grid;
       const f = fieldUnit(xm, zm);
@@ -2754,7 +2760,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
       // a line the reader sees from the ceiling.
       const e = Math.min(ez, half - Math.abs(xm));
       const fade = e >= edgeFade ? 1 : smoothstep(0, edgeFade, e);
-      const d = cell ? cellDirT(cell, colTan[i], rowTan, _d) : dirOn(xm, zm);
+      const d = cellDirT(cell, colTan[i], rowTan, _d);
       const rug = ruggedAt(f.rg, f.h * hPerU, hRef);
       const det = detailAt(ctx, detail, d[0], d[1], d[2], rug, fade);
       // The globe flattens its fine relief at the coast. The patch does the same, so the shore
@@ -2776,15 +2782,16 @@ function patch(seed, site, opts = {}, post = () => {}) {
 
   // The phenomenon stands at the origin, after the field and the noise and before the colours, so
   // the slope of the cone earns its rock and the paint of the vent goes over it. Issue 14.
-  const act = opts.activity && opts.activity.kind
-    ? patchActivity(ctx, opts.activity.kind, { heights, n, grid, half }) : null;
+  const actKind = kindIn(ctx.world.activity, cell);
+  const act = actKind ? patchActivity(ctx, actKind, { heights, n, grid, half }) : null;
 
   // The source of the world, when this cell is the cell that holds it. It runs after the
   // phenomenon, so the wreck can stand clear of a cone the same cell might hold. By the 4-cell rule
   // of makeSource() the two never meet, and the guard costs nothing on the cells where they do not.
   // Issue 34, slice 3.
-  const src = opts.source && opts.source.kind
-    ? patchSource(ctx, opts.source.kind, {
+  const srcKind = kindIn(ctx.world.source, cell);
+  const src = srcKind
+    ? patchSource(ctx, srcKind, {
       heights, n, grid, half, pseed, avoid: act ? act.blocked : null,
     }) : null;
   // The plants, the grass, and the group anchors keep off both footprints.
@@ -2906,16 +2913,16 @@ function patch(seed, site, opts = {}, post = () => {}) {
   const rimMo = new Float32Array(rimN * rimN);
   const rimFm = new Float32Array(rimN * rimN);
   let rimSea = false;
-  const rimColTan = cell ? new Float64Array(rimN) : null;
-  if (cell) for (let i = 0; i < rimN; i++) rimColTan[i] = tanX(-rimOut + i * rimStep);
+  const rimColTan = new Float64Array(rimN);
+  for (let i = 0; i < rimN; i++) rimColTan[i] = tanX(-rimOut + i * rimStep);
   for (let j = 0; j < rimN; j++) {
     const zm = -rimOut + j * rimStep;
-    const rowTan = cell ? tanZ(zm) : 0;
+    const rowTan = tanZ(zm);
     for (let i = 0; i < rimN; i++) {
       const xm = -rimOut + i * rimStep;
       const f = rimFieldAt(xm, zm);
       const base = f.h;
-      const d = cell ? cellDirT(cell, rimColTan[i], rowTan, _d) : dirOn(xm, zm);
+      const d = cellDirT(cell, rimColTan[i], rowTan, _d);
       const rug = ruggedAt(f.rg, f.h * hPerU, hRef);
       const det = detailAt(ctx, detail, d[0], d[1], d[2], rug, 0);
       const damp = smoothstep(0, SHORE_DAMP, Math.abs(base));
@@ -2972,7 +2979,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
   const flora = grown.flora, grass = grown.grass;
 
   post(96, 'Calling the animals');
-  const { groups, members } = patchFauna(ctx, opts, {
+  const { groups, members } = patchFauna(ctx, opts.maxFauna, pulled, {
     pseed, heights, vary, n, grid, half, hPerU, cellT, cellM, cellF,
     blocked,
   });

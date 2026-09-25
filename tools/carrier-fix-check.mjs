@@ -131,7 +131,7 @@ for (let j = 0; j < HM_H; j++) {
 function worldWith(seed, dir) {
   return {
     seed, type: 'terran', source: { kind: 'wreck', dir: [dir.x, dir.y, dir.z] },
-    palette: { fauna: { accent: '#ff7b5c' } }, stats: { radius: '6,000' },
+    palette: { fauna: { accent: '#ff7b5c' } }, env: { radiusKm: 6000 },
     heightMapSize: [HM_W, HM_H], seaRadius: SEA_R,
   };
 }

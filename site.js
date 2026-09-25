@@ -3,7 +3,6 @@
 // A site is a lat and a lon in degrees in the planet's local frame, the frame of the worker's
 // arrays before planet.rotation.y turns them. Lat is asin(y). Lon is atan2(z, x). Two decimals.
 import * as THREE from 'three';
-import { RIM, worldOpts } from './tiers.js';
 import * as grid from './cell-grid.js';
 
 export const PULL_REACH = 0.5;       // parts of a cell: how far the pull to life looks
@@ -25,10 +24,10 @@ export function cellDir(cell, u, v, out = new THREE.Vector3()) {
   return out.fromArray(grid.cellDir(cell, u, v, _cell));
 }
 
-// The cell a site falls in. The worker takes it as patch.cell and lays its box on the quad.
+// The cell a site falls in. The patch call finds the same cell, gives it back as patch.cell, and
+// lays its box on the quad.
 export function siteCell(site) {
-  const d = siteDir(site.lat, site.lon, _local);
-  return grid.dirCell(d.x, d.y, d.z);
+  return grid.siteCell(site.lat, site.lon);
 }
 
 // The turn from the frame of the site, x east and z south, to the frame of the box. The box of
@@ -62,21 +61,11 @@ const _corner = new THREE.Vector3();
 const round2 = (v) => Math.round(v * 100) / 100;
 
 // The site at the middle of the cell that holds a site. The URL keeps a lat and a lon, so the
-// middle of the cell carries the cell: it stands half a cell from every edge, and two decimals of
-// a degree cannot move it into the cell next door.
+// middle of the cell carries the cell. See cellSite() in cell-grid.js. The site keeps its kind.
 export function snapSite(site) {
   if (!site) return site;
-  const d = cellDir(siteCell(site), 0.5, 0.5, _local);
-  return dirToSite(d, site.kind);
-}
-
-// The metres of the globe across one cell, at its middle. The worker takes this as patch.span.
-// A cell of the cube grid is not exactly CELL of arc, so the width comes from the cell itself.
-export function cellSpan(world, site) {
-  if (!site) return grid.CELL * radiusKm(world) * 1000;
-  const cell = siteCell(site);
-  const a = cellDir(cell, 0, 0.5, _corner), b = cellDir(cell, 1, 0.5, _dir);
-  return 2 * Math.asin(THREE.MathUtils.clamp(a.distanceTo(b) / 2, 0, 1)) * radiusKm(world) * 1000;
+  const at = grid.cellSite(siteCell(site));
+  return { lat: at.lat, lon: at.lon, kind: site.kind === undefined ? -1 : site.kind };
 }
 
 // The ground radius under a unit direction in planet space, from the worker's lat/lon height map.
@@ -92,24 +81,16 @@ export function groundRadius(world, hm, dir) {
   return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
 }
 
-// A unit direction in planet space from a site.
+// A unit direction in planet space from a site. See siteDir() in cell-grid.js.
+const _siteArr = [0, 0, 0];
 export function siteDir(lat, lon, out = new THREE.Vector3()) {
-  const a = THREE.MathUtils.degToRad(lat), o = THREE.MathUtils.degToRad(lon);
-  const r = Math.cos(a);
-  return out.set(r * Math.cos(o), Math.sin(a), r * Math.sin(o));
+  return out.fromArray(grid.siteDir(lat, lon, _siteArr));
 }
 
-// The site under a unit direction in planet space.
+// The site under a unit direction in planet space. See dirSite() in cell-grid.js.
 export function dirToSite(dir, kind = -1) {
-  const lat = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)));
-  const lon = THREE.MathUtils.radToDeg(Math.atan2(dir.z, dir.x));
-  return { lat: round2(lat), lon: round2(lon), kind };
-}
-
-// The planet radius in kilometres, from the stats line.
-export function radiusKm(world) {
-  const km = parseFloat(String(world?.stats?.radius || '').replace(/,/g, ''));
-  return km > 0 ? km : 6000;
+  const at = grid.dirSite(dir.x, dir.y, dir.z);
+  return { lat: at.lat, lon: at.lon, kind };
 }
 
 // The ray from a point of the screen, down onto the surface. The point is in normalised device
@@ -238,8 +219,8 @@ export function pickSite(camera, current, ndc) {
 }
 
 // The kinds of phenomenon the ground draws. The first slice of issue 14 builds the volcano and
-// the geyser. The fissure, the aurora, and the storm wait for a later slice, so the pull and the
-// patch do not know them yet.
+// the geyser. The fissure, the aurora, and the storm wait for a later slice, so the pull does not
+// know them yet. patchActivity() in generate.js keeps the same two kinds.
 export const GROUND_ACTIVITY = ['volcano', 'geyser'];
 
 // The direction of the phenomenon of a world, or null. A world with no phenomenon, a kind the
@@ -248,15 +229,6 @@ export function activityDir(world) {
   const act = world && world.activity;
   if (!act || !act.dir || !GROUND_ACTIVITY.includes(act.kind)) return null;
   return act.dir;
-}
-
-// The cell that holds that phenomenon, or null. activityHere() compares the landing cell against
-// this cell: the patch shows the phenomenon when the two are the same, so a landing that reaches
-// the cell without the pull shows it too, and one phenomenon can never stand in two patches.
-// Issue 14.
-export function activitySite(world) {
-  const dir = activityDir(world);
-  return dir ? snapSite(dirToSite({ x: dir[0], y: dir[1], z: dir[2] })) : null;
 }
 
 // ---------------------------------------------------------------- the carrier, issue 34
@@ -324,57 +296,13 @@ function hash01(s) {
 }
 
 // The site of the source of a world, or null. A gas giant and a world where no vertex passed the
-// tests of makeSource() both give null. See makeSource() in generate.js.
+// tests of makeSource() both give null. See makeSource() in generate.js. The patch call puts the
+// wreck on the patch of this cell and of no other; see kindIn() there.
 export function sourceSite(world) {
   const src = world && world.source;
-  return src && src.dir ? snapSite(dirToSite({ x: src.dir[0], y: src.dir[1], z: src.dir[2] })) : null;
-}
-
-// True when the landing cell is the cell of the source. The rule is the cell and not the pull, as
-// activityHere() has it, so one source can never stand in two patches. Slice 3 of issue 34 puts
-// the wreck on the patch by this test.
-export function sourceHere(world, site) {
-  const at = sourceSite(world);
-  if (!at || !site) return false;
-  const here = snapSite(site);
-  return here.lat === at.lat && here.lon === at.lon;
-}
-
-// ---------------------------------------------------------------- the patch message
-// The phenomenon a landing at the site brings, or null. The rule is the cell and not the pull: a
-// landing that reaches the cell of the phenomenon without the pull shows it too, and one
-// phenomenon can never stand in two patches. The worker builds the patch as before when this gives
-// null. Issue 14.
-function activityHere(world, site) {
-  const cell = activitySite(world);
-  if (!cell) return null;
-  const here = snapSite(site);
-  return here.lat === cell.lat && here.lon === cell.lon ? { kind: world.activity.kind } : null;
-}
-
-// The source a landing at the site brings, or null, by the rule activityHere() holds. Issue 34,
-// slice 3.
-function sourceThere(world, site) {
-  const src = world.source;
-  return src && sourceHere(world, site) ? { kind: src.kind } : null;
-}
-
-// The options of a patch message: the row of a device tier, and the facts of the world at the
-// site. app.js sends them, and the Node tools build the same ones, so a check measures the patch a
-// reader gets. `tier` is a row of TIERS in tiers.js.
-export function patchOpts(world, site, tier) {
-  const ground = tier.ground;
-  return {
-    // the options of the world call, so the patch reads the world the reader looked at. See
-    // contextFor() in generate.js.
-    world: worldOpts(tier),
-    grid: ground.grid, size: ground.size, span: cellSpan(world, site), rim: RIM,
-    // the quad of the cube grid the box lands on. See "the cell grid" above.
-    cell: siteCell(site),
-    maxFlora: ground.maxFlora, maxFauna: ground.maxFauna, pulledKind: site.kind ?? -1,
-    activity: activityHere(world, site),
-    source: sourceThere(world, site),
-  };
+  if (!src || !src.dir) return null;
+  const at = grid.cellSite(grid.dirCell(src.dir[0], src.dir[1], src.dir[2]));
+  return { lat: at.lat, lon: at.lon, kind: -1 };
 }
 
 // The arc from a site to a direction, in radians on the globe of radius 1.
@@ -418,7 +346,7 @@ export function carrierAt(world, site) {
   const off = hash01(`${world.seed}|carrier|${cell.face}|${cell.i}|${cell.j}`) * 2 - 1;
   const brg = (bearingTo(at, src.dir) + off * err + 360) % 360;
   // Decision 7: the range states nothing until the reader stands near the source.
-  const rangeKm = arc <= CARRIER_RANGE * grid.CELL ? arc * radiusKm(world) : null;
+  const rangeKm = arc <= CARRIER_RANGE * grid.CELL ? arc * world.env.radiusKm : null;
   return { brg, err, arc, rangeKm };
 }
 

@@ -17,11 +17,11 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | File | Role |
 |---|---|
 | `generate.js` | Generation. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map, the source, and the patch. Two exported calls: `world(seed, opts, onProgress)` and `patch(seed, site, opts, onProgress)`. Each returns its result. No three.js and no DOM. Imports the lore files. |
-| `cell-grid.js` | The cell grid, the map of the ground box and its inverse, and the frame of a site, as plain arrays. The one copy: `generate.js`, `site.js`, `ground-sky.js`, `carrier-globe.js`, and the tools import it. No three.js and no DOM. `tools/cell-grid-check.mjs` tests it. |
+| `cell-grid.js` | The cell grid, the cell of a site and the site of a cell, the map of the ground box and its inverse, and the frame of a site, as plain arrays. The one copy: `generate.js`, `site.js`, `ground-sky.js`, `carrier-globe.js`, and the tools import it. No three.js and no DOM. `tools/cell-grid-check.mjs` tests it. |
 | `world-types.js` | The seven world types, their weights and labels, and the ranges each type rolls in: temperature, land, globe flora, and flora density. `generate.js` rolls from these tables and `tools/lore-audit` sweeps them. No three.js. |
-| `worker.js` | The module worker, a small adapter over `generate.js`. Protocol: `postMessage({type:'generate', seed, opts})` or `{type:'patch', seed, lat, lon, opts}`, replies `progress` then `done`, `patch-done`, or `error`. It transfers every buffer of a result. |
+| `worker.js` | The module worker, a small adapter over `generate.js`. Protocol: `postMessage({type:'generate', seed, opts})` or `{type:'patch', seed, site: {lat, lon, kind}, opts}`, replies `progress` then `done`, `patch-done`, or `error`. It transfers every buffer of a result. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
-| `tiers.js` | The two device tiers, HIGH and LOW, and `RIM`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |
+| `tiers.js` | The two device tiers, HIGH and LOW, `RIM`, and the options of the two calls for a tier: `worldOpts()` and `patchOpts()`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |
 | `species.js` | ES module. Rolls two to four genomes per world with lore. No three.js. |
 | `flora-lore.js` | ES module. The plant vocabulary. Writes the lore of every plant kind of a patch. No three.js. See `docs/flora.md`. |
 | `source-lore.js` | ES module. The vocabulary of the wreck. Writes the crew, the threads, and the 8 to 20 entries of `world.source.log`. Every world thread carries a salience and every fauna thread a way of moving. No three.js. See `docs/source.md`. |
@@ -56,8 +56,7 @@ globe and share their edges. `patch.metresAcross` and `patch.metresUp` give the 
 `patch.span` gives the width of the cell in metres. `metresUp` is one number for the whole world,
 so the highest land of the world stands 800 units up and a flat cell reads flat. A plant and a
 creature keep their lore size in units, so they read as normal against the ground and they are no
-longer the metres the lore says. A patch built with no `cell` keeps the tangent frame of the site,
-and one built with no `span` keeps one unit to one metre. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 4,000 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the reveal and from the ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Since issue 20 the camera ceiling is 500 m and the reveal is 450 m up and 884 m south, so the detail of the patch never reads as a rectangle. Camera floor 2 m above the terrain. Since issue 17 the polar angle runs to 2.09 rad near the ground, which is 30 deg over the horizon, and the floor is a clamp on the position of the camera and no longer a cap on that angle. An up-view lifts the target into the sky and holds the eye on the floor.
+longer the metres the lore says. Since issue 18 the ground does not stop at the box: a coarse rim carries it out to 4,000 units from the site, past the fog. Fog starts at 450 m from the site and is solid at 750 m at ground level. Issue 06 opens the fog with the height of the camera, 1.15 m per metre up to 2,100 m, because a fog solid at 750 m paints one flat colour from the reveal and from the ceiling. `FOG_NEAR` keeps its value and still sets the 450 m limit on the pan. Since issue 20 the camera ceiling is 500 m and the reveal is 450 m up and 884 m south, so the detail of the patch never reads as a rectangle. Camera floor 2 m above the terrain. Since issue 17 the polar angle runs to 2.09 rad near the ground, which is 30 deg over the horizon, and the floor is a clamp on the position of the camera and no longer a cap on that angle. An up-view lifts the target into the sky and holds the eye on the floor.
 
 Budgets:
 
@@ -88,14 +87,18 @@ Independent agents must agree on these. Do not change them inside an issue. If a
   its step of longitude changed at every band, so no two bands lined up.
 - `siteCell(site)` gives that quad as `{face, i, j, n}`. `cellDir(cell, u, v)` gives the unit
   direction at `(u, v)` inside it; `u` and `v` run 0 to 1 and may run past the cell, which is what
-  the rim needs. `app.js` passes the quad as `opts.cell` on the patch message. `cell-grid.js` holds the
-  map as arrays, and `generate.js`, `site.js`, `ground-sky.js`, and `carrier-globe.js` import it;
+  the rim needs. The patch call finds the same quad from the site and gives it back as
+  `patch.cell`. `cell-grid.js` holds the map as arrays, and `generate.js`, `site.js`, `ground-sky.js`, and `carrier-globe.js` import it;
   `site.js` is the adapter of the page and gives `THREE.Vector3`.
 - `snapSite(site)` puts a site on the cell grid: it takes the middle of the quad the site falls in.
   It is idempotent and it keeps `kind`. The middle stands half a cell from every edge, so two
-  decimals of a degree cannot move it into the cell next door.
-- `cellSpan(world, site)` gives the width of that cell in metres. `app.js` passes it as `opts.span`
-  on the patch message. The worker uses it for the scale it reports and not for the frequencies of
+  decimals of a degree cannot move it into the cell next door. `cellSite()` in `cell-grid.js` holds
+  the rule, and the patch call snaps its site by the same rule, so every site of one cell gives the
+  same patch.
+- Two cells are the same cell when `sameCell()` in `cell-grid.js` says so: the face and the two
+  indices agree. No code compares the lat and the lon of two sites to test for one cell.
+- The patch call gives the width of its cell in metres as `patch.span`, from `cellArc()` and
+  `world.env.radiusKm`. It uses the width for the scale it reports and not for the frequencies of
   the relief field; those come from the nominal cell, so two neighbours stay in phase.
 - The box runs x along the u axis of the cell and z against the v axis, so (x, up, z) is a
   right-handed set and the terrain is the true image of the cell, not its mirror. East is the east
@@ -112,8 +115,8 @@ Independent agents must agree on these. Do not change them inside an issue. If a
   home: the world holds many homes and at most one phenomenon, and the pulled cell can still hold
   homes. The patch shows the phenomenon by the cell and not by the pull, so a landing that reaches
   the cell without the pull shows it too, and one phenomenon can never stand in two patches.
-  `activitySite(world)` in `site.js` gives that cell, or null for a world with no phenomenon and for
-  a kind the ground cannot draw yet.
+  `kindIn()` in `generate.js` holds the rule for the phenomenon and for the source: the cell of the
+  direction of the thing.
 - The marker is the square of the cell, not a symbol: what the square holds is what the ground
   shows. It is therefore only a few pixels wide from far out, and the reader zooms in to see it.
 - Since issue 20 the marker shows only while the reader aims, and it follows the pointer.
@@ -149,9 +152,8 @@ Independent agents must agree on these. Do not change them inside an issue. If a
 
 - A site is a lat and lon in degrees in the planet's local frame, the frame of the worker's `pos` arrays before `planet.rotation.y` is applied. Lat is `asin(y)`. Lon is `atan2(z, x)`. Both in degrees, two decimals. Lat in [-90, 90], lon in [-180, 180].
 - URL format: `#Seed@lat,lon`, for example `#Auralis@12.50,-73.25`. Without `@` the URL means orbit. The seed part is URL-encoded as today; the site part is plain.
-- Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``. Pass it to `makeRng` and to a new `Noise` in the worker.
-- Patch message options: `{ world, grid, size, span, rim, cell, maxFlora, maxFauna, pulledKind, activity, source }`. `patchOpts()` in `site.js` builds them for `app.js` and for the Node tools. `world` is the options of the world call; a patch reads the world that call builds, and `generate.js` builds it again when its cache holds another world, so a patch depends only on its arguments.
-  `activity` is `{ kind }` when the landing cell holds the phenomenon of the world, else null. `source` is `{ kind }` when the landing cell holds the source of the world, else null; issue 34 added it and the rule is the cell and not the pull, as it is for `activity`. `size` is the box in units and `span` is the cell in metres. A patch with no `span` covers `size` metres, which is the behaviour before issue 19. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `tiers.js` exports the value as `RIM`.
+- Patch seed string: `` `${seed}|patch|${lat.toFixed(2)}|${lon.toFixed(2)}` ``, where lat and lon are the site at the middle of the cell. Pass it to `makeRng` and to a new `Noise` in the worker.
+- Patch message: a site `{ lat, lon, kind }` and the options `{ world, grid, size, rim, maxFlora, maxFauna }`. `kind` is the species the pull took the site to, or -1. `patchOpts(tier)` in `tiers.js` builds the options for `app.js` and for the Node tools. `world` is the options of the world call; a patch reads the world that call builds, and `generate.js` builds it again when its cache holds another world, so a patch depends only on its arguments. The patch call finds the rest itself: the cell of the site, the width of the cell, and whether the cell holds the phenomenon or the source of the world. The rule is the cell and not the pull. `size` is the box in units. `rim` is how far the ground outside the box must reach, in units; issue 18 added it and `tiers.js` exports the value as `RIM`.
 
 ### The gestures of the ground
 
@@ -191,7 +193,7 @@ Ground frame: x east, y up, z south. Origin at the site at sea level, so `height
 
 ### The patch protocol
 
-Request: `postMessage({ type: 'patch', seed, lat, lon, opts: { grid, size: 1500, span, rim, maxFlora, maxFauna, pulledKind, activity, source } })`. `pulledKind` is the species id the site was pulled to, or `-1`. `activity` is `{ kind }` on the one cell that holds the phenomenon of the world, else null; the worker then raises the shape at the origin of the patch. Issue 14. `source` is `{ kind }` on the one cell that holds the source of the world, else null; the worker then picks a place for the wreck, flattens a disc of 14 units under it, scorches that disc, and keeps the plants, the grass, and the group anchors off it. Issue 34.
+Request: `postMessage({ type: 'patch', seed, site: { lat, lon, kind }, opts: patchOpts(tier) })`. `kind` is the species id the site was pulled to, or `-1`. On the one cell that holds the phenomenon of the world, the patch raises the shape at its origin. Issue 14. On the one cell that holds the source of the world, the patch picks a place for the wreck, flattens a disc of 14 units under it, scorches that disc, and keeps the plants, the grass, and the group anchors off it. Issue 34. `patch.activity` and `patch.source` say what the patch holds.
 
 Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or `{ type: 'error', message }`. Transfer the buffers.
 
@@ -229,7 +231,7 @@ Issue 34. One thing on a world with a surface transmits, and the probe reads a b
 
 - The world: `world.source = { kind, dir: [x, y, z], log } | null`. `kind` is `'wreck'` now; later kinds take the same search. `dir` is a unit direction in the planet's local frame, snapped to the middle of its cell of the cube grid. A gas giant and a world where no vertex passed the tests both give null. `makeSource()` in `generate.js` rolls it from `makeRng(seed + '|source')`, and no other stream draws one number more; `tools/world-checksum.mjs` holds the proof.
 - The log: `world.source.log = { probe, days, species, entries: [{ slot, title, day, text }, ...] }`. The four slots are `arrival`, `survey`, `trouble`, and `last`, in that order. `probe` is the name of the old probe, `days` is the day of the last entry, and `species` is the animal the survey names, or null. `source-lore.js` writes it in `generate()` from `makeRng(seed + '|source-lore')`. The page must not show the log before the reader finds the wreck. See `docs/source.md`.
-- `site.js` gives `sourceSite(world)`, `sourceHere(world, site)`, `bearingTo(site, dir)`, `arcTo(site, dir)`, `carrierAt(world, site)`, `carrierDir(world, site, carrier)`, `carrierBox(world, site, carrier)`, and `boxPoint(site, dir, size)`. `carrierAt` returns `{ brg, err, arc, rangeKm }`: the bearing in degrees from north with east positive, its error in degrees, the arc in radians, and the kilometres to the source inside `CARRIER_RANGE` cells of arc, else null.
+- `site.js` gives `sourceSite(world)`, `bearingTo(site, dir)`, `arcTo(site, dir)`, `carrierAt(world, site)`, `carrierDir(world, site, carrier)`, `carrierBox(world, site, carrier)`, and `boxPoint(site, dir, size)`. `carrierAt` returns `{ brg, err, arc, rangeKm }`: the bearing in degrees from north with east positive, its error in degrees, the arc in radians, and the kilometres to the source inside `CARRIER_RANGE` cells of arc, else null.
 - **The carrier has a reach.** `CARRIER_REACH` in `site.js` is `2 * PI / 3`, a third of the circumference, and `carrierAt()` gives **null** for an arc past it. The landing then shows no carrier block, stores no fix, and draws no wedge, and a silent landing states a fact of its own. Every caller already tests for null. `freshFixes()` in `app.js` drops a stored fix the carrier no longer reaches, so a store from an older build needs no migration.
 - The bearing is 2 degrees wrong at the source and 10 degrees wrong at the edge of the reach, straight in the arc. `CARRIER_ERR` in `site.js` holds the pair. The offset inside that band comes from a hash of the seed and the cell, so one cell always gives one fix and the true bearing always lies inside the wedge. `carrierAt()` is a pure function of the seed and the cell, so a stored fix takes its bearing and its error again on every load; see **The store**.
 - **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `generate.js` lays the box on the axes of the cell of the cube grid, x along u and z against v, which is a right-handed set as the frame of `groundBasis()` is. The box was the mirror of that frame until 2026-09-19; see "The box is right-handed" in `docs/probe.md`. The map of the box still holds no angle, so the needle comes from the slope of that map and not from the bearing less a twist.

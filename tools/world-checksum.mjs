@@ -8,8 +8,8 @@
 // every hash must be equal. Issue 34 used it to prove that the source drew no number from the
 // streams of the other parts of a world.
 //
-// Both device tiers run. The options come from tiers.js and site.js, the same place app.js takes
-// them, so the check measures the worlds and the patches a reader gets and cannot drift from them.
+// Both device tiers run. The options come from tiers.js, the same place app.js takes them, so the
+// check measures the worlds and the patches a reader gets and cannot drift from them.
 //
 // A world line hashes the arrays the reader would see change: the height map, the position and the
 // colour of the globe, the flora, the clouds, the fauna, and the flora grid. It also hashes the
@@ -20,9 +20,13 @@
 // three sites: a fixed site with a pull to the first species, the cell of the source, and the cell
 // of the phenomenon when the ground can draw it.
 //
+// The patch call decides from its own world whether a cell holds the source or the phenomenon.
+// The check holds it to that: the cell of the source holds the wreck, the fixed site and the cell
+// next to the source hold none, and the cell of the phenomenon shows it when the ground can draw
+// the kind. The check finds those cells with cell-grid.js and no copy of the rule.
+//
 // Six seeds cover the seven planet types but one. Meridian is the ice world the acceptance criteria
 // of issue 34 ask for, and Mire is a gas giant, which takes the other path through generate().
-import { register } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -31,15 +35,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rootUrl = pathToFileURL(root + '/').href;
 const BASELINE = path.join(root, 'tools', 'world-checksum.baseline.txt');
 
-// site.js takes three.js by the bare name `three`, which the import map of index.html resolves in
-// the browser. Node has no import map, so a resolve hook points the same name at vendor/.
-register('data:text/javascript,' + encodeURIComponent(`
-export async function resolve(spec, ctx, next) {
-  if (spec === 'three') return { url: ${JSON.stringify(rootUrl + 'vendor/three.module.js')}, shortCircuit: true };
-  return next(spec, ctx);
-}`));
-const { TIERS, worldOpts } = await import(rootUrl + 'tiers.js');
-const { patchOpts, snapSite, sourceSite, activitySite } = await import(rootUrl + 'site.js');
+const { TIERS, worldOpts, patchOpts } = await import(rootUrl + 'tiers.js');
+const { dirCell, cellSite, sameCell } = await import(rootUrl + 'cell-grid.js');
 
 const SEEDS = ['Auralis', 'Vesper', 'Meridian', 'Tessaly', 'Orin', 'Mire'];
 const FIXED_SITE = { lat: 20, lon: 40, kind: 0 };
@@ -62,7 +59,13 @@ function ask(data) {
   return reply.result;
 }
 const world = (seed, tier) => ask({ type: 'generate', seed, opts: worldOpts(tier) });
-const patch = (w, site, tier) => ask({ type: 'patch', seed: w.seed, lat: site.lat, lon: site.lon, opts: patchOpts(w, site, tier) });
+const patch = (w, site, tier) => ask({ type: 'patch', seed: w.seed, site, opts: patchOpts(tier) });
+
+// The cell of a thing of the world that keeps a direction, or null.
+const cellOf = (thing) => (thing && thing.dir ? dirCell(thing.dir[0], thing.dir[1], thing.dir[2]) : null);
+// A cell next to a cell, on the same face.
+const nextTo = (c) => ({ face: c.face, i: c.i > 0 ? c.i - 1 : c.i + 1, j: c.j, n: c.n });
+const fail = (msg) => { throw new Error(msg); };
 
 // FNV-1a over the bytes of an array, with an avalanche at the end. One word is enough: a slipped
 // stream moves thousands of floats, not one bit.
@@ -96,12 +99,23 @@ function linesFor(seed) {
       hashArray(r.heightMap), hashArray(r.terrain.pos), hashArray(r.terrain.col), hashArray(r.flora),
       hashArray(r.clouds), hashArray(r.fauna), hashArray(r.floraGrid), hashJson(w)].join(' '));
     if (w.type === 'gas') continue;
-    const sites = [['fixed', snapSite(FIXED_SITE)], ['source', sourceSite(w)], ['activity', activitySite(w)]];
+    const src = cellOf(w.source), act = cellOf(w.activity);
+    const sites = [['fixed', FIXED_SITE], ['source', src && cellSite(src)], ['activity', act && cellSite(act)]];
     for (const [label, site] of sites) {
       if (!site) { lines.push(`${seed} ${name} patch ${label} -`); continue; }
-      const line = patchLine(seed, name, label, patch(w, site, tier));
+      const p = patch(w, site, tier);
+      const here = p.patch.cell;
+      if (!!p.patch.source !== sameCell(here, src)) fail(`${seed} ${name} ${label}: the wreck and the cell of the source disagree`);
+      if (label === 'activity') {
+        // A phenomenon the ground cannot draw, such as the storm of a lightning world, keeps a
+        // direction too. Its cell then builds a plain patch, and the line stays the one it was.
+        if (!p.patch.activity) { lines.push(`${seed} ${name} patch ${label} -`); continue; }
+      } else if (p.patch.activity && !sameCell(here, act)) fail(`${seed} ${name} ${label}: a phenomenon off its cell`);
+      const line = patchLine(seed, name, label, p);
       lines.push(line);
       if (name === 'LOW' && label === 'source') {
+        const next = patch(w, cellSite(nextTo(src)), tier);
+        if (next.patch.source) fail(`${seed} ${name}: the cell next to the source holds a wreck`);
         world(COLD_SEED, tier);
         const cold = patchLine(seed, name, label, patch(w, site, tier));
         if (cold !== line) throw new Error(`a patch after another world differs:\n  warm ${line}\n  cold ${cold}`);
