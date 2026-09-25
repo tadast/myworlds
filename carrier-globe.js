@@ -35,10 +35,10 @@
 import * as THREE from 'three';
 import { CELL, cellDir, groundRadius, siteCell, siteDir, sourceSite } from './site.js';
 import { tangentFrame } from './cell-grid.js';
-// The mini wreck of a find is the wreck of the ground, at the scale of the globe. ground-source.js
-// builds that body in wreckGeometry(), which takes no DOM and does nothing at import, so the two
+// The mini wreck of a find is the wreck of the ground, at the scale of the globe. wreck-geometry.js
+// builds that body in wreckGeometry(hullOf(world)), which takes no DOM and does nothing at import, so the two
 // models come from one builder and they cannot drift apart.
-import { wreckGeometry, WRECK_HULL } from './ground-source.js';
+import { wreckGeometry, hullOf, WRECK_HULL } from './wreck-geometry.js';
 
 // The number of wedges the shader holds. Four uniform slots of three vec3 and two floats cost 44
 // floats, which every driver carries with room to spare. The first build held eight, and after
@@ -540,7 +540,7 @@ function makeWreckModel(world, hm) {
   };
   obj.add(pin);
 
-  const geo = wreckGeometry();
+  const geo = wreckGeometry(hullOf(world));
   const bb = geo.boundingBox;
   const foot = Math.min(bb.min.y, 0);                   // the ground under the hull, in patch units
   const unit = MODEL_H / Math.max(bb.max.y - foot, 1e-6); // globe radii per unit of the patch

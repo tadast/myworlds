@@ -8,17 +8,18 @@
 // The frame is the frame of the patch: the origin at the site, y up, and x and z in units of the
 // box. patch.source gives the place and the yaw in those units.
 //
-// The wreck reads from far away, because the reader walks to it across the cell. So the mast stands
-// MAST_H units and the lamp draws with the fog off: a lamp that the fog took would go out at the
-// distance the reader first looks for it.
+// The wreck reads from far away, because the reader walks to it across the cell. So the lamp stands
+// on the highest point of the hull, 17 units or more over the ground, and it draws with the fog off:
+// a lamp that the fog took would go out at the distance the reader first looks for it. The seed of
+// the world picks one of four hulls; see wreck-geometry.js.
 //
 // The lamp blinks the rhythm of the motif of the source. The clock is the bar clock of music.js
 // when the sound runs, and the clock of the landing when it does not, so a reader with the sound off
 // loses no fact. Decision 12 of issue 34.
 import * as THREE from 'three';
 import { motifOf } from './music.js';
+import { wreckGeometry, hullOf } from './wreck-geometry.js';
 
-const MAST_H = 18;           // units, the mast over the ground
 const DISC_R = 12;           // units, the ring of the mark. The worker flattens 14.
 const RING_BAND = 0.06;      // the part of the radius the band of the ring takes
 const RING_LIFT = 0.12;      // units, the ring stands this far over the ground
@@ -31,121 +32,11 @@ const LIGHT_RANGE = 260;     // units, how far the lamp light reaches on HIGH
 const LIGHT_CD = 900;        // candela at the lamp, in the light scale of ground.js
 const PICK_PAD = 6;          // units: the tap box stands this far out from the body
 
-// The metal of a machine. It takes no colour from the palette: a wreck must read as a made thing on
-// a green world and on an ice world alike, and a hull in the colours of the biome would read as
-// rock. Only the lamp takes the accent of the world.
-//
-// WRECK_HULL is the one colour that leaves this file. The mini wreck a find leaves on the globe is
-// far too small for a colour per part, so it takes the hull colour for the whole body and the two
-// wrecks then read as one machine. See carrier-globe.js.
-export const WRECK_HULL = '#8f959d';
-const C_HULL = WRECK_HULL;
-const C_HULL_DARK = '#5c626a';
-const C_BURN = '#3b3a3c';
-const C_DISH = '#c2c8d0';
-const C_LEG = '#6d747c';
-
-const _up = new THREE.Vector3(0, 1, 0);
 const _a = new THREE.Vector3();
-const _b = new THREE.Vector3();
-const _q = new THREE.Quaternion();
-const _one = new THREE.Vector3(1, 1, 1);
 const _ray = new THREE.Raycaster();
 const _ndc = new THREE.Vector2();
 
-// One part of the body: a geometry, a colour, and where it stands. mergeParts() below welds them
-// into one flat-shaded mesh, the way mergeGeos() in fauna.js welds a creature.
-function part(geo, color, x, y, z, rx = 0, ry = 0, rz = 0) {
-  const m = new THREE.Matrix4().compose(
-    _a.set(x, y, z), _q.setFromEuler(new THREE.Euler(rx, ry, rz)), _one);
-  return { geo, color, matrix: m };
-}
-
-// A strut between two points: a tapered cylinder that stands along the line from a to b.
-function strut(a, b, r1, r2, color, sides = 5) {
-  _a.set(a[0], a[1], a[2]); _b.set(b[0], b[1], b[2]);
-  const d = _b.clone().sub(_a);
-  const len = d.length() || 0.001;
-  const m = new THREE.Matrix4().compose(
-    _b.clone().add(_a).multiplyScalar(0.5),
-    _q.setFromUnitVectors(_up, d.normalize()),
-    _one);
-  return { geo: new THREE.CylinderGeometry(r2, r1, len, sides, 1), color, matrix: m };
-}
-
-// The parts welded into one non-indexed geometry with a colour per vertex. The material takes
-// flatShading, so the facets read like the ground and like every other body in this app.
-function mergeParts(parts) {
-  const pos = [], nor = [], col = [];
-  const p = new THREE.Vector3(), n = new THREE.Vector3();
-  for (const { geo, color, matrix } of parts) {
-    const g = geo.index ? geo.toNonIndexed() : geo;
-    g.computeVertexNormals();
-    const pa = g.attributes.position, na = g.attributes.normal;
-    const nm = new THREE.Matrix3().getNormalMatrix(matrix);
-    const c = new THREE.Color(color);
-    for (let i = 0; i < pa.count; i++) {
-      p.fromBufferAttribute(pa, i).applyMatrix4(matrix);
-      n.fromBufferAttribute(na, i).applyMatrix3(nm).normalize();
-      pos.push(p.x, p.y, p.z); nor.push(n.x, n.y, n.z); col.push(c.r, c.g, c.b);
-    }
-    if (g !== geo) g.dispose();
-    geo.dispose();
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  out.computeBoundingBox();
-  out.computeBoundingSphere();
-  return out;
-}
-
-// The body of the wreck, in its own frame: y up, the origin on the ground under the hull.
-//
-// It came down on its legs, one leg failed, and the hull settled over the gap. So the hull leans,
-// two legs of the three still stand, the third is a bare socket, and the dish that rode on top lies
-// beside it. The mast held, and the lamp on it still answers the clock of the motif.
-export function wreckGeometry() {
-  const lean = 0.52;                       // radians the hull leans by, about 30 degrees
-  const hullLen = 13, hullFoot = [-2.6, 0.9, 0.4];
-  const sl = Math.sin(lean), cl = Math.cos(lean);
-  const hullTop = [hullFoot[0] + sl * hullLen, hullFoot[1] + cl * hullLen, hullFoot[2]];
-  const parts = [
-    // the hull: a drum that tapers to the nose, and a burnt skirt where it met the ground
-    strut(hullFoot, hullTop, 3.4, 2.5, C_HULL, 8),
-    part(new THREE.ConeGeometry(2.5, 3.2, 8), C_HULL_DARK,
-      hullTop[0] + sl * 1.6, hullTop[1] + cl * 1.6, hullTop[2], 0, 0, -lean),
-    part(new THREE.CylinderGeometry(3.6, 3.9, 1.6, 8), C_BURN,
-      hullFoot[0], hullFoot[1] + 0.2, hullFoot[2], 0, 0, -lean),
-    // a hatch on the flank, so the hull reads as a thing with a front
-    part(new THREE.BoxGeometry(2.6, 3.2, 0.5), C_HULL_DARK, 0.9, 5.4, 2.9, 0, 0, -lean),
-    // the mast, and the arm the lamp sits on. It stands nearly upright: the mast is what the
-    // reader picks out of the fog, and a mast that lay with the hull would say nothing at range.
-    strut([-3.4, 0.4, 1.4], [-4.6, MAST_H, 1.4], 0.42, 0.22, C_LEG, 6),
-    part(new THREE.BoxGeometry(2.4, 0.3, 0.3), C_LEG, -4.6, MAST_H - 1.6, 1.4),
-    strut([-3.4, 0.6, 1.4], [-1.2, 4.2, 1.0], 0.3, 0.2, C_LEG, 4),
-    // the dish, on its back beside the hull. A lathe of four points gives a shallow bowl.
-    part(new THREE.LatheGeometry([
-      new THREE.Vector2(0.15, 0), new THREE.Vector2(2.0, 0.28),
-      new THREE.Vector2(3.6, 0.95), new THREE.Vector2(4.6, 1.9),
-    ], 14), C_DISH, -7.0, 1.5, -4.6, -1.02, 0.4, 0),
-    part(new THREE.CylinderGeometry(0.5, 0.5, 2.6, 6), C_HULL_DARK, -6.6, 0.8, -3.4, 1.0, 0, 0.3),
-    // two legs of the three. Each one is a strut from the hull to a pad on the ground.
-    strut([-0.6, 3.0, 2.4], [2.9, 0.35, 6.2], 0.55, 0.35, C_LEG, 5),
-    part(new THREE.CylinderGeometry(1.5, 1.7, 0.7, 7), C_LEG, 2.9, 0.35, 6.2),
-    strut([-0.6, 3.0, -2.4], [2.6, 0.35, -6.4], 0.55, 0.35, C_LEG, 5),
-    part(new THREE.CylinderGeometry(1.5, 1.7, 0.7, 7), C_LEG, 2.6, 0.35, -6.4),
-    // the socket of the leg that is gone, and the pad it left behind
-    part(new THREE.CylinderGeometry(0.75, 0.75, 1.5, 6), C_BURN, -3.0, 2.4, 0.2, 0, 0, 1.15),
-    part(new THREE.CylinderGeometry(1.4, 1.6, 0.5, 7), C_BURN, -6.6, 0.25, 3.6, 0.2, 0, 0.12),
-  ];
-  const geo = mergeParts(parts);
-  geo.userData.lamp = [-4.6, MAST_H + 0.4, 1.4];
-  return geo;
-}
-
-// The lamp on the mast: a small solid core and a glow around it. Both draw with the fog off, so the
+// The lamp: a small solid core and a glow around it. Both draw with the fog off, so the
 // lamp holds its colour past FOG_NEAR and the reader can walk to it out of the mist.
 function lampParts(color) {
   const core = new THREE.Mesh(
@@ -208,7 +99,7 @@ export class SourceWreck {
     this.group.position.set(src.x, y, src.z);
     this.group.rotation.y = src.yaw || 0;
 
-    const geo = wreckGeometry();
+    const geo = wreckGeometry(hullOf(world));
     this.body = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
       vertexColors: true, flatShading: true,
     }));
@@ -355,9 +246,9 @@ export class SourceInspector {
     this.lamp = null;
   }
 
-  // log is world.source.log; see docs/source.md. `accent` is the colour of the lamp and `variant`
-  // is the ground colour of the world, so the card and the patch agree.
-  show(log, accent, groundColor, motif) {
+  // log is world.source.log; see docs/source.md. `accent` is the colour of the lamp, `groundColor`
+  // is the ground colour of the world, and `hull` is hullOf(world), so the card and the patch agree.
+  show(log, accent, groundColor, motif, hull) {
     if (!this.renderer) {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
       this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -366,8 +257,16 @@ export class SourceInspector {
       this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     }
     this.motif = motif || null;
+    // The card outlives a world, and the next world may carry another hull.
+    if (this.mesh && this.hull !== hull) {
+      this.pivot.remove(this.mesh, this.lamp);
+      this.mesh.geometry.dispose(); this.mesh.material.dispose();
+      this.lamp.geometry.dispose(); this.lamp.material.dispose();
+      this.mesh = null; this.lamp = null;
+    }
+    this.hull = hull;
     if (!this.mesh) {
-      const geo = wreckGeometry();
+      const geo = wreckGeometry(hull);
       const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
         vertexColors: true, flatShading: true, roughness: 0.75, metalness: 0.15,
       }));

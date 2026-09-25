@@ -11,6 +11,7 @@ import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrie
 import { sameCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
+import { hullOf } from './wreck-geometry.js';
 import { Ground } from './ground.js';
 import { TIERS, worldOpts, patchOpts } from './tiers.js';
 import { skyView } from './ground-sky.js';
@@ -1988,7 +1989,7 @@ function inspectSource() {
   creatureCanvas.hidden = true; plantCanvas.hidden = true; sourceCanvas.hidden = false;
   const pal = current.world.palette || {};
   sourceInspector.show(src.log, (pal.fauna && pal.fauna.accent) || '#ffd27f', discColor(),
-    music.motif(current.world));
+    music.motif(current.world), hullOf(current.world));
   creatureCard.dataset.subject = 'source';
   if (!(carrierRecord && carrierRecord.found)) onSourceFound();
   setCarrierLevel();

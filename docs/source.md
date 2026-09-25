@@ -13,6 +13,12 @@ bearing to it, and a landing in its cell shows it. The first kind of source is a
 crewed survey ship that came down, worked, failed, and stopped. The wreck holds the log of that
 crew.
 
+The ship is a lander that can climb to the orbiter once, so every hull has an engine bell, a climb
+tank, and a mast of the crew: the parts the log names. `hullOf(world)` in `wreck-geometry.js` picks
+one of four hulls from the seed: a rocket, a spaceplane, a rotor-rocket, or a ring-tank tripod. A
+world with no air takes the rocket or the tripod. The pick is a pure function of the seed, as the
+motif is, so no stream of `generate.js` draws one number more. The log does not read the hull.
+
 The plan and the terms are in `docs/issues/34-the-carrier.md`. Use the words of that table:
 carrier, source, bearing, fix, wedge, wreck, motif, log.
 
@@ -62,7 +68,7 @@ The page must not show any of this before the reader finds the wreck. The log st
 on the world: no other field of `world` holds the text.
 
 After the find the globe carries a mini model of the wreck at the source, and the wedges of the
-search are gone. `carrier-globe.js` builds that model from `wreckGeometry()` of `ground-source.js`,
+search are gone. `carrier-globe.js` builds that model from `wreckGeometry(hullOf(world))` of `wreck-geometry.js`,
 so the wreck of the patch and the wreck of the globe come from one builder.
 
 ## The one difference from the fauna and the flora
