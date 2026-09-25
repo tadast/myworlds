@@ -1769,7 +1769,7 @@ const FLORA_M = [
   [4, 26],     // 8 spindle
   [1.5, 7],    // 9 puff
   [2, 12],     // 10 shard
-  [0.6, 1.8],  // 11 grass, grown by the ground and not by the cap
+  [0.6, 1.8],  // 11 grass, which no patch grows
   [70, 150],   // 12 colossus
   [3, 10],     // 13 fan
   [2, 9],      // 14 pod
@@ -1794,13 +1794,6 @@ const FLORA_ALIEN = [
   FLORA.TOWER, FLORA.SPINDLE, FLORA.PUFF, FLORA.SHARD, FLORA.FAN, FLORA.POD, FLORA.STACK,
   FLORA.MUSHROOM, FLORA.CRYSTAL,
 ];
-
-// The ground cover. Grass is not one of the plants: a patch holds far more tufts than the plant
-// cap allows, so the worker only says where a tuft may grow and ground-flora.js grows them around
-// the camera. GRASS_BASE is how much cover a world type carries at its wettest.
-const GRASS_BASE = { terran: 1, ocean: 0.95, exotic: 0.9, desert: 0.3, ice: 0.22, lava: 0.14 };
-const GRASS_SLOPE = 1.3;     // rise over run: a steeper node carries no cover
-const GRASS_WAVE = 52;       // units: the wavelength of the bald spots inside a field of cover
 
 // The communities of one patch. Each one takes a band of the community field, so it holds a part
 // of the box, and it carries a lead kind, a companion, and a density of its own.
@@ -1870,15 +1863,11 @@ function floraSize(rng, kind, vigour) {
 // stand plants in a ring, an arc, a row, or a spiral. The colossus pass drops one to three bodies
 // that stand over the fog, each with a court of smaller plants. Both passes keep their plants past
 // the cap, because the cap must not drop a landmark.
-//
-// The function also returns the ground cover mask: one byte per node of a grid at twice the
-// terrain step, which says where ground-flora.js may grow a tuft of grass. The tufts themselves
-// grow on the main thread around the camera, because a patch holds far more of them than the cap.
 function patchFlora(ctx, s) {
   const { heights, vary, n, grid, half, size, hPerM, hPerU, cellT, cellM, cellF, noise, rng } = s;
   const blocked = s.blocked || null;      // the footprint of the phenomenon takes no plant
   const maxFlora = s.maxFlora | 0;
-  const none = { flora: new Float32Array(0), grass: new Uint8Array(0), grassN: 0, grassStep: 1 };
+  const none = { flora: new Float32Array(0) };
   if (maxFlora <= 0 || !ctx.P.flora || ctx.P.flora.length === 0) return none;
 
   const type = ctx.type, density = ctx.floraDensity;
@@ -1889,7 +1878,9 @@ function patchFlora(ctx, s) {
   const og0 = rng() * 90, og1 = rng() * 90;     // the grove field
   const ob0 = rng() * 90, ob1 = rng() * 90;     // the bare field
   const ov0 = rng() * 90, ov1 = rng() * 90;     // the vigour field
-  const oq0 = rng() * 90, oq1 = rng() * 90;     // the ground cover field
+  // Two draws for the field of the grass tufts, which the ground no longer grows. The stream keeps
+  // them, so every later draw and every plant stays where it was.
+  rng(); rng();
   // Issue 27 draws its two fields from streams of their own, so the thicket field and the mega
   // plants cannot move a plant that the scan already placed. The patch keeps the communities, the
   // kinds, and the sizes it grew before this issue. See describePatchFlora() for the same rule.
@@ -1919,7 +1910,7 @@ function patchFlora(ctx, s) {
     return probe;
   }
 
-  // The share of the open ground at one point. 1 is bare: no plant and no grass grows there.
+  // The share of the open ground at one point. 1 is bare: no plant grows there.
   const bareAt = (x, z) => {
     const b = noise.n3(x / BARE_WAVE + ob0, z / BARE_WAVE + ob1, 7.5) * 0.5 + 0.5;
     return smoothstep(1 - bareShare - 0.16, 1 - bareShare + 0.06, b);
@@ -2165,42 +2156,7 @@ function patchFlora(ctx, s) {
   }
   flora.set(fixed, keep * 8);
 
-  // ---------------------------------------------------------------- the ground cover mask
-  // The mask runs on a grid at twice the terrain step. A grid at the terrain step costs four times
-  // as much and the reader cannot see the difference, because one tuft is about one unit wide.
-  const gStep = grid * 2, gN = Math.ceil((n - 1) / 2) + 1;
-  const grass = new Uint8Array(gN * gN);
-  const gBase = GRASS_BASE[type] !== undefined ? GRASS_BASE[type] : 0.6;
-  if (gBase > 0) {
-    for (let j = 0; j < gN; j++) {
-      const zm = -half + j * gStep;
-      const gj = clamp(Math.round((zm + half) / grid), 1, n - 2);
-      for (let i = 0; i < gN; i++) {
-        const xm = -half + i * gStep;
-        const gi = clamp(Math.round((xm + half) / grid), 1, n - 2);
-        const gk = gj * n + gi, h = heights[gk];
-        if (h < 0) continue;
-        if (blocked && blocked(xm, zm)) continue;
-        const t = cellT[gk];
-        const m = cellM[gk] - vary[gk] * 0.1 + Math.max(cellF[gk], 0) * 0.06;
-        if (biomeIndex(ctx, h * hPerU, t, m, beachH) <= 2) continue;
-        const dhx = (heights[gk + 1] - heights[gk - 1]) / (2 * grid);
-        const dhz = (heights[gk + n] - heights[gk - n]) / (2 * grid);
-        const flat = 1 - smoothstep(GRASS_SLOPE * 0.55, GRASS_SLOPE, Math.hypot(dhx, dhz));
-        if (flat <= 0) continue;
-        // The temperature gate must clear a desert. `cellT` carries the temperature bias of the
-        // world, and a desert sits well over 1, so a gate that closed at 1.05 left every hot patch
-        // with no cover at all. It now closes where nothing can live.
-        const warm = smoothstep(0.02, 0.16, t) * (1 - smoothstep(1.25, 1.7, t));
-        const wet = 0.3 + 0.7 * smoothstep(-0.2, 0.45, m);
-        const patchy = 0.4 + 0.6 * (noise.n3(xm / GRASS_WAVE + oq0, zm / GRASS_WAVE + oq1, 41.5) * 0.5 + 0.5);
-        const v = gBase * flat * warm * wet * patchy * (1 - bareAt(xm, zm) * 0.85);
-        grass[j * gN + i] = clamp(Math.round(v * 255), 0, 255);
-      }
-    }
-  }
-
-  return { flora, grass, grassN: gN, grassStep: gStep, marks: markCount, fixed: fixedCount,
+  return { flora, marks: markCount, fixed: fixedCount,
     big: bigAt.length / 2, mega: megaAt.length / 2 };
 }
 
@@ -2786,7 +2742,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
     ? patchSource(ctx, srcKind, {
       heights, n, grid, half, pseed, avoid: act ? act.blocked : null,
     }) : null;
-  // The plants, the grass, and the group anchors keep off both footprints.
+  // The plants and the group anchors keep off both footprints.
   const blockAct = act ? act.blocked : null, blockSrc = src ? src.blocked : null;
   const blocked = blockAct && blockSrc
     ? (x, z) => blockAct(x, z) || blockSrc(x, z) : (blockAct || blockSrc);
@@ -2976,7 +2932,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
     cellT, cellM, cellF, noise: pnoise, rng: prng, maxFlora: opts.maxFlora || 6000, pseed,
     blocked,
   });
-  const flora = grown.flora, grass = grown.grass;
+  const flora = grown.flora;
 
   post(96, 'Calling the animals');
   const { groups, members } = patchFauna(ctx, opts.maxFauna, pulled, {
@@ -2996,8 +2952,6 @@ function patch(seed, site, opts = {}, post = () => {}) {
       floraEdge: FLORA_EDGE,
       floraVariant: ctx.world.floraVariant,
       rim: { out: rimOut, step: rimStep, n: rimN, hasSea: rimSea },
-      // the ground cover mask of issue 21, on its own grid at twice the terrain step
-      cover: { n: grown.grassN, step: grown.grassStep },
       // what the two passes after the scan put on the patch, for the load log
       marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big, mega: grown.mega },
       activity: act ? act.info : null,
@@ -3015,7 +2969,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
       elevation, radiusKm: ctx.radiusKm,
       seaLevel: 0, hasSea, shore: hasSea && hasLand,
     },
-    heights, colors, flora, grass, groups, members, rimHeights, rimColors, surface, rimSurface,
+    heights, colors, flora, groups, members, rimHeights, rimColors, surface, rimSurface,
   };
   return result;
 }

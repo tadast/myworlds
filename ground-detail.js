@@ -1,5 +1,5 @@
 // myworlds — the fine pattern of the ground: dry patches and a leafy speckle on the cover, ripples
-// on the sand, blocks and cracks on the rock, and wind drifts on the snow.
+// and grains on the sand, blocks and cracks on the rock, and wind drifts on the snow.
 //
 // The terrain is a grid of 2 m facets, one colour per vertex. Close to the camera a facet fills a
 // large part of the screen, and it reads as one flat swatch. This file adds the detail a facet
@@ -254,14 +254,6 @@ vec3 detLoose(vec2 p, vec2 q, vec2 gx, vec2 gy, float fp, float big, vec3 base, 
   // grains
   float fg = detFade(0.03, fp);
   if (fg > 0.0) c *= 1.0 + (detNoise(p + 29.0, 0.03, gx, gy) - 0.5) * 0.3 * fg;
-  // pebbles
-  float fb = detFade(0.1, fp);
-  if (fb > 0.0) {
-    vec4 pb = detCell(p, 0.3, 1.9, gx, gy);
-    float peb = (1.0 - smoothstep(0.16, 0.28, pb.g)) * step(0.78, pb.a) * fb;
-    c = mix(c, c * 0.72, peb);
-    h += peb * 0.03;
-  }
   #endif
   #if DETAIL_STYLE == 3
   // a crust of ash, cracked into plates 3 m wide, and a few of the seams still glow. The groove is

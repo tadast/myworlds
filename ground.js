@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from './ground-sky.js';
-import { Flora, GrassField } from './ground-flora.js';
+import { Flora } from './ground-flora.js';
 import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
@@ -332,7 +332,6 @@ export class Ground {
     this.carrier = null;    // the reading of issue 34, from the app. See load().
     this.sky = null;
     this.flora = null;
-    this.grass = null;
     this.fauna = null;
     this.sea = null;
     this.phenomena = null;
@@ -483,10 +482,6 @@ export class Ground {
     this.heights = p ? result.heights : null;
     // the biome of every node plus one, which the fine pattern of the terrain reads
     this.surface = p && result.surface && result.surface.length ? result.surface : null;
-    // the ground cover mask of issue 21, on its own grid at twice the terrain step
-    this.cover = p && result.grass && result.grass.length ? result.grass : null;
-    this.coverN = this.cover && p.cover ? p.cover.n : 0;
-    this.coverStep = this.cover && p.cover ? p.cover.step : 1;
     this.n = p ? p.n : 0;
     this.grid = p ? p.grid : 0;
     this.half = p ? p.size / 2 : PATCH_SIZE / 2;
@@ -524,7 +519,6 @@ export class Ground {
     if (p) {
       this._buildTerrain();
       this._buildFlora(result);
-      this._buildGrass(result);
       // The phenomenon of the world, when this cell is the cell that holds it. The worker raised
       // the cone or the pool at the origin; this adds the smoke, the embers, and the jet. It comes
       // after the terrain, because it reads the drawn height at the origin. See ground-phenomena.js.
@@ -670,47 +664,6 @@ export class Ground {
     console.info(`[myworlds] ground flora ${this.flora.count} plants in ${this.flora.kinds.length} kinds`
       + (m ? `, ${m.placed} of them in ${m.tried} arrangements, ${m.colossus} colossus courts`
         + `, and ${m.mega} mega plants` : ''));
-  }
-
-  // The ground cover of the patch. The worker says where a tuft may grow; GrassField grows a
-  // lattice of them around the camera and carries it as the reader walks. See ground-flora.js.
-  _buildGrass(result) {
-    if (!this.cover) return;
-    this.grass = new GrassField({
-      palette: result.patch.palette, tier: this.tier, variant: result.patch.floraVariant || 0,
-      sampler: {
-        heightAt: (x, z) => this.heightAt(x, z),
-        coverAt: (x, z) => this.coverAt(x, z),
-        colorAt: (x, z, out) => this.colorAt(x, z, out),
-        gain: GROUND_GAIN,       // the terrain multiplies its colours by this, so a tuft must too
-      },
-    });
-    this.content.add(this.grass.group);
-  }
-
-  // The cover mask at one point, 0 to 1. The mask runs on its own grid at twice the terrain step,
-  // so it reads the nearest node: one tuft is about one unit wide and the reader cannot see the
-  // difference between the nearest node and a smooth one.
-  coverAt(x, z) {
-    const C = this.cover;
-    if (!C) return 0;
-    const N = this.coverN, s = this.coverStep;
-    const i = Math.round((x + this.half) / s), j = Math.round((z + this.half) / s);
-    if (i < 0 || j < 0 || i >= N || j >= N) return 0;
-    return C[j * N + i] / 255;
-  }
-
-  // The colour of the terrain at one point, from the vertex colours the worker painted.
-  colorAt(x, z, out) {
-    const C = this.result && this.result.colors;
-    out[0] = out[1] = out[2] = 1;
-    if (!C) return out;
-    const n = this.n;
-    const i = Math.round((x + this.half) / this.grid), j = Math.round((z + this.half) / this.grid);
-    if (i < 0 || j < 0 || i >= n || j >= n) return out;
-    const o = (j * n + i) * 3;
-    out[0] = C[o]; out[1] = C[o + 1]; out[2] = C[o + 2];
-    return out;
   }
 
   // Split a cell range into blocks of about one tenth of the patch, so the frustum can cull them.
@@ -1146,7 +1099,6 @@ export class Ground {
 
     // the LOD walk reads the camera, so it runs after the clamps too
     if (this.flora) this.flora.update(this.camera, t);
-    if (this.grass) this.grass.update(this.camera, t);
   }
 
   // ---------------------------------------------------------------- the hour, issue 32
@@ -1926,7 +1878,6 @@ export class Ground {
     this.result = null;
     this.heights = null;
     this.surface = null;
-    this.cover = null;
     this.rim = null;
     this.sky = null;
     this.sea = null;
@@ -1936,7 +1887,6 @@ export class Ground {
     if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
     if (this.source) { this.source.dispose(); this.source = null; }
     if (this.flora) { this.flora.dispose(); this.flora = null; }
-    if (this.grass) { this.grass.dispose(); this.grass = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }
     this.content.traverse((o) => {
       if (o === this.content) return;

@@ -16,7 +16,8 @@
 // world object as JSON in two parts: the facts, which carry the genomes of the species and the
 // place of the source, and last the lore, the words the lore writers give the world.
 //
-// A patch line hashes every array of the patch and the patch object as JSON in the same two parts:
+// A patch line hashes every array of the patch, the biome of every node and of every rim node
+// among them, and the patch object as JSON in the same two parts:
 // the facts, which carry the biome and the place of the wreck, and last the lore of the plants.
 //
 // The lore writers draw from streams of their own, so a change of wording moves the last column of
@@ -111,8 +112,9 @@ function splitPatch(p) {
 }
 
 const patchLine = (seed, name, label, p) => [seed, name, 'patch', label, p.patch.biome.replace(/ /g, '_'),
-  hashArray(p.heights), hashArray(p.colors), hashArray(p.flora), hashArray(p.grass),
+  hashArray(p.heights), hashArray(p.colors), hashArray(p.flora), hashArray(p.surface),
   hashArray(p.groups), hashArray(p.members), hashArray(p.rimHeights), hashArray(p.rimColors),
+  hashArray(p.rimSurface),
   ...splitPatch(p.patch)].join(' ');
 
 // A patch depends only on its arguments. On the LOW tier the source patch of each world is built a

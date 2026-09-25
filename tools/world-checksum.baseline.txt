@@ -1,42 +1,42 @@
 Auralis HIGH world terran 56cb49c0 fd435b9a 29d9654f 204c2375 80cd41f2 26bdcf1f f125ccac 1eb91ded b9714252
-Auralis HIGH patch fixed ocean 5602361b 88fcd9d6 ab3e7c0b a14462da ab3e7c0b ab3e7c0b 5552be35 1ac8996e 597a9f75 c570341f
-Auralis HIGH patch source forest cc3c023d 3b654fb2 b66aefe8 dcffe529 829fa916 39ccef4e abfa4675 2ab4f598 da29c8d1 abf11d33
-Auralis HIGH patch activity dry f87eb5f4 263e4f81 c91fd7cf 6709b829 ab3e7c0b ab3e7c0b 1e3635b5 db78975c 589637be e536e28a
+Auralis HIGH patch fixed ocean 5602361b 88fcd9d6 ab3e7c0b e68c753d ab3e7c0b ab3e7c0b 5552be35 1ac8996e 6504af06 7c6d92c5 c570341f
+Auralis HIGH patch source forest cc3c023d 3b654fb2 b66aefe8 0a242797 829fa916 39ccef4e abfa4675 2ab4f598 15daf402 a6bc8883 abf11d33
+Auralis HIGH patch activity dry f87eb5f4 263e4f81 c91fd7cf d2bcfd4a ab3e7c0b ab3e7c0b 1e3635b5 db78975c 4a94e543 6027e258 e536e28a
 Auralis LOW world terran a5c05398 cf0efb4e e3702e1f ba0d2f0a 80cd41f2 093e3559 4c9c270b b64f017e b9714252
-Auralis LOW patch fixed ocean 73569642 e3c89e1e ab3e7c0b 0987f591 ab3e7c0b ab3e7c0b 4ce0e0f0 f173a231 86313415 c570341f
-Auralis LOW patch source forest 195fda7b f40fb3dc 7bbb3c36 376d94df 829fa916 39ccef4e 7a14c372 77599eb2 c842c26f 4aeae6c0
-Auralis LOW patch activity dry 791eeb93 4654410b 76794240 9540efa5 ab3e7c0b ab3e7c0b 72621a96 c3df8e1e f8363b1f 188fa4ec
+Auralis LOW patch fixed ocean 73569642 e3c89e1e ab3e7c0b 73dbb6b4 ab3e7c0b ab3e7c0b 4ce0e0f0 f173a231 42bd37fe db7fcb77 c570341f
+Auralis LOW patch source forest 195fda7b f40fb3dc 7bbb3c36 c0f78571 829fa916 39ccef4e 7a14c372 77599eb2 3937a1a4 40c7e7cb 4aeae6c0
+Auralis LOW patch activity dry 791eeb93 4654410b 76794240 b4d5cd6f ab3e7c0b ab3e7c0b 72621a96 c3df8e1e f1ca0e4d c4f58c3e 188fa4ec
 Vesper HIGH world ocean 0b1bed1a 74dc5d65 87f00923 44480ca7 5d07b4ec a403e1e6 b8bd6925 79123b8c 9f30d27e
-Vesper HIGH patch fixed ocean 1f97828f 88fcd9d6 ab3e7c0b a14462da ab3e7c0b ab3e7c0b 82543a33 1ac8996e 984b6637 c570341f
-Vesper HIGH patch source forest 1ad9e784 105d284d 4c6bc9d1 efd6b4bb ab3e7c0b ab3e7c0b 92e43b4f 8febb6b9 357e18b3 05a12cfa
+Vesper HIGH patch fixed ocean 1f97828f 88fcd9d6 ab3e7c0b e68c753d ab3e7c0b ab3e7c0b 82543a33 1ac8996e 6504af06 8ffd37c4 c570341f
+Vesper HIGH patch source forest 1ad9e784 105d284d 4c6bc9d1 845e342a ab3e7c0b ab3e7c0b 92e43b4f 8febb6b9 19094c88 e95db018 05a12cfa
 Vesper HIGH patch activity -
 Vesper LOW world ocean 82d28dc7 8365dcda 2f05038d 9cfd7be4 5d07b4ec 64642224 9c9faf88 4ffca2f5 9f30d27e
-Vesper LOW patch fixed ocean 8c57e461 e3c89e1e ab3e7c0b 0987f591 ab3e7c0b ab3e7c0b a62492ed f173a231 6ad5c5a6 c570341f
-Vesper LOW patch source forest 9ba7c5d4 e5987003 9ba58d0a b68e9378 cccf28be 7cc921a1 cc0e7c4d d979a230 aab92cab dd7d103c
+Vesper LOW patch fixed ocean 8c57e461 e3c89e1e ab3e7c0b 73dbb6b4 ab3e7c0b ab3e7c0b a62492ed f173a231 42bd37fe 58adfaa7 c570341f
+Vesper LOW patch source forest 9ba7c5d4 e5987003 9ba58d0a 9dc90259 cccf28be 7cc921a1 cc0e7c4d d979a230 6725f04c a8d4ee24 dd7d103c
 Vesper LOW patch activity -
 Meridian HIGH world ice 996c674c ca722bb5 d3b5afa9 ab3e7c0b 3b73ee15 ef91e484 4caefaeb d586d1c0 bf098963
-Meridian HIGH patch fixed snow e70ee11e 584e2df7 d7dd5f9a 5321a583 408c9dbe 36bd201f 46241878 07c6df65 591b99f0 d8a75abe
-Meridian HIGH patch source snow c19352ad a1aef4a6 6eb18ffc 90782d9e f5fc9b9d cdf1ee35 7cf1ce58 a0c6f5b4 e439864f e5db8ca5
+Meridian HIGH patch fixed snow e70ee11e 584e2df7 d7dd5f9a 0dec81c5 408c9dbe 36bd201f 46241878 07c6df65 a4d51d09 13592f92 d8a75abe
+Meridian HIGH patch source snow c19352ad a1aef4a6 6eb18ffc 0dec81c5 f5fc9b9d cdf1ee35 7cf1ce58 a0c6f5b4 a4d51d09 d3656d57 e5db8ca5
 Meridian HIGH patch activity -
 Meridian LOW world ice 2767db71 79d085eb bec7a3b7 ab3e7c0b 3b73ee15 aeedc7c5 4caefaeb e8b411bd 0b9c549d
-Meridian LOW patch fixed snow 07c4360f a0019bb0 11a6f664 8398088e 408c9dbe 36bd201f b67c0125 f73741fa dc833909 9e849d6f
-Meridian LOW patch source snow c31b445e 3bd60402 e426021b 0adcaa1d f5fc9b9d cdf1ee35 7229d4b5 81f1db00 a97a4b6a cce17f88
+Meridian LOW patch fixed snow 07c4360f a0019bb0 11a6f664 89095434 408c9dbe 36bd201f b67c0125 f73741fa fa9e615f c9de9cce 9e849d6f
+Meridian LOW patch source snow c31b445e 3bd60402 e426021b 89095434 f5fc9b9d cdf1ee35 7229d4b5 81f1db00 c3697f3a 46119cf6 cce17f88
 Meridian LOW patch activity -
 Tessaly HIGH world desert cbde16b5 a37929d2 7fa5fdd8 8c20e50f 30199b3c 64fc09ac f813f050 8fec3cc9 c8697f35
-Tessaly HIGH patch fixed grass 3adb0ee8 b082f8fb dd3e0c69 ed3014aa 6803c2bc 97dbf75b 213e1d37 adacc12b 250bed0d 0d3c98e5
-Tessaly HIGH patch source dry 158f6d30 722d8cbc c26d39eb a3c77903 085b9457 86611730 8a1d544f ac0beacb 111a4218 97cd55e7
+Tessaly HIGH patch fixed grass 3adb0ee8 b082f8fb dd3e0c69 723f09e6 6803c2bc 97dbf75b 213e1d37 adacc12b 44f4d8be 1386fee8 0d3c98e5
+Tessaly HIGH patch source dry 158f6d30 722d8cbc c26d39eb ebca3cbc 085b9457 86611730 8a1d544f ac0beacb 49d46fe6 d6913405 97cd55e7
 Tessaly HIGH patch activity -
 Tessaly LOW world desert 4526c343 12ec1fa5 4effce3b 9671ab8f 30199b3c 11bff329 c728b4c5 ddbc9b9d c8697f35
-Tessaly LOW patch fixed grass cab29028 b4f44b39 84ad08d8 346c1bc3 6803c2bc 97dbf75b 5f83f7fd 299d47eb 849631f9 cc9015f3
-Tessaly LOW patch source dry 6fe3e0ae 2f452a0a f7c22ddc 9062202d 085b9457 86611730 4addb6bb 87d694b1 cb29dc30 b8c7e677
+Tessaly LOW patch fixed grass cab29028 b4f44b39 84ad08d8 80109fa6 6803c2bc 97dbf75b 5f83f7fd 299d47eb 79d4f81f 97f78faf cc9015f3
+Tessaly LOW patch source dry 6fe3e0ae 2f452a0a f7c22ddc b7bea040 085b9457 86611730 4addb6bb 87d694b1 b2482ecc 1405bc3e b8c7e677
 Tessaly LOW patch activity -
 Orin HIGH world lava bf7e8574 73fe8f95 61fd6917 0b43254c 79f56f11 09daa20f a9cec285 80305620 052a5852
-Orin HIGH patch fixed shallows e90dd133 e7470439 ab3e7c0b a14462da ab3e7c0b ab3e7c0b 7dbe3165 e415f369 60a7ead5 c570341f
-Orin HIGH patch source grass 10fb641a 16985f5c b2117f3d e5c2c8ea 262d9a65 06758968 a3302c66 8663615e c3c88427 74cf6e14
+Orin HIGH patch fixed shallows e90dd133 e7470439 ab3e7c0b 27c61d99 ab3e7c0b ab3e7c0b 7dbe3165 e415f369 6b49f7df e96ec98f c570341f
+Orin HIGH patch source grass 10fb641a 16985f5c b2117f3d 0a7a5a8c 262d9a65 06758968 a3302c66 8663615e 94d41543 7f615b97 74cf6e14
 Orin HIGH patch activity -
 Orin LOW world lava ef810c59 8b9d1f16 71cdc921 920b4ea8 79f56f11 1370b26c a21f4194 31d66292 052a5852
-Orin LOW patch fixed shallows 5d23b86a 2f36a965 ab3e7c0b 0987f591 ab3e7c0b ab3e7c0b e2b61166 d4d48599 38d0183b c570341f
-Orin LOW patch source grass f5293a35 d5b9b034 f8eddb87 5c968cd6 39bc8e23 7e2db237 4ca9ba5b 35ae9e7a 580926c8 157c8673
+Orin LOW patch fixed shallows 5d23b86a 2f36a965 ab3e7c0b 242e3468 ab3e7c0b ab3e7c0b e2b61166 d4d48599 1c007db3 7cb3884f c570341f
+Orin LOW patch source grass f5293a35 d5b9b034 f8eddb87 3ab2db78 39bc8e23 7e2db237 4ca9ba5b 35ae9e7a dd6259a6 c4af4093 157c8673
 Orin LOW patch activity -
 Mire HIGH world gas - c74165a4 edb41c27 ab3e7c0b ab3e7c0b 00442b4c - 529df80d 0a4ab61a
 Mire LOW world gas - 4d80021e 15f38a9d ab3e7c0b ab3e7c0b 00442b4c - 529df80d 0a4ab61a

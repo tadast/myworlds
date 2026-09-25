@@ -10,9 +10,7 @@
 // Issue 21 added three things a reader sees at once. Every plant now carries its own lean, its own
 // width, and its own tint, so no two plants of one kind read the same. Every kind carries a style:
 // how far the wind bends it, how far it breathes, how much it glows, and how far out it must stay
-// a mesh, because a card of 64 pixels cannot carry a body that fills the screen. And the ground
-// itself carries grass: GrassField grows a lattice of tufts around the camera from the cover mask
-// of the worker, far past the plant cap, because a tuft is only useful within about 80 units.
+// a mesh, because a card of 64 pixels cannot carry a body that fills the screen.
 import * as THREE from 'three';
 import { floraGeometry, FLORA, FLORA_STYLE } from './flora-geometry.js';
 
@@ -43,23 +41,6 @@ const SHADOW_REACH = 8;
 const TINT_HUE = 0.16;       // how far one plant may lean from the colour of its kind
 const TINT_LIT = 0.22;       // how far one plant may lean from the brightness of its kind
 
-// The grass lattice. A tuft is about one unit wide, so it only reads within about 80 units, and a
-// field that wide holds far more tufts than the whole plant cap.
-//
-// The fade runs in the vertex shader on the distance from the eye to the tuft, every frame. It used
-// to be baked into the scale of a tuft when the lattice was built, and the lattice is only built
-// once the camera has moved GRASS_STEP. A tuft in the band at the edge then changed its size by up
-// to half in one frame, at every rebuild, so the edge of the field breathed. The distance is also
-// the distance in three dimensions, so a camera that climbs sees the field shrink toward the ground
-// under it, and a camera that comes down sees the grass rise from the ground nearest to it. The
-// field used to swell in over all of its width at once, at 60 to 110 units of height.
-//
-// A tuft also takes the colour of the ground under it as it goes out, before it shrinks. A tuft on
-// a world where the grass and the ground differ in hue used to arrive as a spot of a new colour.
-const GRASS_NEAR = 0.5;      // the share of the radius where a tuft starts to shrink
-const GRASS_HUE = [0.3, 0.85];   // the shares of the radius where the colour turns to the ground
-const GRASS_STEP = 7;        // units: the camera moves this far before the lattice is rebuilt
-
 // The mark. A tap on a plant lays a ring on the ground around it, the way a tap on an animal lays
 // one under the animal. Issue 24. The numbers match ground-fauna.js, so the two marks read alike.
 const PICK_TOL = 34;         // pixels: how far off the body a tap may land and still find it
@@ -86,13 +67,6 @@ function hash1(i) {
   i = Math.imul(i ^ (i >>> 16), 2246822507);
   i = Math.imul(i ^ (i >>> 13), 3266489909);
   return ((i ^ (i >>> 16)) >>> 0) / 4294967296;
-}
-
-// the same hash over a lattice cell, so a tuft keeps its place while the field scrolls under it
-function hash2(i, j) {
-  let h = (Math.imul(i, 374761393) ^ Math.imul(j, 668265263)) >>> 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
 // One instance matrix, from the source array at o into the destination array at d.
@@ -990,158 +964,5 @@ export class Flora {
     this.targets.length = 0;
     this.materials.length = 0;
     this.group.clear();
-  }
-}
-
-// ---------------------------------------------------------------- the ground cover
-// The plants stand metres apart. Between them the ground was bare colour, so a patch read as
-// painted card from close up. GrassField fills that gap.
-//
-// A tuft is about one unit wide, so it only reads within about 80 units of the reader. A field
-// that wide over the whole box would hold a quarter of a million tufts, far past the plant cap.
-// So the field is a lattice in world space that the camera carries: every cell of GRASS_CELL units
-// holds at most one tuft, the tuft takes its place from the hash of its cell, and the field
-// rebuilds when the camera has moved GRASS_STEP units. A tuft therefore never moves under the
-// reader; the field only gains cells at one edge and loses them at the other. The lattice reaches
-// GRASS_STEP past the radius, so every tuft the fade can show already stands in it.
-//
-// The cover mask of the worker says where a tuft may grow. The colour of the terrain under the
-// tuft tints it, so the grass and the ground it stands on hold one hue.
-
-// The material of the tufts: the near material of a plant, and the fade of the field on top. See
-// GRASS_NEAR. The fade reads the eye from cameraPosition, which three.js gives every vertex shader.
-function grassMaterial(style, radius) {
-  const material = animate(floraMaterial(), style);
-  const first = material.onBeforeCompile;
-  const fade = { value: new THREE.Vector4(radius * GRASS_NEAR, radius, radius * GRASS_HUE[0], radius * GRASS_HUE[1]) };
-  material.userData.fade = fade;
-  material.onBeforeCompile = (sh, r) => {
-    first.call(material, sh, r);
-    sh.uniforms.uFade = fade;
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform vec4 uFade;\nattribute vec3 aGround;\nvarying vec3 vGround;\nvarying float vHue;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-      #ifdef USE_INSTANCING
-        vec3 gAt = (modelMatrix * vec4(instanceMatrix[3].xyz, 1.0)).xyz;
-        float gEye = distance(cameraPosition, gAt);
-        transformed *= 1.0 - smoothstep(uFade.x, uFade.y, gEye);
-        vHue = 1.0 - smoothstep(uFade.z, uFade.w, gEye);
-        vGround = aGround;
-      #endif
-      `);
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vGround;\nvarying float vHue;')
-      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(vGround, diffuseColor.rgb, vHue);');
-  };
-  material.customProgramCacheKey = () => 'flora-grass';
-  return material;
-}
-
-export class GrassField {
-  constructor({ palette, tier, sampler, variant = 0 }) {
-    this.sampler = sampler;
-    this.radius = tier.shadows ? 78 : 50;
-    this.cell = tier.shadows ? 1.7 : 2.3;
-    this.reach = this.radius + GRASS_STEP;      // the lattice reaches past the fade, see above
-    this.max = Math.ceil((2 * this.reach / this.cell + 2) ** 2);
-    this.count = 0;
-    this.buildMs = 0;
-    this.atX = Infinity;
-    this.atZ = Infinity;
-    this.group = new THREE.Group();
-
-    const geo = floraGeometry(FLORA.GRASS, palette.flora, variant);
-    geo.computeBoundingBox();
-    this.height = Math.max(geo.boundingBox.max.y, 0.001);
-    // the colour of the ground under every tuft, which the tuft turns to as it goes out
-    this.ground = new THREE.InstancedBufferAttribute(new Float32Array(this.max * 3), 3);
-    this.ground.setUsage(THREE.DynamicDrawUsage);
-    geo.setAttribute('aGround', this.ground);
-    const style = FLORA_STYLE[FLORA.GRASS];
-    this.material = grassMaterial(style, this.radius);
-    this.mesh = new THREE.InstancedMesh(geo, this.material, this.max);
-    this.mesh.castShadow = false;               // one tuft casts nothing a reader can see
-    this.mesh.receiveShadow = !!tier.shadows;
-    this.mesh.frustumCulled = false;            // the field follows the camera, so a sphere is stale
-    this.mesh.count = 0;
-    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.max * 3).fill(1), 3);
-    this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.group.add(this.mesh);
-  }
-
-  update(camera, t) {
-    this.material.userData.time.value = t;
-    const x = camera.position.x, z = camera.position.z;
-    // A camera higher than the radius over the ground sees no tuft, because the fade reads the
-    // distance in three dimensions. The field then draws nothing and builds nothing.
-    const up = camera.position.y - this.sampler.heightAt(x, z);
-    if (up >= this.radius) { this.mesh.count = 0; this.count = 0; return; }
-    const dx = x - this.atX, dz = z - this.atZ;
-    if (this.count === 0 || dx * dx + dz * dz > GRASS_STEP * GRASS_STEP) this._build(x, z);
-  }
-
-  // One lattice, centred on the camera. The matrix carries a turn about y and a scale, and nothing
-  // else, so the walk writes six numbers and leaves the rest of the identity alone.
-  _build(cx, cz) {
-    const t0 = performance.now();
-    const S = this.sampler, cell = this.cell, R = this.reach, R2 = R * R;
-    const gain = S.gain || 1;
-    const m = this.mesh.instanceMatrix.array, col = this.mesh.instanceColor.array;
-    const gr = this.ground.array;
-    const i0 = Math.floor((cx - R) / cell), i1 = Math.ceil((cx + R) / cell);
-    const j0 = Math.floor((cz - R) / cell), j1 = Math.ceil((cz + R) / cell);
-    const rgb = [0, 0, 0];
-    let o = 0;
-    for (let j = j0; j <= j1 && o < this.max * 16; j++) {
-      for (let i = i0; i <= i1 && o < this.max * 16; i++) {
-        const hx = hash2(i, j), hz = hash2(i + 911, j - 37);
-        const x = (i + hx) * cell, z = (j + hz) * cell;
-        const d2 = (x - cx) * (x - cx) + (z - cz) * (z - cz);
-        if (d2 > R2) continue;
-        const cover = S.coverAt(x, z);
-        if (cover <= 0.04) continue;
-        // Thin cover must read thin. The share of the cells that grow follows the mask, so a
-        // desert shows a tuft here and there and a meadow closes over.
-        const hp = hash2(i + 57, j + 91);
-        if (hp > cover * 1.5) continue;
-        const y = S.heightAt(x, z);
-        const hs = hash2(i - 313, j + 449);
-        // A tuft is wider than it is tall, so a field of them reads as cover and not as a crop.
-        const size = (0.45 + 0.85 * hs) * (0.5 + 0.6 * cover) / this.height;
-        const wide = size * 1.3;
-        const a = hash2(i + 7, j - 7) * Math.PI * 2;
-        const ca = Math.cos(a) * wide, sa = Math.sin(a) * wide;
-        m[o] = ca; m[o + 1] = 0; m[o + 2] = -sa; m[o + 3] = 0;
-        m[o + 4] = 0; m[o + 5] = size; m[o + 6] = 0; m[o + 7] = 0;
-        m[o + 8] = sa; m[o + 9] = 0; m[o + 10] = ca; m[o + 11] = 0;
-        m[o + 12] = x; m[o + 13] = y; m[o + 14] = z; m[o + 15] = 1;
-        // The tint carries the hue of the ground under the tuft, not its brightness, so the grass
-        // holds its own colour and still belongs to the ground it stands on.
-        S.colorAt(x, z, rgb);
-        const mean = (rgb[0] + rgb[1] + rgb[2]) / 3 || 1;
-        const lit = 0.9 + 0.55 * hp;
-        const c = o / 16 * 3;
-        col[c] = lit * (1 + (rgb[0] / mean - 1) * 0.5);
-        col[c + 1] = lit * (1 + (rgb[1] / mean - 1) * 0.5);
-        col[c + 2] = lit * (1 + (rgb[2] / mean - 1) * 0.5);
-        gr[c] = rgb[0] * gain; gr[c + 1] = rgb[1] * gain; gr[c + 2] = rgb[2] * gain;
-        o += 16;
-      }
-    }
-    this.count = o / 16;
-    this.mesh.count = this.count;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.mesh.instanceColor.needsUpdate = true;
-    this.ground.needsUpdate = true;
-    this.atX = cx; this.atZ = cz;
-    this.buildMs = performance.now() - t0;
-  }
-
-  dispose() {
-    this.mesh.geometry.dispose();
-    this.mesh.material.dispose();
-    this.group.clear();
-    this.count = 0;
   }
 }
