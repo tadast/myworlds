@@ -223,16 +223,37 @@ that moves more than `TAP_SLOP` stops being a tap.
 
 The **keys** carry the rest, and the probe flies like a drone. `W`, `A`, `S`, and `D` move it in
 the flat plane, parallel to the surface. The tilt of the view does not change the plane, and nothing
-follows the terrain. `Space` lifts the camera, `Ctrl` drops it, `Shift` runs, and `+` and `-` zoom.
-The side arrows turn the view, and the up and down arrows tilt it, and so do `Q` and `E`. The
-velocity eases to the speed the keys ask for at `WALK_EASE`, so the probe gathers speed and coasts
-to a stop over about half a second.
+follows the terrain. `Space` and `E` lift the camera, `C` and `Q` drop it, `Shift` runs, and `+`
+and `-` zoom. The side arrows turn the view, and the up and down arrows tilt it, and so do `R` and
+`F`. The velocity eases to the speed the keys ask for at `WALK_EASE`, so the probe gathers speed and
+coasts to a stop over about half a second.
+
+**No key of the probe needs a modifier.** The drop sat on `Ctrl` at first. A held `Ctrl` turned
+every other key of the flight into a shortcut: `Ctrl+W` closed the tab, `Ctrl+D` made a bookmark,
+and `Ctrl+arrow` on macOS moved to the next desktop. The system takes some of these before the page
+sees them, so `preventDefault()` cannot stop them. The drop therefore moved to `C` and `Q`, and a
+key under `Ctrl`, `Cmd`, or `Alt` now goes to the browser. `E` and `Q` are the lift and the drop of
+the fly camera in Unity, Unreal, and Blender, so the tilt moved from them to `R` and `F`. The map
+reads `KeyboardEvent.code`, the place of the key, and not the letter it types. `W`, `A`, `S`, and
+`D` then sit under the left hand on an AZERTY board, and `+` and `-` still zoom on a layout that
+puts letters on that row.
+
+**Two fingers do one thing at a time.** OrbitControls read every two-finger move as a pinch and a
+turn at once, so a finger that drifted during a turn zoomed the view. Its pinch also raised the
+change of the spread to the power of the zoom speed, which reaches 2.5 at the ceiling, so one pinch
+there covered the whole range. And its turn swung the eye about the target, which can stand far
+out, so a reader who tried to turn to the side flew around a distant point instead. The ground now
+owns two fingers. The gesture waits until the fingers travel `TOUCH_LOCK` pixels, and then it takes
+one mode until a finger lifts. The pinch zooms one to one at every height, and a twist past
+`TOUCH_TWIST` turns the view by its own angle, as a map turns. The slide turns the view about the
+eye, as the look keys do: a slide to the side turns it, and a slide up tilts it up. A slide across
+the short side of the screen turns the view by `TOUCH_LOOK`, a quarter turn.
 
 The look keys turn the target about the eye, and not the eye about the target: the reader turns the
 head, and a camera swung about a target 15 m away would walk a 15 m circle instead. The walk moves
 the pair, so the view direction and the distance both hold and only the place changes. The speed
 follows the height, as the speed of a wheel step does: 16 units a second at eye height and 220 at
-the ceiling, and `Shift` multiplies by 5. An editable element takes every key first, so a reader
+the ceiling, and `Shift` multiplies by 3. An editable element takes every key first, so a reader
 who types a seed does not walk.
 
 Every key moves the camera and the target by one step, on all three axes, so the view direction and

@@ -73,7 +73,10 @@ const helpEl = $('#help');
 // ground carries the reader over it, so the first gesture does a different thing in each, and the
 // line has to say which. See updateHelp().
 const HELP_ORBIT = 'Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife';
-const HELP_GROUND = 'Drag or hold to move · WASD fly level, Space up, Ctrl down, Shift runs · arrows, Q E, two fingers, or right-drag to look';
+// A touch screen gets the help of the fingers, and every other screen gets the help of the keys.
+const HELP_GROUND = isCoarse
+  ? 'Drag or hold to move · two fingers: slide to look, pinch to zoom, twist to turn'
+  : 'Drag or hold to move · WASD fly level, Space or E up, C or Q down, Shift runs · arrows, R F, or right-drag to look';
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
 const muteBtn = $('#mute');

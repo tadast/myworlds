@@ -172,20 +172,36 @@ const WALK_EDGE = 80;       // units: the walk slows to nothing over this band a
 const KEY_YAW = 1.2;        // rad/s, the turn of the side arrows
 const KEY_TILT = 0.9;       // rad/s, the tilt of the up and down arrows, Q, and E
 const KEY_ZOOM = 1.8;       // the part of the distance + and - take each second
-// One name per job, so the reader may press either of two keys for it. A key with one letter comes
-// in lower case; a named key comes as the browser writes it.
+// One name per job, so the reader may press either of two keys for it. The map reads the physical
+// key (KeyboardEvent.code), not the letter it types. W, A, S, and D then sit under the left hand on
+// an AZERTY board too, and + and - still zoom on a layout that puts letters on that row.
 //
 // The probe flies like a drone. W, A, S, and D move it in the flat plane, parallel to the surface,
-// and they do not follow the terrain or the tilt of the view. Space lifts it, Ctrl drops it, and
-// Shift runs. The arrows turn the view about the eye: the side arrows turn it left and right, and
-// up and down tilt it. Q and E tilt it too, for the reader whose right hand holds the mouse.
+// and they do not follow the terrain or the tilt of the view. Space and E lift it, C and Q drop it,
+// and Shift runs. E and Q are the lift and the drop of the fly camera in Unity, Unreal, and
+// Blender. The arrows turn the view about the eye: the side arrows turn it left and right, and up
+// and down tilt it. R and F tilt it too, for the reader whose right hand holds the mouse.
+//
+// No job sits on Ctrl, Cmd, or Alt. The drop sat on Ctrl, and a held Ctrl turned the flight keys
+// into shortcuts of the browser and the system: Ctrl+W closed the tab, Ctrl+D made a bookmark, and
+// Ctrl+arrow on macOS moved to the next desktop. The system takes some of these before the page
+// sees them, so preventDefault() cannot stop them. See _onKey().
 const KEY_JOB = {
-  w: 'fwd', s: 'back', a: 'left', d: 'right',
-  arrowleft: 'yawl', arrowright: 'yawr',
-  arrowup: 'tiltu', arrowdown: 'tiltd', q: 'tiltu', e: 'tiltd',
-  ' ': 'up', control: 'down',
-  '+': 'in', '=': 'in', '-': 'out', _: 'out', shift: 'run',
+  KeyW: 'fwd', KeyS: 'back', KeyA: 'left', KeyD: 'right',
+  ArrowLeft: 'yawl', ArrowRight: 'yawr',
+  ArrowUp: 'tiltu', ArrowDown: 'tiltd', KeyR: 'tiltu', KeyF: 'tiltd',
+  Space: 'up', KeyE: 'up', KeyC: 'down', KeyQ: 'down',
+  Equal: 'in', NumpadAdd: 'in', Minus: 'out', NumpadSubtract: 'out',
+  ShiftLeft: 'run', ShiftRight: 'run',
 };
+// ---------------------------------------------------------------- two fingers
+// Two fingers look and zoom, and each gesture does one thing. OrbitControls read every two-finger
+// move as a pinch and a turn at once, so a finger that drifted during a turn zoomed the view. Its
+// pinch also raised the spread of the fingers to the power of the zoom speed, which reaches 2.5 at
+// the ceiling, so one pinch there covered the whole range. See _onTwo().
+const TOUCH_LOCK = 10;      // px the fingers travel before the gesture picks the pinch or the slide
+const TOUCH_LOOK = Math.PI / 2;   // rad of turn for a slide across the short side of the screen
+const TOUCH_TWIST = 0.2;    // rad a pinch must twist before it turns the view, so a pinch holds its way
 const SEAT_STEPS = 64;      // how many samples the pivot walks down the view ray. See _seatTarget()
 const GLIDE_S = 0.8;        // seconds, the glide to a tapped point
 const GLIDE_HIGH = 200;     // metres, a distance over this one shortens on a glide
@@ -362,7 +378,9 @@ export class Ground {
     this.controls.enablePan = true;
     this.controls.screenSpacePanning = false;
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
-    this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+    // TWO takes no gesture of OrbitControls, so the controls stand still under two fingers and
+    // _onTwo() owns them. When one finger lifts, the controls pan with the finger that stays.
+    this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: null };
 
     // the glide of a tap, and the pointer state that tells a tap from a drag
     this.glide = null;
@@ -370,7 +388,13 @@ export class Ground {
     this._pointers = 0;
     // Issue 23: the keys the reader holds, by job, and the walk velocity of the pair in units per
     // second. The velocity eases in and out, so no step starts or stops on one frame.
+    // Two keys can hold one job, so the held jobs come from the held keys. The release of Space
+    // must not stop a lift that E still holds.
     this.keys = new Set();
+    this._held = new Map();     // KeyboardEvent.code => job
+    // The fingers on the canvas by pointer id, and the two-finger gesture. See _onTwo().
+    this._touches = new Map();
+    this._two = null;
     this._vx = 0;
     this._vy = 0;
     this._vz = 0;
@@ -393,7 +417,7 @@ export class Ground {
       keyup: (e) => this._onKey(e, false),
       // A key held while the tab goes away never sends its keyup, so the reader would come back to
       // a camera that walks on its own.
-      blur: () => this.keys.clear(),
+      blur: () => { this._held.clear(); this.keys.clear(); },
     };
     canvas.addEventListener('pointerdown', this._bound.down, { passive: true });
     canvas.addEventListener('pointermove', this._bound.move, { passive: true });
@@ -1264,18 +1288,23 @@ export class Ground {
   // the sidebar must not walk, so an editable element takes every key. A keyup always comes off,
   // even while the controls are off, or a key held through the dive would stay down for ever.
   _onKey(e, down) {
-    const job = KEY_JOB[e.key.toLowerCase()];
+    const job = KEY_JOB[e.code];
     if (!job) return;
-    if (!down) { this.keys.delete(job); return; }
-    // Ctrl drops the camera, so a held Ctrl now rides on every other key of the flight and the
-    // guard can no longer read it as a shortcut. Cmd and Alt still take their keys away.
-    if (!this.controls.enabled || e.metaKey || e.altKey || e.repeat) return;
+    if (!down) {
+      this._held.delete(e.code);
+      this.keys = new Set(this._held.values());
+      return;
+    }
+    // A key under Ctrl, Cmd, or Alt is a shortcut, and it belongs to the browser. Shift is the run
+    // key and does not count.
+    if (!this.controls.enabled || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
     const el = document.activeElement;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
     // Space presses the button that holds the focus, and the reader who just clicked the probe
     // button would find the lift key dead. So the ground takes the space key and the button gives
     // up the focus. Enter still presses a button, so the keyboard reader keeps every control.
-    if (job === 'up' && el && el.matches && el.matches('button, a, select, summary')) el.blur();
+    if (e.code === 'Space' && el && el.matches && el.matches('button, a, select, summary')) el.blur();
+    this._held.set(e.code, job);
     this.keys.add(job);
     if (e.cancelable) e.preventDefault();   // an arrow key scrolls the page, and a space would too
   }
@@ -1352,45 +1381,55 @@ export class Ground {
     return out.lengthSq() > 1e-8 ? out.normalize() : this._forward(out);
   }
 
+  // Turn the view about the eye: yaw in radians to the left, tilt in radians up. The look keys and
+  // the two fingers both come here.
+  //
+  // The view turns the target about the eye, and not the eye about the target. The reader turns
+  // the head: a camera swung about a target 15 m away would walk a 15 m circle instead.
+  _look(yaw, tilt) {
+    const p = this.camera.position, tg = this.controls.target;
+    _dir.copy(tg).sub(p);
+    if (yaw) _dir.applyAxisAngle(_UP, yaw);
+    if (tilt) {
+      // The tilt holds inside the band of the controls. A tilt past the band made the controls
+      // swing the camera about the target to put the angle back, and the reader saw the probe
+      // move when only the view should turn.
+      const len = _dir.length();
+      _rt.set(_dir.x, 0, _dir.z);
+      if (_rt.lengthSq() < 1e-8 && !this._forward(_rt)) _rt.set(0, 0, -1);
+      _rt.normalize();
+      const c = this.controls;
+      const phi = THREE.MathUtils.clamp(Math.acos(THREE.MathUtils.clamp(-_dir.y / len, -1, 1))
+        + tilt, c.minPolarAngle + 1e-3, c.maxPolarAngle - 1e-3);
+      _dir.copy(_rt).multiplyScalar(len * Math.sin(phi)).setY(-len * Math.cos(phi));
+    }
+    tg.copy(p).add(_dir);
+    this.glide = null;
+  }
+
+  // Move the eye along the view: the distance to the target times k, inside the band of the
+  // controls. The zoom keys and the pinch both come here.
+  _zoomBy(k) {
+    const p = this.camera.position, tg = this.controls.target;
+    const d0 = p.distanceTo(tg);
+    if (d0 < 1e-4) return;
+    const d1 = THREE.MathUtils.clamp(d0 * k, this.controls.minDistance, this.controls.maxDistance);
+    p.sub(tg).setLength(d1).add(tg);
+    this.glide = null;
+  }
+
   // One step of the walk and of the look keys. It runs after the controls and before every clamp,
   // so the fog limit, the floor, and the ceiling all hold over it.
-  //
-  // The look keys turn the target about the eye, and not the eye about the target. The reader
-  // turns the head: a camera swung about a target 15 m away would walk a 15 m circle instead.
   _stepMove(dt) {
     if (dt <= 0 || !this.controls.enabled) return;
     const p = this.camera.position, tg = this.controls.target, K = this.keys;
     const yaw = (K.has('yawl') ? 1 : 0) - (K.has('yawr') ? 1 : 0);
     const tilt = (K.has('tiltu') ? 1 : 0) - (K.has('tiltd') ? 1 : 0);
-    if (yaw || tilt) {
-      _dir.copy(tg).sub(p);
-      if (yaw) _dir.applyAxisAngle(_UP, yaw * KEY_YAW * dt);
-      if (tilt) {
-        // The tilt holds inside the band of the controls. A tilt past the band made the controls
-        // swing the camera about the target to put the angle back, and the reader saw the probe
-        // move when only the view should turn.
-        const len = _dir.length();
-        _rt.set(_dir.x, 0, _dir.z);
-        if (_rt.lengthSq() < 1e-8 && !this._forward(_rt)) _rt.set(0, 0, -1);
-        _rt.normalize();
-        const c = this.controls;
-        const phi = THREE.MathUtils.clamp(Math.acos(THREE.MathUtils.clamp(-_dir.y / len, -1, 1))
-          + tilt * KEY_TILT * dt, c.minPolarAngle + 1e-3, c.maxPolarAngle - 1e-3);
-        _dir.copy(_rt).multiplyScalar(len * Math.sin(phi)).setY(-len * Math.cos(phi));
-      }
-      tg.copy(p).add(_dir);
-      this.glide = null;
-    }
+    if (yaw || tilt) this._look(yaw * KEY_YAW * dt, tilt * KEY_TILT * dt);
     // The zoom keys take the reader up over the trees and back down, so a reader with no wheel and
     // no pinch still owns the height. The clamps of update() hold the floor and the ceiling.
     const zoom = (K.has('in') ? 1 : 0) - (K.has('out') ? 1 : 0);
-    if (zoom) {
-      const d0 = p.distanceTo(tg);
-      const d1 = THREE.MathUtils.clamp(d0 * Math.pow(KEY_ZOOM, -zoom * dt),
-        this.controls.minDistance, this.controls.maxDistance);
-      if (d0 > 1e-4) p.sub(tg).setLength(d1).add(tg);
-      this.glide = null;
-    }
+    if (zoom) this._zoomBy(Math.pow(KEY_ZOOM, -zoom * dt));
 
     // The direction the reader asks for. The keys come first; a press that holds still steers with
     // the pointer instead. A press that moves is a drag of the ground, and the controls own it.
@@ -1580,20 +1619,84 @@ export class Ground {
   // handlers never call preventDefault, so the sheet of the sidebar still folds on a tap.
   _onDown(e) {
     this._pointers++;
-    if (this._pointers > 1) { this._tap = null; return; }   // two fingers pan or pinch
+    if (e.pointerType === 'touch') {
+      this._touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this._two = this._twoBegin();
+    }
+    if (this._pointers > 1) { this._tap = null; return; }   // two fingers look or pinch
     const mouse = e.pointerType === 'mouse';
     this._tap = (!mouse || e.button === 0)
       ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), walk: false } : null;
   }
 
   _onMove(e) {
+    const f = this._touches.get(e.pointerId);
+    if (f) {
+      f.x = e.clientX; f.y = e.clientY;
+      if (this._two) this._onTwo();
+    }
     const tap = this._tap;
     if (!tap || e.pointerId !== tap.id) return;
     if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) { this._tap = null; this.glide = null; }
   }
 
+  // A new two-finger gesture whenever exactly two fingers touch, so a third finger ends it and the
+  // lift of the third starts it again from where the two fingers stand.
+  _twoBegin() {
+    if (this._touches.size !== 2) return null;
+    return { mode: null, twist: false, from: this._twoState(), at: this._twoState() };
+  }
+
+  // The middle, the spread, and the angle of the two fingers on the canvas.
+  _twoState() {
+    const [a, b] = this._touches.values();
+    const dx = b.x - a.x, dy = b.y - a.y;
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.max(1, Math.hypot(dx, dy)), a: Math.atan2(dy, dx) };
+  }
+
+  // Two fingers. The gesture waits until the fingers travel TOUCH_LOCK pixels, and then it takes
+  // one of two modes and keeps it until a finger lifts:
+  //
+  // - the pinch, when the spread or the twist travels furthest. The spread zooms one to one: the
+  //   distance to the target changes by the ratio the spread changes by, at every height. The
+  //   twist turns the view by its own angle, as a map turns, once it passes TOUCH_TWIST. Two
+  //   fingers that pinch twist a little by accident, and the view must not follow.
+  // - the slide, when the middle of the two fingers travels furthest. A slide to the side turns the
+  //   view and a slide up tilts it up, as the look keys do. Each turns the view about the eye.
+  //
+  // So a finger that drifts during a turn does not zoom, and a pinch that slides does not tilt.
+  // A turn to the side follows the fingers: a slide to the right brings the ground on the left
+  // into view, as a twist clockwise turns the ground clockwise.
+  _onTwo() {
+    if (!this.controls.enabled) return;
+    const g = this._two, s = this._twoState();
+    const turn = (a) => Math.atan2(Math.sin(a), Math.cos(a));   // an angle into -pi..pi
+    if (!g.mode) {
+      const f = g.from;
+      const spread = Math.abs(s.d - f.d);
+      const twist = Math.abs(turn(s.a - f.a)) * s.d / 2;     // the path of one fingertip, in px
+      const slide = Math.hypot(s.x - f.x, s.y - f.y);
+      if (Math.max(spread, twist, slide) < TOUCH_LOCK) return;
+      g.mode = slide > Math.max(spread, twist) ? 'slide' : 'pinch';
+    }
+    const last = g.at;
+    if (g.mode === 'pinch') {
+      this._zoomBy(last.d / s.d);
+      if (!g.twist && Math.abs(turn(s.a - g.from.a)) > TOUCH_TWIST) g.twist = true;
+      else if (g.twist) this._look(turn(s.a - last.a), 0);
+    } else {
+      const r = this.canvas.getBoundingClientRect();
+      const k = TOUCH_LOOK / Math.max(1, Math.min(r.width, r.height));
+      this._look((s.x - last.x) * k, (last.y - s.y) * k);
+    }
+    g.at = s;
+  }
+
   _onUp(e) {
     this._pointers = Math.max(0, this._pointers - 1);
+    if (this._touches.delete(e.pointerId)) {
+      this._two = this._twoBegin();
+    }
     const tap = this._tap;
     this._tap = null;
     if (!tap || tap.id !== e.pointerId || e.type === 'pointercancel' || !this.controls.enabled) return;
