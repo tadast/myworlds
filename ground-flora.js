@@ -24,12 +24,13 @@ import { floraGeometry, FLORA, FLORA_STYLE } from './flora-geometry.js';
 const BLEND = 0.12;          // ±12% around the swap distance
 const CARD_ALPHA = 0.4;      // the alpha test of the card. No blending, so the card writes depth.
 const CUT_FADE = 0.2;        // the share of the cut distance a card shrinks to nothing over
-// A card holds the plant seen from four heights of the eye, 0, 30, 60, and 90 degrees over the
-// horizon, in the four tiles of one 2 by 2 texture. See billboard(). The frames of the four views
-// ride in one vec4, so the count is four.
-const CARD_VIEWS = 4;
+// A card holds the plant seen from CARD_GRID by CARD_GRID directions over the upper half of the
+// sphere, one tile each in two textures. See billboard(). An odd grid holds the view straight down.
+const CARD_GRID = 5;
 const CARD_PAD = 1.03;       // the frame of a view against the box of the plant as the view sees it
-const CARD_MAX = 256;        // pixels: the widest tile a kind may take
+// pixels: the widest tile a kind may take. A card holds two textures of CARD_GRID squared tiles,
+// 6 bytes a pixel, so a kind takes 1.9 MB at 112 and 0.6 MB at 64.
+const CARD_MAX = { high: 112, low: 64 };
 // Units a plant keeps outside the four side planes of the view before the walk drops it. The ball
 // of the plant already carries its own body, so this is only a margin. See update().
 const EDGE_SLACK = 2;
@@ -39,7 +40,6 @@ const EDGE_SLACK = 2;
 // the sun is 200 m wide, and 8 heights carries the tallest plant past the edge of that box, so a
 // shadow the cap cuts off is a shadow the sun never draws.
 const SHADOW_REACH = 8;
-const SUN_FACE = 0.6;        // the mean of the sun on the lit half of a plant, a rough ball
 const TINT_HUE = 0.16;       // how far one plant may lean from the colour of its kind
 const TINT_LIT = 0.22;       // how far one plant may lean from the brightness of its kind
 
@@ -76,6 +76,8 @@ const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pw = new THREE.Vect
 const _up2 = new THREE.Vector3(), _fwd2 = new THREE.Vector3(), _rgt2 = new THREE.Vector3();
 const _pos2 = new THREE.Vector3(), _mat2 = new THREE.Matrix4();
 const _camF = new THREE.Vector3();   // scratch for the way the camera points, which the pick reads
+const _vd = new THREE.Vector3(), _vr = new THREE.Vector3(), _vu = new THREE.Vector3();   // one view of a card
+const _clear = new THREE.Color();    // scratch for the clear colour of a normal tile
 const HALF_PI = Math.PI / 2;
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -208,131 +210,203 @@ function fadingDepth() {
   return m;
 }
 
-// The card faces the eye, and it shows the plant from the height the eye stands at. A card used to
-// hold one picture of the side of the plant and to turn about the y axis only. From above it was a
-// narrow slice of that side: a crown read as a thin band, and a thin kind such as the spindle all
-// but vanished under the alpha test. The mesh beside it showed the top of the crown, so every swap
-// turned a flat plant into a solid one. The card now holds CARD_VIEWS pictures, from the side up
-// to straight down, and the shader blends the two that stand nearest the true angle.
+// The card is an impostor: a picture of the plant from every direction it can be seen from. A
+// card used to hold one picture of the side, and later one per height of the eye, and it turned
+// to face the eye. Turning shows the same side of the plant from every bearing, so the plant turns
+// with the reader. From the ground that is slow and it reads as a tree. From above it is not: the
+// bearing of a plant under the camera sweeps through half a turn as the camera passes over it, and
+// every crown under a camera that looks straight down spun in place.
 //
-// Every picture is centred on the middle of the box of the plant, and it frames the box as its
-// view sees it: the width of the box across, and ey * cos(e) + ez * sin(e) up and down, where e is
-// the height of the eye. The card is a rectangle about that middle, as tall as the taller of the
-// two views it blends, so each view keeps its own frame and the two line up point for point. A
-// frame around the ball that holds the plant fit every view at once, but most of it was empty, and
-// an empty pixel still costs two reads of the texture and a discard; that cost about 0.8 ms.
-// The rectangle turns to face the eye: its right stays level, and its up leans back as the eye
-// climbs, the way the up of the bake camera leaned. A point of the plant then falls on the same
-// pixel of the screen from the card as from the mesh, up to the perspective across one plant. An
-// eye under the middle of a tall plant takes the side view and a card that stands upright.
+// The bake draws the plant from CARD_GRID by CARD_GRID directions. The directions come from the
+// hemi-octahedral map, which lays the upper half of the sphere on a square: the corners and edges
+// of the square are the horizon, and its middle is straight down. On a grid of 5 that is 16
+// bearings on the horizon, 8 at about 50 degrees, and one straight down. Each view frames the box
+// of the plant as that view sees it, with its own right and up, and the shader builds the same
+// frame for the same direction.
 //
-// The walk writes a position and one scale per card, with no rotation, so the scale is the length
-// of the first column of the instance matrix.
+// The card is a rectangle about the middle of the plant that faces the eye, as wide and as tall
+// as the box of the plant seen from the eye, so few of its pixels are empty. The shader finds the
+// three views nearest the direction of the eye, in the frame of the plant, and weighs them by the
+// place of that direction inside their triangle on the grid. For each view it carries the point of
+// the card along the eye onto the picture plane of the view and reads the picture there, so the
+// three pictures line up on the plant and the blend holds no double image of a trunk.
 //
-// One picture cannot hold every light. The bake lights the plant from behind the eye, so a card
-// would stay bright while the near mesh beside it turns dark against the sun. The shader therefore
-// dims the card by the angle between the eye and the sun on the ground plane: the card is at its
-// brightest when the sun stands behind the reader, and it falls to uBack against the sun. uBack
-// is the share of the light the sky gives, so the two levels of detail meet at one brightness.
+// The card takes the spin of its plant. The walk writes the turn about y into the instance matrix,
+// so the directions are read in the frame of that one plant, and a card shows the side of the
+// plant that its mesh shows. The mesh also leans and widens, and the card does not.
+//
+// The card holds no light. The bake draws two pictures per view: the colour of the plant, and the
+// direction its surface faces, in the frame of the plant. The card is a Lambert material, and the
+// shader hands it that direction, turned by the spin of the plant, in place of the normal of the
+// flat rectangle. The sun and the sky of the ground then light the card as they light the mesh,
+// from every side, at every hour, and for every spin. A card used to carry the light of the bake
+// and to dim by the angle between the eye and the sun; from above that split the view in two, the
+// plants on one side of the camera dark and on the other bright.
 const CARD_SHADER = `
-#define CARD_VIEWS ${CARD_VIEWS}.0
-#define CARD_STEP ${(Math.PI / 2 / (CARD_VIEWS - 1)).toFixed(6)}
+#define CARD_GRID ${CARD_GRID}.0
+uniform vec3 uHalf;
+// the hemi-octahedral map: a direction over the horizon to the unit square, and back
+vec2 octUv(vec3 d) {
+  vec2 p = d.xz / (abs(d.x) + abs(d.y) + abs(d.z));
+  return vec2(p.x + p.y, p.x - p.y) * 0.5 + 0.5;
+}
+vec3 octDir(vec2 uv) {
+  vec2 xy = uv * 2.0 - 1.0;
+  vec2 p = vec2(xy.x + xy.y, xy.x - xy.y) * 0.5;
+  return normalize(vec3(p.x, 1.0 - abs(p.x) - abs(p.y), p.y));
+}
 `;
 
-function billboard(material, sunXZ, back, pivot, extX, extY) {
+// One view: the point q of the card, in the frame of the plant, carried along the eye e onto the
+// picture plane of the view at the grid point c, as a place on that picture. The right and the up of
+// the picture and the half size of its frame are the numbers viewFrame() and frameOf() build for
+// the bake.
+const CARD_VERTEX = `
+vec4 cardView(vec2 c, vec3 q, vec3 e) {
+  vec3 d = octDir(c / (CARD_GRID - 1.0));
+  vec3 r = abs(d.y) > 0.9999 ? vec3(1.0, 0.0, 0.0) : normalize(cross(vec3(0.0, 1.0, 0.0), d));
+  vec3 u = cross(d, r);
+  vec2 ext = vec2(dot(abs(r), uHalf), dot(abs(u), uHalf));
+  vec3 qk = q - e * (dot(q, d) / max(dot(e, d), 0.05));
+  return vec4(vec2(dot(qk, r), dot(qk, u)) / (2.0 * ext) + 0.5, c);
+}
+`;
+
+// The direction of a surface in two bytes, in the octahedral map of the whole sphere, and back.
+const OCT_NORMAL = `
+vec2 normalPack(vec3 n) {
+  n /= abs(n.x) + abs(n.y) + abs(n.z);
+  vec2 p = n.z >= 0.0 ? n.xy : (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+  return p * 0.5 + 0.5;
+}
+vec3 normalUnpack(vec2 f) {
+  f = f * 2.0 - 1.0;
+  vec3 n = vec3(f, 1.0 - abs(f.x) - abs(f.y));
+  float t = clamp(-n.z, 0.0, 1.0);
+  n.xy += vec2(n.x >= 0.0 ? -t : t, n.y >= 0.0 ? -t : t);
+  return normalize(n);
+}
+`;
+
+function billboard(material, pivot, half, normals) {
   material.onBeforeCompile = (sh) => {
-    sh.uniforms.uSunXZ = { value: sunXZ };
-    sh.uniforms.uBack = { value: back };
     sh.uniforms.uPivot = { value: pivot };
-    sh.uniforms.uExtX = { value: extX };
-    sh.uniforms.uExtY = { value: extY };
+    sh.uniforms.uHalf = { value: half };
+    sh.uniforms.uNormals = { value: normals };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>' + CARD_SHADER
-        + 'uniform vec2 uSunXZ;\nuniform vec3 uPivot;\nuniform float uExtX;\nuniform vec4 uExtY;\n'
-        + 'varying float vLit;\nvarying float vView;\nvarying vec2 vLocal;')
+      .replace('#include <common>', '#include <common>' + CARD_SHADER + CARD_VERTEX
+        + 'uniform vec3 uPivot;\n'
+        + 'varying vec2 vTurn;\nvarying vec4 vView0;\nvarying vec4 vView1;\nvarying vec4 vView2;\nvarying vec3 vWeight;')
       .replace('#include <project_vertex>', `
       vec4 instOrigin = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
       float iScale = length(instanceMatrix[0].xyz);
-      vec3 pivot = (modelMatrix * instOrigin).xyz + uPivot * iScale;
+      mat3 turn = mat3(instanceMatrix) / iScale;
+      mat3 unturn = transpose(turn);
+      vec3 pivot = (modelMatrix * instOrigin).xyz + turn * uPivot * iScale;
       vec3 toEye = cameraPosition - pivot;
-      float eyeLen = length(toEye.xz);
-      vec2 f = eyeLen > 0.0001 ? toEye.xz / eyeLen : vec2(0.0, 1.0);
-      float elev = atan(max(toEye.y, 0.0), max(eyeLen, 0.0001));
-      vec3 right = vec3(f.y, 0.0, -f.x);
-      vec3 look = vec3(f.x * cos(elev), sin(elev), f.y * cos(elev));
-      vec3 up = cross(look, right);
-      float view = clamp(elev / CARD_STEP, 0.0, CARD_VIEWS - 1.0);
-      int ia = int(min(floor(view), CARD_VIEWS - 2.0));
-      // A card on one view exactly, which is most cards at eye level, takes the frame of that view.
-      float hy = view - float(ia) > 0.001 ? max(uExtY[ia], uExtY[ia + 1]) : uExtY[ia];
-      vec2 local = vec2(transformed.x * uExtX, transformed.y * hy);
-      vec3 worldPos = pivot + right * (local.x * iScale) + up * (local.y * iScale);
+      vec3 eye = normalize(toEye);
+      // the rectangle faces the eye and frames the box of the plant as the eye sees it
+      vec3 qr = abs(eye.y) > 0.9999 ? vec3(1.0, 0.0, 0.0) : normalize(cross(vec3(0.0, 1.0, 0.0), eye));
+      vec3 qu = cross(eye, qr);
+      vec3 rl = unturn * qr, ul = unturn * qu;
+      vec2 local = transformed.xy * vec2(dot(abs(rl), uHalf), dot(abs(ul), uHalf));
+      vec3 worldPos = pivot + (qr * local.x + qu * local.y) * iScale;
       vec4 mvPosition = viewMatrix * vec4(worldPos, 1.0);
       gl_Position = projectionMatrix * mvPosition;
-      vLit = 0.5 + 0.5 * dot(f, uSunXZ);
-      vView = view;
-      vLocal = local;
+      // the eye in the frame of the plant; an eye under the middle of the plant takes the horizon
+      vec3 e = unturn * eye;
+      e.y = max(e.y, 0.0);
+      e = dot(e, e) > 1e-8 ? normalize(e) : vec3(0.0, 1.0, 0.0);
+      vec2 g = octUv(e) * (CARD_GRID - 1.0);
+      vec2 cell = clamp(floor(g), 0.0, CARD_GRID - 2.0);
+      vec2 fr = g - cell;
+      vec2 c0 = cell;
+      vec3 w = vec3(1.0 - fr.x - fr.y, fr.x, fr.y);
+      if (fr.x + fr.y > 1.0) { c0 = cell + 1.0; w = vec3(fr.x + fr.y - 1.0, 1.0 - fr.y, 1.0 - fr.x); }
+      vec3 q = rl * local.x + ul * local.y;
+      vView0 = cardView(c0, q, e);
+      vView1 = cardView(cell + vec2(1.0, 0.0), q, e);
+      vView2 = cardView(cell + vec2(0.0, 1.0), q, e);
+      vWeight = w;
+      vTurn = vec2(turn[0].x, -turn[0].z);
     `);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>' + CARD_SHADER + `
-      uniform float uBack;
-      uniform float uExtX;
-      uniform vec4 uExtY;
-      varying float vLit;
-      varying float vView;
-      varying vec2 vLocal;
+      .replace('#include <common>', '#include <common>' + CARD_SHADER + OCT_NORMAL + `
+      uniform sampler2D uNormals;
+      varying vec2 vTurn;
+      varying vec4 vView0;
+      varying vec4 vView1;
+      varying vec4 vView2;
+      varying vec3 vWeight;
       `)
-      // One view: the point of the card in the frame of that view, and nothing outside the frame,
-      // because the texture beside it holds the next view.
+      // One view: its place on the picture, or nothing outside the frame, because the texture
+      // beside it holds the next view.
       .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
-      vec4 cardView(int i) {
-        vec2 uv = vLocal / vec2(2.0 * uExtX, 2.0 * uExtY[i]) + 0.5;
-        if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec4(0.0);
-        return texture2D(map, (vec2(float(i - (i / 2) * 2), float(i / 2)) + uv) * 0.5);
+      vec2 cardAt(vec4 t, float w) {
+        if (w < 0.001 || t.x < 0.0 || t.y < 0.0 || t.x > 1.0 || t.y > 1.0) return vec2(-1.0);
+        return (t.zw + t.xy) / CARD_GRID;
       }
+      vec4 cardColour(vec2 at) { return at.x < 0.0 ? vec4(0.0) : texture2D(map, at); }
+      vec3 cardNormal(vec2 at) { return at.x < 0.0 ? vec3(0.0) : normalUnpack(texture2D(uNormals, at).xy); }
       `)
-      // The two nearest views, blended by their alpha, so a pixel that one view leaves empty does
-      // not pull the colour of the other toward black.
+      // The three views, blended by their alpha, so a pixel that one view leaves empty does not
+      // pull the colour of the others toward black. The normal takes the same weights, and it
+      // turns from the frame of the plant into the frame of the eye.
       .replace('#include <map_fragment>', `
-      #ifdef USE_MAP
-        float view = clamp(vView, 0.0, CARD_VIEWS - 1.0);
-        int ia = int(min(floor(view), CARD_VIEWS - 2.0));
-        float w = view - float(ia);
-        vec4 ca = cardView(ia);
-        vec4 cb = w > 0.001 ? cardView(ia + 1) : vec4(0.0);
-        float alpha = mix(ca.a, cb.a, w);
-        vec3 rgb = (ca.rgb * ca.a * (1.0 - w) + cb.rgb * cb.a * w) / max(alpha, 0.0001);
-        diffuseColor *= vec4(rgb, alpha);
-      #endif
+        vec2 at0 = cardAt(vView0, vWeight.x), at1 = cardAt(vView1, vWeight.y), at2 = cardAt(vView2, vWeight.z);
+        vec4 a0 = cardColour(at0), a1 = cardColour(at1), a2 = cardColour(at2);
+        vec3 wa = vWeight * vec3(a0.a, a1.a, a2.a);
+        float alpha = wa.x + wa.y + wa.z;
+        diffuseColor *= vec4((a0.rgb * wa.x + a1.rgb * wa.y + a2.rgb * wa.z) / max(alpha, 0.0001), alpha);
+        vec3 nl = cardNormal(at0) * wa.x + cardNormal(at1) * wa.y + cardNormal(at2) * wa.z;
+        nl = dot(nl, nl) > 1e-8 ? normalize(nl) : vec3(0.0, 1.0, 0.0);
+        vec3 nw = vec3(vTurn.x * nl.x + vTurn.y * nl.z, nl.y, -vTurn.y * nl.x + vTurn.x * nl.z);
+        vec3 cardN = normalize(mat3(viewMatrix) * nw);
       `)
-      // the fog runs after the light, as it does on the near mesh
-      .replace('#include <fog_fragment>', 'gl_FragColor.rgb *= mix(uBack, 1.0, vLit);\n#include <fog_fragment>');
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = cardN;');
   };
   material.customProgramCacheKey = () => 'flora-card';
   return material;
 }
 
-// The light of the site, for a card bake and for the grass. Both need the same numbers.
-function bakeLight(sky, groundColor) {
-  const sunDir = sky ? sky.sunDir : new THREE.Vector3(1, 0.55, 0.8).normalize();
-  const flat = Math.hypot(sunDir.x, sunDir.z);
-  const night = sky ? sky.night : 0;
-  const hemi = (0.7 - 0.35 * night) * 0.5;
-  const direct = (sky ? sky.sunIntensity : 2.6) * flat * SUN_FACE;
-  return {
-    sunDir, flat, night,
-    color: sky ? sky.sunColor : 0xffffff,
-    intensity: sky ? sky.sunIntensity : 2.6,
-    horizon: sky ? sky.horizon : 0xffffff,
-    ground: groundColor || (sky ? sky.horizon : 0xffffff),
-    back: flat < 0.05 ? 1 : Math.min(1, hemi / (hemi + direct)),
-  };
+// The direction of the view at the grid point (u, v), each in 0 to 1, as octDir() builds it.
+function octDir(u, v, out) {
+  const x = u * 2 - 1, y = v * 2 - 1;
+  const px = (x + y) / 2, pz = (x - y) / 2;
+  return out.set(px, 1 - Math.abs(px) - Math.abs(pz), pz).normalize();
+}
+
+// A direction in two numbers of 0 to 1, as normalPack() in OCT_NORMAL builds them.
+function normalPack(n) {
+  const l = Math.abs(n.x) + Math.abs(n.y) + Math.abs(n.z);
+  let x = n.x / l, y = n.y / l;
+  if (n.z < 0) {
+    const ox = (1 - Math.abs(y)) * (x >= 0 ? 1 : -1), oy = (1 - Math.abs(x)) * (y >= 0 ? 1 : -1);
+    x = ox; y = oy;
+  }
+  return [x * 0.5 + 0.5, y * 0.5 + 0.5];
+}
+
+// The right and the up of the picture of a view along d, as cardView() builds them.
+function viewFrame(d, right, up) {
+  if (Math.abs(d.y) > 0.9999) right.set(1, 0, 0);
+  else right.set(0, 1, 0).cross(d).normalize();
+  up.copy(d).cross(right);
+}
+
+// The half size of the frame of a view: the box of the plant, half as wide as `half`, seen along the
+// right and the up of the view.
+function frameOf(right, up, half) {
+  return [
+    Math.abs(right.x) * half.x + Math.abs(right.y) * half.y + Math.abs(right.z) * half.z,
+    Math.abs(up.x) * half.x + Math.abs(up.y) * half.y + Math.abs(up.z) * half.z,
+  ];
 }
 
 export class Flora {
   // flora: the worker's Float32Array of x y z, nx ny nz, size in units, kind.
   // sky: the Sky of the ground, for the sun colour and the sun direction the card bakes with.
-  constructor({ renderer, flora, palette, tier, sky, lod, cut, groundColor, variant = 0, camera, canvas }) {
+  constructor({ renderer, flora, palette, tier, sky, lod, cut, variant = 0, camera, canvas }) {
     this.renderer = renderer;
     this.camera = camera || null;      // the pick projects with it; the walk takes its own camera
     this.canvas = canvas || null;      // the pick measures in the CSS pixels of this view
@@ -354,11 +428,6 @@ export class Flora {
     const reach = sd ? Math.min(SHADOW_REACH, 1 / Math.max(Math.abs(sd.y), 1e-3)) : 0;
     this.shadowX = sd ? -sd.x * reach : 0;
     this.shadowZ = sd ? -sd.z * reach : 0;
-    // The side the cards dim by. Every card material holds this one vector, so setSun() turns all
-    // of them at once when the sky turns. The picture on a card was baked with the sun of the
-    // landing and cannot turn, but the side the card is bright on can, and that is the cue the
-    // reader reads against the near mesh beside it.
-    this.sunXZ = new THREE.Vector2(0, 1);
     if (sd) this.setSun(sd);
     this.casts = !!tier.shadows;
     this.blend = BLEND;
@@ -376,7 +445,6 @@ export class Flora {
       b.push(i);
     }
 
-    const light = bakeLight(sky, groundColor);
     const up = new THREE.Vector3(0, 1, 0), normal = new THREE.Vector3(), pos = new THREE.Vector3();
     const q = new THREE.Quaternion(), spin = new THREE.Quaternion(), tip = new THREE.Quaternion();
     const axis = new THREE.Vector3(), scale = new THREE.Vector3();
@@ -393,31 +461,29 @@ export class Flora {
       // The terrain runs a Lambert material for the same reason: the reader cannot tell a full
       // reflection model from it on a rough surface, and Lambert is about a third cheaper.
       const nearMat = fading(animate(floraMaterial(), style), false);
-      // The bake draws one plain mesh, which carries no share of the band, so it takes the same
-      // material without the dither. The dither would read a share of 0 there and drop every pixel.
-      const bakeMat = animate(floraMaterial(), style);
-      if (style.glow > 0) {
-        for (const m of [nearMat, bakeMat]) {
-          m.emissive = new THREE.Color(palette.flora.canopy);
-          m.emissiveIntensity = style.glow;
-        }
-      }
 
-      // The frames of the views: the half width of the box across, and the half height of the box
-      // as each view sees it. See billboard(). `frame` is the longest side of any frame against
-      // the height of the plant, and a tile takes that many more pixels than the style asks for,
-      // so a unit of the plant holds at least as many pixels as the one picture of the side did.
+      // The views frame the box of the plant, each as it sees it. See billboard(). `frame` is the
+      // longest side of any frame against the height of the plant, and a tile takes that many more
+      // pixels than the style asks for, so a unit of the plant holds at least as many pixels as the
+      // one picture of the side did, up to CARD_MAX.
       const center = bb.getCenter(new THREE.Vector3());
       const half = bb.getSize(new THREE.Vector3()).multiplyScalar(CARD_PAD / 2);
-      const extY = new THREE.Vector4();
-      for (let v = 0; v < CARD_VIEWS; v++) {
-        const e = (v / (CARD_VIEWS - 1)) * (Math.PI / 2);
-        extY.setComponent(v, half.y * Math.cos(e) + half.z * Math.sin(e));
+      let longest = 0;
+      for (let j = 0; j < CARD_GRID; j++) {
+        for (let i = 0; i < CARD_GRID; i++) {
+          viewFrame(octDir(i / (CARD_GRID - 1), j / (CARD_GRID - 1), _vd), _vr, _vu);
+          longest = Math.max(longest, ...frameOf(_vr, _vu, half));
+        }
       }
-      const frame = (2 * Math.max(half.x, extY.x, extY.y, extY.z, extY.w)) / height;
-      const px = Math.min(CARD_MAX, Math.round(style.card * frame));
-      const card = this._bakeCard(geo, bakeMat, light, center, half.x, extY, px);
-      bakeMat.dispose();
+      const frame = (2 * longest) / height;
+      const px = Math.min(tier.shadows ? CARD_MAX.high : CARD_MAX.low, Math.round(style.card * frame));
+      const card = this._bakeCard(geo, center, half, px);
+      // A kind that glows glows on both levels. The card is a Lambert material as the mesh is, so
+      // the glow is the same number on both.
+      for (const m of style.glow > 0 ? [nearMat, card.material] : []) {
+        m.emissive = new THREE.Color(palette.flora.canopy);
+        m.emissiveIntensity = style.glow;
+      }
       // a unit square: the shader scales it to the frame of the views it blends
       const quad = new THREE.PlaneGeometry(2, 2);
       // The tint of a plant rides on instanceColor, and three.js only reads it into the fragment
@@ -455,11 +521,13 @@ export class Flora {
       // top of that every plant takes a lean and a width of its own, from the style of its kind,
       // so a stand of one kind holds no two bodies of one shape.
       //
-      // The card needs no matrix of its own: its slot holds a diagonal scale and a translation,
-      // and the walk writes only those six numbers into the identity the InstancedMesh starts with.
+      // The card needs no matrix of its own: its slot holds a turn about y, one scale, and a
+      // translation, and the walk writes only those eight numbers into the identity the
+      // InstancedMesh starts with.
       const nearM = new Float32Array(n * 16);
       const at = new Float32Array(n * 3);       // the position of every plant, for the distance walk
       const cards = new Float32Array(n * 2);    // the scale of the card and the height of its base
+      const turns = new Float32Array(n * 2);    // the cosine and the sine of the spin of the plant
       const tints = new Float32Array(n * 3);    // the tint of every plant, for both meshes
       const sz2 = new Float32Array(n);          // the square of the height, for the card-size floor
       const rad = new Float32Array(n);          // the radius of the body, for the frustum test
@@ -480,6 +548,7 @@ export class Flora {
         if (!rock) normal.lerp(up, 0.7).normalize();
         q.setFromUnitVectors(up, normal);
         spin.setFromAxisAngle(up, h0 * Math.PI * 2);
+        turns[j * 2] = Math.cos(h0 * Math.PI * 2); turns[j * 2 + 1] = Math.sin(h0 * Math.PI * 2);
         q.multiply(spin);
         // the lean of this one plant, about an axis of its own
         if (style.lean > 0) {
@@ -510,7 +579,7 @@ export class Flora {
       }
 
       this.kinds.push({
-        kind, style, count: n, near, far, nearM, at, cards, tints, sz2, rad, state: new Uint8Array(n),
+        kind, style, count: n, near, far, nearM, at, cards, turns, tints, sz2, rad, state: new Uint8Array(n),
         nearFade, cardFade,
         // the geometry of one plant of this kind, at one unit of instance scale. The pick puts the
         // top of a body from it, and the mark sizes its ring from it.
@@ -520,78 +589,94 @@ export class Flora {
       });
       this.group.add(near);
       this.group.add(far);
-      this.targets.push(card.target);
+      this.targets.push(...card.targets);
       this.materials.push(nearMat);
     }
   }
 
-  // One card: the near mesh rendered once per view with an orthographic camera, into one tile of a
-  // small target each, with the flat colours and the sun of this site. A tall kind bakes at more
-  // pixels, because the reader can stand under it and still see the card.
-  _bakeCard(geo, material, light, center, extX, extY, px) {
+  // One card: the near mesh rendered once per view with an orthographic camera, into one tile of two
+  // small targets each: the colour of the plant, and the direction of its surface in the frame of
+  // the plant. No light takes part in the bake; the card is lit when it draws. A tall kind bakes at
+  // more pixels, because the reader can stand under it and still see the card.
+  _bakeCard(geo, center, half, px) {
     const renderer = this.renderer;
-    const target = new THREE.WebGLRenderTarget(px * 2, px * 2, {
-      format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
-      depthBuffer: true, stencilBuffer: false,
-      // No mipmaps: a mipmap averages the alpha of a thin trunk toward zero, and the far half of
-      // the forest would then fade away. The card is small on the screen, so it stays sharp.
+    const size = px * CARD_GRID;
+    // No mipmaps: a mipmap averages the alpha of a thin trunk toward zero, and the far half of the
+    // forest would then fade away. The card is small on the screen, so it stays sharp.
+    const opts = {
+      type: THREE.UnsignedByteType, depthBuffer: true, stencilBuffer: false,
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false,
+    };
+    const colour = new THREE.WebGLRenderTarget(size, size, { ...opts, format: THREE.RGBAFormat });
+    // The normals take the nearest texel: a face of a plant holds one direction, and a blend of two
+    // texels across the fold of the octahedral map is a third direction that no face holds.
+    const normals = new THREE.WebGLRenderTarget(size, size, {
+      ...opts, format: THREE.RGFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
     });
 
+    const mesh = new THREE.Mesh(geo);
     const scene = new THREE.Scene();
-    scene.add(new THREE.Mesh(geo, material));
-    // The bake puts the sun behind the eye and keeps its true height, so the card holds the plant
-    // at its brightest. billboard() then dims it toward uBack as the eye turns against the sun.
-    const sun = new THREE.DirectionalLight(light.color, light.intensity);
-    sun.position.set(0, light.sunDir.y, light.flat).multiplyScalar(50);
-    scene.add(sun);
-    scene.add(new THREE.HemisphereLight(light.horizon, light.ground, 0.7 - 0.35 * light.night));
+    scene.add(mesh);
+    // The colour is the vertex colour and nothing else. The bake ran into a render target, so it
+    // holds plain values, and the card goes through the same tone mapping as the mesh.
+    const colourMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+    const normalMat = new THREE.ShaderMaterial({
+      vertexShader: 'varying vec3 vN;\nvoid main() { vN = normal; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: OCT_NORMAL + 'varying vec3 vN;\nvoid main() { gl_FragColor = vec4(normalPack(normalize(vN)), 0.0, 1.0); }',
+    });
 
-    // The eye stands on +z and climbs toward +y, so camera x is always world x. Its up leans back
-    // as it climbs, which is the up billboard() builds for the square.
-    const reach = Math.hypot(extX, extY.x, extY.w);
-    const cam = new THREE.OrthographicCamera(-extX, extX, 1, -1, 0.1, reach * 6);
-    const back = reach * 3;
+    const reach = half.length();
+    const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, reach * 6);
+    const d = new THREE.Vector3(), r = new THREE.Vector3(), u = new THREE.Vector3();
 
     const prevTarget = renderer.getRenderTarget();
     const prevColor = renderer.getClearColor(new THREE.Color());
     const prevAlpha = renderer.getClearAlpha();
     renderer.setClearColor(0x000000, 0);
-    for (let v = 0; v < CARD_VIEWS; v++) {
-      const e = (v / (CARD_VIEWS - 1)) * (Math.PI / 2);
-      cam.position.set(0, Math.sin(e), Math.cos(e)).multiplyScalar(back).add(center);
-      cam.up.set(0, Math.cos(e), -Math.sin(e));
-      cam.lookAt(center);
-      cam.top = extY.getComponent(v); cam.bottom = -cam.top;
-      cam.updateProjectionMatrix();
-      const x = (v % 2) * px, y = Math.floor(v / 2) * px;
-      target.viewport.set(x, y, px, px);
-      target.scissor.set(x, y, px, px);
-      target.scissorTest = true;
-      renderer.setRenderTarget(target);
-      renderer.render(scene, cam);
+    for (let j = 0; j < CARD_GRID; j++) {
+      for (let i = 0; i < CARD_GRID; i++) {
+        octDir(i / (CARD_GRID - 1), j / (CARD_GRID - 1), d);
+        viewFrame(d, r, u);
+        const [ex, ey] = frameOf(r, u, half);
+        cam.left = -ex; cam.right = ex; cam.top = ey; cam.bottom = -ey;
+        cam.updateProjectionMatrix();
+        cam.position.copy(d).multiplyScalar(reach * 3).add(center);
+        cam.up.copy(u);
+        cam.lookAt(center);
+        // The empty texels of a normal tile face the eye of that view, so a pixel at the edge of a
+        // plant that reads past the plant still takes a direction the eye can see, and no dark rim.
+        const [nx, ny] = normalPack(d);
+        for (const [target, mat] of [[colour, colourMat], [normals, normalMat]]) {
+          mesh.material = mat;
+          if (target === normals) renderer.setClearColor(_clear.setRGB(nx, ny, 0, THREE.NoColorSpace), 1);
+          else renderer.setClearColor(0x000000, 0);
+          target.viewport.set(i * px, j * px, px, px);
+          target.scissor.set(i * px, j * px, px, px);
+          target.scissorTest = true;
+          renderer.setRenderTarget(target);
+          renderer.render(scene, cam);
+        }
+      }
     }
-    target.scissorTest = false;
+    colour.scissorTest = false;
+    normals.scissorTest = false;
     renderer.setRenderTarget(prevTarget);
     renderer.setClearColor(prevColor, prevAlpha);
     scene.clear();
+    colourMat.dispose();
+    normalMat.dispose();
 
-    // The bake ran into a render target, so the renderer applied no tone mapping and the texture
-    // holds plain light. The card goes through the same tone mapping as the near mesh at draw
-    // time, so the two read as one plant. The alpha test writes depth, so a card sorts with the
-    // terrain and needs no blending.
-    const cardMat = fading(billboard(new THREE.MeshBasicMaterial({
-      map: target.texture, alphaTest: CARD_ALPHA, transparent: false,
+    // The alpha test writes depth, so a card sorts with the terrain and needs no blending.
+    const cardMat = fading(billboard(new THREE.MeshLambertMaterial({
+      map: colour.texture, alphaTest: CARD_ALPHA, transparent: false,
       side: THREE.DoubleSide, fog: true, vertexColors: true,
-    }), this.sunXZ, light.back, center.clone(), extX, extY), true);
-    return { material: cardMat, target };
+    }), center.clone(), half.clone(), normals.texture), true);
+    return { material: cardMat, targets: [colour, normals] };
   }
 
-  // The sun of the hour. ground.js calls it while the sky turns. It writes the one vector every
-  // card material reads, and the step the shadow of a plant takes over the ground.
+  // The sun of the hour. ground.js calls it while the sky turns. It writes the step the shadow of a
+  // plant takes over the ground. The cards need nothing: the lights of the scene light them.
   setSun(sunDir) {
-    const flat = Math.hypot(sunDir.x, sunDir.z) || 1;
-    this.sunXZ.set(sunDir.x / flat, sunDir.z / flat);
     const reach = Math.min(SHADOW_REACH, 1 / Math.max(Math.abs(sunDir.y), 1e-3));
     this.shadowX = -sunDir.x * reach;
     this.shadowZ = -sunDir.z * reach;
@@ -663,7 +748,7 @@ export class Flora {
       // A kind whose cut stands inside the fog would stop in clear air, so its cards shrink to
       // nothing over the last CUT_FADE of the cut. For the other kinds the band lies in solid fog.
       const fadeK = cutK * (1 - CUT_FADE), fade2 = fadeK * fadeK;
-      const src = k.nearM, at = k.at, cards = k.cards, tints = k.tints, sz2 = k.sz2, state = k.state, n = k.count;
+      const src = k.nearM, at = k.at, cards = k.cards, turns = k.turns, tints = k.tints, sz2 = k.sz2, state = k.state, n = k.count;
       const rad = k.rad;
       const nearArr = k.near.instanceMatrix.array, cardArr = k.far.instanceMatrix.array;
       const nearCol = k.near.instanceColor.array, cardCol = k.far.instanceColor.array;
@@ -713,7 +798,8 @@ export class Flora {
         if (f < 1 && seen) {
           const q = i * 2;
           const sc = dd > fade2 ? cards[q] * (cutK - Math.sqrt(dd)) / (cutK - fadeK) : cards[q];
-          cardArr[c] = sc; cardArr[c + 5] = sc; cardArr[c + 10] = sc;
+          const tc = turns[q] * sc, ts = turns[q + 1] * sc;
+          cardArr[c] = tc; cardArr[c + 2] = -ts; cardArr[c + 5] = sc; cardArr[c + 8] = ts; cardArr[c + 10] = tc;
           cardArr[c + 12] = px; cardArr[c + 13] = cards[q + 1]; cardArr[c + 14] = pz;
           cardCol[c / 16 * 3] = tints[p]; cardCol[c / 16 * 3 + 1] = tints[p + 1]; cardCol[c / 16 * 3 + 2] = tints[p + 2];
           cardF[c / 16] = 1 - f;

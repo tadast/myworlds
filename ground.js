@@ -647,7 +647,7 @@ export class Ground {
     this.flora = new Flora({
       renderer: this.renderer, flora: result.flora, palette: result.patch.palette,
       tier: this.tier, sky: this.sky, lod: this.lod, cut: this.fogFar * CUT_PAST_FOG,
-      groundColor: this.groundColor, variant: result.patch.floraVariant || 0,
+      variant: result.patch.floraVariant || 0,
       // Issue 24: the pick projects with the ground camera and measures in the pixels of this view.
       camera: this.camera, canvas: this.canvas,
     });
