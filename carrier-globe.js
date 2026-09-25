@@ -501,8 +501,7 @@ function clearUniforms(group) {
 
 // ---------------------------------------------------------------- the marks on the ground
 // The radius the mini wreck stands at under one direction: the ground there, or the sea when the
-// ground lies under it, plus the lift. It is the rule showMarker() in site.js drapes the square of
-// a cell with, and it needs the height map the worker sent with the world.
+// ground lies under it, plus the lift. It needs the height map the worker sent with the world.
 function drapeR(world, hm, dir) {
   return Math.max(groundRadius(world, hm, dir), (world && world.seaRadius) || 0) + DRAPE_LIFT;
 }

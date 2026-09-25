@@ -18,8 +18,8 @@ import { perf } from './perf.js';
 import { TIERS } from './tiers.js';
 
 // metres, the side of the ground box. The tier picks the real one and sends it with the patch
-// request, so this is only the fallback for the moments before a patch arrives. See Q.ground in
-// app.js: HIGH draws 3,000 and LOW draws 1,500.
+// request, so this is only the fallback for the moments before a patch arrives. See the ground row
+// of tiers.js: HIGH draws 3,000 and LOW draws 1,500.
 export const PATCH_SIZE = 3000;
 export const FOG_NEAR = 450;         // metres, where the fog starts
 export const FOG_FAR = 750;          // metres, where the fog is solid
@@ -113,9 +113,9 @@ const LOD_THAW = 1.05;      // what the mark grows by, once per decision, after 
 const LOD_STORE = 'myworlds.lod.v1';
 const LOD_START = 150;      // metres, where the knob starts before the store says otherwise
 const LOD_MIN = 40;         // metres, the floor of the knob
-// metres, the ceiling of the knob. The tier lowers it: HIGH asks 220 and LOW asks 250. Issue 25
-// took HIGH down from 400, because a wider box puts the reader inside the forest and the sphere of
-// the knob then fills with plants the old box could not hold. See the Q table in app.js.
+// metres, the ceiling of the knob when the tier sets none. The ground row of tiers.js sets it as
+// lodMax: 400 on HIGH and 250 on LOW. tiers.js says why HIGH is back at 400 after issue 25 took it
+// to 220 for a while.
 const LOD_MAX = 400;
 
 export const CAM_START = 450;        // metres, the height the camera starts at over the site
@@ -276,7 +276,7 @@ function makeGeometry(pos, col, idx) {
 }
 
 export class Ground {
-  // tier: { grid, maxFlora, maxFauna, shadows }
+  // tier: the ground row of tiers.js: { grid, size, maxFlora, maxFauna, shadows, lodMax }
   constructor({ renderer, canvas, world, site, tier, music, onSelect, onSelectPlant, onSelectSource, onDeselect }) {
     this.renderer = renderer;
     this.onSelect = onSelect || null;       // (kind) => void, a tap marked an animal of this species

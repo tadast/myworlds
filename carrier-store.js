@@ -19,7 +19,7 @@
 // Every call of localStorage sits in try and catch, as persist() does: a private window, a full
 // quota, and a browser with the store switched off all give a throw, and the page keeps running.
 // The search of one world is cheap to repeat; risk 5 of issue 34 accepts the loss.
-import { snapSite } from './site.js';
+import { siteCell, cellSite, sameCell as oneCell } from './cell-grid.js';
 
 export const CARRIER_KEY = 'myworlds.carrier.v1';
 
@@ -48,11 +48,10 @@ function asFix(f) {
   return { lat, lon, brg, err };
 }
 
-// One fix per cell. The site of a fix is snapped on the way in, so two numbers are enough here;
-// the snap runs again because a record written by an older build may carry a site off the grid.
+// One fix per cell. The test reads the cells of the two sites and not their numbers, so a record
+// written by an older build with a site off the grid still finds its cell.
 function sameCell(a, b) {
-  const x = snapSite(a), y = snapSite(b);
-  return x.lat === y.lat && x.lon === y.lon;
+  return oneCell(siteCell(a.lat, a.lon), siteCell(b.lat, b.lon));
 }
 
 function readAll() {
@@ -101,7 +100,7 @@ export function loadFixes(seed) {
 export function addFix(seed, fix) {
   const keep = asFix(fix);
   if (!seed || !keep) return loadFixes(seed);
-  const at = snapSite(keep);
+  const at = cellSite(siteCell(keep.lat, keep.lon));
   keep.lat = at.lat; keep.lon = at.lon;
   const all = readAll();
   const rec = recordOf(all, seed);

@@ -1702,7 +1702,7 @@ function carrierState(w) {
 // pointer event except on that one block, so the press never starts a look drag and never picks.
 const briefDlg = $('#carrier-brief');
 
-export function openBrief() {
+function openBrief() {
   if (!briefDlg || briefDlg.open) return;
   // The ground listens for the flight keys on the window, and the keys of a modal dialog still
   // reach it. So the controls of the ground stop while the brief stands open, and the close gives
@@ -1724,7 +1724,7 @@ briefDlg.addEventListener('click', (e) => { if (e.target === briefDlg) briefDlg.
 // ground alike.
 const lostDlg = $('#carrier-lost');
 
-export function openLost() {
+function openLost() {
   if (!lostDlg || lostDlg.open) return;
   if (ground) ground.controls.enabled = false;
   lostDlg.showModal();
@@ -1775,7 +1775,7 @@ function clearCarrier(seed) {
 //
 // The reader is on the ground when this runs, so the model arrives while the globe is not drawn and
 // it stands there at the end of the ascent. A reload of a found world builds it in buildWorld().
-export function onSourceFound() {
+function onSourceFound() {
   if (!current || !current.world.source) return;
   carrierRecord = markFound(current.world.seed);
   setFound(carrierGroup, current.world, current.heightMap);
@@ -1958,10 +1958,14 @@ function cyclePlant(dir) {
   inspectPlant(kind);
   if (mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
 }
-// Escape closes the study card, but a modal dialog owns the key while it stands open: the browser
-// closes the dialog and the card behind it must stay.
+// True while a modal dialog stands open: the about card, the brief, or the lost record. A modal
+// dialog owns the keyboard. On Escape the browser closes the dialog, and the card and the mark
+// behind it must stay. The test reads the page and holds no list, so a new dialog needs no edit.
+const modalOpen = () => !!document.querySelector('dialog:modal');
+
+// Escape closes the study card, but a modal dialog owns the key while it stands open.
 addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && cardOpen() && !$('#about').open && !briefDlg.open) closeCard();
+  if (e.key === 'Escape' && cardOpen() && !modalOpen()) closeCard();
 });
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
@@ -2111,7 +2115,7 @@ aboutDlg.addEventListener('click', (e) => { if (e.target === aboutDlg) aboutDlg.
 aboutDlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') aboutDlg.close(); });
 
 addEventListener('keydown', (e) => {
-  if (aboutDlg.open || briefDlg.open) return;   // a modal dialog owns the keyboard while it is open
+  if (modalOpen()) return;   // a modal dialog owns the keyboard while it is open
   if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
   if (e.key !== 'Escape') return;
   if (!creatureCard.hidden) closeCard();

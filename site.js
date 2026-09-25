@@ -1,4 +1,5 @@
-// myworlds — the landing site: the pick under the pointer, the pull to life, the marker, and the URL.
+// myworlds — the landing site: the pick under the pointer, the pull to life, the carrier, and the
+// URL. The square marker of the cell is paint in the shaders; see showMarker() in carrier-globe.js.
 //
 // A site is a lat and a lon in degrees in the planet's local frame, the frame of the worker's
 // arrays before planet.rotation.y turns them. Lat is asin(y). Lon is atan2(z, x). Two decimals.
@@ -507,8 +508,3 @@ function parseGroundView(text) {
     az: THREE.MathUtils.degToRad(v[3]), pol: THREE.MathUtils.degToRad(v[4]),
   };
 }
-
-// ---------------------------------------------------------------- the marker
-// The square of the cell the probe would land on is paint on the terrain, as the wedges are. See
-// showMarker() in carrier-globe.js. A square of geometry draped on the height map stood a cell or
-// more off the paint at a low camera, because the map is smoother than the facets.
