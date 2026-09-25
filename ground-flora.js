@@ -24,6 +24,12 @@ import { floraGeometry, FLORA, FLORA_STYLE } from './flora-geometry.js';
 const BLEND = 0.12;          // ±12% around the swap distance
 const CARD_ALPHA = 0.4;      // the alpha test of the card. No blending, so the card writes depth.
 const CUT_FADE = 0.2;        // the share of the cut distance a card shrinks to nothing over
+// A card holds the plant seen from four heights of the eye, 0, 30, 60, and 90 degrees over the
+// horizon, in the four tiles of one 2 by 2 texture. See billboard(). The frames of the four views
+// ride in one vec4, so the count is four.
+const CARD_VIEWS = 4;
+const CARD_PAD = 1.03;       // the frame of a view against the box of the plant as the view sees it
+const CARD_MAX = 256;        // pixels: the widest tile a kind may take
 // Units a plant keeps outside the four side planes of the view before the walk drops it. The ball
 // of the plant already carries its own body, so this is only a margin. See update().
 const EDGE_SLACK = 2;
@@ -202,37 +208,103 @@ function fadingDepth() {
   return m;
 }
 
-// The card turns toward the camera around the y axis only, so a plant never leans back. The
-// billboard runs in the vertex shader: the walk on the main thread only copies matrices.
-// The instance matrix of a card carries a position and one scale, and no rotation, so the scale
-// is the length of its first column.
+// The card faces the eye, and it shows the plant from the height the eye stands at. A card used to
+// hold one picture of the side of the plant and to turn about the y axis only. From above it was a
+// narrow slice of that side: a crown read as a thin band, and a thin kind such as the spindle all
+// but vanished under the alpha test. The mesh beside it showed the top of the crown, so every swap
+// turned a flat plant into a solid one. The card now holds CARD_VIEWS pictures, from the side up
+// to straight down, and the shader blends the two that stand nearest the true angle.
 //
-// One picture cannot hold every light. The bake lights the plant from one side, so a card would
-// stay bright while the near mesh beside it turns dark against the sun. The shader therefore
+// Every picture is centred on the middle of the box of the plant, and it frames the box as its
+// view sees it: the width of the box across, and ey * cos(e) + ez * sin(e) up and down, where e is
+// the height of the eye. The card is a rectangle about that middle, as tall as the taller of the
+// two views it blends, so each view keeps its own frame and the two line up point for point. A
+// frame around the ball that holds the plant fit every view at once, but most of it was empty, and
+// an empty pixel still costs two reads of the texture and a discard; that cost about 0.8 ms.
+// The rectangle turns to face the eye: its right stays level, and its up leans back as the eye
+// climbs, the way the up of the bake camera leaned. A point of the plant then falls on the same
+// pixel of the screen from the card as from the mesh, up to the perspective across one plant. An
+// eye under the middle of a tall plant takes the side view and a card that stands upright.
+//
+// The walk writes a position and one scale per card, with no rotation, so the scale is the length
+// of the first column of the instance matrix.
+//
+// One picture cannot hold every light. The bake lights the plant from behind the eye, so a card
+// would stay bright while the near mesh beside it turns dark against the sun. The shader therefore
 // dims the card by the angle between the eye and the sun on the ground plane: the card is at its
 // brightest when the sun stands behind the reader, and it falls to uBack against the sun. uBack
 // is the share of the light the sky gives, so the two levels of detail meet at one brightness.
-function billboard(material, sunXZ, back) {
+const CARD_SHADER = `
+#define CARD_VIEWS ${CARD_VIEWS}.0
+#define CARD_STEP ${(Math.PI / 2 / (CARD_VIEWS - 1)).toFixed(6)}
+`;
+
+function billboard(material, sunXZ, back, pivot, extX, extY) {
   material.onBeforeCompile = (sh) => {
     sh.uniforms.uSunXZ = { value: sunXZ };
     sh.uniforms.uBack = { value: back };
+    sh.uniforms.uPivot = { value: pivot };
+    sh.uniforms.uExtX = { value: extX };
+    sh.uniforms.uExtY = { value: extY };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform vec2 uSunXZ;\nvarying float vLit;')
+      .replace('#include <common>', '#include <common>' + CARD_SHADER
+        + 'uniform vec2 uSunXZ;\nuniform vec3 uPivot;\nuniform float uExtX;\nuniform vec4 uExtY;\n'
+        + 'varying float vLit;\nvarying float vView;\nvarying vec2 vLocal;')
       .replace('#include <project_vertex>', `
       vec4 instOrigin = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-      vec3 anchor = (modelMatrix * instOrigin).xyz;
       float iScale = length(instanceMatrix[0].xyz);
-      vec2 toEye = cameraPosition.xz - anchor.xz;
-      float eyeLen = length(toEye);
-      vec2 f = eyeLen > 0.0001 ? toEye / eyeLen : vec2(0.0, 1.0);
+      vec3 pivot = (modelMatrix * instOrigin).xyz + uPivot * iScale;
+      vec3 toEye = cameraPosition - pivot;
+      float eyeLen = length(toEye.xz);
+      vec2 f = eyeLen > 0.0001 ? toEye.xz / eyeLen : vec2(0.0, 1.0);
+      float elev = atan(max(toEye.y, 0.0), max(eyeLen, 0.0001));
       vec3 right = vec3(f.y, 0.0, -f.x);
-      vec3 worldPos = anchor + right * (transformed.x * iScale) + vec3(0.0, transformed.y * iScale, 0.0);
+      vec3 look = vec3(f.x * cos(elev), sin(elev), f.y * cos(elev));
+      vec3 up = cross(look, right);
+      float view = clamp(elev / CARD_STEP, 0.0, CARD_VIEWS - 1.0);
+      int ia = int(min(floor(view), CARD_VIEWS - 2.0));
+      // A card on one view exactly, which is most cards at eye level, takes the frame of that view.
+      float hy = view - float(ia) > 0.001 ? max(uExtY[ia], uExtY[ia + 1]) : uExtY[ia];
+      vec2 local = vec2(transformed.x * uExtX, transformed.y * hy);
+      vec3 worldPos = pivot + right * (local.x * iScale) + up * (local.y * iScale);
       vec4 mvPosition = viewMatrix * vec4(worldPos, 1.0);
       gl_Position = projectionMatrix * mvPosition;
       vLit = 0.5 + 0.5 * dot(f, uSunXZ);
+      vView = view;
+      vLocal = local;
     `);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uBack;\nvarying float vLit;')
+      .replace('#include <common>', '#include <common>' + CARD_SHADER + `
+      uniform float uBack;
+      uniform float uExtX;
+      uniform vec4 uExtY;
+      varying float vLit;
+      varying float vView;
+      varying vec2 vLocal;
+      `)
+      // One view: the point of the card in the frame of that view, and nothing outside the frame,
+      // because the texture beside it holds the next view.
+      .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
+      vec4 cardView(int i) {
+        vec2 uv = vLocal / vec2(2.0 * uExtX, 2.0 * uExtY[i]) + 0.5;
+        if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec4(0.0);
+        return texture2D(map, (vec2(float(i - (i / 2) * 2), float(i / 2)) + uv) * 0.5);
+      }
+      `)
+      // The two nearest views, blended by their alpha, so a pixel that one view leaves empty does
+      // not pull the colour of the other toward black.
+      .replace('#include <map_fragment>', `
+      #ifdef USE_MAP
+        float view = clamp(vView, 0.0, CARD_VIEWS - 1.0);
+        int ia = int(min(floor(view), CARD_VIEWS - 2.0));
+        float w = view - float(ia);
+        vec4 ca = cardView(ia);
+        vec4 cb = w > 0.001 ? cardView(ia + 1) : vec4(0.0);
+        float alpha = mix(ca.a, cb.a, w);
+        vec3 rgb = (ca.rgb * ca.a * (1.0 - w) + cb.rgb * cb.a * w) / max(alpha, 0.0001);
+        diffuseColor *= vec4(rgb, alpha);
+      #endif
+      `)
       // the fog runs after the light, as it does on the near mesh
       .replace('#include <fog_fragment>', 'gl_FragColor.rgb *= mix(uBack, 1.0, vLit);\n#include <fog_fragment>');
   };
@@ -331,10 +403,23 @@ export class Flora {
         }
       }
 
-      const card = this._bakeCard(geo, bakeMat, light, width, bb.min.y, bb.max.y, style.card);
+      // The frames of the views: the half width of the box across, and the half height of the box
+      // as each view sees it. See billboard(). `frame` is the longest side of any frame against
+      // the height of the plant, and a tile takes that many more pixels than the style asks for,
+      // so a unit of the plant holds at least as many pixels as the one picture of the side did.
+      const center = bb.getCenter(new THREE.Vector3());
+      const half = bb.getSize(new THREE.Vector3()).multiplyScalar(CARD_PAD / 2);
+      const extY = new THREE.Vector4();
+      for (let v = 0; v < CARD_VIEWS; v++) {
+        const e = (v / (CARD_VIEWS - 1)) * (Math.PI / 2);
+        extY.setComponent(v, half.y * Math.cos(e) + half.z * Math.sin(e));
+      }
+      const frame = (2 * Math.max(half.x, extY.x, extY.y, extY.z, extY.w)) / height;
+      const px = Math.min(CARD_MAX, Math.round(style.card * frame));
+      const card = this._bakeCard(geo, bakeMat, light, center, half.x, extY, px);
       bakeMat.dispose();
-      const quad = new THREE.PlaneGeometry(width * 2, bb.max.y - bb.min.y);
-      quad.translate(0, (bb.max.y + bb.min.y) / 2, 0);
+      // a unit square: the shader scales it to the frame of the views it blends
+      const quad = new THREE.PlaneGeometry(2, 2);
       // The tint of a plant rides on instanceColor, and three.js only reads it into the fragment
       // when the material carries vertex colours. The card holds one picture, so its quad takes a
       // white colour attribute and the tint then multiplies the picture.
@@ -430,6 +515,8 @@ export class Flora {
         // the geometry of one plant of this kind, at one unit of instance scale. The pick puts the
         // top of a body from it, and the mark sizes its ring from it.
         height, wRatio: width / height,
+        // the card: the side of its frame against the height of the plant, and its pixels a tile
+        frame, px,
       });
       this.group.add(near);
       this.group.add(far);
@@ -438,12 +525,12 @@ export class Flora {
     }
   }
 
-  // One card: the near mesh rendered once with an orthographic camera into a small target, with
-  // the flat colours and the sun of this site. A tall kind bakes at more pixels, because the reader
-  // can stand under it and still see the card.
-  _bakeCard(geo, material, light, width, y0, y1, px) {
+  // One card: the near mesh rendered once per view with an orthographic camera, into one tile of a
+  // small target each, with the flat colours and the sun of this site. A tall kind bakes at more
+  // pixels, because the reader can stand under it and still see the card.
+  _bakeCard(geo, material, light, center, extX, extY, px) {
     const renderer = this.renderer;
-    const target = new THREE.WebGLRenderTarget(px, px, {
+    const target = new THREE.WebGLRenderTarget(px * 2, px * 2, {
       format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
       depthBuffer: true, stencilBuffer: false,
       // No mipmaps: a mipmap averages the alpha of a thin trunk toward zero, and the far half of
@@ -460,17 +547,31 @@ export class Flora {
     scene.add(sun);
     scene.add(new THREE.HemisphereLight(light.horizon, light.ground, 0.7 - 0.35 * light.night));
 
-    // the eye stands on +z, so camera x is world x and camera y is world y
-    const cam = new THREE.OrthographicCamera(-width, width, y1, y0, 0.1, 100);
-    cam.position.set(0, 0, 20);
-    cam.lookAt(0, 0, 0);
+    // The eye stands on +z and climbs toward +y, so camera x is always world x. Its up leans back
+    // as it climbs, which is the up billboard() builds for the square.
+    const reach = Math.hypot(extX, extY.x, extY.w);
+    const cam = new THREE.OrthographicCamera(-extX, extX, 1, -1, 0.1, reach * 6);
+    const back = reach * 3;
 
     const prevTarget = renderer.getRenderTarget();
     const prevColor = renderer.getClearColor(new THREE.Color());
     const prevAlpha = renderer.getClearAlpha();
-    renderer.setRenderTarget(target);
     renderer.setClearColor(0x000000, 0);
-    renderer.render(scene, cam);
+    for (let v = 0; v < CARD_VIEWS; v++) {
+      const e = (v / (CARD_VIEWS - 1)) * (Math.PI / 2);
+      cam.position.set(0, Math.sin(e), Math.cos(e)).multiplyScalar(back).add(center);
+      cam.up.set(0, Math.cos(e), -Math.sin(e));
+      cam.lookAt(center);
+      cam.top = extY.getComponent(v); cam.bottom = -cam.top;
+      cam.updateProjectionMatrix();
+      const x = (v % 2) * px, y = Math.floor(v / 2) * px;
+      target.viewport.set(x, y, px, px);
+      target.scissor.set(x, y, px, px);
+      target.scissorTest = true;
+      renderer.setRenderTarget(target);
+      renderer.render(scene, cam);
+    }
+    target.scissorTest = false;
     renderer.setRenderTarget(prevTarget);
     renderer.setClearColor(prevColor, prevAlpha);
     scene.clear();
@@ -482,7 +583,7 @@ export class Flora {
     const cardMat = fading(billboard(new THREE.MeshBasicMaterial({
       map: target.texture, alphaTest: CARD_ALPHA, transparent: false,
       side: THREE.DoubleSide, fog: true, vertexColors: true,
-    }), this.sunXZ, light.back), true);
+    }), this.sunXZ, light.back, center.clone(), extX, extY), true);
     return { material: cardMat, target };
   }
 
@@ -513,9 +614,10 @@ export class Flora {
     let nearTotal = 0, cardTotal = 0;
 
     // The focal length of the view in pixels: a plant `size` units tall and `d` units away covers
-    // `size * focal / d` pixels of the screen. The card of its kind holds `style.card` pixels, so
-    // past `size * focal / style.card` the picture is no longer magnified and the swap is
-    // invisible. Nearer than that a card is a blown-up picture, and the reader sees a flat plant.
+    // `size * focal / d` pixels of the screen. A tile of its card holds `px` pixels over `frame`
+    // plant heights, so past `size * frame * focal / px` the picture is no longer magnified and the
+    // swap is invisible. Nearer than that a card is a blown-up picture, and the reader sees a flat
+    // plant.
     // Issue 22: the LOD knob alone did that. On a 30 Hz display the knob fell to its floor of 40 m
     // and 8,018 of 8,126 plants stood as cards, some of them ten metres away.
     this.renderer.getSize(_size);
@@ -556,7 +658,7 @@ export class Flora {
       const k = this.kinds[b];
       const d = this.lod.distance * k.style.lod;
       const knob2 = d * d;
-      const cardK = focal / k.style.card, card2 = cardK * cardK;
+      const cardK = focal * k.frame / k.px, card2 = cardK * cardK;
       const cutK = this.cut * k.style.cut, cut2 = cutK * cutK;
       // A kind whose cut stands inside the fog would stop in clear air, so its cards shrink to
       // nothing over the last CUT_FADE of the cut. For the other kinds the band lies in solid fog.

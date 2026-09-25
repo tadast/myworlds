@@ -451,6 +451,19 @@ The worst single step of the low flight fell from 10% of the frame to 0.16%. A c
 
 **The swap from card to mesh.** A card is one picture of the side of a plant. From above it is a narrow slice, a thin kind such as the spindle nearly vanishes under the alpha test, and a card casts no shadow. The swap happened in one frame, with a band of ±5% against flicker. The two levels now cross over a band of ±12%, and a 4 by 4 dither on the screen shares the pixels of the plant between them. The shadow pass of the mesh takes the same dither, so the shadow of a plant comes in with the mesh. The dither adds changes that are small and many, so the score above rises with it. At a threshold of 40 of 255, which only a pop crosses, the flights at 60 m, 40 m, and 15 m scored 11.3, 10.7, and 2.9 with a swap in one frame, and 0 with the band. The total change over the paths stayed the same, and the largest change of one step fell by half.
 
+**The card sees the plant from the height of the eye.** Added the same day. A card held one picture of the side, and it turned about the y axis only. From above that is the wrong picture: a tiered tower read as a column of loose bars with sky between them, and a crown read as a thin band. The card now holds four pictures, from the side and from 30, 60, and 90 degrees over the horizon, in one texture of 2 by 2 tiles. Every picture is centred on the middle of the box of the plant and frames the box as its view sees it: the width of the box across, and `ey * cos(e) + ez * sin(e)` up and down at the height `e`. The card is a rectangle about that middle, as tall as the taller of the two views it blends, and it faces the eye with its up leaning back as the eye climbs. A point of the plant falls on the same pixel from the card as from the mesh, up to the perspective across one plant. The shader blends the two pictures nearest the true angle by their alpha, so an empty pixel of one picture does not darken the other.
+
+A first build framed the ball that holds the plant, which fits every view with one square. Most of that square was empty, and an empty pixel still costs two reads of the texture and a discard: about 0.8 ms more than the single picture. The tight frames, and one read for a card that sits on one view exactly, took most of that back. Three runs of each build, loaded in turn, gave these medians of the timer query at a draw buffer of 2,560 by 1,600:
+
+| Camera | One picture | Four pictures |
+|---|---|---|
+| Entry, 410 m over the ground | 8.95 ms | 9.12 ms |
+| 90 m over the ground | 8.26 ms | 9.44 ms |
+| 50 m over the ground | 8.78 ms | 9.01 ms |
+| Eye level | 8.58 ms | 8.74 ms |
+
+The cost is about 0.2 ms, except at a middle height, where most cards stand between two views and read both. There it is 0.5 to 1.2 ms, and the knob answers it like any other cost. A tile takes `frame` times the pixels of the style, where `frame` is the longest side of any frame against the height of the plant: 1.12 to 1.36 on `Quasar-579`. A unit of the plant then holds at least as many pixels as before, and the floor of the card keeps its distance. The cards of that patch take 2.4 MB of texture against 0.4 MB before. What stays different: a card turns with the eye and a mesh holds its own spin and lean, and a card casts no shadow.
+
 **The fog of the high tier.** The fog ran from 450 m to 750 m at the ground. The view stayed clear to 450 m and then closed in 300 m, and that read as a wall close in front of the reader. The high tier now starts the haze at 300 m and makes it solid at 1,200 m, and the fog opens to 1,500 m at most. The rim holds to 4,000 m, and from the ceiling at the reach the ground under a fog of 1,500 m ends at 3,962 m. The low tier keeps the old fog, because its box is 1,500 m wide and a fog of 1,200 m would show the end of the plants from the site.
 
 **What it costs.** Timer queries of the graphics card around one `Ground.render`, at a draw buffer of 2,560 by 1,600:
@@ -466,7 +479,6 @@ The spread between runs is about 1 ms, so the table shows no cost the timer can 
 
 **What is still open.**
 
-- A card seen from above is still a side view. Cards baked at three or four heights of the eye, with the one nearest the true angle picked in the shader, would show the crown from above and the side from the ground. This is the largest difference that is left between the two levels.
 - Cards cast no shadow, so a far forest stands on bare ground. A card that turns to face the sun in the shadow pass could cast one, but a vertical card under a high sun casts a line. A dark blob under each card, or a darker ground under the canopy baked into the terrain colour, is the cheaper answer.
 - The shadow box ends at 200 m from the target with a hard edge. A fade of the shadow over the outer part of the box needs a change to the shadow chunk of three.js.
 - The rim carries no plants, so the forest ends at the edge of the box. The long fog of the high tier hides that edge from the site, but not from a reader near the reach.
