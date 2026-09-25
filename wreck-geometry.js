@@ -139,6 +139,29 @@ function mergeParts(parts) {
   return out;
 }
 
+// A lathe is one surface, and its back face is culled: an open bowl or bell seen from behind shows
+// nothing. So a dish and a bell are closed shells, a profile that runs out along one face and back
+// along the other. The outer face runs up and the inner face runs down, so both face outward.
+//
+// The dish: a shallow bowl, the back at the origin and the hollow facing +y.
+function dishGeo() {
+  return new THREE.LatheGeometry([
+    new THREE.Vector2(0.05, 0), new THREE.Vector2(0.9, 0.15), new THREE.Vector2(1.5, 0.5),
+    new THREE.Vector2(1.5, 0.6), new THREE.Vector2(0.9, 0.27), new THREE.Vector2(0.05, 0.12),
+    new THREE.Vector2(0.05, 0),
+  ], 12);
+}
+// A bell, with the radii and the height of CylinderGeometry(rTop, rBottom, h): the wall has a
+// thickness, so the mouth reads as hollow from below and the bell reads whole from any side.
+function bellGeo(rTop, rBottom, h, sides = 8, wall = 0.08) {
+  const y = h / 2;
+  return new THREE.LatheGeometry([
+    new THREE.Vector2(rBottom, -y), new THREE.Vector2(rTop, y),
+    new THREE.Vector2(rTop - wall, y), new THREE.Vector2(rBottom - wall, -y),
+    new THREE.Vector2(rBottom, -y),
+  ], sides);
+}
+
 // The mast the crew raised: a three-sided lattice with rungs, three guy wires, and a small dish.
 // `head` puts a box on top for the lamp; a hull that carries the lamp itself leaves it off.
 function crewMast(x, z, h = MAST_H, guy = 4.5, head = true) {
@@ -157,9 +180,15 @@ function crewMast(x, z, h = MAST_H, guy = 4.5, head = true) {
     const a = (i * 2 * Math.PI) / 3 + Math.PI / 3;
     parts.push(strut([x + guy * Math.cos(a), 0, z + guy * Math.sin(a)], [x + 0.25, h * 0.78, z], 0.05, 0.05, C_HULL_DARK, 3));
   }
-  parts.push(part(new THREE.LatheGeometry([
-    new THREE.Vector2(0.1, 0), new THREE.Vector2(0.9, 0.15), new THREE.Vector2(1.5, 0.5),
-  ], 10), C_DISH, x + 1.2, h * 0.66, z, 0, 0, -1.1));
+  // The dish rides on an arm out of the mast. The back of the bowl sits on the end of the arm, and a
+  // feed stands out of the bowl along its axis.
+  const t = 0.66, tilt = -1.1;
+  const arm = [x + 0.3 * t, (h - 0.6) * t, z];
+  const mount = [arm[0] + 1.0, arm[1] + 0.25, z];
+  const ax = [Math.sin(-tilt), Math.cos(-tilt)];
+  parts.push(strut(arm, mount, 0.1, 0.1, C_LEG, 4));
+  parts.push(part(dishGeo(), C_DISH, mount[0], mount[1], mount[2], 0, 0, tilt));
+  parts.push(strut(mount, [mount[0] + 1.1 * ax[0], mount[1] + 1.1 * ax[1], z], 0.06, 0.04, C_LEG, 3));
   if (head) parts.push(part(new THREE.BoxGeometry(0.9, 0.5, 0.9), C_HULL_DARK, top[0], top[1] + 0.2, top[2]));
   return { parts, lamp: [top[0], h + 0.4, top[2]] };
 }
@@ -195,7 +224,7 @@ function rocket() {
     body.push(part(new THREE.BoxGeometry(1.6, 0.25, 1.5), C_LEG, (R + 0.8) * Math.cos(a), top - 1.4, (R + 0.8) * Math.sin(a), 0, -a, 0));
   }
   // three bells under the skirt; the split one hangs crooked
-  const bell = () => new THREE.CylinderGeometry(0.45, 0.85, 1.3, 8, 1, true);
+  const bell = () => bellGeo(0.45, 0.85, 1.3);
   for (let i = 0; i < 3; i++) {
     const a = (i * 2 * Math.PI) / 3;
     const split = i === 2;
@@ -247,7 +276,7 @@ function spaceplane() {
   for (const s of [1, -1]) {
     body.push(part(plate([[0, 0], [-3.4, 0], [-3.8, 3.6]], 0.3), C_HULL, -3.6, 2.2, 1.5 * s, -0.35 * s, 0, 0));
   }
-  const bell = () => new THREE.CylinderGeometry(1.0, 0.45, 1.6, 8, 1, true);
+  const bell = () => bellGeo(1.0, 0.45, 1.6);
   body.push(part(bell(), C_HULL_DARK, -7.6, 2.2, 0.95, 0, 0, Math.PI / 2));
   body.push(part(bell(), C_HULL_DARK, -7.6, 2.2, -0.95, 0, 0, Math.PI / 2));
   body.push(part(bell(), C_BURN, -7.4, 0.95, 0, 0.35, 0.2, Math.PI / 2 + 0.25));
@@ -269,7 +298,7 @@ function rotor() {
   body.push(part(new THREE.CylinderGeometry(3.8, 3.8, 0.6, 10), C_BURN, 0, 0.3, 0));
   body.push(part(new THREE.CylinderGeometry(1.7, 3.6, 5.4, 10), C_HULL, 0, 3.3, 0));
   body.push(part(new THREE.CylinderGeometry(3.62, 3.62, 1.0, 10), C_PANEL, 0, 1.4, 0));   // the tank band
-  body.push(part(new THREE.CylinderGeometry(0.75, 1.9, 2.2, 10, 1, true), C_HULL_DARK, 0, -1.1, 0));
+  body.push(part(bellGeo(0.75, 1.9, 2.2, 10), C_HULL_DARK, 0, -1.1, 0));
   for (let i = 0; i < 4; i++) {
     const a = (i * Math.PI) / 2 + 0.4;
     body.push(part(new THREE.BoxGeometry(0.9, 0.7, 0.2), C_GLASS, 2.35 * Math.cos(a), 4.2, 2.35 * Math.sin(a), 0, -a + Math.PI / 2, 0));
@@ -303,7 +332,7 @@ function tripod() {
   up.push(part(new THREE.BoxGeometry(1.8, 0.7, 0.4), C_GLASS, 0, 11.4, 2.55, -0.2, 0, 0));
   up.push(part(new THREE.BoxGeometry(1.2, 1.6, 0.4), C_HULL_DARK, 2.3, 10.2, 1.2, 0, 1.1, 0));   // the hatch
   up.push(part(new THREE.TorusGeometry(3.7, 1.15, 6, 12), C_HULL, 0, 9.0, 0, Math.PI / 2, 0, 0));
-  up.push(part(new THREE.CylinderGeometry(0.6, 1.7, 2.6, 10, 1, true), C_HULL_DARK, 0, 6.6, 0));
+  up.push(part(bellGeo(0.6, 1.7, 2.6, 10), C_HULL_DARK, 0, 6.6, 0));
   up.push(part(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8), C_BURN, 0, 8.2, 0));
   for (let i = 0; i < 3; i++) {
     const a = (i * 2 * Math.PI) / 3 + Math.PI / 6;
