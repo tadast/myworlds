@@ -43,10 +43,26 @@
 //
 // `dprMax` caps the pixel ratio of the renderer. app.js takes the smaller of it and the ratio of
 // the display.
+//
+// `fog` is the haze of the probe: where it starts and where it is solid at the ground, in metres,
+// and the widest it opens as the camera climbs. ground.js holds the ratio of the two ends as the
+// fog opens. A row without it takes the fog of ground.js, which is 450, 750, and 2,100.
+//
+// HIGH starts the haze at 300 and makes it solid at 1,200, so the view fades over its whole depth
+// and the far hills stay in it as shapes. The plants follow the fog out, and a paired timer query
+// on Quasar-579@48.13,60.09 put the cost at about 0.2 ms at eye level and under 1 ms at the entry
+// camera, where the cards grew from 5,360 to 17,373. `max` is 1,500 because of the rim: from the
+// ceiling at the reach, sqrt(1500^2 - 500^2) + 2548 is 3,962, under the RIM of 4,000 below.
+//
+// LOW keeps the old fog. Its box is 1,500, so a fog of 1,200 would show the end of the plants from
+// the site itself.
 export const TIERS = {
   HIGH: {
     detail: 100, maxFlora: 10500, maxFauna: 160, shadows: true, dprMax: 2,
-    ground: { grid: 2, size: 3000, maxFlora: 120000, maxFauna: 300, shadows: true, lodMax: 400 },
+    ground: {
+      grid: 2, size: 3000, maxFlora: 120000, maxFauna: 300, shadows: true, lodMax: 400,
+      fog: { near: 300, far: 1200, max: 1500 },
+    },
   },
   LOW: {
     detail: 64, maxFlora: 2500, maxFauna: 70, shadows: false, dprMax: 1.5,

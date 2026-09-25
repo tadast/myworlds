@@ -16,11 +16,14 @@
 import * as THREE from 'three';
 import { floraGeometry, FLORA, FLORA_STYLE } from './flora-geometry.js';
 
-const HYSTERESIS = 0.05;     // ±5% around the LOD distance: a band of 10%, so a plant cannot flicker
-// the band as squared factors, because the walk compares squared distances
-const IN_BAND = (1 - HYSTERESIS) * (1 - HYSTERESIS);
-const OUT_BAND = (1 + HYSTERESIS) * (1 + HYSTERESIS);
+// The two levels of detail cross over a band, and inside it both draw. The mesh keeps a share of
+// the pixels of a plant and the card takes the rest, by one 4 by 4 dither on the screen, so the two
+// never cover the same pixel and never leave a hole. The swap used to happen in one frame, with a
+// band of ±5% so a plant could not flicker; a card and a mesh differ most when the camera looks
+// down, and the reader saw every swap as a plant that turned from flat to solid.
+const BLEND = 0.12;          // ±12% around the swap distance
 const CARD_ALPHA = 0.4;      // the alpha test of the card. No blending, so the card writes depth.
+const CUT_FADE = 0.2;        // the share of the cut distance a card shrinks to nothing over
 // Units a plant keeps outside the four side planes of the view before the walk drops it. The ball
 // of the plant already carries its own body, so this is only a margin. See update().
 const EDGE_SLACK = 2;
@@ -36,8 +39,19 @@ const TINT_LIT = 0.22;       // how far one plant may lean from the brightness o
 
 // The grass lattice. A tuft is about one unit wide, so it only reads within about 80 units, and a
 // field that wide holds far more tufts than the whole plant cap.
-const GRASS_FADE = 22;       // units: the band the tufts shrink to nothing over at the edge
-const GRASS_CEIL = 110;      // units: over this height above the ground the field is gone
+//
+// The fade runs in the vertex shader on the distance from the eye to the tuft, every frame. It used
+// to be baked into the scale of a tuft when the lattice was built, and the lattice is only built
+// once the camera has moved GRASS_STEP. A tuft in the band at the edge then changed its size by up
+// to half in one frame, at every rebuild, so the edge of the field breathed. The distance is also
+// the distance in three dimensions, so a camera that climbs sees the field shrink toward the ground
+// under it, and a camera that comes down sees the grass rise from the ground nearest to it. The
+// field used to swell in over all of its width at once, at 60 to 110 units of height.
+//
+// A tuft also takes the colour of the ground under it as it goes out, before it shrinks. A tuft on
+// a world where the grass and the ground differ in hue used to arrive as a spot of a new colour.
+const GRASS_NEAR = 0.5;      // the share of the radius where a tuft starts to shrink
+const GRASS_HUE = [0.3, 0.85];   // the shares of the radius where the colour turns to the ground
 const GRASS_STEP = 7;        // units: the camera moves this far before the lattice is rebuilt
 
 // The mark. A tap on a plant lays a ring on the ground around it, the way a tap on an animal lays
@@ -58,7 +72,6 @@ const _pos2 = new THREE.Vector3(), _mat2 = new THREE.Matrix4();
 const _camF = new THREE.Vector3();   // scratch for the way the camera points, which the pick reads
 const HALF_PI = Math.PI / 2;
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
-const smoothstep = (a, b, x) => { const t = clamp01((x - a) / (b - a || 1e-6)); return t * t * (3 - 2 * t); };
 
 // the small integer hash the worker and the terrain both use, for the spin of one plant
 function hash1(i) {
@@ -144,6 +157,49 @@ function animate(material, style) {
 // has to draw with an InstancedMesh, as the ground does.
 export function nearFloraMaterial(style) {
   return animate(floraMaterial(), style);
+}
+
+// The dither of the band. aFade is the share of the pixels a level keeps: the mesh keeps the pixels
+// whose threshold stands under it, and the card keeps the rest, so the two always add up to one
+// whole plant. A 4 by 4 Bayer matrix gives 16 steps.
+const DITHER = `
+float bayer2(vec2 a) { a = floor(a); return fract(a.x * 0.5 + a.y * a.y * 0.75); }
+float bayer4(vec2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
+`;
+
+// Put the dither of the band on a material that onBeforeCompile already changes. `card` picks the
+// side: the mesh keeps the pixels under its fade, the card keeps the pixels over one minus its fade.
+function fading(material, card) {
+  const first = material.onBeforeCompile;
+  const key = material.customProgramCacheKey();
+  material.onBeforeCompile = (sh, r) => {
+    if (first) first.call(material, sh, r);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aFade;\nvarying float vFade;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFade = aFade;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vFade;' + DITHER)
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n'
+        + (card ? 'if (bayer4(gl_FragCoord.xy) < 1.0 - vFade) discard;' : 'if (bayer4(gl_FragCoord.xy) >= vFade) discard;'));
+  };
+  material.customProgramCacheKey = () => key + (card ? '-card-fade' : '-fade');
+  return material;
+}
+
+// The shadow of a mesh fades with the mesh. The depth pass keeps the same share of the texels of
+// the map, and the soft filter of the shadow reads a share of them as a lighter shadow.
+function fadingDepth() {
+  const m = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aFade;\nvarying float vFade;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFade = aFade;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vFade;' + DITHER)
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (bayer4(gl_FragCoord.xy) >= vFade) discard;');
+  };
+  m.customProgramCacheKey = () => 'flora-depth-fade';
+  return m;
 }
 
 // The card turns toward the camera around the y axis only, so a plant never leans back. The
@@ -233,6 +289,7 @@ export class Flora {
     this.sunXZ = new THREE.Vector2(0, 1);
     if (sd) this.setSun(sd);
     this.casts = !!tier.shadows;
+    this.blend = BLEND;
     this.kinds = [];
     this.targets = [];
     this.materials = [];
@@ -263,13 +320,19 @@ export class Flora {
 
       // The terrain runs a Lambert material for the same reason: the reader cannot tell a full
       // reflection model from it on a rough surface, and Lambert is about a third cheaper.
-      const nearMat = animate(floraMaterial(), style);
+      const nearMat = fading(animate(floraMaterial(), style), false);
+      // The bake draws one plain mesh, which carries no share of the band, so it takes the same
+      // material without the dither. The dither would read a share of 0 there and drop every pixel.
+      const bakeMat = animate(floraMaterial(), style);
       if (style.glow > 0) {
-        nearMat.emissive = new THREE.Color(palette.flora.canopy);
-        nearMat.emissiveIntensity = style.glow;
+        for (const m of [nearMat, bakeMat]) {
+          m.emissive = new THREE.Color(palette.flora.canopy);
+          m.emissiveIntensity = style.glow;
+        }
       }
 
-      const card = this._bakeCard(geo, nearMat, light, width, bb.min.y, bb.max.y, style.card);
+      const card = this._bakeCard(geo, bakeMat, light, width, bb.min.y, bb.max.y, style.card);
+      bakeMat.dispose();
       const quad = new THREE.PlaneGeometry(width * 2, bb.max.y - bb.min.y);
       quad.translate(0, (bb.max.y + bb.min.y) / 2, 0);
       // The tint of a plant rides on instanceColor, and three.js only reads it into the fragment
@@ -293,6 +356,14 @@ export class Flora {
       far.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
       near.instanceColor.setUsage(THREE.DynamicDrawUsage);
       far.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      // the share of the pixels each level keeps inside the band. See BLEND.
+      const nearFade = new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1);
+      const cardFade = new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1);
+      nearFade.setUsage(THREE.DynamicDrawUsage);
+      cardFade.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('aFade', nearFade);
+      quad.setAttribute('aFade', cardFade);
+      if (tier.shadows) near.customDepthMaterial = fadingDepth();
 
       // The near matrices, built once. A plant leans a little into the terrain normal; a boulder
       // leans the whole way, because a boulder lies on the ground and a tree grows up from it. On
@@ -355,6 +426,7 @@ export class Flora {
 
       this.kinds.push({
         kind, style, count: n, near, far, nearM, at, cards, tints, sz2, rad, state: new Uint8Array(n),
+        nearFade, cardFade,
         // the geometry of one plant of this kind, at one unit of instance scale. The pick puts the
         // top of a body from it, and the mark sizes its ring from it.
         height, wRatio: width / height,
@@ -407,10 +479,10 @@ export class Flora {
     // holds plain light. The card goes through the same tone mapping as the near mesh at draw
     // time, so the two read as one plant. The alpha test writes depth, so a card sorts with the
     // terrain and needs no blending.
-    const cardMat = billboard(new THREE.MeshBasicMaterial({
+    const cardMat = fading(billboard(new THREE.MeshBasicMaterial({
       map: target.texture, alphaTest: CARD_ALPHA, transparent: false,
       side: THREE.DoubleSide, fog: true, vertexColors: true,
-    }), this.sunXZ, light.back);
+    }), this.sunXZ, light.back), true);
     return { material: cardMat, target };
   }
 
@@ -425,8 +497,10 @@ export class Flora {
   }
 
   // The walk: every plant goes to the near mesh or to the card mesh by its distance to the
-  // camera. The hysteresis band keeps a plant on one side until it is clearly past the other, so
-  // a plant at the boundary cannot flicker. The LOD distance of a kind is the knob times the style
+  // camera. Inside the band of BLEND it goes to both, and the dither of the two materials shares its
+  // pixels between them, so a plant crosses from one level to the other over a distance and never
+  // in one frame. A plant at the boundary cannot flicker, because a step back only moves the share
+  // back by the same small amount. The LOD distance of a kind is the knob times the style
   // of the kind, so a colossus stays a mesh out to the fog and a tuft turns into a card at once.
   //
   // The walk also drops every plant outside the frame. The four side planes of the view cut the
@@ -474,6 +548,9 @@ export class Flora {
     const casts = this.casts;
     const shX = this.shadowX * 0.5, shZ = this.shadowZ * 0.5;
     const shR = Math.hypot(shX, shZ);
+    // the band as squared factors, because the walk compares squared distances
+    const blend = this.blend;
+    const IN_BAND = (1 - blend) * (1 - blend), OUT_BAND = (1 + blend) * (1 + blend);
 
     for (let b = 0; b < this.kinds.length; b++) {
       const k = this.kinds[b];
@@ -481,10 +558,14 @@ export class Flora {
       const knob2 = d * d;
       const cardK = focal / k.style.card, card2 = cardK * cardK;
       const cutK = this.cut * k.style.cut, cut2 = cutK * cutK;
+      // A kind whose cut stands inside the fog would stop in clear air, so its cards shrink to
+      // nothing over the last CUT_FADE of the cut. For the other kinds the band lies in solid fog.
+      const fadeK = cutK * (1 - CUT_FADE), fade2 = fadeK * fadeK;
       const src = k.nearM, at = k.at, cards = k.cards, tints = k.tints, sz2 = k.sz2, state = k.state, n = k.count;
       const rad = k.rad;
       const nearArr = k.near.instanceMatrix.array, cardArr = k.far.instanceMatrix.array;
       const nearCol = k.near.instanceColor.array, cardCol = k.far.instanceColor.array;
+      const nearF = k.nearFade.array, cardF = k.cardFade.array;
       let a = 0, c = 0;
       for (let i = 0; i < n; i++) {
         const p = i * 3;
@@ -497,36 +578,43 @@ export class Flora {
         const floor2 = sz2[i] * card2;
         const lim2 = knob2 > floor2 ? knob2 : floor2;
         const in2 = lim2 * IN_BAND, out2 = lim2 * OUT_BAND;
-        let s = state[i];
-        if (s === 0) { if (dd > out2) s = 1; } else s = dd < in2 ? 0 : 1;
-        state[i] = s;
-        // Out of the frame, so out of the draw. The state stands: it holds the near-or-card
-        // reading of this plant, and the plant comes back with the reading it went away with. The
-        // bands above run on the frame it comes back, so a plant that moved far away while it was
-        // out of the frame turns into a card on the same frame it returns.
+        // the share of the mesh: 1 inside the band, 0 outside it, and a smooth step across it
+        let f = 1;
+        if (dd >= out2) f = 0;
+        else if (dd > in2) {
+          const lim = Math.sqrt(lim2), u = (Math.sqrt(dd) - lim * (1 - blend)) / (lim * 2 * blend);
+          f = 1 - u * u * (3 - 2 * u);
+        }
+        state[i] = f === 1 ? 0 : f === 0 ? 1 : 3;
+        // Out of the frame, so out of the draw. A card casts nothing and a sun that is off casts
+        // nothing, so both go. A mesh under a sun stays if its shadow is in the frame.
         const rd = rad[i], r = rd + EDGE_SLACK;
+        let seen = true;
         if (a0x * px + a0y * py + a0z * pz + c0 < -r
           || a1x * px + a1y * py + a1z * pz + c1 < -r
           || a2x * px + a2y * py + a2z * pz + c2 < -r
           || a3x * px + a3y * py + a3z * pz + c3 < -r) {
-          // The plant is out of the frame. A card casts nothing and a sun that is off casts
-          // nothing, so both go. A near mesh under a sun stays if its shadow is in the frame.
-          if (s !== 0 || !casts) continue;
+          if (f === 0 || !casts) continue;
           const qx = px + shX * rd, qz = pz + shZ * rd, qr = r + shR * rd;
           if (a0x * qx + a0y * py + a0z * qz + c0 < -qr
             || a1x * qx + a1y * py + a1z * qz + c1 < -qr
             || a2x * qx + a2y * py + a2z * qz + c2 < -qr
             || a3x * qx + a3y * py + a3z * qz + c3 < -qr) continue;
+          seen = false;
         }
-        if (s === 0) {
+        if (f > 0) {
           copy16(src, i * 16, nearArr, a);
           nearCol[a / 16 * 3] = tints[p]; nearCol[a / 16 * 3 + 1] = tints[p + 1]; nearCol[a / 16 * 3 + 2] = tints[p + 2];
+          nearF[a / 16] = f;
           a += 16;
-        } else {
-          const q = i * 2, sc = cards[q];
+        }
+        if (f < 1 && seen) {
+          const q = i * 2;
+          const sc = dd > fade2 ? cards[q] * (cutK - Math.sqrt(dd)) / (cutK - fadeK) : cards[q];
           cardArr[c] = sc; cardArr[c + 5] = sc; cardArr[c + 10] = sc;
           cardArr[c + 12] = px; cardArr[c + 13] = cards[q + 1]; cardArr[c + 14] = pz;
           cardCol[c / 16 * 3] = tints[p]; cardCol[c / 16 * 3 + 1] = tints[p + 1]; cardCol[c / 16 * 3 + 2] = tints[p + 2];
+          cardF[c / 16] = 1 - f;
           c += 16;
         }
       }
@@ -538,10 +626,12 @@ export class Flora {
       if (a > 0) {
         k.near.instanceMatrix.addUpdateRange(0, a); k.near.instanceMatrix.needsUpdate = true;
         k.near.instanceColor.addUpdateRange(0, a / 16 * 3); k.near.instanceColor.needsUpdate = true;
+        k.nearFade.addUpdateRange(0, a / 16); k.nearFade.needsUpdate = true;
       }
       if (c > 0) {
         k.far.instanceMatrix.addUpdateRange(0, c); k.far.instanceMatrix.needsUpdate = true;
         k.far.instanceColor.addUpdateRange(0, c / 16 * 3); k.far.instanceColor.needsUpdate = true;
+        k.cardFade.addUpdateRange(0, c / 16); k.cardFade.needsUpdate = true;
       }
     }
     this.nearCount = nearTotal;
@@ -702,6 +792,7 @@ export class Flora {
     for (const k of this.kinds) {
       k.near.geometry.dispose();
       k.near.material.dispose();
+      if (k.near.customDepthMaterial) k.near.customDepthMaterial.dispose();
       k.far.geometry.dispose();
       k.far.material.dispose();
     }
@@ -723,17 +814,48 @@ export class Flora {
 // So the field is a lattice in world space that the camera carries: every cell of GRASS_CELL units
 // holds at most one tuft, the tuft takes its place from the hash of its cell, and the field
 // rebuilds when the camera has moved GRASS_STEP units. A tuft therefore never moves under the
-// reader; the field only gains cells at one edge and loses them at the other, and the tufts shrink
-// to nothing over the last GRASS_FADE units, so no ring shows.
+// reader; the field only gains cells at one edge and loses them at the other. The lattice reaches
+// GRASS_STEP past the radius, so every tuft the fade can show already stands in it.
 //
 // The cover mask of the worker says where a tuft may grow. The colour of the terrain under the
 // tuft tints it, so the grass and the ground it stands on hold one hue.
+
+// The material of the tufts: the near material of a plant, and the fade of the field on top. See
+// GRASS_NEAR. The fade reads the eye from cameraPosition, which three.js gives every vertex shader.
+function grassMaterial(style, radius) {
+  const material = animate(floraMaterial(), style);
+  const first = material.onBeforeCompile;
+  const fade = { value: new THREE.Vector4(radius * GRASS_NEAR, radius, radius * GRASS_HUE[0], radius * GRASS_HUE[1]) };
+  material.userData.fade = fade;
+  material.onBeforeCompile = (sh, r) => {
+    first.call(material, sh, r);
+    sh.uniforms.uFade = fade;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform vec4 uFade;\nattribute vec3 aGround;\nvarying vec3 vGround;\nvarying float vHue;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        vec3 gAt = (modelMatrix * vec4(instanceMatrix[3].xyz, 1.0)).xyz;
+        float gEye = distance(cameraPosition, gAt);
+        transformed *= 1.0 - smoothstep(uFade.x, uFade.y, gEye);
+        vHue = 1.0 - smoothstep(uFade.z, uFade.w, gEye);
+        vGround = aGround;
+      #endif
+      `);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGround;\nvarying float vHue;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(vGround, diffuseColor.rgb, vHue);');
+  };
+  material.customProgramCacheKey = () => 'flora-grass';
+  return material;
+}
+
 export class GrassField {
   constructor({ palette, tier, sampler, variant = 0 }) {
     this.sampler = sampler;
     this.radius = tier.shadows ? 78 : 50;
     this.cell = tier.shadows ? 1.7 : 2.3;
-    this.max = Math.ceil((2 * this.radius / this.cell + 2) ** 2);
+    this.reach = this.radius + GRASS_STEP;      // the lattice reaches past the fade, see above
+    this.max = Math.ceil((2 * this.reach / this.cell + 2) ** 2);
     this.count = 0;
     this.buildMs = 0;
     this.atX = Infinity;
@@ -743,8 +865,12 @@ export class GrassField {
     const geo = floraGeometry(FLORA.GRASS, palette.flora, variant);
     geo.computeBoundingBox();
     this.height = Math.max(geo.boundingBox.max.y, 0.001);
+    // the colour of the ground under every tuft, which the tuft turns to as it goes out
+    this.ground = new THREE.InstancedBufferAttribute(new Float32Array(this.max * 3), 3);
+    this.ground.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('aGround', this.ground);
     const style = FLORA_STYLE[FLORA.GRASS];
-    this.material = animate(floraMaterial(), style);
+    this.material = grassMaterial(style, this.radius);
     this.mesh = new THREE.InstancedMesh(geo, this.material, this.max);
     this.mesh.castShadow = false;               // one tuft casts nothing a reader can see
     this.mesh.receiveShadow = !!tier.shadows;
@@ -759,12 +885,10 @@ export class GrassField {
   update(camera, t) {
     this.material.userData.time.value = t;
     const x = camera.position.x, z = camera.position.z;
-    // The field goes away as the reader climbs. A tuft one unit tall says nothing from 100 units
-    // up, and the gate rides in the shader, so a climb costs no rebuild.
+    // A camera higher than the radius over the ground sees no tuft, because the fade reads the
+    // distance in three dimensions. The field then draws nothing and builds nothing.
     const up = camera.position.y - this.sampler.heightAt(x, z);
-    const gate = 1 - smoothstep(GRASS_CEIL * 0.55, GRASS_CEIL, up);
-    this.material.userData.gate.value = gate;
-    if (gate <= 0.01) { this.mesh.count = 0; this.count = 0; return; }
+    if (up >= this.radius) { this.mesh.count = 0; this.count = 0; return; }
     const dx = x - this.atX, dz = z - this.atZ;
     if (this.count === 0 || dx * dx + dz * dz > GRASS_STEP * GRASS_STEP) this._build(x, z);
   }
@@ -773,11 +897,12 @@ export class GrassField {
   // else, so the walk writes six numbers and leaves the rest of the identity alone.
   _build(cx, cz) {
     const t0 = performance.now();
-    const S = this.sampler, cell = this.cell, R = this.radius, R2 = R * R;
+    const S = this.sampler, cell = this.cell, R = this.reach, R2 = R * R;
+    const gain = S.gain || 1;
     const m = this.mesh.instanceMatrix.array, col = this.mesh.instanceColor.array;
+    const gr = this.ground.array;
     const i0 = Math.floor((cx - R) / cell), i1 = Math.ceil((cx + R) / cell);
     const j0 = Math.floor((cz - R) / cell), j1 = Math.ceil((cz + R) / cell);
-    const inner = R - GRASS_FADE;
     const rgb = [0, 0, 0];
     let o = 0;
     for (let j = j0; j <= j1 && o < this.max * 16; j++) {
@@ -794,10 +919,8 @@ export class GrassField {
         if (hp > cover * 1.5) continue;
         const y = S.heightAt(x, z);
         const hs = hash2(i - 313, j + 449);
-        const fade = d2 <= inner * inner ? 1 : 1 - smoothstep(inner, R, Math.sqrt(d2));
-        if (fade <= 0.02) continue;
         // A tuft is wider than it is tall, so a field of them reads as cover and not as a crop.
-        const size = (0.45 + 0.85 * hs) * (0.5 + 0.6 * cover) * fade / this.height;
+        const size = (0.45 + 0.85 * hs) * (0.5 + 0.6 * cover) / this.height;
         const wide = size * 1.3;
         const a = hash2(i + 7, j - 7) * Math.PI * 2;
         const ca = Math.cos(a) * wide, sa = Math.sin(a) * wide;
@@ -814,6 +937,7 @@ export class GrassField {
         col[c] = lit * (1 + (rgb[0] / mean - 1) * 0.5);
         col[c + 1] = lit * (1 + (rgb[1] / mean - 1) * 0.5);
         col[c + 2] = lit * (1 + (rgb[2] / mean - 1) * 0.5);
+        gr[c] = rgb[0] * gain; gr[c + 1] = rgb[1] * gain; gr[c + 2] = rgb[2] * gain;
         o += 16;
       }
     }
@@ -821,6 +945,7 @@ export class GrassField {
     this.mesh.count = this.count;
     this.mesh.instanceMatrix.needsUpdate = true;
     this.mesh.instanceColor.needsUpdate = true;
+    this.ground.needsUpdate = true;
     this.atX = cx; this.atZ = cz;
     this.buildMs = performance.now() - t0;
   }

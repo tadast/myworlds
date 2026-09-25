@@ -72,6 +72,13 @@ const SHADOW_BOX = 200;     // metres, the half width of the shadow box around t
 const SHADOW_OFF = 1.35;
 const SHADOW_ON = 1.05;
 const SHADOW_DWELL = 1500;  // ms
+// The gate used to switch the shadow in one frame, and every shadow in the view came or went at
+// once. The strength of the shadow now eases toward the gate over this many seconds, and the map
+// keeps running until the strength reaches zero.
+const SHADOW_FADE = 0.8;    // s
+// metres: the texel grid of the shadow map hangs on an anchor, and the anchor moves to the box when
+// the target has gone this far from it. See _driveShadow().
+const SHADOW_ANCHOR = 40;
 
 // ---------------------------------------------------------------- the LOD controller, issue 11
 const LOD_PERIOD = 500;     // ms between two decisions
@@ -222,6 +229,13 @@ const WRECK_GRACE = 20;
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM in
 // tiers.js. The ceiling of issue 20 keeps the fog under 1,325 m, so FOG_MAX no longer binds.
+//
+// FOG_NEAR, FOG_FAR, and FOG_MAX are the fog of the LOW tier and the fallback. The HIGH row of
+// tiers.js carries a fog of its own: it starts nearer and ends further out, so the haze grows over
+// the whole view and the far hills stay in it as shapes. The old fog held the view clear to 450 m
+// and hid everything by 750 m, and that band read as a wall close in front of the reader.
+// The plants follow the fog: update() sets their cut distance to the far end of the fog, so no
+// plant stops in air the reader can still see through.
 // The floor of the camera follows the ground, and the ground of issue 26 carries ridges. A floor
 // that answers every one of them to the millimetre shivers under a moving camera. See update().
 const FLOOR_EASE = 1;       // metres: a lift under this one is spread over time
@@ -232,6 +246,9 @@ const FLOOR_RATE = 14;      // 1/s: how fast a spread lift arrives
 const LAPSE_C_PER_M = 0.0065;
 const FOG_LIFT = 1.15;      // metres of fog distance per metre of height
 const FOG_MAX = 2100;       // metres, the widest the fog opens
+// The plants stop this far past the far end of the fog. The fog is solid there, so the stop cannot
+// show, and a margin of 2% holds against the rounding of the depth in the shader.
+const CUT_PAST_FOG = 1.02;
 
 const CHUNKS = 10;           // the fine terrain splits into 10 by 10 meshes, so the frustum culls it
 const JITTER = 0.055;        // the lightness noise per vertex, so the ground is not one flat swatch
@@ -250,6 +267,7 @@ const _off = new THREE.Vector3(), _dir = new THREE.Vector3(), _hit = new THREE.V
 const _sph = new THREE.Spherical();
 const _fw = new THREE.Vector3(), _rt = new THREE.Vector3();   // the walk basis of the frame
 const _UP = new THREE.Vector3(0, 1, 0);
+const _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sd = new THREE.Vector3(), _snap = new THREE.Vector3();   // the shadow box
 const _tint = [0, 0, 0];   // scratch colour for the rim rows
 
 // The settled LOD distance per tier. A tier is its own entry, because a low tier holds a
@@ -339,6 +357,14 @@ export class Ground {
     this._lodPrev = this.lod.distance;
     this._shadowOn = false;
     this._shadowAt = 0;
+    this._shadowK = 0;      // the strength of the shadow, 0 to 1. See SHADOW_FADE.
+    this._shadowAnchor = new THREE.Vector3();   // the point the texel grid hangs on
+    this._anchored = false;
+    // The fog of the tier. The HIGH row carries its own; the LOW row takes the constants here.
+    const fg = this.tier.fog || {};
+    this.fogNear = fg.near || FOG_NEAR;
+    this.fogFar = fg.far || FOG_FAR;
+    this.fogMax = fg.max || FOG_MAX;
     // the height grid of the patch, the coarse grid of the rim, and the ground height at the site
     this.heights = null;
     this.rim = null;
@@ -354,7 +380,7 @@ export class Ground {
 
     this.scene = new THREE.Scene();
     this.scene.background = this.skyColor.clone();
-    this.scene.fog = new THREE.Fog(this.skyColor.getHex(), FOG_NEAR, FOG_FAR);
+    this.scene.fog = new THREE.Fog(this.skyColor.getHex(), this.fogNear, this.fogFar);
 
     const w = renderer.domElement.clientWidth || 1, h = renderer.domElement.clientHeight || 1;
     this.camera = new THREE.PerspectiveCamera(60, w / h, 0.5, SKY_RADIUS * 2.2);
@@ -447,6 +473,8 @@ export class Ground {
     this._clear();
     this._shadowOn = false;      // the camera arrives 800 m up, where nothing casts
     this._shadowAt = 0;
+    this._shadowK = 0;
+    this._anchored = false;
 
     const p = result && result.patch;
     this.heights = p ? result.heights : null;
@@ -618,7 +646,7 @@ export class Ground {
     if (!result.flora || result.flora.length === 0) return;
     this.flora = new Flora({
       renderer: this.renderer, flora: result.flora, palette: result.patch.palette,
-      tier: this.tier, sky: this.sky, lod: this.lod, cut: FOG_FAR * 1.2,
+      tier: this.tier, sky: this.sky, lod: this.lod, cut: this.fogFar * CUT_PAST_FOG,
       groundColor: this.groundColor, variant: result.patch.floraVariant || 0,
       // Issue 24: the pick projects with the ground camera and measures in the pixels of this view.
       camera: this.camera, canvas: this.canvas,
@@ -640,6 +668,7 @@ export class Ground {
         heightAt: (x, z) => this.heightAt(x, z),
         coverAt: (x, z) => this.coverAt(x, z),
         colorAt: (x, z, out) => this.colorAt(x, z, out),
+        gain: GROUND_GAIN,       // the terrain multiplies its colours by this, so a tuft must too
       },
     });
     this.content.add(this.grass.group);
@@ -1061,13 +1090,15 @@ export class Ground {
     // ground. The ratio of the near to the far distance holds, so the depth of the fade holds.
     const fog = this.scene.fog;
     if (fog) {
-      fog.far = Math.min(FOG_FAR + FOG_LIFT * Math.max(0, p.y - this.base), FOG_MAX);
-      fog.near = fog.far * (FOG_NEAR / FOG_FAR);
+      fog.far = Math.min(this.fogFar + FOG_LIFT * Math.max(0, p.y - this.base), this.fogMax);
+      fog.near = fog.far * (this.fogNear / this.fogFar);
+      // the plants stop where the fog is solid, however far the height has opened it
+      if (this.flora) this.flora.cut = fog.far * CUT_PAST_FOG;
     }
 
     // the knob moves before the three parts that read it: the shadow gate, the animals, the plants
     this._driveLod();
-    this._driveShadow();
+    this._driveShadow(dt);
     if (this.fauna) this.fauna.update(t, dt);
     // the sky follows the camera, so it must move after every clamp
     if (this.sky) { this.sky.update(t, dt, this.camera); this._followSun(); }
@@ -1184,7 +1215,15 @@ export class Ground {
   // thresholds and a dwell. It turns off over SHADOW_OFF distances of height and back on under
   // SHADOW_ON, which is a band of 29%, wider than one step of the knob at 15%. It also holds each
   // state for SHADOW_DWELL, which is three decisions of the controller.
-  _driveShadow() {
+  //
+  // The gate does not switch the shadow at once. The strength follows it over SHADOW_FADE, so the
+  // shadows of the view come in and go out together over a short time and never in one frame.
+  //
+  // The box also steps on the texel grid of the map. A box that follows the target by a part of a
+  // texel draws every edge of every shadow on a new row of texels, and the edges then crawl under
+  // a camera that moves. Measured on Quasar-579@48.13,60.09 in a flight at 15 m, that crawl was
+  // the largest change in the frame that the camera did not cause.
+  _driveShadow(dt = 0) {
     const sun = this.sun;
     if (!sun || !this.tier.shadows) return;
     const tg = this.controls.target;
@@ -1195,11 +1234,39 @@ export class Ground {
       this._shadowOn = want;
       this._shadowAt = now;
     }
-    sun.castShadow = this._shadowOn;
+    const k = this._shadowK + (this._shadowOn ? dt : -dt) / SHADOW_FADE;
+    this._shadowK = k < 0 ? 0 : k > 1 ? 1 : k;
+    const casting = this._shadowK > 0;
+    sun.castShadow = casting;
+    sun.shadow.intensity = this._shadowK * this._shadowK * (3 - 2 * this._shadowK);
     // The walk of the plants keeps a caster outside the frame only while the sun draws a shadow.
-    if (this.flora) this.flora.casts = this._shadowOn;
-    if (!this._shadowOn) return;
-    sun.target.position.set(tg.x, tg.y, tg.z);
+    if (this.flora) this.flora.casts = casting;
+    if (!casting) { this._anchored = false; return; }
+    // The axes of the map are the right and the up of a camera that looks down the sun, as
+    // lookAt() builds them. A sun at the zenith has no right, and the box then takes the target.
+    //
+    // The grid hangs on an anchor near the target and not on the origin. The sun turns, so the
+    // axes turn, and a grid turns about the point it hangs on: a grid on the origin, 400 m away,
+    // slid about 20 times faster than the shadows themselves move, and 0.6% of the frame changed
+    // on every frame at a still camera. The anchor is itself a point of the grid, so a move of the
+    // anchor to the box keeps every texel where it was.
+    const texel = (2 * SHADOW_BOX) / sun.shadow.mapSize.x;
+    const a = this._shadowAnchor;
+    if (!this._anchored || a.distanceToSquared(tg) > SHADOW_ANCHOR * SHADOW_ANCHOR) {
+      if (this._anchored) a.copy(sun.target.position); else a.copy(tg);
+      this._anchored = true;
+    }
+    _sx.crossVectors(_UP, this.sunDir);
+    _snap.copy(tg);
+    if (_sx.lengthSq() > 1e-8) {
+      _sx.normalize();
+      _sy.crossVectors(this.sunDir, _sx).normalize();
+      _sd.subVectors(tg, a);
+      const u = _sd.dot(_sx), v = _sd.dot(_sy);
+      _snap.addScaledVector(_sx, Math.round(u / texel) * texel - u);
+      _snap.addScaledVector(_sy, Math.round(v / texel) * texel - v);
+    }
+    sun.target.position.copy(_snap);
     sun.position.copy(this.sunDir).multiplyScalar(SKY_RADIUS * 0.6).add(sun.target.position);
     sun.target.updateMatrixWorld();
   }

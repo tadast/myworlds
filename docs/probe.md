@@ -428,6 +428,49 @@ At the pixel count a phone really asks for, 589 by 1,090, the same LOW site read
 
 **The sheet hid the probe button as well.** The body of the sidebar is the one scroll region, and on a viewport of 375 by 667 it holds 386 px of a scroll height of 1,496 px. A world with a tall card then puts the probe button at y 629, under the footer at y 626 to 667, and the reader who opens the sheet sees no button at all. So an expand of the sheet, and a change of what the button says, bring it into view. The scroll only moves while the button stands outside the body, so the reader who scrolled somewhere else keeps that place, and a wide screen where the button already shows never moves.
 
+### What pops, and what the far view costs
+
+Added on 2026-09-25. The reader reported three faults: the view ends close, the grass comes out of nowhere near the ground, and the trees and their shadows appear at once and turn from flat to solid. Nothing on the ground streams. The patch, the plants, and the cards are all in memory from the landing, so a slower probe gives the renderer no extra time and hides nothing. Every pop comes from a rule that switches something at a distance, a height, or a step of the camera.
+
+**The measure.** A frame difference mixes the motion of the camera with the pops. So the check draws each step of a camera path twice at one pose: once with the state the update left at the step before, and once after the update of this step. The two frames differ only where the level of detail, the grass, the shadow, or the fog changed. The clock of the ground stands still, the check reads the frame in blocks of 4 by 4 pixels, and a block counts when its brightness moves by more than 10 of 255. The score of a path is the share of the frame that counted, summed over its steps. The paths ran on `Quasar-579@48.13,60.09` in headless Chrome on an Apple M2, at 1,280 by 800, with the knob held at 150 m.
+
+**The four causes, and the fixes.**
+
+1. The plants stopped at 900 m from the eye, but the fog opens with the height and was solid only at 1,267 m at the entry camera. From 130 m up, every plant past 900 m was missing in air the reader could still see through, and the ring moved as the camera came down. The cut now follows the far end of the fog on every frame.
+2. The shadow box followed the target by any fraction of a texel, so every shadow edge fell on a new row of texels at every step and crawled. In a flight at 15 m, one step changed 10% of the frame. The box now steps on the texel grid of the map. The grid hangs on an anchor near the target, because the sun turns once in 30 minutes and a grid that hangs on the origin, 400 m away, slid about 20 times faster than the shadows. The anchor moves in whole texels, so a move of the anchor changes nothing.
+3. The shadow gate switched the whole shadow in one frame. The strength of the shadow now eases toward the gate over 0.8 s.
+4. The grass baked its fade at the rebuild, every 7 units of travel, so a tuft at the edge of the field changed its size by up to half in one frame. The whole field also swelled in at once between 110 and 60 units of height. The shader now reads the distance from the eye every frame, in three dimensions, and the tuft turns to the colour of the ground before it shrinks.
+
+| Path | Before | After |
+|---|---|---|
+| Descent at a 66 degree tilt, 480 m to 5 m | 7.85 | 1.82 |
+| Flight at 60 m over the ground | 52.7 | 2.09 |
+| Flight at 15 m over the ground | 197 | 2.29 |
+
+The worst single step of the low flight fell from 10% of the frame to 0.16%. A camera that holds still, with the sun turning, changes 0.02% to 0.15% of the frame from one frame to the next.
+
+**The swap from card to mesh.** A card is one picture of the side of a plant. From above it is a narrow slice, a thin kind such as the spindle nearly vanishes under the alpha test, and a card casts no shadow. The swap happened in one frame, with a band of ±5% against flicker. The two levels now cross over a band of ±12%, and a 4 by 4 dither on the screen shares the pixels of the plant between them. The shadow pass of the mesh takes the same dither, so the shadow of a plant comes in with the mesh. The dither adds changes that are small and many, so the score above rises with it. At a threshold of 40 of 255, which only a pop crosses, the flights at 60 m, 40 m, and 15 m scored 11.3, 10.7, and 2.9 with a swap in one frame, and 0 with the band. The total change over the paths stayed the same, and the largest change of one step fell by half.
+
+**The fog of the high tier.** The fog ran from 450 m to 750 m at the ground. The view stayed clear to 450 m and then closed in 300 m, and that read as a wall close in front of the reader. The high tier now starts the haze at 300 m and makes it solid at 1,200 m, and the fog opens to 1,500 m at most. The rim holds to 4,000 m, and from the ceiling at the reach the ground under a fog of 1,500 m ends at 3,962 m. The low tier keeps the old fog, because its box is 1,500 m wide and a fog of 1,200 m would show the end of the plants from the site.
+
+**What it costs.** Timer queries of the graphics card around one `Ground.render`, at a draw buffer of 2,560 by 1,600:
+
+| Camera | Before, median | After, median | Cards before | Cards after |
+|---|---|---|---|---|
+| Entry, 410 m over the ground | 8.17 ms | 8.87 ms | 5,360 | 14,264 |
+| 90 m over the ground | 8.71 ms | 8.72 ms | 4,529 | 10,609 |
+| 50 m over the ground | 9.36 ms | 9.80 ms | 4,084 | 9,301 |
+| Eye level | 9.45 ms | 8.38 ms | 4,569 | 9,631 |
+
+The spread between runs is about 1 ms, so the table shows no cost the timer can separate. Paired queries, which alternate the two states frame by frame, put the longer fog at 0.2 ms at eye level and under 1 ms at the entry camera, and the band of the dither at about 0.4 ms. The walk of the plants on the main thread rose from about 1.0 ms to about 1.5 ms, because it writes twice as many cards. A rebuild of the grass takes 1.4 to 2.6 ms, once per 7 units of travel.
+
+**What is still open.**
+
+- A card seen from above is still a side view. Cards baked at three or four heights of the eye, with the one nearest the true angle picked in the shader, would show the crown from above and the side from the ground. This is the largest difference that is left between the two levels.
+- Cards cast no shadow, so a far forest stands on bare ground. A card that turns to face the sun in the shadow pass could cast one, but a vertical card under a high sun casts a line. A dark blob under each card, or a darker ground under the canopy baked into the terrain colour, is the cheaper answer.
+- The shadow box ends at 200 m from the target with a hard edge. A fade of the shadow over the outer part of the box needs a change to the shadow chunk of three.js.
+- The rim carries no plants, so the forest ends at the edge of the box. The long fog of the high tier hides that edge from the site, but not from a reader near the reach.
+
 ### What the carrier holds
 
 Added with issue 34. These notes record the constants and the reasons the issue text did not fix.
