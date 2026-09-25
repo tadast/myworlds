@@ -1649,6 +1649,13 @@ function biomeIndex(ctx, h, t, m, beachW = ctx.beachW) {
   return 9;
 }
 
+// The surface byte of one node for ground-detail.js: the biome plus one in the low four bits, and
+// the share of bare rock in fifteenths in the high four. The shader reads the rock share per
+// vertex, so it needs no slope of its own.
+function packSurface(bi, rk) {
+  return (bi + 1) | (Math.round(rk * 15) << 4);
+}
+
 // The colour of one biome, written into out. The two mixed biomes take the same hash the globe
 // takes, so a patch and the face above it draw from one rule.
 function biomeTint(ctx, bi, h, i, out) {
@@ -2749,8 +2756,9 @@ function patch(seed, site, opts = {}, post = () => {}) {
 
   post(66, 'Painting the ground');
   const colors = new Float32Array(n * n * 3);
-  // The biome of every node, plus one, so 0 stays free for a node that carries no surface. The
-  // terrain shader of ground-detail.js reads it to pick the fine pattern of the ground.
+  // The surface of every node, for the fine pattern of ground-detail.js. The low four bits hold the
+  // biome plus one, so 0 stays free for a node that carries no surface, and the high four bits hold
+  // the share of bare rock the slope gives it, in fifteenths. See packSurface().
   const surface = new Uint8Array(n * n);
   const tint = [0, 0, 0];
   const invZ = 1 / (2 * grid);
@@ -2772,7 +2780,6 @@ function patch(seed, site, opts = {}, post = () => {}) {
       // the forest mask lifts the moisture a little, so a cell inside a forest cluster reads green
       const m = cellM[k] - vary[k] * 0.1 + Math.max(cellF[k], 0) * 0.06;
       const bi = biomeIndex(ctx, hg, t, m, beachH);
-      surface[k] = bi + 1;
       biomeTint(ctx, bi, hg, k, tint);
       // Under the water line the bed darkens from the shallow tint to the deep tint over DEEP_M
       // metres, so shallow water reads through the translucent sea plane of ground-sea.js.
@@ -2784,6 +2791,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
       }
       // bare rock reads on a dry slope. Under the water the depth carries the colour instead.
       const rk = P.rock && h > 0 ? smoothstep(SLOPE_ROCK[0], SLOPE_ROCK[1], Math.sqrt(dhx * dhx + dhz * dhz)) : 0;
+      surface[k] = packSurface(bi, rk);
       const o = k * 3;
       if (rk > 0) {
         colors[o] = lerp(tint[0], P.rock[0], rk);
@@ -2906,7 +2914,6 @@ function patch(seed, site, opts = {}, post = () => {}) {
       const t = rimT[k];
       const m = rimMo[k] - rimVary[k] * 0.1 + Math.max(rimFm[k], 0) * 0.06;
       const bi = biomeIndex(ctx, hg, t, m, beachH);
-      rimSurface[k] = bi + 1;
       biomeTint(ctx, bi, hg, k, tint);
       if (h < 0) {
         const dp = smoothstep(0, DEEP_M, -h);
@@ -2915,6 +2922,7 @@ function patch(seed, site, opts = {}, post = () => {}) {
         tint[2] = lerp(P.shallow[2], P.deep[2], dp);
       }
       const rk = P.rock && h > 0 ? smoothstep(SLOPE_ROCK[0], SLOPE_ROCK[1], Math.sqrt(dhx * dhx + dhz * dhz)) : 0;
+      rimSurface[k] = packSurface(bi, rk);
       const o = k * 3;
       if (rk > 0) {
         rimColors[o] = lerp(tint[0], P.rock[0], rk);

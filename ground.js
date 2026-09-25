@@ -640,8 +640,7 @@ export class Ground {
     const wind = this.sky && this.sky.wind != null ? this.sky.wind
       : hash1(Math.round(s.lat * 100) * 73856093 ^ Math.round(s.lon * 100) * 19349663) * Math.PI * 2;
     applyDetail(mat, {
-      type: this.world && this.world.type, palette: this.world && this.world.palette, wind,
-      low: !this.tier.shadows, anisotropy: Math.min(8, this.renderer.capabilities.getMaxAnisotropy()),
+      renderer: this.renderer, type: this.world && this.world.type, wind, low: !this.tier.shadows,
     });
     this.terrainMat = mat;
     this._addBlocks(0, this.n - 1, 0, this.n - 1, mat);
