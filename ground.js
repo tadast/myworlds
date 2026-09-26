@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from './ground-sky.js';
 import { Flora } from './ground-flora.js';
+import { GroundCover } from './ground-cover.js';
 import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
@@ -332,6 +333,8 @@ export class Ground {
     this.carrier = null;    // the reading of issue 34, from the app. See load().
     this.sky = null;
     this.flora = null;
+    this.cover = null;      // the blades and the stones around the camera, see ground-cover.js
+    this.wind = 0;          // the angle of the wind on the ground, in radians
     this.fauna = null;
     this.sea = null;
     this.phenomena = null;
@@ -536,6 +539,7 @@ export class Ground {
         heightAt: (x, z) => this.heightAt(x, z),
       });
       if (this.source) this.content.add(this.source.group);
+      this._buildCover(result);
     } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
       const plane = new THREE.Mesh(
@@ -642,10 +646,25 @@ export class Ground {
     applyDetail(mat, {
       renderer: this.renderer, type: this.world && this.world.type, wind, low: !this.tier.shadows,
     });
+    this.wind = wind;       // the blades of ground-cover.js bend with it
     this.terrainMat = mat;
     this._addBlocks(0, this.n - 1, 0, this.n - 1, mat);
     // The rim carries the ground out past the fog, in one mesh with the same material.
     if (this.rim) this.content.add(this._mesh(this._rimGeometry(), mat));
+  }
+
+  // The blades and the stones around the camera. The graphics card places them from the heights,
+  // the colours, and the biomes of the patch. See ground-cover.js.
+  _buildCover(result) {
+    if (!this.surface) return;
+    this.cover = new GroundCover({
+      renderer: this.renderer, type: this.world && this.world.type, tier: this.tier,
+      patch: result.patch, heights: this.heights, colors: result.colors, surface: this.surface,
+      seaLevel: this.sea ? this.sea.level : null, wind: this.wind,
+      tone: (k) => 1 + (hash1(k) - 0.5) * 2 * JITTER,
+      heightAt: (x, z) => this.heightAt(x, z),
+    });
+    this.content.add(this.cover.group);
   }
 
   // The plants of the patch. ground-flora.js owns the meshes, the cards, and the LOD walk.
@@ -1098,6 +1117,7 @@ export class Ground {
 
     // the LOD walk reads the camera, so it runs after the clamps too
     if (this.flora) this.flora.update(this.camera, t);
+    if (this.cover) this.cover.update(this.camera, t);
   }
 
   // ---------------------------------------------------------------- the hour, issue 32
@@ -1886,6 +1906,7 @@ export class Ground {
     if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
     if (this.source) { this.source.dispose(); this.source = null; }
     if (this.flora) { this.flora.dispose(); this.flora = null; }
+    if (this.cover) { this.cover.dispose(); this.cover = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }
     this.content.traverse((o) => {
       if (o === this.content) return;

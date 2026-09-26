@@ -60,13 +60,14 @@ longer the metres the lore says. Since issue 18 the ground does not stop at the 
 
 Budgets:
 
-| Tier | Grid step | Ground flora | Ground fauna | Shadows |
-|---|---|---|---|---|
-| HIGH | 2 m | 20,000 | 300 | yes |
-| LOW | 4 m | 6,000 | 100 | no |
+| Tier | Grid step | Ground flora | Ground cover | Ground fauna | Shadows |
+|---|---|---|---|---|---|
+| HIGH | 2 m | 20,000 | 150 blades/m², out to 32 m | 300 | yes |
+| LOW | 4 m | 6,000 | 90 blades/m², out to 24 m | 100 | no |
 
-The grass of issue 21 is gone. The ground carries no tufts, and the pattern of `ground-detail.js`
-stands in for the ground cover.
+The grass tufts of issue 21 are gone. The ground cover of `ground-cover.js` stands blades and
+stones around the camera, and the graphics card places them, so they are not part of the flora cap.
+The pattern of `ground-detail.js` carries the detail past them.
 
 `LOW` is defined in `app.js` from pointer type, screen size, and core count. The two rows live in `tiers.js`, and `app.js` puts the row it picks in `Q`. `Q.ground` also holds `lodMax`.
 

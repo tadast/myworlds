@@ -349,6 +349,25 @@ export function bakeDetail(renderer, size) {
   return rt;
 }
 
+// What the 3D ground cover of ground-cover.js shares with the pattern: the stack, the macro layer,
+// the dry hue, and the weights of the four families for every surface byte. A blade then grows
+// where the pattern paints cover, and it takes the dry patches the pattern paints.
+export function detailShared(renderer, type, low = false) {
+  const style = STYLE[type] ?? 0;
+  const fam = FAMILIES[style];
+  // the vertex shader above, run once for each of the 256 bytes
+  const families = new Float32Array(256 * 4);
+  for (let s = 0; s < 256; s++) {
+    const f = fam[Math.min(s & 15, 10)];
+    const rock = f[0] + f[1] + f[3] > 0.001 ? (s >> 4) / 15 : 0;
+    for (let k = 0; k < 4; k++) families[s * 4 + k] = f[k] * (1 - rock) + (k === 2 ? rock : 0);
+  }
+  return {
+    texture: bakeDetail(renderer, low ? BAKE.low : BAKE.high).texture,
+    macro: MACRO, macroBig: MACRO_BIG, dryHue: DRY_HUE[style], families,
+  };
+}
+
 // ---------------------------------------------------------------- the terrain shader
 const glVec4 = (w) => `vec4(${w.map((x) => x.toFixed(2)).join(', ')})`;
 const f4 = (x) => x.toFixed(4);
