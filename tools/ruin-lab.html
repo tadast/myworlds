@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ruin lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg: #0b1020; --fg: #e8ecff; --dim: #8e97bd; --line: #243056; --on: #6f86d6; --gold: #e0b24a; --cell: 300px; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.35 system-ui, sans-serif; }
+  header { padding: 10px 16px 6px; }
+  header p { margin: 2px 0 0; color: var(--dim); max-width: 78em; }
+  header code { color: var(--fg); }
+  main { display: flex; gap: 16px; padding: 0 16px 16px; align-items: flex-start; }
+
+  #form { position: sticky; top: 8px; flex: 0 0 270px; max-height: calc(100vh - 16px); overflow: auto;
+    border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px 10px; box-sizing: border-box; }
+  #form section { border-top: 1px solid var(--line); padding: 6px 0 4px; }
+  #form section:first-child { border-top: 0; }
+  #form h3 { margin: 4px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--on); }
+  #form .row { margin: 6px 0; }
+  #form .row > label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #form small { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
+  #form select, #form input[type=number], #form input[type=text] { width: 130px; background: #121a33; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
+  #form button { background: #121a33; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 10px; cursor: pointer; margin: 2px 4px 2px 0; }
+  #form dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 4px 0; font-variant-numeric: tabular-nums; }
+  #form dt { color: var(--dim); }
+  #form dd { margin: 0; }
+  #form dd.over { color: #ff8a7a; }
+  #form details { margin-top: 6px; }
+  #form summary { cursor: pointer; color: var(--dim); }
+  #form pre { white-space: pre-wrap; word-break: break-all; font-size: 11px; color: var(--dim); margin: 4px 0 0; }
+
+  #stage { flex: 1 1 auto; min-width: 0; display: grid; gap: 10px; }
+  #viewer { position: relative; width: 100%; aspect-ratio: 16 / 10; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #0b1022; }
+  #viewer canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #ov { position: absolute; left: 10px; bottom: 8px; font-size: 12px; color: rgba(255,255,255,.8); text-shadow: 0 1px 2px rgba(0,0,0,.7); pointer-events: none; }
+  #note { color: var(--gold); margin: 0; min-height: 1.35em; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr)); gap: 8px; }
+  .thumb { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #0b1022; cursor: pointer; text-align: left; padding: 0; color: var(--fg); }
+  .thumb:hover { border-color: var(--on); }
+  .thumb img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+  .thumb .cap { padding: 6px 8px 8px; display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+  .thumb .cap b { font-weight: 600; }
+  .thumb .cap span { color: var(--dim); font-size: 11px; }
+  .thumb.over .cap span { color: #ff8a7a; }
+  @media (max-width: 760px) {
+    main { flex-direction: column; }
+    #form { position: static; flex: none; width: 100%; max-height: none; }
+  }
+</style>
+<script type="importmap">
+  { "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }
+</script>
+</head>
+<body>
+<header>
+  <strong>Ruin lab</strong>
+  <p>The page builds the ruin with the real <code>ruinGeometry()</code> of <code>ruin-geometry.js</code>, so a
+    change to that file shows here with no world roll. The form picks one proto on one world type with one
+    maker; the grid under the view shows every proto on every type it fits. A person of 1.8 units stands by the
+    ruin and the wreck of chapter 1 stands at the edge of the disc, for scale. The address bar keeps the view.
+    From the console, <code>lab.render()</code> draws one frame, <code>lab.shot('name')</code> posts a PNG of it
+    to the shot-sink, and <code>lab.shotGrid('name')</code> posts the grid.</p>
+</header>
+<main>
+  <form id="form" onsubmit="return false"></form>
+  <div id="stage">
+    <div id="viewer"><canvas id="c" aria-label="A 3D view of the ruin. Drag to turn it."></canvas><div id="ov"></div></div>
+    <p id="note"></p>
+    <div id="grid"></div>
+  </div>
+</main>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ruinGeometry, ruinPalette, triangles, BODY_BUDGET, MINI_BUDGET, miniHeight, WRECK_MODEL_H } from '../ruin-geometry.js';
+import { RUIN_PROTOS, protoRow } from '../ruin-types.js';
+import { wreckGeometry, WRECK_HULL } from '../wreck-geometry.js';
+
+const q = new URLSearchParams(location.search);
+const $ = (s) => document.querySelector(s);
+
+// The scene of the lab: the sky, the fog, and the ground of each world type. The stone of the ruin
+// comes from ruin-geometry.js; these colours only stand the ruin in a place that looks like its world.
+const SCENE = {
+  terran: { sky: 0xa9c9e8, fog: 0xbcd3e6, ground: 0x587a43, ground2: 0x4c6b3a, sun: 0xfff1d8 },
+  ocean:  { sky: 0x9fd3e0, fog: 0xb8dfe8, ground: 0xd2c092, ground2: 0x2c6c84, sun: 0xfff6e2 },
+  desert: { sky: 0xf0d3aa, fog: 0xefd8b4, ground: 0xd8ae74, ground2: 0xc79a61, sun: 0xfff0d0 },
+  ice:    { sky: 0xbcd0e4, fog: 0xd2e0ec, ground: 0xe3edf5, ground2: 0xcfdde9, sun: 0xf4f8ff },
+  lava:   { sky: 0x4d2a24, fog: 0x5e3428, ground: 0x3a2b27, ground2: 0x2b201d, sun: 0xffc8a0 },
+  exotic: { sky: 0x3e3163, fog: 0x4a3a70, ground: 0x5d4273, ground2: 0x4c3661, sun: 0xf6e8ff },
+};
+const TYPES = Object.keys(SCENE);
+const LIMBS = [0, 1, 2, 3, 4, 6];
+const LIMB_NAME = { 0: '0: a serpent, coils', 1: '1: a monopod', 2: '2: a biped or a slinger', 3: '3: a tripod', 4: '4: a quad, a plough, or wings', 6: '6: a hexapod' };
+
+// ---------------------------------------------------------------- state
+// Every control is one URL parameter, so a view can be shared as a link or scripted.
+const DEFAULTS = { proto: 'hive', type: 'terran', limbs: 6, height: 1.8, mini: false, scale: true, grid: true, turn: true, az: 40, el: 22, dist: '', blink: true };
+const S = structuredClone(DEFAULTS);
+for (const k of Object.keys(S)) {
+  if (!q.has(k)) continue;
+  const v = q.get(k);
+  S[k] = typeof S[k] === 'boolean' ? v !== '0' : typeof S[k] === 'number' ? Number(v) : v;
+}
+const SINK = q.get('sink') || 'http://127.0.0.1:5566/';
+
+// ---------------------------------------------------------------- the renderer
+const canvas = $('#c');
+// preserveDrawingBuffer keeps the frame, so a shot of a hidden pane still holds the picture.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const camera = new THREE.PerspectiveCamera(38, 16 / 10, 1, 4000);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.minDistance = 8; controls.maxDistance = 900; controls.maxPolarAngle = 1.5;
+controls.addEventListener('start', () => { S.turn = false; drawForm(); saveUrl(); });
+
+// One scene per build. It holds the lights, the ground, the ruin, and the scale.
+let cur = null;
+const std = (o) => new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.92, metalness: 0.02, ...o });
+function mesh(geo, mat, shadow = true) {
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = shadow; m.receiveShadow = true;
+  return m;
+}
+
+// The ground: the flat disc the patch lays, in the ground colour, and a wide ring beyond it. The
+// well opens a hole of userData.hole in both.
+function ground(row, sc, hole) {
+  const g = new THREE.Group();
+  const disc = new THREE.RingGeometry(hole || 0.001, row.disc, 48, 1);
+  disc.rotateX(-Math.PI / 2);
+  g.add(mesh(disc, std({ color: sc.ground, roughness: 1 }), false));
+  const far = new THREE.RingGeometry(row.disc, 600, 48, 1);
+  far.rotateX(-Math.PI / 2);
+  far.translate(0, -0.05, 0);
+  g.add(mesh(far, std({ color: sc.ground2, roughness: 1 }), false));
+  return g;
+}
+
+// The scale: a person of 1.8 units by the ruin, and the wreck of chapter 1 at the edge of the disc,
+// with no camp. In the mini view the wreck is the mini wreck, so the two mini models compare.
+function scaleRefs(row, mini) {
+  const g = new THREE.Group();
+  const wreck = wreckGeometry('tripod', { camp: false });
+  const hull = std({ color: WRECK_HULL, vertexColors: !mini, roughness: 0.6, metalness: 0.1 });
+  const w = mesh(wreck, hull);
+  // to the right of the ruin and behind it, seen from the default azimuth of 40 degrees
+  const off = row.disc + 14;
+  w.position.set(off * 0.77, 0, -off * 0.64);
+  w.rotation.y = -0.6;
+  g.add(w);
+  if (!mini) {
+    const person = std({ color: 0xeef1ff });
+    const px = row.disc * 0.42, pz = row.disc * 0.62;
+    g.add(mesh(new THREE.CylinderGeometry(0.33, 0.4, 1.3, 6), person)).position.set(px, 0.65, pz);
+    g.add(mesh(new THREE.SphereGeometry(0.28, 8, 6), person)).position.set(px, 1.55, pz);
+  }
+  return g;
+}
+
+// The world stub ruinGeometry() reads: the type and the maker.
+const stub = (type, limbs, height) => ({ type, ruin: { maker: { species: -1, limbs, height, rolled: true } } });
+
+// One built ruin in a scene, with its counts. `o` overrides the state, for the grid and for a shot.
+function build(o = {}) {
+  const proto = o.proto || S.proto, type = o.type || S.type, mini = o.mini ?? S.mini;
+  const limbs = o.limbs ?? S.limbs, height = o.height ?? S.height, scale = o.scale ?? S.scale;
+  const row = protoRow(proto) || RUIN_PROTOS[0], sc = SCENE[type] || SCENE.terran, P = ruinPalette(type);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(sc.sky);
+  scene.fog = new THREE.Fog(sc.fog, 260, 900);
+  const hemi = new THREE.HemisphereLight(sc.sky, sc.ground2, 1.1);
+  const sun = new THREE.DirectionalLight(sc.sun, 2.1);
+  sun.position.set(90, 130, 70); sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -120, right: 120, top: 120, bottom: -120, near: 10, far: 400 });
+  scene.add(hemi, sun);
+
+  const world = stub(type, limbs, height);
+  const full = ruinGeometry(proto, world);
+  const small = ruinGeometry(proto, world, { mini: true });
+  const R = mini ? small : full;
+  const hole = R.body.userData.hole || 0;
+  scene.add(ground(row, sc, hole));
+  const group = new THREE.Group();
+  const bodyMat = std({ vertexColors: !mini, color: mini ? P.stone : 0xffffff, roughness: 0.9 });
+  group.add(mesh(R.body, bodyMat));
+  const glowMat = std({ color: P.glow, emissive: P.glow, emissiveIntensity: 1.4, roughness: 0.4 });
+  if (R.glow) group.add(mesh(R.glow, glowMat, false));
+  let orbit = null;
+  if (R.orbit) { orbit = mesh(R.orbit, bodyMat); group.add(orbit); }
+  scene.add(group);
+  if (scale) scene.add(scaleRefs(row, mini));
+  // the lamp: a small bright marker, so the place of the point light shows
+  const lamp = mesh(new THREE.SphereGeometry(0.6, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }), false);
+  lamp.position.set(...R.lamp);
+  scene.add(lamp);
+  const box = new THREE.Box3().setFromObject(group);
+  box.min.y = Math.max(box.min.y, 0);
+  const size = box.getSize(new THREE.Vector3());
+  const counts = { body: triangles(full.body), glow: triangles(full.glow), orbit: triangles(full.orbit), mini: triangles(small.body) };
+  const other = mini ? full : small;
+  for (const g of [other.body, other.glow, other.orbit]) g && g.dispose();
+  return { scene, group, orbit, glowMat, size, counts, row, type, proto, mini, hole, lamp: R.lamp, geos: [R.body, R.glow, R.orbit].filter(Boolean), mats: [bodyMat, glowMat] };
+}
+function dispose(c) {
+  if (!c) return;
+  for (const g of c.geos) g.dispose();
+  for (const m of c.mats) m.dispose();
+  c.scene.traverse((o) => { if (o.isMesh && !c.geos.includes(o.geometry)) { o.geometry.dispose(); o.material.dispose && o.material.dispose(); } });
+}
+
+// The camera frames the box of the ruin from the azimuth and the elevation of the state.
+function frame(c, cam = camera, ctl = controls, o = {}) {
+  const h = c.size.y, span = Math.max(c.size.x, c.size.z, h * 0.9);
+  const dist = Number(o.dist ?? S.dist) || Math.max(52, span * 1.55 + h * 0.3, h * 2.2);
+  const az = THREE.MathUtils.degToRad(Number(o.az ?? S.az)), el = THREE.MathUtils.degToRad(Number(o.el ?? S.el));
+  const target = new THREE.Vector3(0, Math.max(5, h * 0.33), 0);
+  cam.position.set(target.x + dist * Math.cos(el) * Math.sin(az), target.y + dist * Math.sin(el), target.z + dist * Math.cos(el) * Math.cos(az));
+  cam.lookAt(target);
+  if (ctl) { ctl.target.copy(target); ctl.update(); }
+}
+
+// ---------------------------------------------------------------- the frame
+// The light blinks a short figure on a steady clock, as the lamp of the wreck blinks its motif, and
+// the orbit turns. The loop runs on requestAnimationFrame; a hidden pane stops it, so render() also
+// draws one frame on demand.
+const FIG = [1, 0, 1, 0, 0, 1, 1, 0];
+const clock = new THREE.Clock();
+function animate(c, t) {
+  if (!c) return;
+  c.glowMat.emissiveIntensity = S.blink ? 0.7 + 1.1 * FIG[Math.floor(t * 3) % FIG.length] : 1.4;
+  if (c.orbit) c.orbit.rotation.y = t * 0.09;
+}
+function resize() {
+  const r = $('#viewer').getBoundingClientRect();
+  if (!r.width) return;
+  const pr = renderer.getPixelRatio();
+  if (canvas.width !== Math.floor(r.width * pr) || canvas.height !== Math.floor(r.height * pr)) renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+}
+function render(t = clock.getElapsedTime()) {
+  if (!cur) return;
+  resize();
+  animate(cur, t);
+  if (S.turn) { const a = THREE.MathUtils.degToRad(S.az) + t * 0.12; const d = camera.position.clone().sub(controls.target); const r = Math.hypot(d.x, d.z); camera.position.set(controls.target.x + r * Math.sin(a), camera.position.y, controls.target.z + r * Math.cos(a)); camera.lookAt(controls.target); }
+  controls.update();
+  renderer.render(cur.scene, camera);
+}
+function loop() { render(); requestAnimationFrame(loop); }
+
+// ---------------------------------------------------------------- the form
+const cap = (s) => s[0].toUpperCase() + s.slice(1);
+const opts = (vals, curv, lab = (v) => v) => vals.map((v) => `<option value="${v}"${String(v) === String(curv) ? ' selected' : ''}>${lab(v)}</option>`).join('');
+const form = $('#form');
+function drawForm() {
+  const row = protoRow(S.proto) || RUIN_PROTOS[0];
+  const c = cur ? cur.counts : { body: 0, glow: 0, orbit: 0, mini: 0 };
+  const fits = row.fits.includes(S.type) ? '' : ` This proto does not fit a ${S.type} world; the lab draws it all the same.`;
+  form.innerHTML = `
+    <section>
+      <h3>Ruin</h3>
+      <div class="row"><label>Proto<select name="proto">${opts(RUIN_PROTOS.map((p) => p.id), S.proto, (v) => protoRow(v).name)}</select></label><small>Fits: ${row.fits.join(', ')}. Disc ${row.disc}, height ${row.height} units.${fits}</small></div>
+      <div class="row"><label>World type<select name="type">${opts(TYPES, S.type, cap)}</select></label><small>The type sets the stone, the dark, the accent, and the glow.${ruinPalette(S.type).seam ? ' On lava the accent is a seam that takes the glow.' : ''}</small></div>
+      <div class="row"><label>Maker limbs<select name="limbs">${opts(LIMBS, S.limbs, (v) => LIMB_NAME[v])}</select></label><small>The colossus lies on these limbs. The other protos do not read it.</small></div>
+      <div class="row"><label>Maker size<input type="number" name="height" step="0.1" min="0.1" value="${S.height}"></label><small>Metres. It sets the doors of the dome and the hive and the steps of the well, not the statue.</small></div>
+      <div class="row"><label style="justify-content:flex-start;gap:6px"><input type="checkbox" name="mini"${S.mini ? ' checked' : ''}>Mini model</label><small>The body of the globe: one colour, the big parts only. It stands ${(miniHeight(S.proto) / WRECK_MODEL_H).toFixed(2)} times the mini wreck on the globe.</small></div>
+    </section>
+    <section>
+      <h3>Triangles</h3>
+      <dl>
+        <dt>Body</dt><dd class="${c.body >= BODY_BUDGET ? 'over' : ''}">${c.body.toLocaleString('en')} of ${BODY_BUDGET.toLocaleString('en')}</dd>
+        <dt>Glow</dt><dd>${c.glow.toLocaleString('en')}</dd>
+        <dt>Orbit</dt><dd>${c.orbit ? c.orbit.toLocaleString('en') : '–'}</dd>
+        <dt>Mini</dt><dd class="${c.mini >= MINI_BUDGET ? 'over' : ''}">${c.mini.toLocaleString('en')} of ${MINI_BUDGET.toLocaleString('en')}</dd>
+        <dt>Height</dt><dd>${cur ? cur.size.y.toFixed(1) : '–'} units</dd>
+        <dt>Across</dt><dd>${cur ? Math.max(cur.size.x, cur.size.z).toFixed(1) : '–'} units</dd>
+        <dt>Lamp</dt><dd>${cur ? cur.lamp.map((v) => v.toFixed(1)).join(', ') : '–'}</dd>
+        ${cur && cur.hole ? `<dt>Hole</dt><dd>${cur.hole} units</dd>` : ''}
+      </dl>
+      <small>The body, the glow, and the orbit are three geometries; the budget of 4,000 is on the body.</small>
+    </section>
+    <section>
+      <h3>View</h3>
+      <div class="row"><label style="justify-content:flex-start;gap:6px"><input type="checkbox" name="scale"${S.scale ? ' checked' : ''}>A person and the wreck, for scale</label></div>
+      <div class="row"><label style="justify-content:flex-start;gap:6px"><input type="checkbox" name="turn"${S.turn ? ' checked' : ''}>Turn the camera</label></div>
+      <div class="row"><label style="justify-content:flex-start;gap:6px"><input type="checkbox" name="blink"${S.blink ? ' checked' : ''}>Blink the light</label></div>
+      <div class="row"><label>Azimuth<input type="number" name="az" step="5" value="${S.az}"></label></div>
+      <div class="row"><label>Elevation<input type="number" name="el" step="5" min="2" max="85" value="${S.el}"></label></div>
+      <div class="row"><label>Distance<input type="number" name="dist" step="10" min="10" value="${S.dist}" placeholder="auto"></label><small>Units from the ruin. Empty: the camera frames the ruin.</small></div>
+      <div class="row"><label style="justify-content:flex-start;gap:6px"><input type="checkbox" name="grid"${S.grid ? ' checked' : ''}>The grid of every proto on every type</label></div>
+    </section>
+    <section>
+      <button type="button" id="reframe">Frame the ruin</button>
+      <button type="button" id="reset">Reset all</button>
+      <details><summary>Shots</summary><pre>lab.shot('p2-36-name')       this view
+lab.shotGrid('p2-36-grid')  the grid
+?shot=name in the address does the first at load
+The PNG goes to ${SINK}name.png</pre></details>
+    </section>`;
+  form.querySelector('#reset').onclick = () => { Object.assign(S, structuredClone(DEFAULTS)); update(); };
+  form.querySelector('#reframe').onclick = () => { S.dist = ''; frame(cur); saveUrl(); };
+}
+function readForm() {
+  const fd = new FormData(form);
+  for (const k of ['proto', 'type']) if (fd.has(k)) S[k] = fd.get(k);
+  for (const k of ['limbs', 'height', 'az', 'el']) if (fd.has(k)) S[k] = Number(fd.get(k));
+  S.dist = fd.get('dist') || '';
+  for (const k of ['mini', 'scale', 'turn', 'blink', 'grid']) S[k] = fd.has(k);
+}
+function saveUrl() {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(S)) {
+    if (typeof v === 'boolean') { if (v !== DEFAULTS[k]) p.set(k, v ? '1' : '0'); continue; }
+    if (v === '' || String(DEFAULTS[k]) === String(v)) continue;
+    p.set(k, v);
+  }
+  history.replaceState(null, '', location.pathname + (p.size ? '?' + p : ''));
+}
+
+// ---------------------------------------------------------------- the grid
+// Every proto on every type it fits, as still pictures from one frame each. It renders through the
+// main canvas and keeps the pictures as images, so a hidden pane costs nothing.
+const gridEl = $('#grid');
+const CELLS = RUIN_PROTOS.flatMap((p) => p.fits.map((t) => ({ proto: p.id, type: t })));
+let gridShots = [];
+function drawGrid() {
+  gridEl.innerHTML = '';
+  gridShots = [];
+  if (!S.grid) return;
+  const w = 480, h = 300, cam = new THREE.PerspectiveCamera(38, w / h, 1, 4000);
+  const prevPR = renderer.getPixelRatio();
+  renderer.setPixelRatio(1); renderer.setSize(w, h, false);
+  for (const cell of CELLS) {
+    const c = build({ ...cell, mini: S.mini, scale: S.scale });
+    animate(c, 0.4);
+    frame(c, cam, null, { az: 40, el: 22, dist: '' });
+    renderer.render(c.scene, cam);
+    const src = canvas.toDataURL('image/png');
+    const over = c.counts.body >= BODY_BUDGET || c.counts.mini >= MINI_BUDGET;
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'thumb' + (over ? ' over' : '');
+    b.innerHTML = `<img alt="${c.row.name} on a ${cell.type} world" width="${w}" height="${h}" src="${src}"><div class="cap"><b>${c.row.name} · ${cap(cell.type)}</b><span>body ${c.counts.body.toLocaleString('en')} · mini ${c.counts.mini.toLocaleString('en')}</span></div>`;
+    b.onclick = () => { S.proto = cell.proto; S.type = cell.type; update(); $('#viewer').scrollIntoView({ block: 'nearest' }); };
+    gridEl.appendChild(b);
+    gridShots.push({ src, label: `${c.row.name} · ${cap(cell.type)} · body ${c.counts.body} · mini ${c.counts.mini}` });
+    dispose(c);
+  }
+  renderer.setPixelRatio(prevPR);
+  resize();
+}
+
+// ---------------------------------------------------------------- build and update
+function rebuild() {
+  dispose(cur);
+  cur = build();
+  frame(cur);
+  $('#ov').textContent = `${cur.row.name} on a ${S.type} world · drag to turn · wheel to zoom`;
+  render();
+}
+function update() {
+  rebuild();
+  drawForm();
+  saveUrl();
+  drawGrid();
+  const msg = [];
+  if (cur.counts.body >= BODY_BUDGET) msg.push(`The body of ${cur.row.name} is over the budget of ${BODY_BUDGET} triangles.`);
+  if (cur.counts.mini >= MINI_BUDGET) msg.push(`The mini model of ${cur.row.name} is over the budget of ${MINI_BUDGET} triangles.`);
+  $('#note').textContent = msg.join(' ');
+}
+form.addEventListener('change', (e) => {
+  const name = e.target.name;
+  readForm();
+  if (['az', 'el', 'dist'].includes(name)) { frame(cur); saveUrl(); return; }
+  if (['turn', 'blink'].includes(name)) { saveUrl(); return; }
+  if (name === 'grid') { saveUrl(); drawGrid(); return; }
+  update();
+});
+
+// ---------------------------------------------------------------- the shots
+// A shot renders one frame and posts the PNG to the shot-sink, so the picture of a hidden pane
+// reaches the disk. `o` overrides the state for that frame only.
+async function post(name, blob) {
+  const res = await fetch(SINK + name.replace(/\.png$/, '') + '.png', { method: 'POST', body: blob });
+  return res.status;
+}
+const toBlob = (cv) => new Promise((ok) => cv.toBlob(ok, 'image/png'));
+async function shot(name, o = {}) {
+  if (Object.keys(o).length) { Object.assign(S, o); update(); }
+  const turn = S.turn; S.turn = false;
+  render(0.4);
+  S.turn = turn;
+  return post(name, await toBlob(canvas));
+}
+async function shotGrid(name) {
+  if (!gridShots.length) { S.grid = true; drawGrid(); }
+  const cols = 4, w = 480, h = 300, cap = 26, rows = Math.ceil(gridShots.length / cols);
+  const cv = document.createElement('canvas');
+  cv.width = cols * w; cv.height = rows * (h + cap);
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#0b1020'; ctx.fillRect(0, 0, cv.width, cv.height);
+  await Promise.all(gridShots.map((g, i) => new Promise((ok) => {
+    const img = new Image();
+    img.onload = () => {
+      const x = (i % cols) * w, y = Math.floor(i / cols) * (h + cap);
+      ctx.drawImage(img, x, y, w, h);
+      ctx.fillStyle = '#e8ecff'; ctx.font = '15px system-ui, sans-serif';
+      ctx.fillText(g.label, x + 8, y + h + 18);
+      ok();
+    };
+    img.src = g.src;
+  })));
+  return post(name, await toBlob(cv));
+}
+
+window.lab = { S, render, shot, shotGrid, update, frame: () => frame(cur), get current() { return cur; } };
+update();
+new ResizeObserver(() => { resize(); render(); }).observe($('#viewer'));
+loop();
+if (q.get('shot')) shot(q.get('shot')).then((st) => console.log('shot', q.get('shot'), st));
+</script>
+</body>
+</html>
