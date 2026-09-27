@@ -322,7 +322,7 @@ when the crew holds three people besides the keeper.
 | `walk` | the walk out on foot, and what for: the supply drop, the heat of the vents, fresh water round the shore |
 | `launch` | the climb on a patched feed line. Forced by the `patched` strand thread, and reached by no other log |
 | `split` | some stay and some go |
-| `cut` | the entry that stops in the middle of a sentence |
+| `cut` | the entry that stops in the middle of a sentence. The card prints a note under it; see "The card" |
 | `second` | the entry by a second hand, after the keeper dies |
 | `stay` | the quiet one: a person says the crew could live here, and the crew tries. `temperate waterliquid` only |
 | `message` | the message to whoever finds the log |
@@ -491,6 +491,16 @@ name of the ship and the log. The left column is set by position and not by the 
 An entry hangs off a rail with a dot at its day. The day is quiet and the text is what reads: a
 measure of 62 characters and open leading. The landing and the last entry carry a title, take the
 class `ctitled`, and take the accent.
+
+**An ending of the kind `cut` gets a note of the card.** That ending stops in the middle of a
+sentence on purpose, and without a note the reader takes the open line for text that did not load.
+So `SourceInspector.show()` prints "[log ends abruptly]" under the text of an entry whose `slot` is
+`end.cut`, in its own element, `.cabrupt`. The note is a part of the card and not of the log, so it
+takes the quiet colour of the day label and italics, and not the accent. It is not in
+`log.entries`: the text of the log does not change, the audit never reads the brackets, and the
+hash of `tools/world-checksum.mjs` does not move. The rule reads the slot and not the text, so
+every ending of the kind `cut` gets the note, the endings of p2-40 too. The note stands inside the
+entry, so it scrolls with the log and clears the fade. A screen reader reads it after the text.
 
 `.clog` scrolls inside the card and nothing else does, so the card holds a fixed height. Three
 rules keep the last line in sight:

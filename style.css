@@ -365,6 +365,10 @@ button.probe[hidden] { display: none; }
 .clog-entry.ctitled h3 { color: var(--accent); }
 .clog-entry.ctitled h3::before { background: var(--accent); }
 .clog-entry p { margin: 0; max-width: 62ch; font-size: 14.5px; line-height: 1.6; color: #dfe4ff; }
+/* The note under an ending of the kind `cut`, p2-37. It is a note of the card and not a line of
+   the log, so it takes the quiet colour of the day label and italics, and never the accent. It stands
+   inside the entry, so it scrolls with the entry and clears the fade at the foot of .clog. */
+.clog-entry .cabrupt { margin-top: 6px; font-size: 13px; font-style: italic; letter-spacing: 0.02em; color: var(--muted); }
 #creature[data-subject="source"] .ctags,
 #creature[data-subject="source"] .cstory,
 #creature[data-subject="source"] .cnav { display: none; }
