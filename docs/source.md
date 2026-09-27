@@ -25,6 +25,11 @@ disc. `wreckGeometry(hull, { camp: false })` leaves it off, and the mini wreck o
 The plan and the terms are in `docs/issues/34-the-carrier.md`. Use the words of that table:
 carrier, source, bearing, fix, wedge, wreck, motif, log.
 
+Phase 2 adds a second kind of source, the ruin, as `world.ruin` beside `world.source`. It stands
+12 to 35 cells from the wreck, and `makeRuin()` places it with the tests of `makeSource()` and a
+stream of its own, `seed + '|ruin'`. The log of the wreck does not read it yet; p2-40 adds the
+call thread that names its frequency and its compass word. See `docs/ruin.md`.
+
 **The carrier does not reach the far side of the world.** `CARRIER_REACH` in `site.js` is a third of
 the circumference, and `carrierAt()` gives null past it. A landing past the reach shows no carrier
 block, stores no fix, and draws no wedge, and the reader who hears nothing learns a fact too. The
@@ -92,6 +97,7 @@ proves it: the hashes of the worlds and the patches must stay equal to the basel
 
 The place of the source, `world.source.dir`, comes from `makeRng(seed + '|source')`, which is a
 different stream. The motif of the source takes a third one in `music.js`. The three never mix.
+The ruin of phase 2 takes a fourth, `makeRng(seed + '|ruin')`, and it mixes with none of them.
 
 ## The shape of a log
 

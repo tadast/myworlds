@@ -1,10 +1,11 @@
 // myworlds — generation: the seeded build of a world and of a patch. Hashing, PRNG, simplex
-// noise, icosphere, terrain, biomes, flora, fauna, clouds, the source, and the ground of a landing.
+// noise, icosphere, terrain, biomes, flora, fauna, clouds, the source, the ruin, and the ground of a
+// landing.
 // The same seed string always produces the same world.
 //
 // Two calls make the interface, and they are exported at the end of this file:
 //
-//   world(seed, opts, onProgress)         the globe, the species, the source, and the sea level
+//   world(seed, opts, onProgress)         the globe, the species, the source, the ruin, and the sea level
 //   patch(seed, site, opts, onProgress)   the ground of the cell of a site { lat, lon, kind }
 //
 // Each call returns its result and throws on a failure. onProgress(pct, label) reports the build,
@@ -15,15 +16,18 @@
 // builds them. Every typed array in a result is new and belongs to the caller, so worker.js can
 // transfer them all. The world object of a result is the one a later patch of that world reads, so
 // a caller in the same thread must not change it. worker.js runs the two calls off the main
-// thread, and the Node tools import this file and call them.
+// thread, and the Node tools import this file and call them. A third export, placeFacts(), gives
+// the Node checks the numbers the tests of the source and of the ruin read; it is no part of the
+// interface of the page.
 //
 // This file holds no three.js and no DOM, because a module worker has no import map.
 import { Species } from './species.js';           // species genomes and lore
 import { FloraLore, FLORA_LORE } from './flora-lore.js';   // the plant vocabulary, written per patch
 import { SourceLore } from './source-lore.js';     // the log of the source, written per world
 import { Lore } from './lore.js';                 // the lore engine, shared with the flora
-import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, siteCell, cellSite, sameCell, cellArc } from './cell-grid.js';
+import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, siteCell, cellSite, sameCell, cellArc, tangentFrame } from './cell-grid.js';
 import { TYPES, TYPE_LABEL, TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE } from './world-types.js';
+import { protoOf, freqOf, compass8 } from './ruin-types.js';   // the protos and the hashes of the ruin
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -564,6 +568,9 @@ function worldContext(seed) {
     // Issue 34: the thing that transmits, one per world with a surface. makeSource() fills it in
     // generate(). A gas giant keeps the null, because it takes no probe.
     source: null,
+    // p2-35: the second source, the ruin. makeRuin() fills it in generate() after the source. A
+    // world with no source keeps the null. See docs/ruin.md.
+    ruin: null,
   };
   // The planet numbers, and the facts the lore reads. `env` fills up as the world is built: the
   // moons, the rings, and the activity are added in generate(), which then writes the lore again.
@@ -872,6 +879,9 @@ function generate(seed, opts = {}, post = () => {}) {
   // Issue 34. The source stands after the activity, because a volcano raises the ground it must
   // keep away from. Its stream is its own, so no world built before this issue changes.
   makeSource(makeRng(seed + '|source'), ctx, world, beachW);
+  // p2-35. The ruin stands after the source, because it stands at an arc from the wreck. Its
+  // stream is its own too, so no world built before the ruin changes.
+  makeRuin(makeRng(seed + '|ruin'), ctx, world, beachW);
 
   post(62, 'Painting biomes');
   // per-face colouring, expanded to non-indexed triangles
@@ -1486,11 +1496,10 @@ function makeSource(rng, ctx, world, beachW) {
   const sinLat = Math.sin(SOURCE_LAT * Math.PI / 180);
   const near = (d) => !!actMid && d[0] * actMid[0] + d[1] * actMid[1] + d[2] * actMid[2] > keep;
 
-  // The sea level of every tier. A world with no ocean keeps the one it has, which is already free
-  // of the tier. The swap is put back before this function returns, because the patch path reads
-  // the same context later; see cachedCtx in generate().
+  // The sea level of every tier; see testSeaLevel(). The swap is put back before this function
+  // returns, because the patch path reads the same context later; see cachedCtx in generate().
   const seaWas = ctx.seaLevel;
-  if (ctx.land < 1) ctx.seaLevel = sampledSeaLevel(ctx);
+  ctx.seaLevel = testSeaLevel(ctx);
   try {
     for (let t = 0; t < SOURCE_TRIES; t++) {
       // Two numbers a try, drawn first and drawn always, so a candidate that fails takes the
@@ -1509,8 +1518,7 @@ function makeSource(rng, ctx, world, beachW) {
       // The field holds no activity: makeActivity() writes its cone into the height array and not
       // into the field, so the slope below never sees one. The rule of SOURCE_KEEP cells is what
       // holds the source off the activity.
-      if (fieldAt(ctx, d[0], d[1], d[2], _srcFld).h <= beachW) continue;
-      if (surfaceSlope(ctx, d) >= SOURCE_SLOPE) continue;
+      if (!groundFits(ctx, d, beachW)) continue;
       world.source = { kind: 'wreck', dir: [d[0], d[1], d[2]] };
       return world.source;
     }
@@ -1518,6 +1526,191 @@ function makeSource(rng, ctx, world, beachW) {
     ctx.seaLevel = seaWas;
   }
   return null;
+}
+
+// The ground tests of the source and of the ruin, on the middle of a cell: the ground stands over
+// the beach band, and its slope stays under SOURCE_SLOPE. The caller puts the sea level of
+// testSeaLevel() into the context first. The cheap tests of the latitude and of the activity run
+// before this one.
+function groundFits(ctx, d, beachW) {
+  if (fieldAt(ctx, d[0], d[1], d[2], _srcFld).h <= beachW) return false;
+  return surfaceSlope(ctx, d) < SOURCE_SLOPE;
+}
+
+// For the Node checks: the numbers the tests of makeSource() and makeRuin() read at one unit
+// direction, on the world of a seed and of world options. The check compares them with the limits
+// it is given, so it proves that a stored place passes the tests that chose it. The page does not
+// call it. tools/ruin-check.mjs does.
+function placeFacts(seed, opts, dir) {
+  const ctx = contextFor(seed, opts);
+  if (ctx.type === 'gas') return null;
+  const seaWas = ctx.seaLevel;
+  ctx.seaLevel = testSeaLevel(ctx);
+  try {
+    return {
+      h: fieldAt(ctx, dir[0], dir[1], dir[2], _srcFld).h, beachW: ctx.beachW,
+      slope: surfaceSlope(ctx, dir), maxSlope: SOURCE_SLOPE, maxLat: SOURCE_LAT, keep: SOURCE_KEEP,
+    };
+  } finally {
+    ctx.seaLevel = seaWas;
+  }
+}
+
+// The sea level the source and the ruin test against: the same number on every tier. A world
+// with no ocean keeps the one it has, which is already free of the tier. The context keeps the
+// number, because makeSource() and makeRuin() both need it and 60,000 samples of the field are
+// not free. A new world builds a new context, so the number never outlives its world.
+function testSeaLevel(ctx) {
+  if (ctx.testSea === undefined) ctx.testSea = ctx.land < 1 ? sampledSeaLevel(ctx) : ctx.seaLevel;
+  return ctx.testSea;
+}
+
+// ---------------------------------------------------------------- the ruin, p2-35
+// The second source: the thing the makers built. It stands at an arc from the wreck, because the
+// last entry of the log of the wreck (p2-40) names its frequency and the direction to it, and the
+// search of chapter 2 starts at the wreck. See docs/ruin.md and decision 9 of
+// docs/issues/p2-00-the-second-signal.md.
+//
+// The stream is makeRng(seed + '|ruin') and no other stream draws one number more, so the ruin
+// moves no world built before it. It takes the rules of makeSource() above: the candidates come
+// out of the stream as directions, every test reads the field of the globe and the sea level of
+// testSeaLevel(), and the tier touches neither. So a phone and a desktop see one ruin.
+//
+// Each try draws two numbers, first and always: the arc from the wreck, then the bearing from the
+// wreck. The arc is even over the area of the band and not over the arc, so the far part of the
+// band, which holds more ground, takes more of the tries. The candidate is the direction at that
+// arc and bearing, snapped to the middle of its cell, and the tests run on the middle.
+//
+// A band takes RUIN_TRIES tries. When none passes, the next band takes the same count, and a band
+// always draws its tries in full before the next band starts, so the stream stays in step. After
+// the last band the world takes no ruin. Every band stays inside CARRIER_REACH of site.js, a third
+// of the circumference or 209 cells, so a fix at the wreck always hears the ruin.
+//
+// The proto, the frequency, and the seed of the way on are hashes of the seed in ruin-types.js,
+// and no stream draws them. The maker comes after the place, from this stream; see makerOf().
+const RUIN_NEAR = 12;          // cells of arc: the nearest the ruin stands to the wreck
+const RUIN_FAR = 35;           // cells of arc: the farthest. About 900 to 2,600 km on 7,352 km
+const RUIN_TRIES = 900;        // tries a band takes before the next band
+// The bands in cells of arc from the wreck. The first is decision 9 of p2-00; the two after it
+// are the fallbacks. world.ruin.band gives the index of the band the ruin came from.
+const RUIN_BANDS = [[RUIN_NEAR, RUIN_FAR], [6, 80], [2, 120]];
+const _ruinDir = [0, 0, 0];
+
+function makeRuin(rng, ctx, world, beachW) {
+  world.ruin = null;
+  const src = world.source;
+  if (!src || !src.dir) return null;
+  const w = src.dir;
+  const wCell = dirCell(w[0], w[1], w[2]);
+  // The frame of the draw: the tangent frame of cell-grid.js at the wreck, north the part of +y
+  // in the tangent plane and east the direction of falling lon. It is the frame bearingTo() in
+  // site.js reads, so the bearing of a draw and the bearing the page reads are one angle.
+  const f = tangentFrame(Math.asin(clamp(w[1], -1, 1)) * 180 / Math.PI, Math.atan2(w[2], w[0]) * 180 / Math.PI);
+  const E = f.east, S = f.south;
+  const act = world.activity && world.activity.dir;
+  const actMid = act ? cellDir(dirCell(act[0], act[1], act[2]), 0.5, 0.5, _srcAct) : null;
+  const keep = Math.cos(SOURCE_KEEP * CELL);
+  const sinLat = Math.sin(SOURCE_LAT * Math.PI / 180);
+  const near = (d) => !!actMid && d[0] * actMid[0] + d[1] * actMid[1] + d[2] * actMid[2] > keep;
+
+  let place = null, band = -1;
+  const seaWas = ctx.seaLevel;
+  ctx.seaLevel = testSeaLevel(ctx);
+  try {
+    for (let b = 0; b < RUIN_BANDS.length && !place; b++) {
+      // The cosines of the two ends of the band. A draw even in the cosine is even in area.
+      const cNear = Math.cos(RUIN_BANDS[b][0] * CELL), cFar = Math.cos(RUIN_BANDS[b][1] * CELL);
+      for (let t = 0; t < RUIN_TRIES; t++) {
+        const k = cNear - rng() * (cNear - cFar);           // the cosine of the arc
+        const brg = rng() * Math.PI * 2;                    // the bearing from north, east positive
+        const s = Math.sqrt(Math.max(0, 1 - k * k));
+        const te = Math.sin(brg) * s, tn = Math.cos(brg) * s;
+        // The step along the tangent: east by te and north by tn. North is the opposite of south.
+        const cell = dirCell(w[0] * k + E[0] * te - S[0] * tn, w[1] * k + E[1] * te - S[1] * tn, w[2] * k + E[2] * te - S[2] * tn);
+        if (sameCell(cell, wCell)) continue;
+        const d = cellDir(cell, 0.5, 0.5, _ruinDir);
+        // The snap moves a direction up to most of a cell, so the middle can fall just outside
+        // the band. The band holds the middle, which is the place the page and the check read.
+        const dot = w[0] * d[0] + w[1] * d[1] + w[2] * d[2];
+        if (dot > cNear || dot < cFar) continue;
+        if (d[1] > sinLat || d[1] < -sinLat) continue;
+        if (near(d)) continue;
+        if (!groundFits(ctx, d, beachW)) continue;
+        place = [d[0], d[1], d[2]];
+        band = b;
+        break;
+      }
+    }
+  } finally {
+    ctx.seaLevel = seaWas;
+  }
+  if (!place) return null;
+
+  // The maker takes two numbers always, after the place, so a later draw of this stream does not
+  // hang on whether the world holds a fit species.
+  const maker = makerOf(world, rng(), rng());
+  world.ruin = {
+    kind: 'ruin',
+    proto: protoOf(world),
+    dir: place,
+    freq: freqOf(world.seed),
+    maker,
+    from: compass8(bearingFrom(wCell, place)),
+    band,
+    log: null,
+  };
+  return world.ruin;
+}
+
+// The bearing in degrees from the middle of a cell to a direction, north 0 and east 90. It is
+// bearingTo() of site.js step for step, on the site sourceSite() gives, so the compass word of the
+// log and the bearing of the page never part, even on the line between two words.
+// tools/ruin-check.mjs holds the two to that.
+function bearingFrom(cell, d) {
+  const site = cellSite(cell);
+  const f = tangentFrame(site.lat, site.lon);
+  const e = d[0] * f.east[0] + d[1] * f.east[1] + d[2] * f.east[2];
+  const n = -(d[0] * f.south[0] + d[1] * f.south[1] + d[2] * f.south[2]);
+  if (e === 0 && n === 0) return 0;
+  return (Math.atan2(e, n) * (180 / Math.PI) + 360) % 360;
+}
+
+// The maker of the ruin: the species of this world whose way of moving can build, as an ancestor
+// of that species. Decision 4 of p2-00. The ways of moving come from motionOf() of
+// source-lore.js, the tag the log reads, so the log and the ruin never disagree on how an animal
+// moves. MAKER_MOTION holds them in the order the maker takes them: a walker first, then a
+// crawler, a slinger, a digger, and a flyer. Among the species of the first way of moving the
+// world holds, the largest body takes it, and the lower index wins a tie. A roller, a flow, a sac,
+// a whale of the air, a swarm, and an anchor build nothing.
+//
+// The height is the size in metres that species.js states, the number the gates bigBody() and
+// handBody() of source-lore.js read. A world with no fit species rolls a maker from the two
+// numbers it is given: limbs from ROLLED_LIMBS and a height in ROLLED_HEIGHT.
+const MAKER_MOTION = ['mwalk', 'mcrawl', 'msling', 'mdig', 'mfly'];
+// The limbs of a maker by its locomotion. A winged maker has two legs and two wings.
+const MAKER_LIMBS = { monopod: 1, biped: 2, tripod: 3, quad: 4, hexapod: 6, serpent: 0, slinger: 2, plough: 4, wings: 4 };
+const ROLLED_LIMBS = [2, 3, 4, 6];
+const ROLLED_HEIGHT = [1.5, 6];        // metres
+
+function makerOf(world, rLimbs, rHeight) {
+  const species = world.species || [];
+  for (const motion of MAKER_MOTION) {
+    let best = -1, tallest = -Infinity;
+    for (let i = 0; i < species.length; i++) {
+      const G = species[i];
+      if (SourceLore.motionOf(G) !== motion) continue;
+      const m = Species.bodyMetres(G).metres;
+      if (m > tallest) { best = i; tallest = m; }
+    }
+    if (best >= 0) return { species: best, limbs: MAKER_LIMBS[species[best].loco], height: tallest, rolled: false };
+  }
+  const h = ROLLED_HEIGHT[0] + rHeight * (ROLLED_HEIGHT[1] - ROLLED_HEIGHT[0]);
+  return {
+    species: -1,
+    limbs: ROLLED_LIMBS[Math.min(ROLLED_LIMBS.length - 1, Math.floor(rLimbs * ROLLED_LIMBS.length))],
+    height: Math.round(h * 10) / 10,
+    rolled: true,
+  };
 }
 
 // ---------------------------------------------------------------- gas giant
@@ -2983,4 +3176,5 @@ function patch(seed, site, opts = {}, post = () => {}) {
 }
 
 // ---------------------------------------------------------------- the interface
-export { generate as world, patch };
+// placeFacts() is for the Node checks only. worker.js does not send it and the page never calls it.
+export { generate as world, patch, placeFacts };

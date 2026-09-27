@@ -16,9 +16,10 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 
 | File | Role |
 |---|---|
-| `generate.js` | Generation. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map, the source, and the patch. Two exported calls: `world(seed, opts, onProgress)` and `patch(seed, site, opts, onProgress)`. Each returns its result. No three.js and no DOM. Imports the lore files. |
+| `generate.js` | Generation. Seed to hash, PRNG, simplex noise, icosphere, terrain, biomes, flora, fauna placement, clouds, height map, the source, the ruin, and the patch. Two exported calls: `world(seed, opts, onProgress)` and `patch(seed, site, opts, onProgress)`. Each returns its result. A third export, `placeFacts(seed, opts, dir)`, gives the Node checks the numbers the tests of the source and of the ruin read; the page never calls it. No three.js and no DOM. Imports the lore files and `ruin-types.js`. |
 | `cell-grid.js` | The cell grid, the cell of a site and the site of a cell, the map of the ground box and its inverse, and the frame of a site, as plain arrays. The one copy: `generate.js`, `site.js`, `ground-sky.js`, `carrier-globe.js`, and the tools import it. No three.js and no DOM. `tools/cell-grid-check.mjs` tests it. |
 | `world-types.js` | The seven world types, their weights and labels, and the ranges each type rolls in: temperature, land, globe flora, and flora density. `generate.js` rolls from these tables and `tools/lore-audit` sweeps them. No three.js. |
+| `ruin-types.js` | The ruin of phase 2, as pure functions of the seed: `RUIN_PROTOS` (the eight protos of p2-00 in the order of its table, each `{ id, name, fits, disc, height, light }`), `protoRow(id)`, `protoOf(world)`, `freqOf(seed)`, `parseFreq(text)`, `portalSeed(world)`, `compass8(brg)`, and `COMPASS`. Each pick is the FNV hash `hullOf()` takes, over a string of its own, so no stream of `generate.js` draws one number more. No three.js and no DOM, so the worker, the page, and the tools import it. `tools/ruin-check.mjs` tests it. p2-35. |
 | `worker.js` | The module worker, a small adapter over `generate.js`. Protocol: `postMessage({type:'generate', seed, opts})` or `{type:'patch', seed, site: {lat, lon, kind}, opts}`, replies `progress` then `done`, `patch-done`, or `error`. It transfers every buffer of a result. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `tiers.js` | The two device tiers, HIGH and LOW, `RIM`, and the options of the two calls for a tier: `worldOpts()` and `patchOpts()`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |
@@ -266,6 +267,49 @@ Issue 34. One thing on a world with a surface transmits, and the probe reads a b
 - **A find takes the wedges and the dots away and stands a mini wreck at the source.** The model is the body of `wreckGeometry()` of `ground-source.js`, scaled to `WRECK_H` of 0.06 globe radii, standing on the terrain of the cell of the source, its up axis along the surface normal and its yaw from `world.source.yaw` or 0. It carries a `MeshStandardMaterial` in `WRECK_HULL`, the hull colour of the ground wreck, with a little emissive so it reads on the night side, and an additive lamp over the mast that blinks on the clock of `updateCarrierGroup()`. Neither mesh answers a ray, so a pick still names the cell under the model. `disposeCarrierGroup()` gives both geometries and both materials back.
 - The dot of a fix and the foot of the mini wreck both **lie on the terrain**: each takes `max(groundRadius(world, heightMap, dir), world.seaRadius) + DRAPE_LIFT`, the rule `showMarker()` in `site.js` drapes the square of a cell with. The dot reaches 0.35 of a cell. So `makeCarrierGroup()` and `setFound()` both take the height map of the world.
 - `tools/carrier-fix-check.mjs` holds the store, the wedge, the cap, the age, the wash, the fade, the drape, and the mini wreck. It builds every test direction with its own copy of the east of the globe and reads it back through `bearingTo()` of `site.js`, so a mirrored east in either file fails the run.
+
+### The ruin
+
+Phase 2, p2-35. The second source of a world. `docs/ruin.md` holds the rules and
+`docs/issues/p2-00-the-second-signal.md` the plan.
+
+```js
+world.ruin = {
+  kind: 'ruin',
+  proto: 'spires',                 // protoOf(world), a pure function of the seed and the type
+  dir: [x, y, z],                  // unit direction in the local frame, at the middle of its cell
+  freq: '7.316',                   // freqOf(seed): three decimals, 3.000 to 29.999, no unit
+  maker: { species: 2, limbs: 6, height: 3.4, rolled: false },
+  from: 'north-east',              // compass8() of the bearing from the wreck to the ruin
+  band: 0,                         // the band of arc the place came from: 0, 1, or 2
+  log: null,                       // the second log, p2-43; null when nobody went
+} | null
+```
+
+- `makeRuin()` in `generate.js` places it after `makeSource()`, from `makeRng(seed + '|ruin')` and
+  no other stream. It is null when `world.source` is null, and on a world where no cell of any band
+  passes the tests. The key is on every world, null or not, so a caller tests `world.ruin` and
+  never `'ruin' in world`.
+- The place is the middle of a cell, 12 to 35 cells of arc from `world.source.dir` (band 0). A
+  world where no cell of that band passes takes 6 to 80 cells (band 1), then 2 to 120 cells
+  (band 2). Every band stays inside `CARRIER_REACH`. The cell stands over the beach band, under
+  `SOURCE_SLOPE`, inside `SOURCE_LAT`, off the cell of the wreck, and `SOURCE_KEEP` cells or more
+  from the cell of the activity: the tests of the wreck, on the sea level of every tier. So the
+  ruin never shares a cell with the wreck or with the activity, and HIGH and LOW give one ruin.
+- `from` is `compass8(bearingTo(sourceSite(world), world.ruin.dir))`, with `bearingTo()` and
+  `sourceSite()` of `site.js`. `generate.js` computes the same bearing step for step in
+  `bearingFrom()`, so the word never parts from the page, even on the line between two words.
+- `maker.species` is the index in `world.species` of the species that built the ruin, or -1 for a
+  rolled maker. The species is the first way of moving of `motionOf()` in `source-lore.js`, in the
+  order `mwalk`, `mcrawl`, `msling`, `mdig`, `mfly`, that the world holds, and among those the
+  largest body. `limbs` comes from the locomotion: monopod 1, biped 2, tripod 3, quad 4, hexapod 6,
+  serpent 0, slinger 2, plough 4, wings 4. `height` is `Species.bodyMetres(G).metres`. A rolled
+  maker takes `limbs` from 2, 3, 4, and 6 and `height` from 1.5 to 6 metres.
+- The page must not show `freq`, `from`, or `log` before the reader reads them in the log of the
+  wreck or on the card of the ruin. `?ruin` draws a debug dot on the globe and stays out of the UI.
+- `tools/world-checksum.mjs` leaves `world.ruin` out of the facts of a world, so the baseline of
+  the worlds before the ruin still holds. `tools/ruin-check.mjs` proves the ruin over 500 seeds,
+  and `node tools/world-checksum.mjs --source` prints it on both tiers.
 
 ### Metres for a creature
 

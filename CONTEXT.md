@@ -14,6 +14,22 @@ _Avoid_: archetype, planet type, planet kind
 The terrain value that leaves the land fraction of the world dry. The world call sets it from the vertices of the globe, so it follows the device tier. A patch reads the sea level of the world call with the same options, so the ground and the globe meet the sea at the same height.
 _Avoid_: water line, ocean level
 
+**Ruin**:
+The second kind of source: the thing the makers built. A world with a wreck holds one ruin at most, `world.ruin`, with `kind: 'ruin'`. It stands 12 to 35 cells from the wreck on nearly every world. `docs/ruin.md` holds the rules.
+_Avoid_: structure, relic, artefact, alien base
+
+**Proto**:
+One of the eight shapes a ruin can take, such as `spires` or `hive`. `ruin-types.js` holds them, and each world type allows three or four of them.
+_Avoid_: model, type (a world has a type)
+
+**Maker**:
+The species that built the ruin: an ancestor of a species of this world that can build, or a rolled body of limbs and height when the world holds no such species. `world.ruin.maker` holds it.
+_Avoid_: alien, builder
+
+**Frequency**:
+The band the ruin sends on, in MHz with three decimals, from 3.000 to 29.999. The log and the overlay print it as `7.316 MHz`; the code keeps it as `freq`, the string `'7.316'`.
+_Avoid_: channel, signal
+
 ### The globe and the ground
 
 **Cell grid**:
@@ -45,7 +61,7 @@ The seeded build of a world and of a patch. `generate.js` holds it, and it has t
 _Avoid_: worldgen, the worker (the worker is only the adapter that runs generation off the main thread)
 
 **World call**:
-`generate.world()`: the seed and the device options in, the globe, the species, the source, and the sea level out.
+`generate.world()`: the seed and the device options in, the globe, the species, the source, the ruin, and the sea level out.
 _Avoid_: generate message
 
 **Patch call**:

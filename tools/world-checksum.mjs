@@ -2,7 +2,7 @@
 //
 //   node tools/world-checksum.mjs                 print one line per world and per patch
 //   node tools/world-checksum.mjs --check         compare against the baseline file
-//   node tools/world-checksum.mjs --source        the source of each seed on both tiers
+//   node tools/world-checksum.mjs --source        the source and the ruin of each seed on both tiers
 //
 // Record the baseline before a change that must leave the worlds alone, run it again after, and
 // every hash must be equal. Issue 34 used it to prove that the source drew no number from the
@@ -42,7 +42,7 @@ const rootUrl = pathToFileURL(root + '/').href;
 const BASELINE = path.join(root, 'tools', 'world-checksum.baseline.txt');
 
 const { TIERS, worldOpts, patchOpts } = await import(rootUrl + 'tiers.js');
-const { dirCell, cellSite, sameCell } = await import(rootUrl + 'cell-grid.js');
+const { CELL, dirCell, cellSite, sameCell } = await import(rootUrl + 'cell-grid.js');
 
 const SEEDS = ['Auralis', 'Vesper', 'Meridian', 'Tessaly', 'Orin', 'Mire'];
 const FIXED_SITE = { lat: 20, lon: 40, kind: 0 };
@@ -95,8 +95,14 @@ function splitWorld(w) {
     fauna: w.stats && w.stats.fauna,
     floraTags: w.env && w.env.floraTags, plantWord: w.env && w.env.plantWord,
   };
+  // The ruin of phase 2 stays out of both parts. It came after the baseline, and a new key in the
+  // facts would move that hash on every world, so the facts hash the worlds as they stood before
+  // the ruin. tools/ruin-check.mjs proves the ruin instead, and --source below prints it on both
+  // tiers. The ruin draws from a stream of its own, so the arrays above still prove that it moved
+  // no other stream.
   const facts = {
     ...w,
+    ruin: undefined,
     species: (w.species || []).map((g) => ({ ...g, lore: undefined })),
     source: w.source && { ...w.source, log: undefined },
     stats: w.stats && { ...w.stats, fauna: undefined },
@@ -160,7 +166,8 @@ function linesFor(seed) {
 
 // ---------------------------------------------------------------- the source on the two tiers
 // Issue 34. The source of a world must be the same on a phone and on a desktop. The two tiers draw
-// the globe at two detail levels, so this builds every seed twice and compares.
+// the globe at two detail levels, so this builds every seed twice and compares. p2-35 adds the
+// ruin under each wreck.
 // The six seeds above and nineteen more, so the sweep covers every planet type more than once.
 const SOURCE_SEEDS = SEEDS.concat([
   'Caldera', 'Nyx', 'Selene', 'Thule', 'Boreas', 'Kestrel', 'Halcyon', 'Verdant', 'Meridian II',
@@ -168,9 +175,14 @@ const SOURCE_SEEDS = SEEDS.concat([
   'Ostara', 'Wyrd',
 ]);
 
+// The ruin of phase 2 prints under the wreck of its seed: its cell, its proto, its frequency, and
+// its maker. The ruin of the two tiers must be one ruin too, key for key.
 function sourceReport() {
   const deg = (v) => (v * 180 / Math.PI).toFixed(2);
-  let bad = 0, nulls = 0, surface = 0;
+  const cellText = (d) => { const c = dirCell(d[0], d[1], d[2]); return `cell ${c.face}/${c.i}/${c.j}`; };
+  const limbs = (n) => `${n} ${n === 1 ? 'limb' : 'limbs'}`;
+  const makerText = (m) => `${m.rolled ? 'rolled' : `species ${m.species}`}, ${limbs(m.limbs)}, ${m.height} m`;
+  let bad = 0, nulls = 0, surface = 0, badRuin = 0, noRuin = 0;
   for (const seed of SOURCE_SEEDS) {
     const hi = world(seed, TIERS.HIGH).world, lo = world(seed, TIERS.LOW).world;
     const a = hi.source && hi.source.dir, b = lo.source && lo.source.dir;
@@ -181,11 +193,24 @@ function sourceReport() {
       ? `lat ${deg(Math.asin(a[1])).padStart(7)}  lon ${deg(Math.atan2(a[2], a[0])).padStart(8)}`
       : hi.type === 'gas' ? 'none, a gas giant' : 'NO SOURCE';
     console.log(`  ${seed.padEnd(12)} ${hi.type.padEnd(7)} ${where.padEnd(32)} ${same ? 'same on both tiers' : 'DIFFERS'}`);
+    const sameRuin = JSON.stringify(hi.ruin) === JSON.stringify(lo.ruin);
+    if (!sameRuin) badRuin++;
+    if (a && !hi.ruin) noRuin++;
+    if (hi.ruin) {
+      const r = hi.ruin;
+      const arc = Math.acos(Math.min(1, a[0] * r.dir[0] + a[1] * r.dir[1] + a[2] * r.dir[2])) / CELL;
+      console.log(`  ${''.padEnd(12)} ruin    ${cellText(r.dir)}, ${arc.toFixed(1)} cells ${r.from} of the wreck, band ${r.band}`
+        + `  ${r.proto}  ${r.freq} MHz  maker: ${makerText(r.maker)}  ${sameRuin ? 'same on both tiers' : 'DIFFERS'}`);
+    } else if (a) {
+      console.log(`  ${''.padEnd(12)} ruin    NO RUIN  ${sameRuin ? 'same on both tiers' : 'DIFFERS'}`);
+    }
   }
   console.log(`\n${SOURCE_SEEDS.length} seeds on both tiers: ${bad} differ.`
     + ` ${nulls} of ${surface} worlds with a surface hold no source`
     + ` (${(nulls / Math.max(surface, 1) * 100).toFixed(0)}%).`);
+  console.log(`The ruin: ${badRuin} differ between the tiers. ${noRuin} of ${surface - nulls} worlds with a wreck hold no ruin.`);
   if (bad) { console.error('source: the tiers disagree'); process.exitCode = 1; }
+  if (badRuin) { console.error('ruin: the tiers disagree'); process.exitCode = 1; }
 }
 
 if (process.argv.includes('--source')) {
