@@ -27,6 +27,7 @@ on. `CONTEXT.md` holds the words to avoid.
 | 1. Name the ruin | `ruin-types.js` | Web Worker, page, tools | the proto, the frequency, the seed of the way on |
 | 2. Place the ruin | `generate.js`, `makeRuin()` | Web Worker | `world.ruin` |
 | 3. Show the place | `app.js`, `?ruin` | Main thread | a cyan dot on the globe, for the eye check |
+| 4. Follow the ruin | `site.js`, `carrier-store.js`, `carrier-globe.js`, `app.js` | Main thread | chapter 2 of the search, after the tune (p2-38) |
 
 `world.ruin` rides back with the world as plain data, so `worker.js` clones it with the rest:
 
@@ -215,6 +216,73 @@ A gas giant takes no proto. `protoRow(id)` gives the row of an id.
   of the syllables is a word of the word list of macOS (`/usr/share/dict/words` and
   `propernames`), so it reads as a name.
 
+## Chapter 2 of the search
+
+p2-38. The search of issue 34 follows the wreck. After the reader tunes the receiver to the
+frequency of the ruin, the same search follows the ruin: the same bearing, the same error, the same
+reach, the same wedges, and the same brief. The reader tunes at the wreck, because the log states
+the frequency there, and the landing that tunes takes the first fix of chapter 2.
+
+- **The receiver hears one source.** `activeSource(world, record)` in `site.js` gives the ruin when
+  the record of the store is tuned and the world holds a ruin, else the wreck. `sourceSite()`,
+  `carrierAt()`, `carrierDir()`, `carrierBox()`, and `goalCell()` take the source as an argument,
+  and every caller in `app.js` reads it from `activeSource()`. A world with no ruin stays on the
+  wreck, tuned or not.
+- **The ruin reads offsets of its own.** The hash of the offset of a wedge takes the kind of the
+  source for the ruin, `` `${seed}|carrier|ruin|${face}|${i}|${j}` ``, and keeps the key of issue 34
+  for the wreck. So no fix of chapter 1 moves, and a cell does not state the same offset for the
+  two sources. `tools/carrier-check.mjs` runs every check of the carrier for the ruin as well.
+- **The store keeps two chapters.** `myworlds.carrier.v1` keeps chapter 1 at the top of the record
+  of a seed and chapter 2 under `ruin`, with `tuned` beside them. A record of issue 34 reads as
+  chapter 1 with nothing in chapter 2. Each call that writes a chapter takes `{ chapter }`, and
+  `markTuned()` sets the tune. See "The store" in `docs/issues/README.md`.
+- **Two colours.** The wedges of chapter 2 take a second colour: of the candidates of
+  `pickCarrierColour()` that stand far from the surface, the one that stands farthest from the
+  colour of chapter 1. `carrierColour(world, 2)` gives it. The pin and the mini wreck of the find
+  of the wreck keep the colour of chapter 1.
+- **The overlay prints the band.** The carrier block prints the frequency the receiver holds under
+  the bearing: `406.025 MHz` for the whole of chapter 1, and the frequency of the ruin in chapter 2.
+  So the reader learns the look of a frequency on the first landing. The page prints the frequency
+  of the ruin only after the tune, and the tune needs the number from the log.
+- **The brief.** Chapter 2 takes three stages: "Unknown signal", "Stronger signal", and "Carrier in
+  reach". The first says that the receiver holds the band of the log, that nothing of the crew
+  sends on it, and that the search runs as it did for the wreck. The drawings of issue 34 stay, and
+  their wedges take the colour of chapter 2.
+- **The Carrier row** reads "Found", then "Tuned", then "1 fix", "3 fixes", and "Found 2 of 2".
+  The Clear chip drops the fixes of the chapter that runs. After both finds the Aim chip offers
+  both sources, "Wreck" and "Ruin". A saved world with both finds carries two marks on its thumb.
+- **The ground.** p2-41 puts the body of the ruin on its cell. Until then a landing on the cell of
+  the ruin shows the needle, the range in kilometres, and "Here", and no body. On the cell of the
+  wreck in chapter 2 the needle keeps the bearing of the ruin, and the motif of the wreck stays
+  silent: the receiver holds the other band.
+
+`window.__mw.tune()` tunes the world on the screen, even when the wreck is not found, and p2-39
+puts the field of the tuner in front of it. `__mw.landAt(lat, lon)` and `__mw.recall()` land and
+recall the probe by script, so a test can walk a whole search.
+
+### The length of the search
+
+p2-38 walked 11 worlds by script from the wreck, on the build of 2026-09-28. The reader tunes on
+the cell of the wreck, lands 15 cells to one side of the first wedge, lands on the cross of the two
+wedges, and then lands on the filled cell or a count of cells along the bearing. The table counts
+the landings after the landing on the wreck, up to and with the landing on the cell of the ruin.
+
+| World | Type | Cells from the wreck | Landings |
+|---|---|---|---|
+| `p238-alpha` | terran | 15.2 | 3 |
+| `p238-bravo` | terran | 21.8 | 3 |
+| `p238-charlie` | exotic | 22.4 | 2 |
+| `p238-delta` | exotic | 14.9 | 3 |
+| `p238-echo` | ice | 24.0 | 3 |
+| `p238-foxtrot` | ice | 17.8 | 3 |
+| `p238-w1` to `p238-w5` | | | 3 each |
+
+The five worlds `p238-w1` to `p238-w5` land 1.5 cells off the cross on purpose, as a hand that
+aims by eye does. The third wedge then closes the goal, and the next landing is the ruin. The
+median is 3, inside the three or four of decision 9. On `p238-charlie` the cross of two wedges
+stood on the cell of the ruin itself. The walk by hand of the manager is still open, and it
+decides `RUIN_NEAR` and `RUIN_FAR`.
+
 ## The checks
 
 - `node tools/ruin-check.mjs` runs 500 seeds through `worker.js` on LOW, every tenth of them on HIGH
@@ -223,5 +291,8 @@ A gas giant takes no proto. `protoRow(id)` gives the row of an id.
   `generate.js` gives it the numbers of the field that the tests read; the page never calls it.
 - `node tools/world-checksum.mjs --check` must match its baseline: the ruin moves no other stream.
 - `node tools/world-checksum.mjs --source` prints the ruin of each seed on both tiers.
+- `node tools/carrier-check.mjs` runs every check of the carrier with the wreck and with the ruin
+  as the source, and `node tools/carrier-fix-check.mjs` tests the two chapters of the store and of
+  the group. p2-38.
 - Add `?ruin` to the address, with `?source`, to see the two dots on the globe, for example
   `http://localhost:5555/?ruin&source#Auralis`. The ruin is cyan and the wreck is pink.

@@ -32,8 +32,15 @@
 // (sin lon, 0, -cos lon), the direction of falling lon. The copy is not trusted: tools/
 // carrier-fix-check.mjs builds the planes with wedgePlanes(), the one function the uniforms come
 // from, and reads them back through bearingTo() and carrierAt() of site.js.
+//
+// **Two chapters.** The receiver hears one source at a time: the wreck in chapter 1, and the ruin
+// of phase 2 in chapter 2, after the reader tunes. activeSource() in site.js reads the record. The
+// group paints the fixes of the chapter that runs, in the colour of that chapter: the second colour
+// of pickCarrierColour() stands far from the surface and far from the first colour, so the reader
+// never takes a wedge of chapter 2 for a wedge of chapter 1. The pin and the mini wreck of the find
+// of chapter 1 stand on their cell in both chapters, in the colour of chapter 1. p2-38.
 import * as THREE from 'three';
-import { CELL, cellDir, groundRadius, siteCell, siteDir, sourceSite } from './site.js';
+import { CELL, cellDir, groundRadius, siteCell, siteDir, sourceSite, activeSource, activeChapter } from './site.js';
 import { tangentFrame } from './cell-grid.js';
 // The mini wreck of a find is the wreck of the ground, at the scale of the globe. wreck-geometry.js
 // builds that body in wreckGeometry(hullOf(world)), which takes no DOM and does nothing at import, so the two
@@ -267,12 +274,15 @@ export function showMarker(site, current) {
 //
 // The grid is the tangent plane at the source, and a direction on it takes a normalize. The
 // overlap stands at most GOAL_REACH cells out, where the plane and the sphere part by under 0.1%.
+//
+// `source` is the source of the fixes: the wreck when the caller gives none, and the ruin for the
+// fixes of chapter 2. p2-38.
 const _gE = new THREE.Vector3(), _gN = new THREE.Vector3(), _gD = new THREE.Vector3();
-export function goalCell(world, fixes) {
+export function goalCell(world, fixes, source = world && world.source) {
   if (!fixes || fixes.length < GOAL_WEDGES) return null;
-  const at = sourceSite(world);
+  const at = sourceSite(world, source);
   if (!at) return null;
-  const src = world.source.dir;
+  const src = source.dir;
   const s = new THREE.Vector3(src[0], src[1], src[2]).normalize();
   const planes = fixes.map(wedgePlanes);
   _gE.set(0, 1, 0).cross(s);
@@ -460,11 +470,12 @@ function drawnFixes(u) {
   return all.length > MAX_WEDGES ? all.slice(all.length - MAX_WEDGES) : all;
 }
 
-// Put the fixes of a group into the uniforms. It runs on every change and not on every frame.
+// Put the fixes of a group into the uniforms. It runs on every change and not on every frame. The
+// wedges, the visited cells, and the goal take the colour of the chapter that runs.
 function writeUniforms(group) {
   const u = group.userData;
   uniformOwner = group;
-  uniforms.uWedgeCol.value.set(accentOf(u.world));
+  uniforms.uWedgeCol.value.set(carrierColour(u.world, u.chapter));
   uniforms.uWedgeSea.value = (u.world && u.world.seaRadius) || 0;
   const drawn = drawnFixes(u);
   uniforms.uWedgeCount.value = drawn.length;
@@ -478,7 +489,10 @@ function writeUniforms(group) {
     uniforms.uWedgeAge.value[i] = WEDGE_AGE[drawn.length - 1 - i] || WEDGE_AGE[WEDGE_AGE.length - 1];
     cellPlanes(drawn[i], uniforms.uVisitN.value.slice(i * 4, i * 4 + 4));
   }
-  u.goal = u.found ? sourceSite(u.world) : goalCell(u.world, drawn);
+  // The goal is the cell of the source of this chapter: filled for good after its find, and
+  // filled when the wedges close on it before that. One slot holds one cell, so in chapter 2 the
+  // cell of the wreck gives up its fill, and the pin of its find still marks it.
+  u.goal = u.found ? sourceSite(u.world, u.src) : goalCell(u.world, drawn, u.src);
   if (u.goal) cellPlanes(u.goal, uniforms.uGoalN.value);
   uniforms.uGoalK.value = goalK(u);
 }
@@ -595,10 +609,17 @@ function dropWreck(u) {
 // are dark, because a bright wash on an ice sheet shows nothing.
 //
 // It draws no random number, so the same world gets the same colour on each visit.
+//
+// **The second colour.** Chapter 2 of the search paints its wedges in a colour of its own, so the
+// reader never takes a wedge of the ruin for a wedge of the wreck. The pick keeps the rule of the
+// first colour and adds one: of the candidates that stand far from the surface, the one that also
+// stands farthest from the first colour. A candidate stands far from the surface when its score
+// reaches CARRIER_FAR of the best score. p2-38.
 const CARRIER_COLOURS = ['#ff2fa0', '#19e3ff', '#ffe433', '#ff7b1c', '#8dff2e', '#a066ff', '#ff3b30', '#1f4bff', '#c4007a', '#7a1fd6'];
 const CARRIER_SAMPLES = 3000;   // the most vertices one pick reads
 const CARRIER_PCT = 0.1;        // a candidate is as good as its distance to the nearest tenth of the surface
-const carrierColours = new WeakMap();
+const CARRIER_FAR = 0.7;        // the share of the best score a candidate for chapter 2 must reach
+const carrierColours = new WeakMap();   // world to [the colour of chapter 1, the colour of chapter 2]
 
 // A colour as luma and two chroma parts, from linear RGB, with a square root for the gamma.
 function toYCC(r, g, b, out) {
@@ -611,6 +632,9 @@ function toYCC(r, g, b, out) {
 // col is the colour attribute of the terrain (linear RGB, 3 floats a vertex). pos is its position
 // attribute, which lets the pick skip the sea bed; a world with a sea counts the colour of the sea
 // one time for each vertex it skips. Without col the pick keeps the accent of the palette.
+//
+// It gives the colour of chapter 1 and keeps both colours for the world. carrierColour() below
+// reads either one.
 export function pickCarrierColour(world, col, pos = null) {
   if (!world || !col || col.length < 3) return accentOf(world);
   const n = col.length / 3;
@@ -619,7 +643,6 @@ export function pickCarrierColour(world, col, pos = null) {
   const pal = world.palette || {};
   const ocean = sea && pal.ocean ? toYCC(..._c.set(pal.ocean).toArray(), [0, 0, 0]) : null;
   const samples = [];
-  const v = [0, 0, 0];
   for (let i = 0; i < n; i += step) {
     const k = i * 3;
     if (sea && pos && Math.hypot(pos[k], pos[k + 1], pos[k + 2]) < sea) {
@@ -629,38 +652,61 @@ export function pickCarrierColour(world, col, pos = null) {
     samples.push(toYCC(col[k], col[k + 1], col[k + 2], [0, 0, 0]));
   }
   if (!samples.length) return accentOf(world);
-  let best = CARRIER_COLOURS[0], bestScore = -1;
-  for (const hex of CARRIER_COLOURS) {
-    toYCC(..._c.set(hex).toArray(), v);
-    const d = samples.map((s) => Math.hypot(s[0] - v[0], s[1] - v[1], s[2] - v[2])).sort((a, b) => a - b);
-    const score = d[Math.floor((d.length - 1) * CARRIER_PCT)];
-    if (score > bestScore) { bestScore = score; best = hex; }
-  }
-  carrierColours.set(world, best);
-  return best;
+  const rows = CARRIER_COLOURS.map((hex) => {
+    const at = toYCC(..._c.set(hex).toArray(), [0, 0, 0]);
+    const d = samples.map((s) => Math.hypot(s[0] - at[0], s[1] - at[1], s[2] - at[2])).sort((a, b) => a - b);
+    return { hex, at, score: d[Math.floor((d.length - 1) * CARRIER_PCT)] };
+  });
+  let best = rows[0];
+  for (const r of rows) if (r.score > best.score) best = r;
+  // chapter 2: far from the surface first, then as far as it can stand from the first colour
+  const others = rows.filter((r) => r !== best);
+  const far = others.filter((r) => r.score >= best.score * CARRIER_FAR);
+  const apart = (r) => Math.hypot(r.at[0] - best.at[0], r.at[1] - best.at[1], r.at[2] - best.at[2]);
+  let second = null;
+  for (const r of far.length ? far : others) if (!second || apart(r) > apart(second)) second = r;
+  carrierColours.set(world, [best.hex, second ? second.hex : best.hex]);
+  return best.hex;
 }
 const _c = new THREE.Color();
 
-const accentOf = (world) => (world && carrierColours.get(world))
+const accentOf = (world) => (world && carrierColours.get(world) && carrierColours.get(world)[0])
   || (world && world.palette && world.palette.fauna && world.palette.fauna.accent) || '#ffffff';
 
+// The colour of one chapter of the search on a world, as a hex string: 1 is the wreck and 2 the
+// ruin. pickCarrierColour() sets both when app.js builds the world; before that, and on a world it
+// never read, both chapters take the accent of the palette. The glow of the ruin (p2-41) and its
+// card (p2-42) take the colour of chapter 2 from here, so the ruin reads in one colour everywhere.
+export function carrierColour(world, chapter = 1) {
+  const pair = world && carrierColours.get(world);
+  if (!pair) return accentOf(world);
+  return chapter === 2 ? pair[1] : pair[0];
+}
+
 // The group of one world, or null for a world with no source. `record` is the record of
-// carrier-store.js: the fixes of this world and whether the reader has found the source.
+// carrier-store.js: the fixes of each chapter, the finds, and the tune. The group runs the chapter
+// activeChapter() in site.js reads off the record, and it paints the fixes of that chapter only. A
+// record of issue 34 holds no tune, so it runs chapter 1 as it did.
 //
 // `heightMap` is the height map the worker sent with the world, which buildWorld() in app.js reads
 // off the same reply. The mini wreck stands on the terrain and needs it.
 //
 // The group holds no mesh during the search: the wedges, the visited cells, and the goal cell all
-// ride in the uniforms of the terrain and of the sea. A found world paints none of them, and
-// carries the mini wreck at the source instead.
+// ride in the uniforms of the terrain and of the sea. A chapter whose source is found paints none
+// of them. The find of the wreck stands the mini wreck at the wreck, in both chapters.
 export function makeCarrierGroup(world, record, heightMap = null) {
   if (!world || !world.source || !world.source.dir) return null;
+  const chapter = activeChapter(world, record);
+  const part = chapter === 2 ? (record && record.ruin) || {} : record || {};
   const group = new THREE.Group();
   group.name = 'carrier';
   group.userData = {
     world, hm: heightMap,
-    fixes: (record && Array.isArray(record.fixes) ? record.fixes : []).slice(),
-    found: !!(record && record.found),
+    chapter,                                  // 1 follows the wreck, 2 follows the ruin
+    src: activeSource(world, record),         // the source of this chapter
+    fixes: (Array.isArray(part.fixes) ? part.fixes : []).slice(),
+    found: !!part.found,                      // the source of this chapter is found
+    wreckFound: !!(record && record.found),   // the wreck is found, in either chapter
     fade: null,       // { fix, t, k } while one wedge fades in
     wreck: null,      // the mini wreck of a find. makeWreckModel() builds it.
     goal: null,       // the site of the goal cell, or null. goalCell() finds it.
@@ -670,12 +716,13 @@ export function makeCarrierGroup(world, record, heightMap = null) {
   return group;
 }
 
-// Stand the mini wreck at the source, or take it away, and state the paint in the uniforms. It
+// Stand the mini wreck at the wreck, or take it away, and state the paint in the uniforms. It
 // runs on every change and not on every frame.
 function rebuild(group) {
   const u = group.userData;
-  if (u.found) {
-    // The find takes the place of the search: no paint, and the wreck at the source.
+  if (u.wreckFound) {
+    // The find takes the place of the search of chapter 1: the wreck at the source, in the colour
+    // of chapter 1, whichever chapter runs now.
     if (!u.wreck) u.wreck = makeWreckModel(u.world, u.hm);
     if (u.wreck && u.wreck.obj.parent !== group) group.add(u.wreck.obj);
   } else {
@@ -710,16 +757,22 @@ export function addWedge(group, fix, { fade = false } = {}) {
   rebuild(group);
 }
 
-// The reader has found the source. Slice 3 calls onSourceFound() in app.js, which calls this.
-// The mini wreck the rebuild stands at the source sits on the terrain, so a caller that gives a new
-// world gives its height map with it.
-export function setFound(group, world, heightMap) {
+// The reader has found the source of one chapter, 1 by default. Slice 3 calls onSourceFound() in
+// app.js, which calls this for the wreck. The mini wreck the rebuild stands at the source sits on
+// the terrain, so a caller that gives a new world gives its height map with it.
+//
+// A find of the chapter that runs takes its wedges away. A find of the wreck while chapter 2 runs
+// stands the mini wreck and leaves the wedges of the ruin as they are. p2-38.
+export function setFound(group, world, heightMap, { chapter = 1 } = {}) {
   if (!group) return;
   const u = group.userData;
   if (world) u.world = world;
   if (heightMap) u.hm = heightMap;
-  u.fade = null;
-  u.found = true;
+  if (chapter !== 2) u.wreckFound = true;
+  if ((chapter === 2 ? 2 : 1) === u.chapter) {
+    u.fade = null;
+    u.found = true;
+  }
   rebuild(group);
 }
 

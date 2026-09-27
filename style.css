@@ -161,10 +161,11 @@ button.go:hover { filter: brightness(1.08); }
   opacity: 0; transition: opacity 0.15s;
 }
 /* The mark of a find, issue 34. It stands opposite the delete button and it never fades, because
-   it is the one thing the reader earned on that world. */
+   it is the one thing the reader earned on that world. A world with both finds, the wreck and the
+   ruin, carries two marks, so the width follows the text. p2-38. */
 .world .found {
   position: absolute; top: 4px; left: 6px; font-style: normal; color: var(--accent-2);
-  width: 18px; height: 18px; line-height: 18px; text-align: center; font-size: 11px;
+  min-width: 18px; height: 18px; line-height: 18px; text-align: center; font-size: 11px;
   text-shadow: 0 0 8px rgba(255, 184, 107, 0.6); pointer-events: none;
 }
 .world:hover .del, .world:focus .del { opacity: 1; }
@@ -443,6 +444,17 @@ button.probe[hidden] { display: none; }
   color: #dfe4ff; font-size: 14px; line-height: 1.55;
 }
 .brief-steps li { margin-bottom: 8px; }
+/* Chapter 2 of the search, p2-38. The drawings of issue 34 stay, and the marks of the search in
+   them take the colour of chapter 2 of the world, which app.js writes into --brief-wedge: the
+   wedges, their lines, the cells of the fixes, and the numbers of the fixes. The globe, the probe,
+   and the next landing keep their colours. The drawings write #7cc4ff as an attribute, and a rule
+   of the style sheet wins over an attribute of an SVG. Stage 3 draws no wedge, so it keeps its
+   colours. */
+#carrier-brief[data-chapter="2"] :is([data-stage="1"], [data-stage="2"]) .brief-ill polygon[fill="#7cc4ff"] { fill: var(--brief-wedge, #7cc4ff); }
+#carrier-brief[data-chapter="2"] :is([data-stage="1"], [data-stage="2"]) .brief-ill path[stroke="#7cc4ff"] { stroke: var(--brief-wedge, #7cc4ff); }
+#carrier-brief[data-chapter="2"] :is([data-stage="1"], [data-stage="2"]) .brief-ill rect[stroke="#7cc4ff"] { stroke: var(--brief-wedge, #7cc4ff); }
+#carrier-brief[data-chapter="2"] :is([data-stage="1"], [data-stage="2"]) .brief-ill circle[fill="#0b1026"][stroke="#7cc4ff"] { stroke: var(--brief-wedge, #7cc4ff); }
+#carrier-brief[data-chapter="2"] :is([data-stage="1"], [data-stage="2"]) .brief-ill text[fill="#7cc4ff"] { fill: var(--brief-wedge, #7cc4ff); }
 .brief-steps li:last-child { margin-bottom: 0; }
 /* The drawing of one step of the brief: the move the text asks for, on the globe or on the cell
    grid. It is inline SVG in index.html. Four classes move it: a pulse on the place to land, a flow
@@ -616,6 +628,10 @@ button.probe[hidden] { display: none; }
 }
 .hud-read b { display: block; color: var(--accent); text-shadow: 0 0 10px rgba(124, 196, 255, 0.45); }
 .hud-sub { display: flex; gap: 8px; }
+/* The band the receiver holds, p2-38: under the bearing, in the size of the error. The unit keeps
+   its case, because MHz is the unit and MHZ is not, and the digits keep one width so two bands
+   compare at a glance. */
+#probe-hud #hud-freq { text-transform: none; font-variant-numeric: tabular-nums; }
 
 /* Risk 4 of issue 34: a reader may never look at the fifth block. The block pulses on every landing
    that hears the carrier until the reader opens the brief, and it then stands quiet on that world

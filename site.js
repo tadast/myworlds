@@ -299,8 +299,10 @@ function hash01(s) {
 // The site of the source of a world, or null. A gas giant and a world where no vertex passed the
 // tests of makeSource() both give null. See makeSource() in generate.js. The patch call puts the
 // wreck on the patch of this cell and of no other; see kindIn() there.
-export function sourceSite(world) {
-  const src = world && world.source;
+//
+// `src` is the source to read, and it is the wreck when the caller gives none. Chapter 2 of the
+// search gives `world.ruin`; see activeSource() below. A caller that gives null gets null. p2-38.
+export function sourceSite(world, src = world && world.source) {
   if (!src || !src.dir) return null;
   const at = grid.cellSite(grid.dirCell(src.dir[0], src.dir[1], src.dir[2]));
   return { lat: at.lat, lon: at.lon, kind: -1 };
@@ -336,15 +338,20 @@ export function bearingTo(site, dir) {
 //
 // The site takes the snap first, because the fix belongs to the cell and not to two decimals of a
 // degree. Gives null for a world with no source, and null for a site past the reach.
-export function carrierAt(world, site) {
-  const src = world && world.source;
+//
+// `src` is the source the receiver hears: the wreck when the caller gives none, and `world.ruin` in
+// chapter 2 of the search. See activeSource() below. The hash of the offset takes the kind of
+// every source but the wreck, so the ruin reads offsets of its own on each cell. The wreck keeps
+// the key of issue 34, so no fix of chapter 1 moves. p2-38.
+export function carrierAt(world, site, src = world && world.source) {
   if (!src || !src.dir || !site) return null;
   const at = snapSite(site);
   const cell = siteCell(at);
   const arc = arcTo(at, src.dir);
   if (arc > CARRIER_REACH) return null;      // the carrier does not reach the far side of the world
   const err = CARRIER_ERR[0] + (CARRIER_ERR[1] - CARRIER_ERR[0]) * (arc / CARRIER_REACH);
-  const off = hash01(`${world.seed}|carrier|${cell.face}|${cell.i}|${cell.j}`) * 2 - 1;
+  const kind = src.kind && src.kind !== 'wreck' ? `|${src.kind}` : '';
+  const off = hash01(`${world.seed}|carrier${kind}|${cell.face}|${cell.i}|${cell.j}`) * 2 - 1;
   const brg = (bearingTo(at, src.dir) + off * err + 360) % 360;
   // Decision 7: the range states nothing until the reader stands near the source.
   const rangeKm = arc <= CARRIER_RANGE * grid.CELL ? arc * world.env.radiusKm : null;
@@ -359,8 +366,10 @@ export function carrierAt(world, site) {
 //
 // A turn of +a about the up axis takes east toward north, which takes the bearing down, so the
 // offset turns the other way.
-export function carrierDir(world, site, carrier, out = new THREE.Vector3()) {
-  const src = world && world.source;
+//
+// `src` is the source of carrierAt(), and the wreck when the caller gives none. It stands last,
+// after `out`, so every call of issue 34 keeps its arguments where they are. p2-38.
+export function carrierDir(world, site, carrier, out = new THREE.Vector3(), src = world && world.source) {
   if (!src || !src.dir || !carrier || !site) return null;
   const at = snapSite(site);
   const off = THREE.MathUtils.degToRad(carrier.brg - bearingTo(at, src.dir));
@@ -388,10 +397,41 @@ export function boxPoint(site, dir, size) {
 // any arc, and the needle holds even where boxPoint() gives null. The needle may not come through
 // the matrix of groundBasis() with the twist: that frame is square and the box is not, so the
 // needle would stand off the wreck by the same angle.
-export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }) {
-  if (!carrierDir(world, site, carrier, _aim)) return null;
+//
+// `src` stands last, as it does on carrierDir().
+export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }, src = world && world.source) {
+  if (!carrierDir(world, site, carrier, _aim, src)) return null;
   _arr[0] = _aim.x; _arr[1] = _aim.y; _arr[2] = _aim.z;
   return grid.boxHeading(siteCell(snapSite(site)), _arr, out);
+}
+
+// ---------------------------------------------------------------- the two chapters, p2-38
+// The receiver hears one source at a time. Chapter 1 of the search follows the wreck of issue 34.
+// After the reader tunes the receiver to the frequency of the log, chapter 2 follows the ruin of
+// p2-35. `record` is the record of carrier-store.js for this world, and `record.tuned` says that
+// the reader has tuned. A world with no ruin stays on the wreck, tuned or not, so the search never
+// points at nothing.
+//
+// Every caller of the carrier reads the source here and gives it to carrierAt() and the rest. The
+// source carries its kind, so `src.kind === 'ruin'` tells the two chapters apart.
+export function activeSource(world, record) {
+  if (!world) return null;
+  if (record && record.tuned && world.ruin && world.ruin.dir) return world.ruin;
+  return world.source || null;
+}
+
+// The chapter a record runs on this world: 2 while the receiver hears the ruin, else 1.
+export function activeChapter(world, record) {
+  const src = activeSource(world, record);
+  return src && src.kind === 'ruin' ? 2 : 1;
+}
+
+// The frequency the receiver holds in each chapter, as the overlay prints it with no unit. Chapter
+// 1 is the distress band of the wreck, which the overlay shows for the whole of chapter 1, so the
+// reader learns the look of a frequency before a log states one. Decision 7 of p2-00.
+export const WRECK_FREQ = '406.025';
+export function sourceFreq(src) {
+  return src && src.kind === 'ruin' && src.freq ? src.freq : WRECK_FREQ;
 }
 
 // The pull to life. A creature home inside the cell under the pick takes the site. The nearest
