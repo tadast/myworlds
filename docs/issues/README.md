@@ -20,6 +20,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `cell-grid.js` | The cell grid, the cell of a site and the site of a cell, the map of the ground box and its inverse, and the frame of a site, as plain arrays. The one copy: `generate.js`, `site.js`, `ground-sky.js`, `carrier-globe.js`, and the tools import it. No three.js and no DOM. `tools/cell-grid-check.mjs` tests it. |
 | `world-types.js` | The seven world types, their weights and labels, and the ranges each type rolls in: temperature, land, globe flora, and flora density. `generate.js` rolls from these tables and `tools/lore-audit` sweeps them. No three.js. |
 | `ruin-types.js` | The ruin of phase 2, as pure functions of the seed: `RUIN_PROTOS` (the eight protos of p2-00 in the order of its table, each `{ id, name, fits, disc, height, light }`), `protoRow(id)`, `protoOf(world)`, `freqOf(seed)`, `parseFreq(text)`, `portalSeed(world)`, `compass8(brg)`, and `COMPASS`. Each pick is the FNV hash `hullOf()` takes, over a string of its own, so no stream of `generate.js` draws one number more. No three.js and no DOM, so the worker, the page, and the tools import it. `tools/ruin-check.mjs` tests it. p2-35. |
+| `ruin-geometry.js` | The body of the ruin: `ruinGeometry(proto, world, { mini })` gives `{ body, glow, orbit, lamp }`, the eight protos of `ruin-types.js` welded into flat-shaded geometry with a colour per vertex, on the pattern of `wreck-geometry.js`. `RUIN_PAL` and `ruinPalette(type)` hold the stone of each world type, `miniHeight(proto)` and `MINI_UNIT` the scale of the mini model on the globe, `BODY_BUDGET` and `MINI_BUDGET` the triangle budgets, and `triangles(geo)` counts. It reads `world.type` and `world.ruin.maker` and nothing else of the world. No DOM, nothing at import. `tools/ruin-geometry-check.mjs` tests it and `tools/ruin-lab.html` shows it. p2-36. See `docs/ruin.md`, "The body". |
 | `worker.js` | The module worker, a small adapter over `generate.js`. Protocol: `postMessage({type:'generate', seed, opts})` or `{type:'patch', seed, site: {lat, lon, kind}, opts}`, replies `progress` then `done`, `patch-done`, or `error`. It transfers every buffer of a result. |
 | `app.js` | Main thread. Renderer, scene, OrbitControls, `buildWorld()`, `frame()`, movers, worker client, `localStorage` store, sidebar, URL hash, inspector wiring. |
 | `tiers.js` | The two device tiers, HIGH and LOW, `RIM`, and the options of the two calls for a tier: `worldOpts()` and `patchOpts()`. No three.js and no DOM. `app.js` picks a row into `Q`, and the Node tools read the same rows. |
@@ -310,6 +311,19 @@ world.ruin = {
 - `tools/world-checksum.mjs` leaves `world.ruin` out of the facts of a world, so the baseline of
   the worlds before the ruin still holds. `tools/ruin-check.mjs` proves the ruin over 500 seeds,
   and `node tools/world-checksum.mjs --source` prints it on both tiers.
+
+**The body.** p2-36. `ruinGeometry(proto, world, { mini = false })` in `ruin-geometry.js` gives
+`{ body, glow, orbit, lamp }`. `body` is one non-indexed `BufferGeometry` with a colour per vertex,
+flat-shaded, y up, the origin on the ground under the middle of the ruin, in units of the box;
+`body.userData.lamp` repeats `lamp`, and the well sets `body.userData.hole`, the radius of its
+mouth. `glow` holds the parts of the light with no vertex colour, for one material in
+`ruinPalette(world.type).glow` that blinks the motif. `orbit` holds the parts that move, only for
+the floaters, else null. `lamp` is `[x, y, z]` of the brightest point. With `mini: true` the body
+holds the big parts in one colour, the stone of the type, and `glow` and `orbit` are null; the globe
+scales it by `MINI_UNIT` globe radii per unit. The builder reads `world.type` and
+`world.ruin.maker` and nothing else of the world. The budget is `BODY_BUDGET` 4,000 triangles for
+a body and `MINI_BUDGET` 1,500 for a mini; `tools/ruin-geometry-check.mjs` holds every proto to it.
+See `docs/ruin.md`, "The body".
 
 ### Metres for a creature
 

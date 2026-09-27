@@ -6,8 +6,9 @@ Type: plan. Read `docs/issues/README.md`, `docs/issues/34-the-carrier.md`, and `
 first. Every issue of phase 2 reads this file for the terms, the decisions, and the contracts.
 
 The decisions come from the design session of 2026-09-27 and its choice sheet. The shapes of the
-ruins come from the prototypes of that session: `tools/ruin-prototypes.html` holds them, with the
-choices as they were put to the owner. That page is a reference and not a part of the app.
+ruins come from the prototypes of that session. p2-36 ported them into `ruin-geometry.js`, and
+`tools/ruin-lab.html` shows them with the real builder. The prototype page and the choice sheet,
+`tools/ruin-prototypes.html`, stand in the history at commit e2a1744 and no longer in the tree.
 
 ## The feature in one paragraph
 
@@ -62,7 +63,7 @@ issue 34 stay: carrier, source, bearing, fix, wedge, wreck, motif, log.
 5. **Eight protos, a short list per world type.** Choices D5 and D6 C. The owner kept spires,
    dome, arches, well, floaters, colossus, and ring, and asked for the hive to come back as a
    colony: one mound of equal hex cells in terraces, three small hives around it, and paved paths
-   between them. `tools/ruin-prototypes.html` shows the colony. Each world type allows the protos
+   between them. `tools/ruin-lab.html` shows the colony. Each world type allows the protos
    that fit it, and a hash of the seed picks one, as `hullOf()` picks a hull. See the table below.
 6. **The ruin replies.** Choice D7 B. The call started on the day the crew put the beacon on the
    mast. The call thread states both days, and they are one day. The card states it again.
@@ -116,7 +117,8 @@ Each world type then allows three or four protos:
 | exotic | floaters, ring, hive |
 
 A gas giant takes no source and no ruin. The prototypes that the owner did not keep are henge,
-ziggurat, dishes, and monolith. They stay in `tools/ruin-prototypes.html` and nowhere else.
+ziggurat, dishes, and monolith. They stay in `tools/ruin-prototypes.html` at commit e2a1744 of
+the history and nowhere else.
 
 ## The shared contracts of phase 2
 
