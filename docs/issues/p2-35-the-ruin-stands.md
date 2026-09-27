@@ -97,3 +97,67 @@ It is the eye check for the placement and it stays out of the UI.
   wreck on a terran, an ocean, and an ice world.
 - `parseFreq()` and `compass8()` pass their cases in the check.
 - `world.ruin` rides back from the worker. `worker.js` can clone it, because it is plain data.
+
+## What the build changed
+
+The build follows the plan, with these deviations and additions.
+
+1. **`world.ruin.band`.** The shape of p2-00 has no band. The check must test "the arc from the
+   wreck lies inside the band the world took", and the arc alone cannot name the band: a world of
+   band 1 can stand 20 cells out. So `world.ruin` carries `band`, 0, 1, or 2. The contract in
+   `docs/issues/README.md` states it.
+2. **The band holds the middle of the cell.** The plan lists the tests and not the band. The snap to
+   the middle of a cell moves a direction up to most of a cell, so a draw at 12.1 cells can land at
+   11.5. `makeRuin()` therefore tests the arc of the middle against the band too, and the ruin
+   stands 12 to 35 cells from the wreck on every world of band 0.
+3. **`placeFacts()`, a third export of `generate.js`.** The check must prove that the cell of the
+   ruin passes the tests of the field, and only `generate.js` holds the field. `placeFacts(seed,
+   opts, dir)` gives the height, the beach band, the slope, and the limits at one direction, on the
+   sea level of every tier. `worker.js` does not send it and the page never calls it. The README
+   and the module table say so.
+4. **Two shared helpers in `generate.js`.** `groundFits()` holds the test of the beach band and of
+   the slope for the wreck and for the ruin. `testSeaLevel()` keeps the sea level of every tier on
+   the context, so `makeRuin()` does not read 60,000 directions a second time. `makeSource()` now
+   calls both; the checksum proves that no world moved. A world builds in 112.7 ms against 114.5 ms
+   on main on LOW, over 60 builds interleaved, so the ruin costs nothing a reader can measure.
+5. **The maker draws two numbers always.** After the place, the maker draws the numbers of a rolled
+   body whether it rolls or not, so a later draw of `seed + '|ruin'` does not hang on the species of
+   the world.
+6. **The order of the maker.** "`mwalk` first, then `mcrawl`, `msling`, `mdig`, and `mfly`" reads
+   as a priority: the maker takes the first way of moving the world holds, and the largest body of
+   that way. A lower index wins a tie. A rolled height takes one decimal, as `bodyMetres()` does.
+7. **More exports of `ruin-types.js`.** Each row of `RUIN_PROTOS` carries `light`, the column "The
+   light" of p2-00, because p2-36 and p2-42 read it. The module also exports `protoRow(id)`,
+   `COMPASS`, `FREQ_MIN`, and `FREQ_MAX`. The names p2-00 fixes are unchanged.
+8. **`parseFreq()` at the edges.** `'7'` gives 7, `'7.'` gives 7, and `'.316'` gives 0.316. A sign,
+   an exponent, a space inside the number, two points, and a unit other than MHz give null.
+9. **`portalSeed()`.** It takes 2 to 4 of 16 syllables, with no syllable twice in a row. No word of
+   2 to 4 of them is a word of `/usr/share/dict/words` or `propernames` on macOS. On a match with
+   its own seed the last syllable moves on one place. The check also asks the way on of every way
+   on, and none names itself.
+10. **The checksum.** `splitWorld()` in `tools/world-checksum.mjs` sets `ruin: undefined` in the
+    facts, so the baseline of today still holds, and a comment says that `tools/ruin-check.mjs` and
+    `--source` prove the ruin. The baseline file did not move.
+11. **The check samples the tiers.** `tools/ruin-check.mjs` builds all 500 seeds on LOW through
+    `worker.js`. Every tenth seed builds on HIGH too (42 worlds with a ruin), and every 25th builds
+    again after another world (16), because a HIGH build of all 500 takes several minutes more.
+    `world-checksum.mjs --source` compares both tiers on its 25 seeds.
+12. **The dot of `?ruin` is cyan**, `#2ee6ff`, against the pink of the wreck.
+
+### The results
+
+- `node tools/ruin-check.mjs`: every test passes. Of 500 seeds, 420 have a surface, 420 a wreck,
+  and 420 a ruin. Band 0 (12 to 35 cells): 418, 99.5%. Band 1 (6 to 80): 2, 0.5%, `ruin-151` (ice)
+  and `ruin-189` (terran). Band 2 (2 to 120): 0. No ruin: 0. The arc runs from 12.05 to 78.25
+  cells. The makers: `mwalk` 311, `mcrawl` 35, `mfly` 22, `msling` 18, `mdig` 13, and 21 rolled
+  (5.0%).
+- `node tools/world-checksum.mjs --check`: every hash matches the baseline.
+- `node tools/world-checksum.mjs --source`: 25 seeds, the wreck and the ruin the same on both tiers,
+  and every world with a wreck holds a ruin, all of band 0.
+- `carrier-check`, `carrier-fix-check`, `cell-grid-check`, `frame-check`, and
+  `lore-audit/audit.mjs`: all pass.
+- In the browser, with `?ruin&source`, the cyan dot stands from the pink dot: 20.40 cells on
+  `Auralis` (terran, a dome, south-east), 30.56 cells on `Vesper` (ocean, a ring, north), and 18.61
+  cells on `Meridian` (ice, a colossus, west). The ruin on the page is the ruin of Node, and a reload
+  of `Meridian` gives it again. The console holds no error. The change adds no work to a frame, and
+  the pane was hidden, so no frame time was read.

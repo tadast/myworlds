@@ -39,6 +39,10 @@ const PERF = new URLSearchParams(location.search).has('perf');
 // `?source` puts a dot on the globe where the source of issue 34 stands. It is the eye check on
 // the bearing math: three wedges from three continents must cross over it. It stays out of the UI.
 const SOURCE_DOT = new URLSearchParams(location.search).has('source');
+// `?ruin` puts a dot on the globe where the ruin of p2-35 stands, in another colour. It is the eye
+// check on the place: with `?source` on too, the ruin stands 12 to 35 cells from the wreck on
+// nearly every world. It stays out of the UI.
+const RUIN_DOT = new URLSearchParams(location.search).has('ruin');
 const HUD_MS = 500;       // ms, the overlay reads twice a second
 const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
 const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
@@ -541,18 +545,21 @@ const SLOPE_STEP = 0.02;
   // natural activity: at most one per world
   const activity = buildActivity(world, planet, cloudGroup, cloudInst, (dir) => groundRadius(world, heightMap, dir));
 
-  // `?source`: the dot of issue 34. It rides under the planet, so it turns with the world, and it
-  // goes away with the world, because the whole group is disposed.
-  if (SOURCE_DOT && world.source) {
-    const d = new THREE.Vector3(...world.source.dir);
+  // `?source`: the dot of issue 34. `?ruin`: the dot of p2-35, cyan against the pink of the
+  // wreck. Each rides under the planet, so it turns with the world, and it goes away with the
+  // world, because the whole group is disposed.
+  const debugDot = (dir, color) => {
+    const d = new THREE.Vector3(...dir);
     const dot = new THREE.Mesh(
       new THREE.SphereGeometry(0.012, 12, 8),
-      new THREE.MeshBasicMaterial({ color: '#ff3ba7', toneMapped: false, depthTest: false }),
+      new THREE.MeshBasicMaterial({ color, toneMapped: false, depthTest: false }),
     );
     dot.position.copy(d).multiplyScalar(Math.max(groundRadius(world, heightMap, d), world.seaRadius || 0) + 0.01);
     dot.renderOrder = 4;
     planet.add(dot);
-  }
+  };
+  if (SOURCE_DOT && world.source) debugDot(world.source.dir, '#ff3ba7');
+  if (RUIN_DOT && world.ruin) debugDot(world.ruin.dir, '#2ee6ff');
 
   // The wedges of the search, from the store. They ride under the planet too, so they turn with
   // the world, and the far side of the globe hides the part of a wedge that runs behind it. A gas
