@@ -471,6 +471,14 @@ export class Ground {
   // in the frame of the site. See ground-sky.js. The carrier of issue 34 comes from the app for
   // the same reason again: carrierAt() in site.js reads the globe and the app turns the direction
   // of the source into this frame.
+  //
+  // `carrier` also carries `kind`, the kind of the source the receiver holds, and `freq`, the band
+  // the overlay prints. setCarrier() swaps the reading while the probe stands here, which a tune on
+  // the ground does. p2-38.
+  setCarrier(carrier) {
+    this.carrier = carrier || null;
+  }
+
   load(result, { sunDir, view, carrier } = {}) {
     this.result = result;
     this.carrier = carrier || null;
@@ -980,15 +988,22 @@ export class Ground {
   //   rangeKm   kilometres to the source inside CARRIER_RANGE cells of arc, else null. Decision 7.
   //   range     units from the camera to the wreck on this patch, or null off its cell. The
   //             overlay then states the range in units and the word "here". Decision 7.
+  //   freq      the band the receiver holds, as the overlay prints it with no unit: '406.025' in
+  //             chapter 1, and the frequency of the ruin in chapter 2. p2-38.
   //
   // On the cell of the source the needle stops reading the globe and reads the wreck: the reader can
   // see the thing, so a needle that pointed anywhere else would be a fault the reader can measure.
   // Both the needle and the range are taken from the CAMERA POSITION, which is the point the height
   // of the overlay is measured from, so every number of the block speaks about one place. The
   // camera moves as the reader walks, so the needle turns and the range falls with every step.
+  //
+  // The body on the patch takes the needle only when it is the source the receiver holds. In
+  // chapter 2 the wreck on its cell is not the carrier, so the needle there keeps the bearing of the
+  // ruin. p2-38.
   _carrier() {
     const c = this.carrier;
     if (!c) return null;
+    const heard = this.source && this.source.kind === (c.kind || 'wreck') ? this.source : null;
     // The camera looks from its own position at the target, so the flat part of that step is the
     // way the reader faces. carrier.dir is the way the needle points as (x, z) in the frame of the
     // box, which the app reads off the axes of the cell; see carrierBox() in site.js. The box
@@ -1002,8 +1017,8 @@ export class Ground {
     let range = null;
     // The wreck stands on this patch, in the same units as the camera, so the needle takes the true
     // way to it and the range is the plain distance over the ground.
-    if (this.source) {
-      const wx = this.source.at.x - p.x, wz = this.source.at.z - p.z;
+    if (heard) {
+      const wx = heard.at.x - p.x, wz = heard.at.z - p.z;
       range = Math.hypot(wx, wz);
       if (range > 1e-6) d = [wx / range, wz / range];
     }
@@ -1012,7 +1027,7 @@ export class Ground {
       fx /= fl; fz /= fl;
       rel = THREE.MathUtils.radToDeg(Math.atan2(d[1] * fx - d[0] * fz, d[0] * fx + d[1] * fz));
     }
-    return { brg: c.brg, err: c.err, arc: c.arc, rel, rangeKm: c.rangeKm, range };
+    return { brg: c.brg, err: c.err, arc: c.arc, rel, rangeKm: c.rangeKm, range, freq: c.freq || null };
   }
 
   // The time to the next sunset, or to the next sunrise when the star is under the horizon.

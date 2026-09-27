@@ -72,6 +72,7 @@ export class ProbeHud {
     this.elNeedle = root.querySelector('#hud-needle');
     this.elBrg = root.querySelector('#hud-brg');
     this.elErr = root.querySelector('#hud-err');
+    this.elFreq = root.querySelector('#hud-freq');
     this.elStrength = root.querySelector('#hud-strength');
     this.elRange = root.querySelector('#hud-range');
     this.elHint = root.querySelector('#hud-hint');
@@ -189,6 +190,11 @@ export class ProbeHud {
   // straight ahead. The bearing reads as three digits, because the reader compares one landing
   // against the next and a number of one width is easier to compare. The range states kilometres
   // near the source and units on its cell; both stay away until the probe is near. Decision 7.
+  //
+  // The band the receiver holds prints under the bearing, in the size of the error: 406.025 MHz
+  // for the whole of chapter 1, and the frequency of the ruin in chapter 2. It shows on every
+  // landing that hears a carrier, so the reader learns the look of a frequency long before a log
+  // states one. Decision 7 of p2-00.
   _writeCarrier(c) {
     if (!this.elCarrier) return;
     this.elCarrier.hidden = !c;
@@ -203,6 +209,7 @@ export class ProbeHud {
     }
     if (this.elBrg) this.elBrg.textContent = `${String(Math.round(c.brg) % 360).padStart(3, '0')}°`;
     if (this.elErr) this.elErr.textContent = `±${Math.round(c.err)}°`;
+    if (this.elFreq) this.elFreq.textContent = `${c.freq || '406.025'} MHz`;
     if (this.elStrength) {
       this.elStrength.textContent = c.arc < CARRIER_HERE ? 'Here'
         : c.arc < CARRIER_STRONG ? 'Strong' : c.arc < CARRIER_CLEAR ? 'Clear' : 'Faint';

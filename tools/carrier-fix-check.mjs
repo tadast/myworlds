@@ -29,6 +29,13 @@
 //    source, and two fixes or three wide ones do not. A find takes the wedges away, keeps the
 //    source cell filled, and stands a pin of PIN_H on it with a model of MODEL_H on top.
 //
+// E. The two chapters, p2-38. A record of issue 34 reads as chapter 1 with an empty chapter 2 and
+//    writes back as it was. Each call that writes a chapter touches that chapter only, the tune
+//    keeps the fixes of chapter 1, and foundSeeds() counts the finds of a seed. The group of a
+//    tuned record paints the fixes of chapter 2 in the second colour, fills the cell of the ruin
+//    when three near fixes close on it, and keeps the pin of the wreck. The second colour stands
+//    apart from the first.
+//
 // site.js takes three.js by a bare name; three-hook.mjs resolves it in Node.
 import { root } from './three-hook.mjs';
 
@@ -498,6 +505,127 @@ let goalRow = '';
   goalRow = `  goal    three near fixes filled the source cell on ${hit} of ${runs} worlds, three far fixes on ${wide}`;
 }
 
+// ---------------------------------------------------------------- E: the two chapters, p2-38
+let chapterRow = '';
+{
+  store.clear();
+  // A record written by the build of issue 34 loads with no change of chapter 1, and a find of that
+  // build stays a find. It reads as not tuned, with nothing in chapter 2.
+  const site = S.snapSite({ lat: 12.5, lon: -73.25, kind: -1 });
+  const other = S.snapSite({ lat: -40.1, lon: 119.8, kind: -1 });
+  const old = { fixes: [{ lat: site.lat, lon: site.lon, brg: 41.2, err: 5 }], found: false, briefed: 2, ts: 1 };
+  store.set(C.CARRIER_KEY, JSON.stringify({ Old: old, OldFound: { fixes: [], found: true, briefed: 3, ts: 2 } }));
+  let rec = C.loadFixes('Old');
+  ok('chapters', rec.fixes.length === 1 && rec.fixes[0].brg === 41.2 && rec.found === false && rec.briefed === 2, 'a record of issue 34 changed chapter 1 on the load');
+  ok('chapters', rec.tuned === false && rec.ruin.fixes.length === 0 && rec.ruin.found === false && rec.ruin.briefed === 0, 'a record of issue 34 read as something in chapter 2');
+  ok('chapters', C.loadFixes('OldFound').found === true, 'a find of issue 34 did not stay a find');
+  ok('chapters', C.foundSeeds().get('OldFound') === 1, 'foundSeeds() did not count the find of issue 34 as one');
+  // a write of chapter 1 leaves the record in the shape of issue 34: no tuned and no ruin key
+  C.addFix('Old', { lat: other.lat, lon: other.lon, brg: 200, err: 7 });
+  const raw = JSON.parse(store.get(C.CARRIER_KEY)).Old;
+  ok('chapters', !('tuned' in raw) && !('ruin' in raw), 'a write of chapter 1 added the keys of chapter 2');
+
+  // chapter 2 takes its own fixes, and the fixes of chapter 1 stand still
+  rec = C.addFix('Old', { lat: site.lat, lon: site.lon, brg: 99, err: 3 }, { chapter: 2 });
+  ok('chapters', rec.ruin.fixes.length === 1 && rec.ruin.fixes[0].brg === 99, 'chapter 2 did not take its fix');
+  ok('chapters', rec.fixes.length === 2 && rec.fixes.every((f) => f.brg !== 99), 'a fix of chapter 2 went into chapter 1');
+  // one fix per cell holds in chapter 2 too, and the bound of MAX_FIXES
+  rec = C.addFix('Old', { lat: site.lat, lon: site.lon, brg: 98, err: 3 }, { chapter: 2 });
+  ok('chapters', rec.ruin.fixes.length === 1 && rec.ruin.fixes[0].brg === 98, 'a second landing on one cell did not replace the fix of chapter 2');
+  for (let i = 0; i < C.MAX_FIXES + 3; i++) {
+    const d = S.dirToSite(snapDir(randDir()));
+    rec = C.addFix('Old', { lat: d.lat, lon: d.lon, brg: i, err: 4 }, { chapter: 2 });
+  }
+  ok('chapters', rec.ruin.fixes.length === C.MAX_FIXES && rec.fixes.length === 2, `the bound of chapter 2 gave ${rec.ruin.fixes.length} fixes and chapter 1 kept ${rec.fixes.length}`);
+
+  // the brief of each chapter stands on its own
+  rec = C.markBriefed('Old', 3, { chapter: 2 });
+  ok('chapters', rec.ruin.briefed === 3 && rec.briefed === 2, 'the brief of chapter 2 moved the brief of chapter 1');
+
+  // the tune: it keeps every fix, and it reads back
+  rec = C.markTuned('Old');
+  ok('chapters', rec.tuned === true && C.loadFixes('Old').tuned === true, 'the tune did not stand after a read');
+  ok('chapters', rec.fixes.length === 2 && rec.ruin.fixes.length === C.MAX_FIXES, 'the tune took fixes with it');
+
+  // the clear of chapter 2 keeps chapter 1, the tune, and the briefs
+  rec = C.clearFixes('Old', { chapter: 2 });
+  ok('chapters', rec.ruin.fixes.length === 0 && rec.fixes.length === 2 && rec.tuned && rec.ruin.briefed === 3, 'the clear of chapter 2 took more than its fixes');
+  // the find of chapter 2 drops its fixes only, and a found chapter 2 takes no fix
+  C.addFix('Old', { lat: site.lat, lon: site.lon, brg: 12, err: 3 }, { chapter: 2 });
+  rec = C.markFound('Old', { chapter: 2 });
+  ok('chapters', rec.ruin.found && rec.ruin.fixes.length === 0 && rec.fixes.length === 2 && !rec.found, 'the find of chapter 2 touched chapter 1');
+  rec = C.addFix('Old', { lat: site.lat, lon: site.lon, brg: 13, err: 3 }, { chapter: 2 });
+  ok('chapters', rec.ruin.fixes.length === 0, 'a found chapter 2 took a new fix');
+  ok('chapters', C.foundSeeds().get('Old') === 1, 'foundSeeds() did not count the find of the ruin');
+  C.markFound('Old');
+  ok('chapters', C.foundSeeds().get('Old') === 2, 'foundSeeds() did not count two finds');
+  // a chapter 2 of garbage reads as empty
+  store.set(C.CARRIER_KEY, '{"Bad": {"fixes": [], "tuned": 1, "ruin": {"fixes": [7, {"lat": "x"}], "found": 0, "briefed": 99}}}');
+  rec = C.loadFixes('Bad');
+  ok('chapters', rec.tuned === true && rec.ruin.fixes.length === 0 && rec.ruin.found === false && rec.ruin.briefed === C.BRIEF_STAGES, 'a chapter 2 of garbage did not clean up');
+  store.clear();
+
+  // The second colour. A plain green world with no sea: the two colours differ, both come from the
+  // list, and carrierColour() gives each chapter its own.
+  const world = worldWith('Colour', snapDir(randDir()));
+  const col = new Float32Array(3 * 600);
+  for (let i = 0; i < 600; i++) { col[i * 3] = 0.05 + 0.02 * (i % 5); col[i * 3 + 1] = 0.3 + 0.01 * (i % 7); col[i * 3 + 2] = 0.04; }
+  const c1 = G.pickCarrierColour(world, col, null);
+  ok('colour', G.carrierColour(world, 1) === c1, 'carrierColour() of chapter 1 is not the pick');
+  const c2 = G.carrierColour(world, 2);
+  ok('colour', c2 !== c1, `the two chapters took one colour, ${c1}`);
+  ok('colour', G.pickCarrierColour(world, col, null) === c1 && G.carrierColour(world, 2) === c2, 'the pick of the colours is not the same on a second read');
+  const hex = (c) => new THREE.Color(c).getHex();
+
+  // The group of a tuned record paints chapter 2: the fixes of the ruin in the second colour.
+  const ruinDir = snapDir(randDir());
+  world.ruin = { kind: 'ruin', dir: [ruinDir.x, ruinDir.y, ruinDir.z], freq: '7.316' };
+  const ruinSite = S.sourceSite(world, world.ruin);
+  const up = S.siteDir(ruinSite.lat, ruinSite.lon, new THREE.Vector3());
+  const near = [];
+  for (let k = 0; k < 3; k++) {
+    const t = new THREE.Vector3(0, 1, 0).cross(up).normalize().applyAxisAngle(up, k * 2.1);
+    const d = up.clone().multiplyScalar(Math.cos(3 * S.CELL)).addScaledVector(t, Math.sin(3 * S.CELL));
+    const s = S.snapSite(S.dirToSite(d));
+    const c = S.carrierAt(world, s, world.ruin);
+    near.push({ lat: s.lat, lon: s.lon, brg: c.brg, err: c.err });
+  }
+  const wreckFix = { lat: site.lat, lon: site.lon, brg: 1, err: 5 };
+  const record = { fixes: [wreckFix], found: false, briefed: 0, ts: 0, tuned: false, ruin: { fixes: near, found: false, briefed: 0 } };
+  let group = G.makeCarrierGroup(world, record, HM);
+  let uni = G.carrierUniforms();
+  ok('group', group.userData.chapter === 1 && uni.uWedgeCount.value === 1, 'a record that is not tuned did not paint chapter 1');
+  ok('group', uni.uWedgeCol.value.getHex() === hex(c1), 'chapter 1 did not paint in the first colour');
+  G.disposeCarrierGroup(group);
+
+  record.tuned = true;
+  record.found = true;             // the wreck is found: its pin stands in chapter 2 too
+  group = G.makeCarrierGroup(world, record, HM);
+  uni = G.carrierUniforms();
+  ok('group', group.userData.chapter === 2 && uni.uWedgeCount.value === 3, `a tuned record painted ${uni.uWedgeCount.value} wedges of chapter ${group.userData.chapter}`);
+  ok('group', uni.uWedgeCol.value.getHex() === hex(c2), 'chapter 2 did not paint in the second colour');
+  ok('group', uni.uWedgeS.value[0].distanceTo(G.wedgePlanes(near[0]).s) < 1e-6, 'the first wedge of chapter 2 is not the first fix of the ruin');
+  ok('group', !!group.userData.wreck && group.userData.wreck.obj.parent === group, 'the pin of the wreck went away in chapter 2');
+  ok('group', group.userData.wreck.pinMat.color.getHex() === hex(c1), 'the pin of the wreck left the colour of chapter 1');
+  // three near fixes of the ruin fill the cell of the ruin, and not the cell of the wreck
+  const g = G.goalCell(world, near, world.ruin);
+  ok('goal', g && g.lat === ruinSite.lat && g.lon === ruinSite.lon, 'three near fixes of the ruin did not fill the cell of the ruin');
+  ok('goal', uni.uGoalK.value > 0 && G.inCell(uni.uGoalN.value, up) > 0, 'the group of chapter 2 does not fill the cell of the ruin');
+  // a find of the ruin takes the wedges of chapter 2 away and fills its cell for good
+  G.setFound(group, world, HM, { chapter: 2 });
+  ok('group', uni.uWedgeCount.value === 0 && uni.uGoalK.value > 0 && G.inCell(uni.uGoalN.value, up) > 0, 'the find of the ruin did not take the wedges away and fill its cell');
+  G.disposeCarrierGroup(group);
+
+  // a tuned record of a world with no ruin stays on the wreck
+  const bare = { ...world, ruin: null };
+  group = G.makeCarrierGroup(bare, record, HM);
+  ok('group', group.userData.chapter === 1, 'a world with no ruin ran chapter 2');
+  G.disposeCarrierGroup(group);
+
+  chapterRow = `  chapters  a record of issue 34 read and wrote as it was; each call touched its own chapter;`
+    + ` chapter 2 painted in ${c2} beside ${c1} and filled the cell of the ruin`;
+}
+
 // ---------------------------------------------------------------- the report
 console.log('carrier-fix-check');
 console.log('  store   one fix per cell, the brief, the find that drops the fixes, both bounds, a quota error, and garbage');
@@ -510,6 +638,7 @@ console.log(washRow);
 console.log(fadeRow);
 console.log(markRow);
 console.log(goalRow);
+console.log(chapterRow);
 if (fails.length) {
   console.error('\nFAIL');
   for (const f of fails) console.error('  ' + f);

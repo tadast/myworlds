@@ -128,7 +128,13 @@
             far   one more wedge must cut the cross
          3  this is the cell of the carrier: the needle leads to it
        Each step carries an inline SVG that draws the move it asks for. The SVG is the only copy,
-       and the ill-* classes in style.css animate it. -->
+       and the ill-* classes in style.css animate it.
+
+       Chapter 2 of the search, p2-38, takes the same three stages for the ruin. app.js writes the
+       chapter on the dialog as data-chapter, and a block with data-chapter shows in that chapter
+       only. Stage 1 holds a text for each chapter under one drawing, and stages 2 and 3 read the
+       same in both. In chapter 2 the wedges and the fixes of the drawings take the colour of chapter
+       2 of the world; see "the brief of the carrier" in style.css. -->
   <dialog id="carrier-brief" aria-labelledby="carrier-brief-title">
     <form method="dialog" class="about-card">
       <button type="submit" class="cclose" aria-label="Close">×</button>
@@ -150,14 +156,27 @@
 <text x="12" y="26" text-anchor="start" font-size="12" fill="#eef1ff">the carrier is where</text><text x="12" y="39" text-anchor="start" font-size="12" fill="#9aa3c7">the wedges cross</text>
 <text x="18" y="150" text-anchor="start" font-size="12" fill="#9aa3c7">first landing</text><text x="20" y="163" text-anchor="start" font-size="12" fill="#9aa3c7">takes a wedge</text>
 <text x="350" y="158" text-anchor="end" font-size="12" fill="#ffb86b">land again,</text><text x="350" y="171" text-anchor="end" font-size="12" fill="#9aa3c7">far to one side</text></svg>
-        <p>The probe hears a distress signal. Something on this world still transmits.</p>
-        <p>The instrument shows a bearing to the source, with an error. It shows no distance. The signal does not reach the far side of the world.</p>
-        <ol class="brief-steps">
-          <li>Go back to orbit. The globe shows a wedge from this site. The source is inside the wedge.</li>
-          <li>Land at a second site, far to one side. The new wedge crosses the first.</li>
-          <li>Land where the wedges cross. Near the source, the instrument shows a range.</li>
-          <li>Follow the needle and walk to the source.</li>
-        </ol>
+        <div data-chapter="1">
+          <p>The probe hears a distress signal. Something on this world still transmits.</p>
+          <p>The instrument shows a bearing to the source, with an error. It shows no distance. The signal does not reach the far side of the world.</p>
+          <ol class="brief-steps">
+            <li>Go back to orbit. The globe shows a wedge from this site. The source is inside the wedge.</li>
+            <li>Land at a second site, far to one side. The new wedge crosses the first.</li>
+            <li>Land where the wedges cross. Near the source, the instrument shows a range.</li>
+            <li>Follow the needle and walk to the source.</li>
+          </ol>
+        </div>
+        <div data-chapter="2" hidden>
+          <p>The receiver holds the band of the log. The probe hears a signal on it.</p>
+          <p>Nothing of the crew sends on this band. Something else on this world transmits here.</p>
+          <p>The search runs as it did for the wreck. The instrument shows a bearing to the source, with an error, and no distance. The signal does not reach the far side of the world.</p>
+          <ol class="brief-steps">
+            <li>Go back to orbit. The globe shows a wedge from this site, in a new colour. The source is inside the wedge.</li>
+            <li>Land at a second site, far to one side. The new wedge crosses the first.</li>
+            <li>Land where the wedges cross. Near the source, the instrument shows a range.</li>
+            <li>Follow the needle to the source.</li>
+          </ol>
+        </div>
       </div>
       <div data-stage="2" hidden>
         <p>The signal is stronger, but the carrier is not within the reach of the probe.</p>
@@ -263,18 +282,21 @@
       <span class="k">Above ground</span>
     </div>
     <!-- The fifth block, issue 34: the carrier. A needle that turns with the view, the bearing as
-         three digits, the error of that bearing, one word for the strength, and the range once the
-         probe stands near the source. probe-hud.js hides the block on a world with no source.
+         three digits, the band the receiver holds, the error of that bearing, one word for the
+         strength, and the range once the probe stands near the source. probe-hud.js hides the block
+         on a world with no source. The band is 406.025 MHz in chapter 1 and the frequency of the
+         ruin in chapter 2. p2-38.
 
-         The block is a button, because it opens the brief of the distress signal below. The rest of
-         the overlay takes no pointer event, so the style gives this one block pointer-events: auto
-         and every other gesture still belongs to the ground under it. -->
+         The block is a button, because it opens the brief of the signal below. The rest of the
+         overlay takes no pointer event, so the style gives this one block pointer-events: auto and
+         every other gesture still belongs to the ground under it. -->
     <button type="button" class="hud-carrier" id="hud-carrier" hidden
-            aria-label="Read the brief of the distress signal">
+            aria-label="Read the brief of the signal">
       <div class="hud-dial"><i id="hud-needle"></i></div>
       <div class="hud-read">
         <span class="k">Carrier</span>
         <b id="hud-brg">—</b>
+        <span class="k" id="hud-freq">406.025 MHz</span>
         <div class="hud-sub"><span class="k" id="hud-err">±0°</span><span class="k" id="hud-strength">Faint</span></div>
         <span class="k" id="hud-range" hidden></span>
         <span class="k hud-hint" id="hud-hint">New signal · tap</span>
