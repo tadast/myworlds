@@ -27,7 +27,8 @@ on. `CONTEXT.md` holds the words to avoid.
 | 1. Name the ruin | `ruin-types.js` | Web Worker, page, tools | the proto, the frequency, the seed of the way on |
 | 2. Place the ruin | `generate.js`, `makeRuin()` | Web Worker | `world.ruin` |
 | 3. Show the place | `app.js`, `?ruin` | Main thread | a cyan dot on the globe, for the eye check |
-| 4. Follow the ruin | `site.js`, `carrier-store.js`, `carrier-globe.js`, `app.js` | Main thread | chapter 2 of the search, after the tune (p2-38) |
+| 4. Build the body | `ruin-geometry.js`, `ruinGeometry()` | Main thread, tools | the body, the glow, the orbit, and the lamp. See "The body" |
+| 5. Follow the ruin | `site.js`, `carrier-store.js`, `carrier-globe.js`, `app.js` | Main thread | chapter 2 of the search, after the tune (p2-38) |
 
 `world.ruin` rides back with the world as plain data, so `worker.js` clones it with the rest:
 
@@ -198,6 +199,106 @@ of the tallest part, in units. The mast of the wreck stands 18.
 
 A gas giant takes no proto. `protoRow(id)` gives the row of an id.
 
+## The body
+
+`ruinGeometry(proto, world, { mini })` in `ruin-geometry.js` builds the body of a ruin, on the
+pattern of `wreckGeometry()` in `wreck-geometry.js`. It takes no DOM and does nothing at import, so
+the ground (p2-41), the card (p2-42), the globe, and the tools build their ruin here. It reads
+`world.type` for the stone and `world.ruin.maker` for the limbs and the size of the maker, and
+nothing else of the world, so a plain stub `{ type, ruin: { maker } }` builds a ruin in the lab.
+
+It gives `{ body, glow, orbit, lamp }`:
+
+- `body` is one non-indexed `BufferGeometry` with a colour per vertex, flat-shaded, in its own
+  frame: y up, the origin on the ground under the middle of the ruin, in units of the box.
+  `body.userData.lamp` repeats `lamp`, and the well sets `body.userData.hole`, the radius of its
+  mouth, so p2-41 can open the terrain over the shaft.
+- `glow` holds the parts that carry the light, in the same frame, with no vertex colour. p2-41
+  gives it one material in the `glow` colour of the type, and blinks it on the motif.
+- `orbit` holds the parts that move, or null. Only the floaters have one: the nine slabs and the
+  two rings, which p2-41 turns about y.
+- `lamp` is `[x, y, z]` of the brightest point: the point light of HIGH and the lamp of the globe.
+
+### The eight protos
+
+The shapes are the prototypes of the design session of 2026-09-27, ported part for part, with the
+proportions, the heights, and the discs of the table above.
+
+| Proto | What the body holds | Where the light stands | Lamp |
+|---|---|---|---|
+| `spires` | seven five-sided spires on dark plinths, six bridges, rubble | the tip of the tallest spire, and a band at 0.62 of each spire | the tip, at 88 |
+| `dome` | a base ring with a door, 14 ribs of beams, six of them broken, fallen pieces, an accent band, a stone ring near the top, a plinth | a core on the plinth | the core |
+| `arches` | six arches of legs and nine blocks each, lower along z, the fifth broken, the sixth without its arch, paving, a fallen block | the keystone of the first arch | the keystone |
+| `well` | a shaft 46 deep with the wall facing in, a rim, eight pylons that lean out, a stair down the wall, rubble | the floor of the shaft, and the cap of each pylon | the middle of the mouth, 2 up, because the light of the floor comes out of it |
+| `floaters` | a ring of ten stones and a plinth; in the orbit, nine slabs and two rings | a core over the plinth | the core |
+| `colossus` | the statue of the maker on its side, the head to -x, and the hand that stands out of the ground | the eye, and the palm of the hand | the palm, because the hand is the landmark |
+| `ring` | 26 stones on a ring on its edge, one missing, the part under the ground left out, accent blocks on every third stone, two fallen stones | a torus along the inner edge, over the ground only | the top of the inner edge |
+| `hive` | the colony: see below | a door on every third cell of the rim of each mound, and a crown on the great mound | the crown |
+
+**The hive is a colony.** One great mound and three small hives, each a hexagon of rings of equal
+hex cells, `rc` 2.6 units, with each ring one step, `STEP` 5 units, over the ring outside it, so the
+terraces are level and the mound reads as built and not as grown. The great mound has five rings
+and stands 30 units at the crown; each small hive has one ring. A few cells inside a mound fell one
+step: it is a ruin. Two rows of hex pavers pave the way from the great mound to each small hive.
+Every cell wears an accent cap. A face of a cell that a neighbour of the same height or higher
+covers is left out, and a face over a lower neighbour starts at the top of that neighbour, so a
+terrace costs its top and its outer wall and nothing more.
+
+**The colossus takes the maker.** `maker.limbs` sets the legs: pairs lie along the body at
+stations, one leg on the up side, bent at the knee, and one crushed under the body, as the
+prototype lays three. Six limbs take three stations, four and three take two, two and one take
+one. A maker of one limb lies on one thick leg. A maker of no limbs, a serpent, lies as a long body
+in coils: a chain of rods on a wave, thick at the head and thin at the tail. The raised hand stays
+on every count, with the palm lit, because it is the landmark from across the cell.
+
+**The maker sizes the doors and the steps.** `maker.height` is the body size in metres, a length
+for a hexapod, a serpent, a slinger, a plough, or a winged maker. It does not scale the statue. It
+sets the door of the dome, a gap in the base ring with two jambs and a lintel, the doors of the
+hive, and the rise of the steps of the well, each inside a range the part can hold: a door of the
+hive stays under the height of the cell it stands in, and a big maker takes fewer, taller steps.
+
+### The stone
+
+The stone is fixed per world type in `RUIN_PAL`: the stone, the dark, an accent, and the colour
+of the glow. It does not take the colours of the biome, so a ruin reads as a made thing on every
+world, as the hull of the wreck does. On a lava world the accent is a seam that takes the glow: the
+accent parts join the glow geometry there, so the seams blink with the light. `ruinPalette(type)`
+gives the row of a type.
+
+### The mini model
+
+`mini: true` gives the body only, in one colour, the stone of the type, with the big parts alone: no
+rubble, no pavers, no bands, no doors, no steps, and no glow, except the core of the floaters,
+which the mini keeps as stone because it is the shape. The slabs of the floaters go into the body.
+`glow` and `orbit` are null. The globe draws that body beside the mini wreck after the find, at
+`MINI_UNIT` globe radii per unit: `WRECK_MODEL_H` of 0.012, the `MODEL_H` of `carrier-globe.js`,
+over the mast of the wreck of 18 units, so the spires stand 4.9 times the mini wreck and the
+colossus 1.2 times. `miniHeight(proto)` gives the height of a mini in globe radii. The constant is
+a copy, because `carrier-globe.js` imports this file for the mini ruin.
+
+### The budget
+
+At most `BODY_BUDGET`, 4,000 triangles, for the body of any proto, and `MINI_BUDGET`, 1,500, for
+the mini model. Every face that stands under the ground or inside another part is left off: a
+box on the ground has no bottom, a beam has no ends, a cone has no base, a hex cell has no bottom
+and no covered side. The counts on 2026-09-28, the largest over every type, limb count, and maker
+size:
+
+| Proto | Body | Glow | Orbit | Mini |
+|---|---|---|---|---|
+| spires | 366 | 192 | – | 126 |
+| dome | 1,940 | 20 | – | 700 |
+| arches | 654 | 8 | – | 472 |
+| well | 992 | 244 | – | 188 |
+| floaters | 116 | 8 | 492 | 232 |
+| colossus | 448 | 20 | – | 328 |
+| ring | 336 | 404 | – | 228 |
+| hive | 3,152 | 200 | – | 1,012 |
+
+`node tools/ruin-geometry-check.mjs` holds every build to the budget, the frame, the disc, the
+height, and the maker, and prints this table. `tools/ruin-lab.html` shows every proto on every
+type it fits, with the counts, a person of 1.8 units, and the wreck of chapter 1 for scale.
+
 ## The frequency, the compass word, and the way on
 
 - `freqOf(seed)` gives the frequency as `'N.NNN'`, from 3.000 to 29.999 MHz. It always prints three
@@ -296,3 +397,10 @@ decides `RUIN_NEAR` and `RUIN_FAR`.
   the group. p2-38.
 - Add `?ruin` to the address, with `?source`, to see the two dots on the globe, for example
   `http://localhost:5555/?ruin&source#Auralis`. The ruin is cyan and the wreck is pink.
+- `node tools/ruin-geometry-check.mjs` builds every proto on every type it fits, with every limb
+  count and four maker sizes, and holds each build to the budget and the frame. See "The body".
+- `tools/ruin-lab.html` draws the protos with the real `ruinGeometry()`. The address takes the
+  view, for example `tools/ruin-lab.html?proto=hive&type=terran&limbs=6&mini=1`, and the grid
+  under the view shows every proto on every type it fits. From the console, `lab.render()` draws
+  one frame, `lab.shot('name')` posts a PNG of it to the shot-sink, and `lab.shotGrid('name')`
+  posts the grid; `?shot=name` in the address takes the first shot at load.

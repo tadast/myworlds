@@ -74,3 +74,49 @@ wreck for scale. When the lab works, delete `tools/ruin-prototypes.html` and poi
 - Every body is under 4,000 triangles, and every mini model under 1,500.
 - The colossus lies on the limbs of its maker for 0, 2, 3, 4, and 6 limbs.
 - The owner looks at the lab on the six types before p2-41 merges. This is the HITL check of p2-00.
+
+## What the build changed
+
+Built 2026-09-28. Every deviation from the plan above, and the reason:
+
+- **The hive mound is a hexagon of rings, not a rounded dome.** The prototype gave each cell a
+  height from a rounded profile, so every cell stood at its own height and the mound read as basalt
+  columns, not as built terraces. The port lays a mound as rings of hex cells, and each ring stands
+  one step, 5 units, over the ring outside it, so the terraces are level. The cell size stays 2.6.
+  The great mound has five rings and stands 30 at the crown; each small hive has one ring. A few
+  cells inside a mound fell one step, so it still reads as a ruin. The crown gained six stone
+  prongs around the lit stone. The three small hives are all one ring, because a two-ring hive did
+  not fit the disc of 55 beside the great mound.
+- **On a lava world the accent parts join the glow geometry.** The prototype gave the lava accent a
+  steady glow of its own. The contract has three geometries and one blinking material, so the
+  seams blink with the light there. A fourth geometry for a steady seam is a choice for p2-41.
+- **The lamp of the well stands at the mouth, 2 units up,** not on the floor 45 units down: a point
+  light on the floor lights nothing the reader sees, and the lamp of the globe must stand over the
+  model. The floor and the pylon caps are the glow. **The lamp of the colossus is the palm,** not
+  the eye, because the hand is the landmark from across the cell.
+- **The dome gained a door.** The prototype had none, and the plan asks the maker to size it. The
+  door is a gap in the base ring with two jambs and an accent lintel, sized from `maker.height`.
+- **The rubble stays inside the disc.** The prototype scattered the rubble of the spires to 26 and
+  of the well to 36 units, past discs of 24 and 30. The port keeps every part inside the disc, and
+  the check holds it there.
+- **The steps of the well scale in pitch and depth with the rise,** so a big maker takes fewer and
+  longer steps, not the same steps farther apart.
+- **The mini keeps the core of the floaters as stone.** It is the shape of that proto. Every other
+  glow part leaves the mini.
+- **`mergeParts()` is not shared.** `ruin-geometry.js` has its own `weld()`, with a no-colour mode
+  for the glow, and its own face-masked primitives, because the budget needs boxes with no bottom,
+  beams with no ends, cones with no base, hex cells with no covered side, and a shaft that faces
+  in. `wreck-geometry.js` is untouched.
+- **The scale in the lab is the whole wreck, not the mast alone.** `wreckGeometry('tripod', { camp:
+  false })` carries the mast of 18 units, and the body beside it shows the true size relation.
+- **The mini scale.** `carrier-globe.js` holds the height of the mini wreck as `MODEL_H = 0.012`
+  globe radii; there is no `WRECK_H` in the code. `WRECK_MODEL_H` in `ruin-geometry.js` copies
+  0.012, with a comment, because an import of `carrier-globe.js` would be a cycle once the globe
+  imports the ruin. One unit of a ruin is 0.012 / 18 globe radii on the globe.
+- **p2-35 merged during the build.** The branch rebased on it, and `ruin-geometry.js` imports
+  `RUIN_PROTOS` and `protoRow` from `ruin-types.js`. The local table of the plan was never committed.
+- **The colossus stations.** Six limbs take the three stations of the prototype, four and three
+  take two, two and one take one; the second station keeps the foot box of the prototype. A pair
+  is one leg on the up side and one crushed under the body on the far side.
+- **The check is a Node script,** `tools/ruin-geometry-check.mjs`, through `tools/three-hook.mjs`,
+  so the budget runs with no browser. The lab states the counts too.
