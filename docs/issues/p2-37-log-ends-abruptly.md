@@ -37,3 +37,26 @@ it off.
 - The note reads at a phone width of 390 pixels and scrolls clear of the fade.
 - `node tools/world-checksum.mjs` passes against the baseline, and `node tools/lore-audit/audit.mjs`
   passes.
+
+## What the build changed
+
+- The note is a `<p class="cabrupt">` inside the `.clog-entry` of the ending, after the `<p>` of the
+  text. So it hangs off the rail of the entry, a screen reader reads it after the text, and the
+  padding of `.clog` still clears it of the fade. `ABRUPT_SLOT` and `ABRUPT` in `ground-source.js`
+  hold the slot and the words.
+- The plan gave no size. The note takes 13 px, a top margin of 6 px, and a letter spacing of
+  0.02 em, so it reads as smaller than the text and larger than the day label. It takes
+  `var(--muted)`, the colour of a day label with no title. The day label of the last entry takes the
+  accent, because that entry carries a title, and the note does not follow it there.
+- The docs go past the one paragraph of the plan by two lines. The ending table of
+  `docs/source.md` points the `cut` row at "The card", and `README.md` "How it works" gets one
+  sentence, because the conventions ask for it when a reader sees a change.
+- The verification did not land on the cell of the wreck. It called `__mw.sourceInspector.show()`
+  in orbit with `data-subject="source"`, the steps of `inspectSource()` less `onSourceFound()`, so
+  the store of the shared origin records no find.
+- Verified on `audit-15` (terran, `Bastion 19`, "The hatch alarm is going and Vikram is shouting
+  for me. I will finish this when I") and on `audit-21`: one note, in the last entry, in italics and
+  in `rgb(154, 163, 199)`, with no `aria-hidden`, and the tree of the page holds it. `audit-0` and
+  `audit-1` end on `doom` and `audit-2` ends on `ride`: no note. With the log scrolled to its end,
+  the note stands 7.8 px over the fade at 1280 by 800 and 4.1 px over it at 390 by 844, on one line,
+  and the page does not scroll across.

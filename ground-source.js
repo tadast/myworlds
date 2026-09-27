@@ -215,6 +215,13 @@ const SPIN = 0.22;           // radians per second: one turn in about 28 seconds
 const FRAME_H = 2.6;         // units: the height the body is scaled to on the card
 const CAM_DIST = 5.6;        // units: set from FRAME_H and the 36 degree field of view
 const CARD_DISC = 2.2;       // units: the ground disc under the wreck
+// An ending of the kind `cut` stops in the middle of a sentence on purpose. Without a note, the
+// reader takes the open line for text that did not load. The card therefore prints this note under
+// that entry. The note is a part of the card and not of the log: it is not in log.entries, and the
+// audit never reads it. The rule reads the slot and not the text, so every ending of the kind `cut`
+// gets the note. See "The card" in docs/source.md.
+const ABRUPT_SLOT = 'end.cut';
+const ABRUPT = '[log ends abruptly]';
 
 export class SourceInspector {
   constructor({ card, canvas }) {
@@ -302,10 +309,11 @@ export class SourceInspector {
     this.crewEl.innerHTML = crew.length
       ? crew.map((c) => `<span${c.name === log.keeper ? ' class="ckeeper"' : ''}>${esc(c.name)}<i>${esc(c.role)}</i></span>`).join('')
       : '';
-    // The log itself. A middle entry carries no title, and the header is then the day alone.
+    // The log itself. A middle entry carries no title, and the header is then the day alone. An
+    // ending of the kind `cut` also gets the note of the card under its text. See ABRUPT.
     const entries = (log && log.entries) || [];
     this.logEl.innerHTML = entries.length
-      ? entries.map((e) => `<div class="clog-entry${e.title ? ' ctitled' : ''}"><h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p></div>`).join('')
+      ? entries.map((e) => `<div class="clog-entry${e.title ? ' ctitled' : ''}"><h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p>${e.slot === ABRUPT_SLOT ? `<p class="cabrupt">${ABRUPT}</p>` : ''}</div>`).join('')
       : '<div class="clog-entry"><p>The recorder is dead. Nothing can be read from it.</p></div>';
     this.logEl.scrollTop = 0;
     this.card.hidden = false;
