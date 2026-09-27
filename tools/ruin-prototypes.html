@@ -1,0 +1,1023 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The prototypes and the choice sheet of the design session of 2026-09-27, for phase 2. A
+     reference and not a part of the app. See docs/issues/p2-00-the-second-signal.md. The shapes
+     move to ruin-geometry.js in p2-36, and tools/ruin-lab.html replaces this page as the lab. -->
+<title>The Second Signal</title>
+<meta name="description" content="Plan and choice sheet for chapter 2 of the carrier search in My Worlds.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #070a16;
+    --panel: #0d1228;
+    --panel-2: #131a36;
+    --line: rgba(238, 241, 255, 0.12);
+    --line-2: rgba(238, 241, 255, 0.22);
+    --text: #eef1ff;
+    --muted: #9aa3c7;
+    --faint: #6b7399;
+    --carrier: #7cc4ff;   /* chapter 1: the distress carrier of the wreck */
+    --signal: #8ef0c6;    /* chapter 2: the unknown signal */
+    --rec: #ffb86b;       /* recommended */
+    --warn: #ff8a7a;
+    --display: 'Fredoka', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+    --body: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 var(--body);
+    padding-inline: 16px;
+    padding-block: 0 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin-inline: auto; display: grid; gap: 64px; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 500; text-wrap: balance; margin: 0; letter-spacing: 0.005em; }
+  h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.05; }
+  h2 { font-size: 28px; line-height: 1.15; }
+  h3 { font-size: 19px; line-height: 1.25; }
+  p { margin: 0; }
+  .muted { color: var(--muted); }
+  .eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .mono { font-family: var(--mono); }
+  .tnum { font-variant-numeric: tabular-nums; }
+  a { color: var(--carrier); }
+  button, input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+  /* ---------- header */
+  header { padding-top: 56px; display: grid; gap: 18px; max-width: 760px; }
+  header .lede { font-size: 18px; color: var(--muted); max-width: 64ch; }
+  header .lede b { color: var(--text); font-weight: 700; }
+  .band { display: flex; flex-wrap: wrap; gap: 10px 22px; font: 400 13px/1.3 var(--mono); color: var(--muted); }
+  .band span b { color: var(--carrier); font-weight: 500; }
+  .band span.sig b { color: var(--signal); }
+
+  section { display: grid; gap: 22px; }
+  .sechead { display: grid; gap: 8px; max-width: 760px; }
+  .sechead p { color: var(--muted); }
+
+  /* ---------- the spine */
+  .spine { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: s; }
+  .steps li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .steps li:first-child { border-top: 0; }
+  .steps li::before { content: counter(s); font: 500 13px/28px var(--mono); width: 28px; height: 28px; text-align: center; border-radius: 50%; border: 1px solid var(--line-2); color: var(--muted); }
+  .steps li.ch1::before { border-color: var(--carrier); color: var(--carrier); }
+  .steps li.ch2::before { border-color: var(--signal); color: var(--signal); }
+  .steps h3 { font-size: 17px; margin-bottom: 2px; }
+  .steps p { color: var(--muted); font-size: 15px; }
+
+  .demo { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; display: grid; gap: 16px; }
+  .entry { display: grid; grid-template-columns: 16px 1fr; gap: 12px; }
+  .entry .rail { position: relative; }
+  .entry .rail::before { content: ''; position: absolute; left: 7px; top: 0; bottom: 0; width: 1px; background: var(--line-2); }
+  .entry .rail::after { content: ''; position: absolute; left: 3px; top: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--rec); }
+  .entry .day { font: 400 12px/1.4 var(--mono); color: var(--muted); }
+  .entry .ttl { font: 500 16px/1.3 var(--display); color: var(--rec); }
+  .entry .txt { font-size: 15px; max-width: 62ch; }
+  .entry .txt .f { font-family: var(--mono); font-size: 14px; background: rgba(142, 240, 198, 0.1); padding: 1px 5px; border-radius: 4px; }
+  .tuner { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .tuner label { font: 500 12px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .tuner form { display: flex; gap: 8px; flex-wrap: wrap; }
+  .field { display: flex; align-items: center; background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px; padding-inline: 12px; min-width: 0; flex: 1 1 160px; }
+  .field input { background: none; border: 0; outline: 0; padding-block: 10px; font: 500 16px var(--mono); width: 100%; min-width: 0; }
+  .field span { font: 400 13px var(--mono); color: var(--muted); }
+  .field:focus-within { border-color: var(--signal); }
+  .btn { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px; padding: 9px 16px; cursor: pointer; font-family: var(--display); font-weight: 500; }
+  .btn:hover { border-color: var(--text); }
+  .btn.sig { border-color: var(--signal); color: var(--signal); }
+  .reply { font: 400 14px/1.4 var(--mono); color: var(--muted); min-height: 1.4em; }
+  .reply.lock { color: var(--signal); }
+  .reply.near { color: var(--rec); }
+  .hud { display: flex; align-items: center; gap: 14px; background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font: 400 13px/1.3 var(--mono); }
+  .needle { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-2); position: relative; flex: none; }
+  .needle i { position: absolute; left: 50%; top: 4px; width: 2px; height: 13px; margin-left: -1px; background: var(--carrier); transform-origin: 50% 13px; transform: rotate(63deg); transition: transform .6s, background .3s; border-radius: 1px; }
+  .hud .k { color: var(--muted); font-size: 11px; letter-spacing: .1em; }
+  .hud .v { color: var(--carrier); transition: color .3s; }
+  .hud.locked .v { color: var(--signal); }
+  .hud.locked .needle i { background: var(--signal); transform: rotate(41deg); }
+  .hint { font-size: 13px; color: var(--faint); }
+
+  /* ---------- the structures */
+  .types { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border: 1px solid var(--line-2); background: none; border-radius: 999px; padding: 6px 14px; cursor: pointer; font: 500 14px var(--display); color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
+  .chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .chip[aria-pressed="true"] { color: var(--text); border-color: var(--text); background: var(--panel-2); }
+  .stage { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 20px; align-items: stretch; }
+  .viewer { position: relative; aspect-ratio: 16 / 10; max-width: 100%; border-radius: 18px; overflow: hidden; border: 1px solid var(--line); background: #0b1022; }
+  .viewer canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .viewer .ov { position: absolute; left: 12px; bottom: 10px; font: 400 12px var(--mono); color: rgba(255,255,255,.75); text-shadow: 0 1px 2px rgba(0,0,0,.6); pointer-events: none; }
+  .viewer .load { position: absolute; inset: 0; display: grid; place-items: center; font: 400 14px var(--mono); color: var(--muted); }
+  .info { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; display: grid; gap: 14px; align-content: start; }
+  .info .name { font: 500 26px/1.1 var(--display); }
+  .info dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 14px; }
+  .info dt { color: var(--muted); font: 400 12px/1.7 var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+  .info dd { margin: 0; }
+  .fits { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fits span { font: 400 12px/1 var(--mono); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--muted); }
+  .fits span.on { color: var(--text); border-color: var(--text); }
+  .toggles { display: flex; flex-wrap: wrap; gap: 14px; font-size: 14px; color: var(--muted); }
+  .toggles label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .keep { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font: 500 15px var(--display); }
+  .switch input { appearance: none; width: 40px; height: 22px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line-2); position: relative; cursor: pointer; margin: 0; transition: background .2s; }
+  .switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+  .switch input:checked { background: rgba(142, 240, 198, .2); border-color: var(--signal); }
+  .switch input:checked::after { transform: translateX(18px); background: var(--signal); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .card { position: relative; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); display: grid; cursor: pointer; text-align: left; padding: 0; }
+  .card img { width: 100%; aspect-ratio: 330 / 210; object-fit: cover; display: block; background: #0b1022; }
+  .card .cap { padding: 8px 10px 10px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .card .cap b { font: 500 15px/1.2 var(--display); }
+  .card .tag { font: 400 11px var(--mono); color: var(--faint); }
+  .card.kept .tag { color: var(--signal); }
+  .card.sel { border-color: var(--text); }
+  .card.kept::after { content: ''; position: absolute; top: 8px; right: 8px; width: 10px; height: 10px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 3px rgba(7,10,22,.6); }
+
+  .map { overflow-x: auto; }
+  .map table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .map th, .map td { text-align: left; padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+  .map th { font: 400 12px var(--mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+  .map td.none { color: var(--warn); }
+
+  /* ---------- the choices */
+  .decs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  fieldset { margin: 0; border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: grid; gap: 10px; align-content: start; background: var(--panel); min-width: 0; }
+  fieldset.wide { grid-column: 1 / -1; }
+  legend { padding: 0; float: left; width: 100%; display: grid; gap: 4px; margin-bottom: 4px; }
+  legend .id { font: 500 12px var(--mono); color: var(--muted); letter-spacing: .1em; }
+  legend h3 { font-size: 20px; }
+  legend .q { color: var(--muted); font-size: 14px; font-family: var(--body); }
+  .opt { display: grid; grid-template-columns: 20px 1fr; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid transparent; cursor: pointer; }
+  .opt:hover { background: rgba(255,255,255,.03); }
+  .opt:has(input:checked) { border-color: var(--line-2); background: var(--panel-2); }
+  .opt input { margin: 3px 0 0; accent-color: var(--signal); width: 16px; height: 16px; }
+  .opt .t { font-weight: 700; }
+  .opt .rec { font: 500 11px var(--mono); color: var(--rec); letter-spacing: .06em; text-transform: uppercase; margin-left: 6px; white-space: nowrap; }
+  .opt .d { color: var(--muted); font-size: 14.5px; display: block; margin-top: 2px; }
+  .opt q { display: block; quotes: none; margin-top: 8px; padding: 8px 12px; border-left: 2px solid var(--rec); background: rgba(255, 184, 107, .06); font-size: 14.5px; color: var(--text); border-radius: 0 8px 8px 0; }
+  .opt q + q { margin-top: 4px; }
+  .note { font-size: 13.5px; color: var(--faint); }
+  textarea { width: 100%; min-height: 110px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 12px; padding: 12px; resize: vertical; }
+
+  /* ---------- the issues */
+  .issues { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .issue { display: grid; grid-template-columns: 64px minmax(0, 1fr) 190px; gap: 16px; padding: 16px 18px; border-top: 1px solid var(--line); background: var(--panel); }
+  .issue:first-child { border-top: 0; }
+  .issue .no { font: 500 22px/1 var(--display); color: var(--muted); }
+  .issue h3 { font-size: 17px; margin-bottom: 4px; }
+  .issue p { color: var(--muted); font-size: 14.5px; }
+  .issue .meta { display: grid; gap: 6px; align-content: start; font: 400 12px/1.4 var(--mono); color: var(--muted); }
+  .issue .meta b { font-weight: 500; color: var(--text); }
+  .lbl { display: inline-block; padding: 2px 7px; border-radius: 5px; border: 1px solid var(--line-2); font: 500 11px var(--mono); }
+  .lbl.afk { color: var(--signal); border-color: rgba(142,240,198,.5); }
+  .lbl.hitl { color: var(--rec); border-color: rgba(255,184,107,.5); }
+  .waves { display: flex; flex-wrap: wrap; gap: 8px; font: 400 13px var(--mono); color: var(--muted); }
+  .waves span { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .waves b { color: var(--text); font-weight: 500; }
+
+  /* ---------- the bar */
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(9, 13, 30, .92); backdrop-filter: blur(8px); border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .bar .in { max-width: 1120px; margin-inline: auto; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .bar .st { font: 400 13px var(--mono); color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .bar .st i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); display: inline-block; }
+  .bar .st.ok i { background: var(--signal); }
+  .bar .st.off i { background: var(--rec); }
+  .copied { font: 400 13px var(--mono); color: var(--signal); }
+  #copyText { position: absolute; left: -9999px; }
+
+  @media (max-width: 860px) {
+    .spine, .stage, .decs { grid-template-columns: minmax(0, 1fr); }
+    .issue { grid-template-columns: 44px minmax(0, 1fr); }
+    .issue .meta { grid-column: 2; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .needle i, .hud .v { transition: none; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">My Worlds · the carrier, chapter 2 · issues 35 to 43</div>
+    <h1>The second signal</h1>
+    <p class="lede">Every log ends on a signal the crew cannot explain, on a frequency outside the band plan. The crew says they will go and look. <b>The reader types that frequency into the receiver, and the same search starts again</b>: probe, wedge, cross. At the end of it stands a structure that no crew built.</p>
+    <div class="band tnum"><span>chapter 1 · <b>406.025 MHz</b> · the distress carrier of the wreck</span><span class="sig">chapter 2 · <b>7.316 MHz</b> · a band that is not on the plan</span></div>
+    <p class="muted">Each choice below starts on my recommendation. Change what you disagree with. Your picks save to this page, and I read them back when you say so.</p>
+  </header>
+
+  <!-- ============================================================ the spine -->
+  <section id="spine" aria-labelledby="spine-h">
+    <div class="sechead">
+      <div class="eyebrow">The part that does not change</div>
+      <h2 id="spine-h">The spine</h2>
+      <p>These six steps hold for every choice below. Steps 3 to 5 reuse the search of issue 34 as it is: the reach, the error of 2 to 10 degrees, four fixes, and the wedges painted on the terrain.</p>
+    </div>
+    <div class="spine">
+      <ol class="steps">
+        <li class="ch1"><div><h3>The log ends on the signal</h3><p>The last entry states a frequency, and the crew says what they will do about it. The number prints in no other entry.</p></div></li>
+        <li class="ch2"><div><h3>The reader tunes the receiver</h3><p>A field takes the number. The right number locks the receiver on the second source. The store keeps the tune.</p></div></li>
+        <li class="ch2"><div><h3>Probe</h3><p>A landing hears the new carrier and states a bearing and an error. The first fix usually comes at the wreck itself.</p></div></li>
+        <li class="ch2"><div><h3>Wedge</h3><p>The globe paints the fixes of chapter 2 in a second colour. The mini wreck stays on its cell.</p></div></li>
+        <li class="ch2"><div><h3>Cross</h3><p>Two or three landings close the wedges on one cell. Near it, the range shows. On it, the needle points at the structure.</p></div></li>
+        <li class="ch2"><div><h3>The structure</h3><p>A tap on it opens its card, and the find leaves a second mini model on the globe.</p></div></li>
+      </ol>
+
+      <div class="demo" aria-label="A demo of the last entry and the tuner">
+        <div class="eyebrow">Try it · a sample last entry</div>
+        <div class="entry">
+          <div class="rail"></div>
+          <div>
+            <div class="day">Day 184</div>
+            <div class="ttl">Last entry</div>
+            <p class="txt">Tamsin has the click on the speaker again. It is on <span class="f">7.316 MHz</span>, and it comes from the north-east. Nothing we brought sends on that band. We leave at first light, all four of us, with the rover and the spare radio.</p>
+          </div>
+        </div>
+        <div class="tuner">
+          <label for="tuneIn">Tune the receiver</label>
+          <form id="tuneForm" autocomplete="off">
+            <div class="field"><input id="tuneIn" inputmode="decimal" placeholder="406.025" aria-describedby="tuneReply"><span>MHz</span></div>
+            <button class="btn sig" type="submit">Tune</button>
+          </form>
+          <div class="reply" id="tuneReply" aria-live="polite">The receiver holds the distress band.</div>
+        </div>
+        <div class="hud tnum" id="hud" aria-label="The carrier block of the probe instrument">
+          <div class="needle"><i></i></div>
+          <div><div class="k">CARRIER</div><div class="v" id="hudF">406.025 MHz · 063° ±2° · here</div></div>
+        </div>
+        <p class="hint">Try 7.31 for the near miss of choice D8, and 7,316 or 7316 for the forms the parser takes.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ the structures -->
+  <section id="structures" aria-labelledby="st-h">
+    <div class="sechead">
+      <div class="eyebrow">Choice D5 · keep any number</div>
+      <h2 id="st-h">The structure</h2>
+      <p>Twelve prototypes, flat-shaded like the rest of the app. The world type sets the stone and the light. Keep the ones you want in the game. The wreck is under 1,500 triangles and its mast stands 18 units; a structure has to read from across a cell, so these stand 22 to 88 units tall.</p>
+    </div>
+    <div class="types" id="types" role="group" aria-label="World type"></div>
+    <div class="stage">
+      <div class="viewer" id="viewer"><canvas id="cv" aria-label="A 3D view of the selected structure. Drag to turn it."></canvas><div class="load" id="load">Loading three.js…</div><div class="ov" id="ov"></div></div>
+      <div class="info" id="info">
+        <div class="eyebrow" id="iType">Terran</div>
+        <div class="name" id="iName">Ring of stones</div>
+        <p id="iLine" class="muted"></p>
+        <dl class="tnum">
+          <dt>Height</dt><dd id="iH">–</dd>
+          <dt>Across</dt><dd id="iW">–</dd>
+          <dt>Triangles</dt><dd id="iT">–</dd>
+        </dl>
+        <div><div class="eyebrow" style="margin-bottom:8px">Fits</div><div class="fits" id="iFits"></div></div>
+        <div class="toggles">
+          <label><input type="checkbox" id="tScale" checked> A person and the mast of the wreck, for scale</label>
+          <label><input type="checkbox" id="tCamp" checked> The camp of the crew (choice D3)</label>
+        </div>
+        <div class="keep"><label class="switch"><input type="checkbox" id="iKeep"> Keep this structure</label><span class="muted mono" id="keptN" style="font-size:13px"></span></div>
+      </div>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="map">
+      <table>
+        <thead><tr><th>World type</th><th>Structures the seed can pick (with choice D6 C)</th></tr></thead>
+        <tbody id="mapBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ the choices -->
+  <section id="choices" aria-labelledby="ch-h">
+    <div class="sechead">
+      <div class="eyebrow">The part you decide</div>
+      <h2 id="ch-h">The choices</h2>
+      <p>The sample lines use one crew: Bo the navigator keeps the log, Suri is the pilot, Tamsin runs the radio, and Oke is the medic. They follow the voice rules of <span class="mono">docs/source.md</span>: short sentences, no simile, and a name or a job in place of a pronoun.</p>
+    </div>
+    <div class="decs" id="decs"></div>
+  </section>
+
+  <!-- ============================================================ the issues -->
+  <section id="issues" aria-labelledby="is-h">
+    <div class="sechead">
+      <div class="eyebrow">Draft · the final text follows your picks</div>
+      <h2 id="is-h">The issues</h2>
+      <p>Nine vertical slices in the format of <span class="mono">docs/issues/</span>. Each one is small enough for one agent, updates its own docs and contracts, and runs the checks it touches. The two HITL marks are a read of logs and a listen test that no tool can close.</p>
+    </div>
+    <div class="waves"><span><b>Wave 1</b> · 35, 36</span><span><b>Wave 2</b> · 37, 39, 40</span><span><b>Wave 3</b> · 38, 41</span><span><b>Wave 4</b> · 42, 43</span></div>
+    <div class="issues" id="issueList"></div>
+  </section>
+</div>
+
+<div class="bar" role="region" aria-label="Your picks">
+  <div class="in">
+    <div class="st" id="st"><i></i><span id="stT">Connecting to the page store…</span></div>
+    <div style="display:flex;gap:10px;align-items:center"><span class="copied" id="copied" aria-live="polite"></span><button class="btn" id="copyBtn" type="button">Copy the picks</button></div>
+  </div>
+</div>
+<textarea id="copyText" aria-hidden="true" tabindex="-1"></textarea>
+
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+
+<script>
+// ---------------------------------------------------------------- data shared by the page
+window.SS = {};
+SS.TYPES = {
+  terran: { label: 'Terran', dot: '#5b7a45' },
+  ocean:  { label: 'Ocean',  dot: '#2f6f86' },
+  desert: { label: 'Desert', dot: '#d8ae74' },
+  ice:    { label: 'Ice',    dot: '#dfe9f2' },
+  lava:   { label: 'Lava',   dot: '#ff6a2a' },
+  exotic: { label: 'Exotic', dot: '#9486c0' },
+};
+SS.PROTOS = [
+  { id: 'henge',    name: 'Ring of stones',   fits: ['terran', 'ice', 'desert'], keep: true,  line: 'Twelve standing slabs with lintels. One slab lies flat. A stone on the altar holds the light. It stays low, so the sky shows through it.' },
+  { id: 'ziggurat', name: 'Stepped mound',    fits: ['terran', 'desert'],        keep: true,  line: 'Six tiers sunk into the ground, a stair up one face, and a shrine with a lit slot on top.' },
+  { id: 'spires',   name: 'Needle spires',    fits: ['ice', 'ocean', 'lava'],    keep: true,  line: 'Seven thin spires up to 88 units, joined by bridges. The tallest carries the light. It looks like what it is: a transmitter.' },
+  { id: 'dome',     name: 'Broken dome',      fits: ['desert', 'terran'],        keep: true,  line: 'The ribs of a dome 56 units wide. Many ribs broke and lie on the ground. A lit core stands inside.' },
+  { id: 'arches',   name: 'Arch causeway',    fits: ['ocean', 'terran'],         keep: true,  line: 'Six arches in a line, each one lower than the last. The last two are broken. The first keystone holds the light.' },
+  { id: 'well',     name: 'The deep well',    fits: ['ice', 'desert', 'lava'],   keep: true,  line: 'A shaft into the ground, with steps down the wall and eight pylons that lean out. The light is at the bottom.' },
+  { id: 'dishes',   name: 'Dish field',       fits: ['desert', 'lava', 'ice'],   keep: false, line: 'Nine dishes on posts, all aimed at one point in the sky. The big dish carries a lit feed. It reads as a machine more than a ruin.' },
+  { id: 'floaters', name: 'Floating stones',  fits: ['exotic'],                  keep: true,  line: 'Nine slabs turn around a lit core with no support. A ring of stones marks the ground under them.' },
+  { id: 'hive',     name: 'Hive colony',      fits: ['exotic', 'ocean', 'terran'], keep: true, line: 'Reworked from your note. One mound of equal six-sided cells in terraces, three small hives around it, and paved paths between them. The doors at the foot hold the light.' },
+  { id: 'colossus', name: 'Fallen maker',     fits: ['terran', 'desert', 'ice'], keep: true,  line: 'A statue of a six-limbed maker lies on its side. One hand still stands out of the ground. The eye holds the light.' },
+  { id: 'ring',     name: 'The ring',         fits: ['exotic', 'lava', 'ocean'], keep: true,  line: 'A ring 48 units across stands on its edge, a part of it under the ground. The inner edge holds the light.' },
+  { id: 'monolith', name: 'Black slab',       fits: ['lava', 'ice'],             keep: false, line: 'One black slab, 36 units tall, with a lit seam, and nine cairns around it. The simplest option, and a familiar one.' },
+];
+
+SS.DECS = [
+  { id: 'D1', h: 'How the log reaches the signal', q: 'The last entry must state the frequency. How much of the log leads up to it?', type: 'radio', opts: [
+    { v: 'A', t: 'The ending only', d: 'The last entry is always about the signal, and the 12 ending kinds go. A small job, but every log then ends the same way.' },
+    { v: 'B', t: 'Every ending kind carries the signal', d: 'Each of the 12 kinds gets signal wordings: a doom hands the number to the reader, a split sends two people, a cut stops after the number. It keeps the variety. About 40 new wordings.',
+      s: ['Tamsin has the signal on the speaker. 7.316 MHz. It answers our beacon, click for click. I am going up to the mast to', 'This is Suri. Bo wrote the number on the hatch before the end: 7.316 MHz. I am going to find out what sends on it.'] },
+    { v: 'C', rec: true, t: 'A signal thread, and B', d: 'A new thread of 3 to 5 beats runs in every log, as the strand thread does. It rises by force like every thread. The number itself prints only in the last entry. The ending then pays off a thread the reader followed. The largest writing job.',
+      s: ['Tamsin hears a click under the static at night. It comes every eleven seconds. Tamsin logged it as a fault in the radio.', 'The click is back, on the same eleven seconds. Tamsin swapped the radio for the spare. The spare hears it too.', 'Tamsin checked the click against the band plan. Nothing we brought sends on that band.'] },
+  ]},
+  { id: 'D2', h: 'Who goes to the signal', q: 'Pick every outcome a log may take. The threads decide which one a given log takes: a quarrel gives a split, a hurt keeper gives nobody.', type: 'check', opts: [
+    { v: 'whole', rec: true, t: 'The whole crew goes', s: ['We leave at first light, all four of us, with the rover and the spare radio. The signal is on 7.316 MHz. If you hear it too, come after us.'] },
+    { v: 'part', rec: true, t: 'A part of the crew goes', s: ['Suri and Tamsin go after the signal in the morning, with the rover. It is on 7.316 MHz. I stay with the beacon, so one of our two signals stays on the air.'] },
+    { v: 'alone', rec: true, t: 'One person goes alone', s: ['Our pilot walks out alone at dawn, toward the signal on 7.316 MHz. The rest of us cannot walk that far. Suri took the spare radio and the last full air tank.'] },
+    { v: 'nobody', rec: true, t: 'Nobody can go, and the log hands it to the reader', s: ['We cannot reach it. The signal is on 7.316 MHz and it comes from the north-east. We have listened to it for nine days. You have a probe. Go and see what sends it.'] },
+    { v: 'beast', t: 'They ride or follow the animal toward it', d: 'Only where the fauna thread earned a reckless ending. Gated on the motion tags, as the ride and follow endings are now.', s: ['The hoppers walk north-east every dawn, toward the signal on 7.316 MHz. Tomorrow Suri and I walk with them. Tamsin says the plan is bad. We are going all the same.'] },
+  ]},
+  { id: 'D3', h: 'What the reader finds of the crew', q: 'The payoff at the structure.', type: 'radio', opts: [
+    { v: 'A', t: 'Nothing', d: 'The structure stands alone. The reader never learns whether the crew got there.' },
+    { v: 'B', t: 'A camp and a second log, always', d: 'A dome, a flag, and 5 to 8 entries by the people who went, on days after the wreck log stops.' },
+    { v: 'C', t: 'Traces only', d: 'A camp or a cairn, and no text.' },
+    { v: 'D', rec: true, t: 'It follows who went', d: 'The whole crew or a part: a camp and a second log. One person alone: a cairn and one note. Nobody: nothing, and the reader is the first to stand there.',
+      s: ['Day 212. We reached the stones at noon. Suri counted twelve, and one lies flat. The click is loud here. It comes out of the stone on the altar.', 'Day 219. Tamsin says the signal changed on the day we arrived. It sends our own beacon back to us now, slower.'] },
+  ]},
+  { id: 'D4', h: 'Who built it', q: 'The makers. This sets the carvings, the glyphs, and the sizes of the doors and the steps.', type: 'radio', opts: [
+    { v: 'A', t: 'One maker on every world', d: 'Every structure is one node of one network, and the glyphs share one script. A later chain across worlds then follows on its own.' },
+    { v: 'B', t: 'One maker per world type', d: 'Six species, each one fit for its world.' },
+    { v: 'C', rec: true, t: 'The ancestors of a living species', d: 'The carvings show the body plan of a species the reader can meet on this world: the same limbs and the same shape, from species.js. A world with no beasts falls back to D.',
+      s: ['The carvings show a body with six legs and a long neck. It is the body of the hardpan long-day hopper.'] },
+    { v: 'D', t: 'A maker rolled per world', d: 'A small genome of limbs and height. The same numbers set the door and the step, so the building tells the size of its makers.' },
+  ]},
+  { id: 'D6', h: 'Which structure stands on which world', q: 'The pick is a pure function of the seed, as hullOf() is for the wreck.', type: 'radio', opts: [
+    { v: 'A', t: 'One fixed structure per world type', d: 'Six worlds of one type show one structure. Easy to learn, fast to tire of.' },
+    { v: 'B', t: 'Any kept structure on any world', d: 'The world type sets only the stone and the light.' },
+    { v: 'C', rec: true, t: 'A short list per world type', d: 'Each type allows the kept structures that fit it, and the seed picks one. The table under the gallery shows the lists.' },
+  ]},
+  { id: 'D7', h: 'Why it still transmits', q: 'This colours the signal thread, the card, and the voice of D12.', type: 'radio', opts: [
+    { v: 'A', t: 'The beacon', d: 'It calls its makers, and it has done so for longer than the rock under it has stood.' },
+    { v: 'B', rec: true, t: 'The reply', d: 'It started on the day the crew put their distress beacon on the mast. It answers. The signal thread states the day.', s: ['The click started on day 3. That is the day we put the beacon on the mast.'] },
+    { v: 'C', t: 'The recorder', d: 'It keeps what it hears. On its cell the probe hears the voices of the crew, sent back on its carrier. It pairs with D3 A, where nobody arrived.' },
+    { v: 'D', t: 'A mix', d: 'The seed picks A, B, or C per world.' },
+  ]},
+  { id: 'D8', h: 'The frequency, and the field', q: 'Two parts: how the number looks, and how the field answers.', type: 'radio', opts: [
+    { v: 'A', rec: true, t: '“7.316 MHz”, and a near miss', d: 'Three decimals in 3 to 30 MHz, from a hash of the seed. The overlay shows 406.025 MHz for the whole of chapter 1, so the reader knows what a frequency looks like. A close number answers “A pattern under the static”; a wrong one answers “Static on 7.313 MHz”.' },
+    { v: 'B', t: '“7.316 MHz”, exact only', d: 'Only the exact number locks. Every other number gives static.' },
+    { v: 'C', t: 'A channel, “CH 4817”', d: 'Four digits. Easy to type, and it reads less like a radio.' },
+    { v: 'D', t: 'A dial', d: 'The reader turns a dial and the static clears near the number. No typing, so it drops your field.' },
+  ]},
+  { id: 'D9', h: 'Where the field lives', q: 'Pick one or more.', type: 'check', opts: [
+    { v: 'card', rec: true, t: 'Under the last entry of the log card', d: 'The number is in sight while the reader types it.' },
+    { v: 'hud', t: 'In the carrier block of the probe instrument', d: 'The block becomes a tuner after the find. On the ground only.' },
+    { v: 'side', rec: true, t: 'In the Carrier row of the sidebar', d: 'In orbit and on the ground, so a reader who closed the card can still tune.' },
+  ]},
+  { id: 'D10', h: 'How far the structure stands from the wreck', q: 'It always stands inside the reach of the carrier from the wreck, so the first tune at the wreck hears it. A cell is about 74 km.', type: 'radio', opts: [
+    { v: 'A', t: 'Near: 5 to 15 cells', d: 'About 350 to 1,100 km. The first fix is narrow, and two landings close it.' },
+    { v: 'B', rec: true, t: 'Middle: 12 to 35 cells', d: 'The fix at the wreck is heard, and the search takes three or four landings. A crew with a rover can reach it in the days the log allows.' },
+    { v: 'C', t: 'Anywhere inside the reach', d: 'Up to a third of the world away. Only “nobody goes” fits this distance.' },
+  ]},
+  { id: 'D11', h: 'Does the log give a direction', q: '', type: 'radio', opts: [
+    { v: 'A', t: 'The number only', d: 'The reader gets the direction from the first fix.' },
+    { v: 'B', rec: true, t: 'The number and a compass word', d: '“It comes from the north-east.” The word is the true bearing at the wreck to eight points, so it is never false. It saves the reader nothing, because the first wedge is narrower.' },
+  ]},
+  { id: 'D12', h: 'The voice of the structure', q: 'The motif of the wreck plays in the mode of the song. The song itself stays whole in every option.', type: 'radio', opts: [
+    { v: 'A', t: 'A second motif in the mode of the song', d: 'In tune, in a new timbre: a low bell.' },
+    { v: 'B', t: 'An alien scale', d: 'A whole-tone figure, out of the key of the song. It plays only near the structure.' },
+    { v: 'C', rec: true, t: 'The motif of the wreck, played back', d: 'Slower and an octave lower. The structure repeats what it heard, which is the reply of D7 B.' },
+  ]},
+  { id: 'D13', h: 'After the find', q: 'This issue set builds A. B and C go to “Left for later”, and the choice here only sets what the card hints at.', type: 'radio', opts: [
+    { v: 'A', rec: true, t: 'The search ends here', d: 'The globe carries both mini models, and the Carrier row reads “Found 2 of 2”.' },
+    { v: 'B', t: 'A third frequency on the same world', d: 'The card ends on a new number. A later issue builds the chain.' },
+    { v: 'C', t: 'The name of another world', d: 'The glyphs spell a seed word. The reader opens that world, and the search goes on there. A later issue builds it.' },
+  ]},
+  { id: 'notes', h: 'Anything else', q: 'A change to a structure, a plot idea, a rule the plan must keep.', type: 'text', wide: true },
+];
+
+SS.ISSUES = [
+  { n: 35, t: 'The structure stands on the world', d: 'makeRuin() rolls from seed|ruin and no other stream: a dry cell at the distance of D10 from the wreck, inside the reach, off the activity, with a fallback band so every world with a wreck gets one. world.ruin = { kind, proto, dir, freq }. freqOf() from a hash. The checksum proves that no terrain, plant, or animal moves. A ?ruin flag draws a dot.', by: 'none', dec: 'D6, D8, D10', lbl: ['afk'] },
+  { n: 36, t: 'The geometry of the structure', d: 'ruin-geometry.js on the pattern of wreck-geometry.js: the kept prototypes, the stone of each world type, the place of the light, the mini model for the globe, and a triangle budget. protoOf(world) is a pure pick. A tool page draws every prototype on every type.', by: 'none', dec: 'D4, D5, D6', lbl: ['afk'] },
+  { n: 37, t: 'The carrier follows the tuned source', d: 'carrierAt(), carrierDir(), and carrierBox() take a source. The store gains the tune and a second search record, with no new key and no migration. The wedges of chapter 2 take a second colour. The brief gains the stages of the unknown signal. __mw.tune() is the debug hook.', by: '35', dec: '–', lbl: ['afk'] },
+  { n: 38, t: 'The tuner', d: 'The field in the places of D9, the parser (7.316, 7,316, 7316, “7.316 MHz”), the answer of D8, and the frequency on the carrier block: 406.025 MHz in chapter 1, the tuned number in chapter 2.', by: '37', dec: 'D8, D9', lbl: ['afk'] },
+  { n: 39, t: 'The log ends on the signal', d: 'The signal thread and the ending wordings of D1 and D2, the tokens {freq} and {ruindir}, and new audit rules: every last entry holds the exact number, and no other entry holds it. The log hashes of world-checksum change on purpose, and the baseline moves in the same commit.', by: '35', dec: 'D1, D2, D7, D11', lbl: ['afk', 'hitl'] },
+  { n: 40, t: 'The structure on the ground', d: 'patchRuin() from pseed|ruin: a flat disc wide enough for the footprint, cleared of plants, grass, and herds. ground-source.js draws kind ruin, its light blinks the rhythm of its motif, the needle and the range read it on its cell, and a tap marks it.', by: '35, 36', dec: '–', lbl: ['afk'] },
+  { n: 41, t: 'The card of the structure, and the find', d: 'The survey card: the height, the age, the stone, the makers of D4, and a panel of glyphs drawn from the seed. The first open marks the find of chapter 2, the globe stands the second mini model, and the Aim chip offers both finds.', by: '37, 40', dec: 'D3, D4, D13', lbl: ['afk'] },
+  { n: 42, t: 'The crew at the structure', d: 'The traces of D3 by who went, and the second short log from its own stream, on the rules of the first: no pronoun for the crew, no dead person acts, the days follow the last entry. The audit sweeps it.', by: '39, 41', dec: 'D2, D3', lbl: ['afk', 'hitl'] },
+  { n: 43, t: 'The voice of the structure', d: 'The motif of D12 from its own stream, on its own bus. The level follows the distance on the ground and joins the orbit song after the find, as the wreck motif does.', by: '35, 40', dec: 'D12', lbl: ['afk', 'hitl'] },
+];
+</script>
+
+<script>
+// ---------------------------------------------------------------- the choices, the picks, and the store
+(function () {
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let dirty = false;
+
+  // The choices
+  const decs = $('#decs');
+  for (const D of SS.DECS) {
+    const fs = document.createElement('fieldset');
+    if (D.wide) fs.className = 'wide';
+    let html = `<legend><span class="id">${D.id === 'notes' ? 'NOTES' : D.id}</span><h3>${esc(D.h)}</h3>${D.q ? `<span class="q">${esc(D.q)}</span>` : ''}</legend>`;
+    if (D.type === 'text') {
+      html += `<label for="notesIn" class="note">Free text. It saves with the picks.</label><textarea id="notesIn" name="notes" placeholder="For example: the spires must never stand on a terran world."></textarea>`;
+    } else {
+      for (const o of D.opts) {
+        const id = `${D.id}-${o.v}`;
+        html += `<label class="opt" for="${id}"><input type="${D.type === 'check' ? 'checkbox' : 'radio'}" name="${D.id}" id="${id}" value="${o.v}" ${o.rec ? 'checked' : ''}><span><span class="t">${D.type === 'radio' ? o.v + ' · ' : ''}${esc(o.t)}</span>${o.rec ? '<span class="rec">Recommended</span>' : ''}${o.d ? `<span class="d">${esc(o.d)}</span>` : ''}${(o.s || []).map((s) => `<q>${esc(s)}</q>`).join('')}</span></label>`;
+      }
+    }
+    fs.innerHTML = html;
+    decs.appendChild(fs);
+  }
+
+  // The issues
+  $('#issueList').innerHTML = SS.ISSUES.map((i) => `<article class="issue"><div class="no tnum">${i.n}</div><div><h3>${esc(i.t)}</h3><p>${esc(i.d)}</p></div><div class="meta"><div>${i.lbl.map((l) => `<span class="lbl ${l}">${l.toUpperCase()}</span>`).join(' ')}</div><div>Blocked by <b>${esc(i.by)}</b></div><div>Reads <b>${esc(i.dec)}</b></div></div></article>`).join('');
+
+  // The picks
+  function picks() {
+    const p = { structures: SS.PROTOS.filter((x) => x.keep).map((x) => x.id), ts: Date.now() };
+    for (const D of SS.DECS) {
+      if (D.type === 'text') p.notes = $('#notesIn').value;
+      else if (D.type === 'check') p[D.id] = [...document.querySelectorAll(`input[name="${D.id}"]:checked`)].map((i) => i.value);
+      else { const c = $(`input[name="${D.id}"]:checked`); p[D.id] = c ? c.value : null; }
+    }
+    return p;
+  }
+  function applyPicks(p) {
+    if (!p || dirty) return;
+    if (Array.isArray(p.structures)) { for (const x of SS.PROTOS) x.keep = p.structures.includes(x.id); SS.onKeep && SS.onKeep(); }
+    for (const D of SS.DECS) {
+      if (D.type === 'text') { if (typeof p.notes === 'string') $('#notesIn').value = p.notes; continue; }
+      const v = p[D.id]; if (v == null) continue;
+      document.querySelectorAll(`input[name="${D.id}"]`).forEach((i) => { i.checked = Array.isArray(v) ? v.includes(i.value) : i.value === v; });
+    }
+  }
+  function summary() {
+    const p = picks();
+    const lines = ['The second signal · my picks', `D5 structures kept: ${p.structures.join(', ') || 'none'}`];
+    for (const D of SS.DECS) {
+      if (D.type === 'text') continue;
+      const v = p[D.id];
+      const name = (x) => { const o = D.opts.find((o) => o.v === x); return o ? `${x} (${o.t})` : x; };
+      lines.push(`${D.id} ${D.h}: ${Array.isArray(v) ? v.map(name).join(', ') || 'none' : v ? name(v) : 'none'}`);
+    }
+    if (p.notes.trim()) lines.push(`Notes: ${p.notes.trim()}`);
+    return lines.join('\n');
+  }
+
+  // The store. The page is read back by Claude, so the picks live in the db of the artifact.
+  const stEl = $('#st'), stT = $('#stT');
+  let db = null, saveT = 0, chain = Promise.resolve();
+  const setSt = (cls, t) => { stEl.className = 'st ' + cls; stT.textContent = t; };
+  function save() {
+    dirty = true;
+    if (!db) return;
+    clearTimeout(saveT);
+    setSt('', 'Saving…');
+    saveT = setTimeout(() => {
+      const body = picks();
+      chain = chain.then(() => db.doc('picks/main').set(body))
+        .then(() => setSt('ok', 'Saved. Tell Claude “picks done” in the chat.'))
+        .catch(() => setSt('off', 'This view cannot save. Copy the picks and paste them in the chat.'));
+    }, 700);
+  }
+  SS.save = save;
+  document.addEventListener('change', (e) => { if (e.target.closest('#decs')) save(); });
+  document.addEventListener('input', (e) => { if (e.target.id === 'notesIn') save(); });
+
+  (async () => {
+    try { db = window.claude && window.claude.use ? await window.claude.use('db') : null; } catch { db = null; }
+    if (!db) { setSt('off', 'This view cannot save. Copy the picks and paste them in the chat.'); return; }
+    try { const s = await db.doc('picks/main').get(); if (s.exists) applyPicks(s.data()); } catch {}
+    setSt('ok', dirty ? 'Ready. Your changes save as you go.' : 'Ready. Your changes save as you go.');
+    if (dirty) save();
+  })();
+
+  $('#copyBtn').addEventListener('click', () => {
+    const text = summary();
+    const done = () => { $('#copied').textContent = 'Copied'; setTimeout(() => { $('#copied').textContent = ''; }, 2000); };
+    const fallback = () => { const ta = $('#copyText'); ta.value = text; ta.select(); try { document.execCommand('copy'); done(); } catch { $('#copied').textContent = 'Select and copy by hand'; } };
+    try { navigator.clipboard.writeText(text).then(done, fallback); } catch { fallback(); }
+  });
+
+  // The demo tuner
+  const TARGET = 7.316;
+  function parseFreq(s) {
+    let t = String(s).toLowerCase().replace(/mhz/g, '').replace(/\s+/g, '').replace(',', '.');
+    if (!/^\d+(\.\d*)?$/.test(t)) return null;
+    if (!t.includes('.') && t.length >= 4) t = t.slice(0, t.length - 3) + '.' + t.slice(-3);
+    const v = parseFloat(t);
+    return Number.isFinite(v) ? v : null;
+  }
+  $('#tuneForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = parseFreq($('#tuneIn').value), r = $('#tuneReply'), hud = $('#hud');
+    r.className = 'reply';
+    if (v == null) { r.textContent = 'The receiver takes a number in MHz, for example 406.025.'; return; }
+    const f = v.toFixed(3);
+    if (Math.abs(v - 406.025) < 0.0005) { hud.classList.remove('locked'); $('#hudF').textContent = '406.025 MHz · 063° ±2° · here'; r.textContent = 'The receiver holds the distress band.'; return; }
+    if (Math.abs(v - TARGET) < 0.0005) { r.className = 'reply lock'; r.textContent = `Locked on ${f} MHz. The probe hears a second source.`; hud.classList.add('locked'); $('#hudF').textContent = '7.316 MHz · 041° ±3° · faint'; return; }
+    hud.classList.remove('locked'); $('#hudF').textContent = `${f} MHz · static`;
+    if (Math.abs(v - TARGET) < 0.05) { r.className = 'reply near'; r.textContent = `A pattern under the static on ${f} MHz.`; }
+    else r.textContent = `Static on ${f} MHz.`;
+  });
+})();
+</script>
+
+<script type="module">
+// ---------------------------------------------------------------- the structures in 3D
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = (s) => document.querySelector(s);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// The stone and the light of each world type. The light is the one made colour of a structure, as
+// the lamp is the one made colour of the wreck.
+const PAL = {
+  terran: { sky: 0xa9c9e8, fog: 0xbcd3e6, ground: 0x587a43, ground2: 0x6b8a4e, stone: 0x9b9a88, dark: 0x6a6b5d, accent: 0x4c7a38, glow: 0x8ef0c6, sun: 0xfff1d8 },
+  ocean:  { sky: 0x9fd3e0, fog: 0xb8dfe8, ground: 0xd2c092, ground2: 0xbfad80, stone: 0xe3dfd0, dark: 0xa4aca6, accent: 0x5f9e98, glow: 0x8ef0c6, sun: 0xfff6e2, sea: 0x2c6c84, island: true },
+  desert: { sky: 0xf0d3aa, fog: 0xefd8b4, ground: 0xd8ae74, ground2: 0xc79a61, stone: 0xc68b56, dark: 0x8b5a37, accent: 0xe9c38e, glow: 0x9df5ff, sun: 0xfff0d0 },
+  ice:    { sky: 0xbcd0e4, fog: 0xd2e0ec, ground: 0xe3edf5, ground2: 0xcfdde9, stone: 0x2e3440, dark: 0x1d222c, accent: 0xd4e8f5, glow: 0x7fe0ff, sun: 0xf4f8ff },
+  lava:   { sky: 0x4d2a24, fog: 0x5e3428, ground: 0x3a2b27, ground2: 0x2b201d, stone: 0x2e2830, dark: 0x19151c, accent: 0xff6a2a, glow: 0xffc070, sun: 0xffc8a0, accentGlow: true },
+  exotic: { sky: 0x3e3163, fog: 0x4a3a70, ground: 0x5d4273, ground2: 0x4c3661, stone: 0x9587c2, dark: 0x51457a, accent: 0x6fe0c8, glow: 0xff9df0, sun: 0xf6e8ff },
+};
+
+let T = 'terran', sel = 'henge';
+const canvas = $('#cv');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 16 / 10, 1, 3000);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.minDistance = 25; controls.maxDistance = 420; controls.maxPolarAngle = 1.48;
+controls.autoRotate = !reduce; controls.autoRotateSpeed = 0.55;
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.1);
+const sun = new THREE.DirectionalLight(0xffffff, 2.1);
+sun.position.set(90, 130, 70); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 10, far: 400 });
+scene.add(hemi, sun);
+
+let world = null, structure = null, extras = null, M = null;
+
+// ---------------------------------------------------------------- the helpers
+const rngOf = (s) => { let a = 0; for (const c of s) a = (a * 31 + c.charCodeAt(0)) | 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+function add(g, geo, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z); m.rotation.order = 'YXZ'; m.rotation.set(rx, ry, rz);
+  m.castShadow = true; m.receiveShadow = true; g.add(m); return m;
+}
+const _Y = new THREE.Vector3(0, 1, 0);
+function beam(g, a, b, w, mat, round = false) {
+  const A = new THREE.Vector3(...a), E = new THREE.Vector3(...b);
+  const d = E.clone().sub(A), len = d.length();
+  const m = new THREE.Mesh(round ? new THREE.CylinderGeometry(w, w, len, 6) : B(w, len, w), mat);
+  m.position.copy(A).add(E).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(_Y, d.normalize());
+  m.castShadow = true; m.receiveShadow = true; g.add(m); return m;
+}
+function mats(P) {
+  const std = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, flatShading: true, roughness: 0.92, metalness: 0.02, ...o });
+  return {
+    stone: std(P.stone), dark: std(P.dark),
+    accent: P.accentGlow ? std(P.accent, { emissive: P.accent, emissiveIntensity: 1.1 }) : std(P.accent),
+    glow: std(P.glow, { emissive: P.glow, emissiveIntensity: 1.4, roughness: 0.4 }),
+    black: std(0x0b0b10, { roughness: 0.22, metalness: 0.35 }),
+    shaft: std(0x08080c, { side: THREE.DoubleSide }),
+    hull: std(0x8f959d), panel: std(0xd6d9dd), door: std(0xc0662e), crate: std(0x7d735c), person: std(0xeef1ff),
+    bowl: std(P.stone, { side: THREE.DoubleSide }),
+  };
+}
+
+// ---------------------------------------------------------------- the twelve structures
+const BUILD = {
+  henge(g, m, r) {
+    const n = 12, R = 24, hs = [];
+    for (let i = 0; i < n; i++) {
+      const a = i / n * Math.PI * 2, h = 15 + r() * 7, ry = -a - Math.PI / 2; hs.push(h);
+      if (i === 7) { add(g, B(5.5, 2.6, h), m.stone, Math.cos(a) * (R + 8), 1.2, Math.sin(a) * (R + 8), 0, ry + 0.35, 0.05); continue; }
+      add(g, B(5.5, h, 2.8), m.stone, Math.cos(a) * R, h / 2 - 0.6, Math.sin(a) * R, 0, ry, (r() - 0.5) * 0.08);
+      add(g, B(6, 2.2, 3.3), m.accent, Math.cos(a) * R, 0.5, Math.sin(a) * R, 0, ry, 0);
+    }
+    const chord = 2 * R * Math.sin(Math.PI / n) + 5;
+    for (const i of [0, 1, 3, 4, 9, 10]) {
+      const a = (i + 0.5) / n * Math.PI * 2, hh = Math.min(hs[i], hs[i + 1]);
+      add(g, B(chord, 2.4, 3), m.stone, Math.cos(a) * R * 0.99, hh + 0.5, Math.sin(a) * R * 0.99, 0, -a - Math.PI / 2, 0);
+    }
+    for (let k = 0; k < 5; k++) { const a = Math.PI * (0.6 + k * 0.2), h = 7 + k % 2 * 2; add(g, B(3.5, h, 2), m.dark, Math.cos(a) * 11, h / 2 - 0.4, Math.sin(a) * 11, 0, -a - Math.PI / 2, 0); }
+    add(g, B(9, 2.6, 5.5), m.dark, 0, 1.3, 0);
+    g.userData.glow = add(g, new THREE.OctahedronGeometry(2.2), m.glow, 0, 5.8, 0);
+  },
+  ziggurat(g, m) {
+    const sink = 5; let y = -sink;
+    for (let k = 0; k < 6; k++) {
+      const s = 54 - k * 8.4, h = 6;
+      add(g, B(s, h, s), k % 2 ? m.dark : m.stone, 0, y + h / 2, 0);
+      if (k % 2 === 0) add(g, B(s + 0.4, 0.9, s + 0.4), m.accent, 0, y + 0.45, 0);
+      y += h;
+    }
+    const top = y, steps = 16;
+    for (let i = 1; i <= steps; i++) { const yt = i * (top / steps); add(g, B(7, yt + sink, 1.6), m.stone, 0, (yt - sink) / 2, 30 - i * 1.5); }
+    add(g, B(12, 8, 12), m.stone, 0, top + 4, 0);
+    add(g, B(14, 1.2, 14), m.dark, 0, top + 8.6, 0);
+    g.userData.glow = add(g, B(2.2, 5, 0.4), m.glow, 0, top + 3.6, 6.05);
+    add(g, B(6, 6, 6), m.stone, 30, 2.4, 20, 0.3, 0.5, 0.2);
+    add(g, B(4, 4, 4), m.dark, -27, 1.6, 26, 0.2, 0.9, 0.1);
+  },
+  spires(g, m, r) {
+    const list = [[0, 0, 88], [11, 6, 62], [-10, 8, 55], [5, -12, 48], [-13, -6, 40], [17, -5, 34], [-3, 15, 30]];
+    list.forEach(([x, z, h], i) => {
+      const rb = 2.2 + h / 40, lean = i ? (r() - 0.5) * 0.07 : 0;
+      add(g, new THREE.ConeGeometry(rb, h, 5, 1), m.stone, x, h / 2 - 1, z, lean, r() * 6, lean);
+      add(g, new THREE.CylinderGeometry(rb * 1.25, rb * 1.5, 4, 5), m.dark, x, 2, z);
+      const yb = h * 0.62; add(g, new THREE.CylinderGeometry(rb * (1 - 0.62) + 0.35, rb * (1 - 0.6) + 0.35, 0.9, 5), m.glow, x, yb - 1, z);
+    });
+    g.userData.glow = add(g, new THREE.OctahedronGeometry(1.7), m.glow, 0, 88, 0);
+    for (const [a, b, y] of [[0, 1, 22], [0, 2, 18], [0, 3, 26], [2, 4, 14], [1, 5, 12], [2, 6, 11]]) beam(g, [list[a][0], y, list[a][1]], [list[b][0], y - 2, list[b][1]], 0.9, m.dark);
+    for (let i = 0; i < 16; i++) { const a = r() * 6.28, d = 8 + r() * 18, s = 1 + r() * 2.2; add(g, B(s, s * 0.7, s), i % 3 ? m.dark : m.accent, Math.cos(a) * d, s * 0.3, Math.sin(a) * d, r(), r() * 3, r()); }
+  },
+  dome(g, m, r) {
+    const R = 28, n = 14, seg = 12, reach = [12, 12, 5, 12, 8, 3, 12, 10, 12, 4, 12, 7, 12, 11];
+    add(g, new THREE.TorusGeometry(R, 1.6, 4, 36), m.dark, 0, 0.6, 0, Math.PI / 2, 0, 0);
+    const p = (phi, t) => [Math.cos(phi) * R * Math.cos(t), R * Math.sin(t), Math.sin(phi) * R * Math.cos(t)];
+    for (let i = 0; i < n; i++) {
+      const phi = i / n * Math.PI * 2;
+      for (let s = 0; s < reach[i]; s++) beam(g, p(phi, s / seg * Math.PI / 2), p(phi, (s + 1) / seg * Math.PI / 2), 1.4, m.stone);
+      if (reach[i] < 12) for (let k = 0; k < 2; k++) { const d = R * (0.7 + r() * 0.5), a = phi + (r() - 0.5) * 0.4; add(g, B(1.4, 1.4, 6.5), m.stone, Math.cos(a) * d, 0.7, Math.sin(a) * d, 0, r() * 3, 0); }
+    }
+    const t1 = 2 / seg * Math.PI / 2; add(g, new THREE.TorusGeometry(R * Math.cos(t1), 0.9, 4, 40), m.accent, 0, R * Math.sin(t1), 0, Math.PI / 2, 0, 0);
+    const t2 = 6 / seg * Math.PI / 2;
+    for (let i = 0; i < n; i++) if (reach[i] > 6 && reach[(i + 1) % n] > 6) beam(g, p(i / n * Math.PI * 2, t2), p((i + 1) / n * Math.PI * 2, t2), 0.9, m.dark);
+    const tt = 11 / seg * Math.PI / 2; add(g, new THREE.TorusGeometry(R * Math.cos(tt), 0.9, 4, 16), m.stone, 0, R * Math.sin(tt), 0, Math.PI / 2, 0, 0);
+    add(g, new THREE.CylinderGeometry(5, 6.5, 3, 6), m.dark, 0, 1.5, 0);
+    g.userData.glow = add(g, new THREE.IcosahedronGeometry(3.2), m.glow, 0, 7.5, 0);
+  },
+  arches(g, m) {
+    for (let k = 0; k < 6; k++) {
+      const z = -45 + k * 18, x = 7 * Math.sin(z / 28), hl = 22 - k * 2.4, w = 16 - k * 0.9;
+      const shortLeg = k === 5 ? 0.45 : 1;
+      add(g, B(3.2, hl, 3.2), m.stone, x - w / 2, hl / 2, z);
+      add(g, B(3.2, hl * shortLeg, 3.2), m.stone, x + w / 2, hl * shortLeg / 2, z);
+      add(g, B(4, 1.4, 4), m.accent, x - w / 2, 0.7, z); add(g, B(4, 1.4, 4), m.accent, x + w / 2, 0.7, z);
+      const nb = 9, keep = k === 4 ? 4 : k === 5 ? 0 : nb, rr = w / 2, len = Math.PI * rr / nb + 0.4;
+      for (let i = 0; i < keep; i++) {
+        const th = Math.PI - (i + 0.5) / nb * Math.PI;
+        const blk = add(g, B(len, 3.2, 3.2), (k === 0 && i === 4) ? m.glow : m.stone, x + Math.cos(th) * rr, hl + Math.sin(th) * rr, z, 0, 0, th + Math.PI / 2);
+        if (k === 0 && i === 4) g.userData.glow = blk;
+      }
+      if (k < 5) add(g, B(9, 0.6, 18), k % 2 ? m.dark : m.stone, x + 7 * (Math.sin((z + 9) / 28) - Math.sin(z / 28)) / 2, 0.3, z + 9);
+    }
+    add(g, B(3.2, 3.2, 7), m.stone, 12, 1.6, 44, 0.2, 0.4, 0);
+  },
+  well(g, m, r) {
+    g.userData.hole = 13;
+    add(g, new THREE.CylinderGeometry(13, 13, 46, 18, 1, true), m.shaft, 0, -22.9, 0);
+    g.userData.glow = add(g, new THREE.CircleGeometry(12.8, 18), m.glow, 0, -45, 0, -Math.PI / 2, 0, 0);
+    add(g, new THREE.TorusGeometry(13.8, 1.5, 4, 24), m.stone, 0, 0.3, 0, Math.PI / 2, 0, 0);
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * Math.PI * 2, p = new THREE.Group();
+      p.position.set(Math.cos(a) * 19, 0, Math.sin(a) * 19); p.rotation.order = 'YXZ'; p.rotation.set(-0.2, -a - Math.PI / 2, 0);
+      add(p, B(3, 25, 2.2), m.stone, 0, 11.5, 0); add(p, B(3.6, 2.4, 2.8), m.accent, 0, 0.6, 0); add(p, B(1, 1.6, 2.4), m.glow, 0, 24.6, 0);
+      g.add(p);
+    }
+    for (let i = 0; i < 28; i++) { const a = i * 0.45; add(g, B(4.2, 0.8, 2.4), m.dark, Math.cos(a) * 11, -1 - i * 1.5, Math.sin(a) * 11, 0, -a - Math.PI / 2, 0); }
+    for (let i = 0; i < 8; i++) { const a = r() * 6.28, d = 26 + r() * 10; add(g, B(2.5, 1.2, 2), m.dark, Math.cos(a) * d, 0.5, Math.sin(a) * d, 0, r() * 3, 0.1); }
+  },
+  dishes(g, m, r) {
+    const focus = new THREE.Vector3(-60, 150, -110);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      const big = !i && !j, x = i * 21, z = j * 21, rd = big ? 11 : 5.8, hp = big ? 9 : 4 + r() * 3;
+      add(g, new THREE.CylinderGeometry(big ? 1.3 : 0.8, big ? 2 : 1.2, hp, 6), m.dark, x, hp / 2, z);
+      const d = new THREE.Group(); d.position.set(x, hp, z);
+      d.quaternion.setFromUnitVectors(_Y, focus.clone().sub(d.position).normalize());
+      const R = rd * 1.35;
+      add(d, new THREE.SphereGeometry(R, 14, 4, 0, Math.PI * 2, 0, 0.72), m.bowl, 0, R * 0.9, 0, Math.PI, 0, 0);
+      add(d, new THREE.TorusGeometry(R * Math.sin(0.72), 0.35, 4, 20), m.accent, 0, R * 0.9 - R * Math.cos(0.72), 0, Math.PI / 2, 0, 0);
+      if (big) {
+        const fy = R * 0.9 + 6; for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI * 2, rr = R * Math.sin(0.72); beam(d, [Math.cos(a) * rr, R * 0.9 - R * Math.cos(0.72), Math.sin(a) * rr], [0, fy, 0], 0.3, m.dark, true); }
+        g.userData.glow = add(d, new THREE.OctahedronGeometry(1.5), m.glow, 0, fy, 0);
+      }
+      g.add(d);
+    }
+    for (const [a, b] of [[[-21, 0.3, 0], [21, 0.3, 0]], [[0, 0.3, -21], [0, 0.3, 21]]]) beam(g, a, b, 0.6, m.dark);
+  },
+  floaters(g, m, r) {
+    for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; add(g, B(3, 2.4, 3), i % 2 ? m.stone : m.dark, Math.cos(a) * 17, 1.1, Math.sin(a) * 17, 0, -a, 0); }
+    add(g, new THREE.CylinderGeometry(5, 6.5, 2, 6), m.dark, 0, 1, 0);
+    g.userData.glow = add(g, new THREE.OctahedronGeometry(3.3), m.glow, 0, 23, 0);
+    const orbit = new THREE.Group(); g.add(orbit);
+    const slabs = [];
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * Math.PI * 2 + r() * 0.3, d = 9 + r() * 8, y = 12 + r() * 22;
+      const s = add(orbit, B(3 + r() * 3, 7 + r() * 8, 1.6 + r()), i % 2 ? m.stone : m.dark, Math.cos(a) * d, y, Math.sin(a) * d, (r() - 0.5) * 0.5, -a - Math.PI / 2, (r() - 0.5) * 0.5);
+      s.userData.y = y; s.userData.ph = r() * 6; slabs.push(s);
+    }
+    const rings = [0.3, 1.2].map((tilt) => add(g, new THREE.TorusGeometry(6.5, 0.25, 4, 36), m.accent, 0, 23, 0, tilt, 0, 0.4));
+    g.userData.update = (t) => {
+      orbit.rotation.y = t * 0.09;
+      for (const s of slabs) s.position.y = s.userData.y + Math.sin(t * 0.6 + s.userData.ph) * 1.2;
+      rings[0].rotation.y = t * 0.3; rings[1].rotation.y = -t * 0.22;
+    };
+  },
+  // A colony: one great mound of equal hex cells in terraces, three small hives around it, and
+  // hex pavers between them. One cell size and one step height everywhere, so it reads as built.
+  hive(g, m) {
+    const rc = 2.6, gap = 0.12, STEP = 3, sq = Math.sqrt(3);
+    const face = (a) => Math.round((a - Math.PI / 6) / (Math.PI / 3)) * (Math.PI / 3) + Math.PI / 6;
+    const mound = (cx, cz, R, H, doors, crown) => {
+      const n = Math.ceil(R / (rc * 1.5)) + 1;
+      for (let s = -n; s <= n; s++) for (let q = -n * 2; q <= n * 2; q++) {
+        const x = (rc + gap) * sq * (q + s / 2), z = (rc + gap) * 1.5 * s, d = Math.hypot(x, z);
+        if (d > R) continue;
+        const layers = Math.max(1, Math.round(H * Math.pow(1 - (d / R) ** 2, 0.55) / STEP)), h = layers * STEP;
+        add(g, new THREE.CylinderGeometry(rc, rc, h, 6), layers % 2 ? m.stone : m.dark, cx + x, h / 2, cz + z);
+        add(g, new THREE.CylinderGeometry(rc * 0.78, rc * 0.78, 0.5, 6), m.accent, cx + x, h + 0.25, cz + z);
+        if (doors && d > R - rc * 2.4 && (Math.round(q * 7 + s * 3) % 3 === 0)) {
+          const a = face(Math.atan2(x, z));
+          add(g, B(1.5, 2.2, 0.3), m.glow, cx + x + Math.sin(a) * rc * 0.87, 1.3, cz + z + Math.cos(a) * rc * 0.87, 0, a, 0);
+        }
+        if (crown && d < 0.5) g.userData.glow = add(g, new THREE.OctahedronGeometry(1.7), m.glow, cx + x, h + 2.6, cz + z);
+      }
+    };
+    mound(0, 0, 22, 30, true, true);
+    const sats = [[40, 12, 9, 12], [-30, 30, 8, 9], [-12, -40, 10, 14]];
+    for (const [x, z, R, H] of sats) {
+      mound(x, z, R, H, true, false);
+      const len = Math.hypot(x, z), ux = x / len, uz = z / len;
+      for (let t = 22; t < len - R; t += 4.6) add(g, new THREE.CylinderGeometry(2, 2, 0.35, 6), m.accent, ux * t, 0.18, uz * t);
+    }
+  },
+  colossus(g, m, r) {
+    const body = new THREE.Group(); body.rotation.order = 'YXZ'; body.rotation.set(0, 0.25, 0.1); g.add(body);
+    add(body, B(30, 9, 11), m.stone, 0, 3.2, 0);
+    add(body, B(12, 9.6, 11.6), m.accent, -6, 3.2, 0);
+    beam(body, [-15, 5, -1], [-21, 6.5, -2], 2.6, m.stone, true);
+    add(body, new THREE.DodecahedronGeometry(5.6), m.stone, -25.5, 6, -2.5, 0.3, 0.4, 0);
+    g.userData.glow = add(body, new THREE.OctahedronGeometry(1.2), m.glow, -29.6, 7.4, -0.2);
+    [-9, 2, 12].forEach((x, i) => {
+      beam(body, [x, 4, 5.5], [x + 4, 1, 17 - i * 2], 1.7, m.stone, true);
+      if (i !== 1) beam(body, [x + 4, 1, 17 - i * 2], [x + 2, 0.8, 24 - i * 2], 1.4, m.dark, true);
+      else add(body, B(3, 2.4, 5), m.dark, x + 9, 1, 22, 0.3, 0.8, 0.2);
+    });
+    add(body, B(10, 4, 8), m.dark, 16, 1.4, -2, 0, 0.1, -0.1);
+    beam(g, [8, -2, -16], [8.6, 14, -17], 1.9, m.stone, true);
+    add(g, B(5, 4.2, 2.2), m.stone, 8.8, 16.6, -17.2);
+    for (let f = 0; f < 3; f++) add(g, B(0.9, 4, 0.9), m.stone, 7.2 + f * 1.6, 20.5, -17.2, 0, 0, (f - 1) * 0.12);
+    add(g, B(1.4, 1.4, 0.4), m.glow, 8.8, 16.6, -16);
+    for (let i = 0; i < 10; i++) { const a = r() * 6.28, d = 14 + r() * 22, s = 1 + r() * 2.5; add(g, B(s, s * 0.8, s), m.dark, Math.cos(a) * d, s * 0.3, Math.sin(a) * d, r(), r() * 3, r()); }
+  },
+  ring(g, m) {
+    const R = 24, n = 26, cy = 14, ring = new THREE.Group(); ring.rotation.y = 0.55; g.add(ring);
+    for (let i = 0; i < n; i++) {
+      if (i === 5) continue;
+      const th = i / n * Math.PI * 2, x = Math.cos(th) * R, y = cy + Math.sin(th) * R;
+      if (y < -4) continue;
+      add(ring, B(R * 2 * Math.PI / n + 0.3, 5, 6), i % 2 ? m.dark : m.stone, x, y, 0, 0, 0, th + Math.PI / 2);
+      if (i % 3 === 0) add(ring, B(2, 2.2, 6.8), m.accent, Math.cos(th) * (R + 2.4), cy + Math.sin(th) * (R + 2.4), 0, 0, 0, th + Math.PI / 2);
+    }
+    g.userData.glow = add(ring, new THREE.TorusGeometry(R - 2.9, 0.5, 4, 56), m.glow, 0, cy, 0);
+    add(g, B(6, 3.2, 3.6), m.stone, 16, 1.2, 14, 0.2, 0.6, 0.3);
+    add(g, B(4, 3, 4), m.dark, -18, 1, -12, 0.1, 0.2, 0.2);
+  },
+  monolith(g, m, r) {
+    const s = new THREE.Group(); s.rotation.y = 0.45; g.add(s);
+    add(s, B(4, 36, 9), m.black, 0, 18, 0);
+    g.userData.glow = add(s, B(4.1, 32, 0.3), m.glow, 0, 18, 0);
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * Math.PI * 2 + 0.2, d = 15 + r() * 2, x = Math.cos(a) * d, z = Math.sin(a) * d;
+      let y = 0; for (let k = 0; k < 3 + (i % 2); k++) { const w = 2.6 - k * 0.5, h = 1.1; add(g, B(w, h, w * 0.9), k % 2 ? m.accent : m.stone, x, y + h / 2, z, 0, r() * 2, (r() - 0.5) * 0.15); y += h; }
+    }
+    for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; add(g, B(3, 0.4, 1.8), m.dark, Math.cos(a) * 7.5, 0.2, Math.sin(a) * 7.5, 0, -a, 0); }
+  },
+};
+
+// The camp of the crew, and the scale: a person of 1.8 units and the 18 unit mast of the wreck.
+function makeExtras(m) {
+  const camp = new THREE.Group(), scale = new THREE.Group();
+  camp.position.set(46, 0, 36); scale.position.set(46, 0, 36);
+  add(camp, new THREE.SphereGeometry(3.2, 12, 5, 0, Math.PI * 2, 0, Math.PI / 2), m.panel);
+  add(camp, B(1.4, 2, 0.8), m.door, 0, 1, 3.05);
+  add(camp, new THREE.CylinderGeometry(0.12, 0.12, 6, 5), m.hull, 4, 3, -1);
+  add(camp, B(2.2, 1.3, 0.06), m.door, 5.1, 5.3, -1);
+  add(camp, B(1.6, 1.1, 1.1), m.crate, -3.8, 0.55, 1.2, 0, 0.3, 0);
+  add(camp, B(1.1, 0.8, 1.1), m.crate, -4.2, 1.5, 1.1, 0, 0.1, 0);
+  add(scale, new THREE.CylinderGeometry(0.33, 0.4, 1.3, 6), m.person, 6.5, 0.65, 3.5);
+  add(scale, new THREE.SphereGeometry(0.28, 8, 6), m.person, 6.5, 1.55, 3.5);
+  add(scale, new THREE.CylinderGeometry(0.22, 0.34, 18, 5), m.hull, -9, 9, -5);
+  add(scale, new THREE.SphereGeometry(1.6, 10, 3, 0, Math.PI * 2, 0, 0.9), m.bowl, -9, 19.5, -5, Math.PI * 0.8, 0, 0);
+  return { camp, scale };
+}
+
+// The ground: a wide disc of flat-shaded facets that is flat under the structure.
+function hash2(x, z) { const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return s - Math.floor(s); }
+const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function groundY(P, x, z) {
+  const d = Math.hypot(x, z);
+  const bump = Math.sin(x * 0.21 + z * 0.13) * 0.25 + (hash2(Math.round(x), Math.round(z)) - 0.5) * 0.3;
+  if (P.island) return d < 95 ? bump * sstep(40, 90, d) : -(d - 95) * 0.1 + bump;
+  const f = sstep(70, 240, d);
+  return bump * sstep(45, 80, d) + f * (Math.sin(x * 0.021) * Math.cos(z * 0.018) * 14 + Math.sin(x * 0.007 + z * 0.009) * 22 + 12);
+}
+function makeWorld(P, hole) {
+  const g = new THREE.Group();
+  let geo = new THREE.PlaneGeometry(1400, 1400, 130, 130); geo.rotateX(-Math.PI / 2); geo = geo.toNonIndexed();
+  const pos = geo.attributes.position, keep = [], col = [];
+  const c1 = new THREE.Color(P.ground), c2 = new THREE.Color(P.ground2), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) pos.setY(i, groundY(P, pos.getX(i), pos.getZ(i)));
+  for (let t = 0; t < pos.count; t += 3) {
+    const cx = (pos.getX(t) + pos.getX(t + 1) + pos.getX(t + 2)) / 3, cz = (pos.getZ(t) + pos.getZ(t + 1) + pos.getZ(t + 2)) / 3;
+    if (hole && Math.hypot(cx, cz) < hole) continue;
+    const h = hash2(cx * 0.37, cz * 0.53);
+    c.copy(c1).lerp(c2, h).multiplyScalar(0.9 + 0.12 * hash2(cz, cx));
+    for (let k = 0; k < 3; k++) { keep.push(pos.getX(t + k), pos.getY(t + k), pos.getZ(t + k)); col.push(c.r, c.g, c.b); }
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  out.computeVertexNormals();
+  const ground = new THREE.Mesh(out, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+  ground.receiveShadow = true; g.add(ground);
+  if (P.sea) {
+    const sea = new THREE.Mesh(new THREE.CircleGeometry(900, 48), new THREE.MeshStandardMaterial({ color: P.sea, roughness: 0.35, metalness: 0.1, flatShading: true }));
+    sea.rotation.x = -Math.PI / 2; sea.position.y = -0.5; g.add(sea);
+  }
+  return g;
+}
+
+// ---------------------------------------------------------------- build and frame
+function clear(obj) {
+  if (!obj) return;
+  scene.remove(obj);
+  obj.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+}
+function build(id) {
+  clear(structure);
+  structure = new THREE.Group();
+  BUILD[id](structure, M, rngOf(id));
+  scene.add(structure);
+  const hole = structure.userData.hole || 0;
+  if (!world || world.userData.hole !== hole || world.userData.type !== T) {
+    clear(world); world = makeWorld(PAL[T], hole); world.userData.hole = hole; world.userData.type = T; scene.add(world);
+  }
+  const box = new THREE.Box3().setFromObject(structure);
+  box.min.y = Math.max(box.min.y, 0);
+  const size = box.getSize(new THREE.Vector3());
+  let tris = 0; structure.traverse((o) => { if (o.isMesh) { const gg = o.geometry; tris += (gg.index ? gg.index.count : gg.attributes.position.count) / 3; } });
+  return { size, tris: Math.round(tris) };
+}
+function frame(size, cam = camera, ctl = controls) {
+  const h = size.y, span = Math.max(size.x, size.z, h * 0.9);
+  const dist = Math.max(62, span * 1.7 + h * 0.3);
+  const target = new THREE.Vector3(0, Math.max(6, h * 0.36), 0);
+  cam.position.set(target.x + dist * 0.62, target.y + dist * 0.34, target.z + dist * 0.74);
+  cam.lookAt(target);
+  if (ctl) { ctl.target.copy(target); ctl.update(); }
+}
+function setType(t) {
+  T = t;
+  const P = PAL[t];
+  if (M) Object.values(M).forEach((mm) => mm.dispose());
+  M = mats(P);
+  scene.background = new THREE.Color(P.sky);
+  scene.fog = new THREE.Fog(P.fog, 220, 700);
+  hemi.color.set(P.sky); hemi.groundColor.set(P.ground2);
+  sun.color.set(P.sun);
+  for (const e of Object.values(extras || {})) { scene.remove(e); e.traverse((o) => o.geometry && o.geometry.dispose()); }
+  extras = makeExtras(M);
+  scene.add(extras.camp, extras.scale);
+  extras.camp.visible = $('#tCamp').checked; extras.scale.visible = $('#tScale').checked;
+}
+
+// ---------------------------------------------------------------- thumbnails
+function thumbs() {
+  const w = 330, h = 210, cam = new THREE.PerspectiveCamera(38, w / h, 1, 3000);
+  const prevPR = renderer.getPixelRatio(), prevSize = renderer.getSize(new THREE.Vector2());
+  renderer.setPixelRatio(1); renderer.setSize(w, h, false);
+  const campV = extras.camp.visible, scaleV = extras.scale.visible; extras.camp.visible = false; extras.scale.visible = false;
+  for (const p of SS.PROTOS) {
+    const { size } = build(p.id); frame(size, cam, null);
+    renderer.render(scene, cam);
+    const img = document.querySelector(`.card[data-id="${p.id}"] img`);
+    if (img) img.src = canvas.toDataURL('image/jpeg', 0.84);
+  }
+  extras.camp.visible = campV; extras.scale.visible = scaleV;
+  renderer.setPixelRatio(prevPR); renderer.setSize(prevSize.x, prevSize.y, false);
+}
+
+// ---------------------------------------------------------------- the page
+const typesEl = $('#types');
+typesEl.innerHTML = Object.entries(SS.TYPES).map(([k, v]) => `<button type="button" class="chip" data-t="${k}" aria-pressed="${k === T}"><i style="background:${v.dot}"></i>${v.label}</button>`).join('');
+const grid = $('#grid');
+grid.innerHTML = SS.PROTOS.map((p) => `<button type="button" class="card" data-id="${p.id}" aria-label="Show ${p.name}"><img alt="" width="330" height="210"><div class="cap"><b>${p.name}</b><span class="tag"></span></div></button>`).join('');
+
+function showKeep() {
+  for (const p of SS.PROTOS) {
+    const c = grid.querySelector(`[data-id="${p.id}"]`);
+    c.classList.toggle('kept', p.keep); c.classList.toggle('sel', p.id === sel);
+    c.querySelector('.tag').textContent = p.keep ? 'kept' : 'not kept';
+  }
+  const cur = SS.PROTOS.find((p) => p.id === sel);
+  $('#iKeep').checked = cur.keep;
+  $('#keptN').textContent = `${SS.PROTOS.filter((p) => p.keep).length} of 12 kept`;
+  $('#mapBody').innerHTML = Object.entries(SS.TYPES).map(([k, v]) => {
+    const list = SS.PROTOS.filter((p) => p.keep && p.fits.includes(k)).map((p) => p.name);
+    return `<tr><th>${v.label}</th><td class="${list.length ? '' : 'none'}">${list.length ? list.join(' · ') : 'No kept structure fits this type. Keep one more, or note a change to the fits.'}</td></tr>`;
+  }).join('');
+}
+SS.onKeep = showKeep;
+
+function show(id, reframe = true) {
+  sel = id;
+  const p = SS.PROTOS.find((x) => x.id === id);
+  const { size, tris } = build(id);
+  if (reframe) frame(size);
+  $('#iType').textContent = SS.TYPES[T].label + ' world';
+  $('#iName').textContent = p.name;
+  $('#iLine').textContent = p.line;
+  $('#iH').textContent = `${Math.round(size.y)} units`;
+  $('#iW').textContent = `${Math.round(Math.max(size.x, size.z))} units`;
+  $('#iT').textContent = tris.toLocaleString('en');
+  $('#iFits').innerHTML = Object.entries(SS.TYPES).map(([k, v]) => `<span class="${p.fits.includes(k) ? 'on' : ''}">${v.label}</span>`).join('');
+  $('#ov').textContent = `${p.name} · drag to turn · wheel or pinch to zoom`;
+  showKeep();
+}
+
+typesEl.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-t]'); if (!b) return;
+  typesEl.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', c === b));
+  setType(b.dataset.t); thumbs(); show(sel);
+});
+grid.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) { show(c.dataset.id); $('#viewer').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' }); } });
+$('#iKeep').addEventListener('change', (e) => { SS.PROTOS.find((p) => p.id === sel).keep = e.target.checked; showKeep(); SS.save(); });
+$('#tScale').addEventListener('change', (e) => { extras.scale.visible = e.target.checked; });
+$('#tCamp').addEventListener('change', (e) => { extras.camp.visible = e.target.checked; });
+
+function resize() {
+  const r = $('#viewer').getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe($('#viewer'));
+
+// The light blinks a short figure on a steady clock, as the lamp of the wreck blinks its motif.
+const FIG = [1, 0, 1, 0, 0, 1, 1, 0];
+const clock = new THREE.Clock();
+function loop() {
+  const t = clock.getElapsedTime();
+  if (M) M.glow.emissiveIntensity = reduce ? 1.4 : 0.7 + 1.1 * FIG[Math.floor(t * 3) % FIG.length];
+  if (structure && structure.userData.update && !reduce) structure.userData.update(t);
+  if (structure && structure.userData.glow && sel === 'henge' && !reduce) structure.userData.glow.rotation.y = t * 0.6;
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+
+setType(T);
+resize();
+thumbs();
+show(sel);
+$('#load').remove();
+loop();
+</script>
