@@ -1782,7 +1782,8 @@ function carrierState(w) {
   const finds = (wreck ? 1 : 0) + (ruin ? 1 : 0);
   let text;
   if (chapter === 2) text = part.found ? `Found ${finds} of 2` : n === 0 ? 'Tuned' : n === 1 ? '1 fix' : `${n} fixes`;
-  else text = part.found ? 'Found' : n === 0 ? 'Not heard' : n === 1 ? '1 fix' : `${n} fixes`;
+  // After a find of the ruin by chance the search follows the wreck again; see activeSource().
+  else text = part.found ? 'Found' : n === 0 ? (ruin ? 'Found 1 of 2' : 'Not heard') : n === 1 ? '1 fix' : `${n} fixes`;
   // The Tune chip of p2-39: a world with a ruin, after the find of the wreck, before the tune.
   const tune = !!(w.ruin && wreck && !rec.tuned);
   return { n, chapter, found: part.found, wreck, ruin, text, tune, rec };

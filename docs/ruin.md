@@ -693,12 +693,15 @@ The later issue that opens the way reads the same script. Do not change a glyph.
   a clear of the fixes keeps the find.
 - **A find by chance.** A reader can land on the cell of the ruin before the tune, and a patch shows
   the ruin whether or not the reader tuned. That find is a find all the same, and the card states the
-  band, so `onRuinFound()` calls `markTuned()` too. The receiver then holds the band of the ruin: a
-  probe on the ground reads the carrier again, as a tune there does, and the overlay prints the band
-  of the ruin. The fix that landing took for the wreck stays a fix of chapter 1. The Carrier row reads
-  "Found 1 of 2", and the locked band takes the place of the Tune chip.
-- The group of the carrier is built again from the record, because a find by chance moves the
-  search to chapter 2. After both finds the Carrier row reads "Found 2 of 2" and offers "Wreck" and
+  band, so `onRuinFound()` calls `markTuned()` too. The fix that landing took for the wreck stays a
+  fix of chapter 1, and the locked band takes the place of the Tune chip.
+- **The wreck is still to find.** After a find of the ruin by chance, `activeSource()` gives the
+  wreck again until the wreck is found: the overlay prints `406.025 MHz`, the wedges of chapter 1
+  paint, and the Carrier row reads "Found 1 of 2" until the next fix. Without that rule the tune
+  moved the receiver to a source that was found already, and the search for the wreck could not
+  end. The manager added the rule at the merge of p2-42.
+- The group of the carrier is built again from the record, because a find of the ruin changes the
+  chapter the record runs. After both finds the Carrier row reads "Found 2 of 2" and offers "Wreck" and
   "Ruin", and the thumb of the saved world carries two marks.
 
 ### The mini ruin on the globe

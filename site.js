@@ -414,9 +414,15 @@ export function carrierBox(world, site, carrier, out = { x: 0, z: 0 }, src = wor
 //
 // Every caller of the carrier reads the source here and gives it to carrierAt() and the rest. The
 // source carries its kind, so `src.kind === 'ruin'` tells the two chapters apart.
+//
+// A find of the ruin by chance tunes the world (p2-42), and the wreck can still stand unfound. The
+// receiver then follows the wreck again until its find, so the search of chapter 1 can still end.
+// After the find of the wreck it follows the ruin, which is found too, so the search is over.
 export function activeSource(world, record) {
   if (!world) return null;
-  if (record && record.tuned && world.ruin && world.ruin.dir) return world.ruin;
+  const ruin = world.ruin && world.ruin.dir ? world.ruin : null;
+  const chance = !!(record && record.ruin && record.ruin.found && !record.found);
+  if (record && record.tuned && ruin && !chance) return ruin;
   return world.source || null;
 }
 

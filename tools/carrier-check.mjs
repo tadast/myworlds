@@ -369,8 +369,9 @@ const ruinRows = checkKind('ruin');
 //    the same cell, and the same direction, the two kinds state two bearings. They agree only by
 //    chance, about as often as two offsets of the hash land within a thousandth of a degree.
 // c. activeSource() gives the ruin only on a tuned record of a world that holds one, and the wreck
-//    in every other case: no record, a record of issue 34, a record that is not tuned, and a tuned
-//    record of a world whose ruin is null.
+//    in every other case: no record, a record of issue 34, a record that is not tuned, a tuned
+//    record of a world whose ruin is null, and a find of the ruin by chance while the wreck is not
+//    found. After both finds it gives the ruin again.
 let chapterRow = '';
 {
   let same = 0, apart = 0, pairs = 0;
@@ -405,6 +406,8 @@ let chapterRow = '';
     [world, { tuned: false, ruin: { fixes: [] } }, wreck, 'a record that is not tuned'],
     [world, { tuned: true }, ruin, 'a tuned record'],
     [bare, { tuned: true }, wreck, 'a tuned record of a world with no ruin'],
+    [world, { tuned: true, found: false, ruin: { found: true } }, wreck, 'a find of the ruin by chance, with the wreck not found'],
+    [world, { tuned: true, found: true, ruin: { found: true } }, ruin, 'both finds'],
   ];
   for (const [w, rec, want, name] of cases) {
     if (S.activeSource(w, rec) !== want) fail('chapter', `activeSource() on ${name} gave the ${S.activeSource(w, rec)?.kind}`);
