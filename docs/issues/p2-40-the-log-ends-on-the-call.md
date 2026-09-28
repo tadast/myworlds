@@ -223,3 +223,24 @@ The build follows the plan, with these deviations and additions.
     the three tokens, the two extra draws of the stream, the checks 11 and 12, and the proof by
     hand. `docs/issues/README.md` states the fields of the log as they are, not as the first build
     had them. `README.md` "How it works" gets two sentences.
+13. **The read of the manager, 2026-09-28.** The manager read 20 more logs whole: audit-0, 1, 3, 5,
+    6, 7, 8, 11, 12, 13, 15, 18, 20, 21, 28, 30, 45, 49, 52, and 70. That is five of `all`, five of
+    `some`, four of `one`, six of `none`, and every ending kind. The call rises in every log, and
+    every ending reads as the end of that thread. The read changed these wordings:
+    - Three of the four logs of `one` printed one wording: "leaves at dawn for the {from}, alone,
+      on foot". Two new `split` wordings of `one` go in the rover, and the wording on foot is now
+      `!harsh`, so nobody walks alone at 807 °C. The share of `one` rose from 6 to 11 per cent.
+    - Two of the three logs of `all` with the lead `walk` printed the same wording. Two new
+      wordings of `walk` take the lead: one in the rover, one on a route drawn on the wall map. The
+      wording on foot is now `!harsh`.
+    - The joke "all of us walk toward the {from}" is now `!mostlysea`, and the island takes a new
+      joke with the raft.
+    - A new `follow` wording takes the lead `follow`, because two of two logs with that lead printed
+      "The rover cannot make the trip back".
+    - The first beat of the thread `click` named the same person twice and mixed the tenses. It now
+      reads "{one} heard a click … Our {onejob} logged it as a fault in the radio."
+    - The split of the lead `split` read "walk toward the click at first light, on {freq}, to the
+      {from}". The band now takes a sentence of its own.
+    After the read: the audit passes, `--seeds 200` gives `went` none 41, some 29, all 19, and one
+    11 per cent, and the commonest sentence of the call stays at 7.8 per cent. The checksum moved the
+    same 10 log hashes against main and nothing else, and the baseline holds the new values.
