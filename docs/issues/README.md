@@ -553,5 +553,5 @@ p2-44; then p2-43.
 | p2-40 | The log ends without a way forward | AFK, HITL read | p2-35, p2-37 | CLOSED 5a95868 |
 | p2-41 | A landing on the cell of the ruin shows empty ground | AFK | p2-35, p2-36 | CLOSED 291cdc5 |
 | p2-42 | The ruin can be seen but not read, and a find leaves no mark | AFK | p2-38, p2-41 | CLOSED d965fd2 |
-| p2-43 | The crew went to the call, and the ruin holds no trace of them | AFK, HITL read | p2-40, p2-42 | open |
+| p2-43 | The crew went to the call, and the ruin holds no trace of them | AFK, HITL read | p2-40, p2-42 | CLOSED af255ae |
 | p2-44 | The ruin is silent | AFK, HITL listen | p2-38, p2-41 | CLOSED ee666f5; the listen test is open |

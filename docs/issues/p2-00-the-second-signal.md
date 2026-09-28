@@ -1,6 +1,8 @@
 # p2-00 The second signal: the plan of phase 2
 
-Status: PLAN, 2026-09-27. The issues p2-35 to p2-44 build it.
+Status: BUILT, 2026-09-28. The issues p2-35 to p2-44 built it; "What the build changed" at the foot
+of this file says where the build went another way. `docs/issues/p2-REPORT.md` is the report of the
+build.
 
 Type: plan. Read `docs/issues/README.md`, `docs/issues/34-the-carrier.md`, and `docs/source.md`
 first. Every issue of phase 2 reads this file for the terms, the decisions, and the contracts.
@@ -281,3 +283,42 @@ searches, finds the ruin, and reads its card. p2-43 and p2-44 add the payoff and
 - A third band on the same world, which the card of the ruin states.
 - The prototypes that the owner did not keep: henge, ziggurat, dishes, and monolith.
 - A ruin on a gas giant, which needs a probe between the cloud decks first.
+
+## What the build changed
+
+The build followed the plan. Each issue file records its own deviations under "What the build
+changed". These are the ones a reader of this plan must know.
+
+- **The checksum keeps the ruin out of the facts.** A new key `world.ruin` would move the facts hash
+  of every world. `splitWorld()` in `tools/world-checksum.mjs` leaves `world.ruin` out of the facts
+  and puts `world.ruin.log` in the lore. `tools/ruin-check.mjs` proves the place, the maker, the
+  patch of the ruin, the camp, and the glyphs instead. The baseline moved twice, in p2-40 and in
+  p2-43, and both times only the lore column of the ten world lines of the five worlds with a
+  surface moved.
+- **`world.ruin` gains `band`**, the index of the band the place came from. Over 500 seeds 99.5 per
+  cent of the ruins stand in the first band and none in the last. No world with a wreck lacks a ruin.
+- **The search length.** The manager played eleven worlds with real landings. The median search of
+  chapter 2 takes three landings after the wreck, inside the three or four of decision 9, so
+  `RUIN_NEAR` and `RUIN_FAR` keep 12 and 35.
+- **The colour of chapter 2 takes no orange and no yellow**, because the drawings of the brief mark
+  the next landing in orange (`MARK_APART` in `carrier-globe.js`).
+- **A find of the ruin by chance** tunes the world, as decision 12 says, and the receiver then follows
+  the wreck again until its find, so the search of chapter 1 can still end. The ruin keeps its voice
+  in orbit after its find, whatever chapter runs.
+- **The tuner** is `tuner.js`, one builder for the card and the sidebar. The field in the card does
+  not take the focus when the card opens, because the keyboard of a phone would cover the log.
+- **The log.** Three call threads of five beats in one fixed order; a trim keeps the last beat, so a
+  call of three beats reads: heard, the reply, the direction. The first log gains `went`, `goers`,
+  `beacon`, `by`, and `traits` on a world with a ruin. Over 200 worlds `went` reads none 40, some
+  28, all 19, and one 12 per cent.
+- **The ruin on the ground.** The flat part is the whole `disc`, and the soft edge lies outside it.
+  The range of the overlay measures to the outline of the ruin, and the needle points at its middle.
+- **The card of the ruin** takes its text from `ruinCard(world)` in `ruin-types.js`, a pure
+  function the Node check reads. The Call row is two sentences, to keep the voice under 20 words a
+  sentence. A maker whose living species has no legs says so in the Makers row.
+- **The second log** is `ruin-lore.js`. It always runs the sight, the carvings, a person, and the
+  reply, so it holds 6 to 8 entries. The trip runs at 40 km a day in the rover, 15 on foot, 30 on
+  the raft, and 25 on an animal. A crew that counted its food down says how it ate on the way.
+- **The voice of the ruin** plays on bars 3 and 4 of every 8 bars of the song, one bar after the call
+  of the wreck, as an FM bell at `RUIN_LEVEL` 0.35. No song and no wreck motif changed.
+- **Open:** the listen test of p2-44 still needs a person. See `docs/issues/p2-REPORT.md`.

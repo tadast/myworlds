@@ -1,6 +1,6 @@
 # p2-43 The crew went to the call, and the ruin holds no trace of them
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit af255ae.
 
 Type: AFK, then a HITL read. Phase 2. Blocked by: p2-40, p2-42. Read `docs/source.md` whole, and
 `docs/issues/p2-00-the-second-signal.md`, decisions 2 and 3.
