@@ -150,3 +150,76 @@ that only the log hashes moved and how many.
 - **The HITL read.** Read 20 whole logs with `node tools/lore-audit/log-sample.mjs`: at least three of
   each value of `went`, one of each ending kind, and two worlds with no ruin. The call must rise,
   and the ending must read as the end of that thread. State in the summary what the read changed.
+
+## What the build changed
+
+The build follows the plan, with these deviations and additions.
+
+1. **The trim of the call thread keeps its last beat.** The plan trims the call thread to three
+   beats like every thread, and puts `{from}` in its last beat. A thread that runs a prefix loses
+   that beat under the trim, and most logs trim it: a log with a fauna thread stands at 16 beats
+   before the call, under a cap of 18. So `callBeats()` in `source-lore.js` drops the middle beats
+   of a call thread and keeps the beats up to the reply beat and the last one. Every call thread
+   therefore holds five beats in one order: heard, the reply, not a fault, not on the plan, the
+   direction. A thread of three beats reads heard, reply, direction. The reply beat is always beat
+   1, so a trim to three keeps it, and the audit holds every thread to that order. The thread
+   earns its lead `call` always, because its last beat always runs.
+2. **The first beat of the call never stands first after the landing.** The plan rolls `{beacon}`
+   from 2 to 6 and before the first beat of the call thread. The entry after the landing can be day
+   2, so no such day exists when the call stands first. When the sort by force puts it first, it
+   changes places with the beat after it. That beat is the first beat of another thread, because
+   the jitter is smaller than the step between two beats of one thread, so no thread runs out of
+   order. `{beacon}` is then `2 + floor(rng() * min(5, firstCall - 2))`, which is 2 to 6 and under
+   the first call beat. No number is drawn for the swap.
+3. **`log.beacon`.** The plan names `went` and `goers` as the fields of the log. The audit has to
+   find the reply beat, so the log also carries `beacon`, the day the crew put the beacon on the
+   mast. A world with no ruin carries none of the three keys, so its log object does not move.
+4. **Three call threads, six wordings in the beats that always run.** The plan asks for three
+   wordings per beat and five in the busiest. One call thread runs per log, so with 180 logs a
+   sentence with no token in it stands in 180 / (threads × wordings) logs. Five wordings over three
+   threads put the commonest sentence of the call at 10 per cent. The beats that always run, 0, 1,
+   and 4, carry six wordings each, and nearly every sentence of them carries a name or a day, so
+   the commonest sentence of the call over the audit seeds is 7.8 per cent (14/180). The audit
+   gives the call a floor of three threads in place of six, and reports the commonest sentence of
+   the call on its own.
+5. **The weights of the call endings.** The plan says no outcome needs a weight of its own. The
+   spread of today's kinds gives `none` 53 per cent, past half, because the doom, the cut, the
+   message, the stay, the launch, and half of the second hand all send nobody. The call wordings
+   take weights near the ones of today (`cut` 1.2, `joke` 1.2, `walk` 1.2 and 3.5 on `leadwalk`,
+   the ungated doom 1.5) so that the spread over the audit seeds is `none` 43, `some` 28, `all`
+   22, and `one` 6 per cent, and the ending kinds keep the doom on top: doom 24, joke 23, ride 19,
+   launch 18, walk 17, cut 17, follow 16, split 14, catch 10, stay 8, second 7, message 7 of 180.
+6. **An island takes the raft.** A walk or a drive toward the click over 900 kilometres of sea is
+   false, so the walking and driving wordings of `walk` and `split` are gated `!mostlysea`, and one
+   wording of each takes the raft the coast thread built, gated `mostlysea waterliquid`. The `walk`
+   endings of today are ungated, and they stay so.
+7. **The entry count.** A log of a world with a ruin now holds 18 to 20 entries (min 18, median
+   18, max 20 over the audit seeds; 15, 16, 20 before). The call adds 3 to 5 beats to logs that
+   already stood near the cap of 20, and the cap holds. `docs/source.md` says so. With every world
+   of the sweep carrying beasts, a second crew thread now fits only when the log has no room for
+   it, so most logs with a ruin run one crew thread.
+8. **The checks.** `tools/lore-audit/audit.mjs` gains the checks of the plan and three more: every
+   call thread holds five beats in the fixed order and states no number of MHz; the compass word is
+   computed again from `cell-grid.js` and compared with `world.ruin.from`; and no value of `went`
+   may pass half of the logs with a ruin, which fails the run. `tools/lore-audit/log-sample.mjs`
+   filters on `went.<value>`, `ruin`, and `noruin`, and prints `went`, the goers, and the beacon
+   day in the header.
+9. **No audit seed lacks a ruin.** All 180 logs of the 200 audit seeds have a ruin, so the case of
+   a world with no ruin was proved by hand: `SourceLore.writeLog` wrapped on the shared module
+   object to pass `{ ...world, ruin: null }` to the real writer, over the same 200 seeds, against
+   the logs of `main`. 180 of 180 logs were byte-equal; with the ruin kept, 180 of 180 differed.
+10. **The checksum.** `node tools/world-checksum.mjs` before and after: 42 lines, 32 equal, 10
+    moved in the last column of a world line only (Auralis, Vesper, Meridian, Tessaly, and Orin on
+    both tiers), 0 moved elsewhere, and every patch line equal. Mire, the gas giant, did not move.
+    The baseline moved by those 10 hashes in the same commit.
+11. **The read.** 20 logs read whole: audit-0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 15, 18, 20, 21, 30,
+    49, and 52 (three or more of every value of `went`, one of every ending kind) and audit-3 and
+    audit-4 with the ruin forced to null, which are the logs of main. The read changed one wording
+    of `split`, "one person can walk it", to "one person can make the walk". The three commonest
+    sentences over the 200 worlds are lines of `SOUND_LANDING`, at 8.9, 8.9, and 8.3 per cent; that
+    pool is the text of today and the issue leaves it alone. On main the commonest sentence was
+    "The plan is simple." of the same pool, at 8.3 per cent.
+12. **The docs.** `docs/source.md` gains "The call" and "The call endings", the five thread kinds,
+    the three tokens, the two extra draws of the stream, the checks 11 and 12, and the proof by
+    hand. `docs/issues/README.md` states the fields of the log as they are, not as the first build
+    had them. `README.md` "How it works" gets two sentences.

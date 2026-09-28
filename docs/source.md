@@ -27,8 +27,9 @@ carrier, source, bearing, fix, wedge, wreck, motif, log.
 
 Phase 2 adds a second kind of source, the ruin, as `world.ruin` beside `world.source`. It stands
 12 to 35 cells from the wreck, and `makeRuin()` places it with the tests of `makeSource()` and a
-stream of its own, `seed + '|ruin'`. The log of the wreck does not read it yet; p2-40 adds the
-call thread that names its frequency and its compass word. See `docs/ruin.md`.
+stream of its own, `seed + '|ruin'`. The log of the wreck reads it: on a world with a ruin the log
+runs a call thread, and its last entry names the frequency of the ruin and its compass word. See
+"The call" below and `docs/ruin.md`.
 
 **The carrier does not reach the far side of the world.** `CARRIER_REACH` in `site.js` is a third of
 the circumference, and `carrierAt()` gives null past it. A landing past the reach shows no carrier
@@ -55,10 +56,14 @@ log does not read that bound: a source stands where `makeSource()` put it, whoev
   crew: [{ name: 'Bo', role: 'navigator' }, ...],     // 3 to 5 people, one role each
   lost: { name: 'Suri', how: 'gone', day: 173 },      // the person a thread took out, or null
   cause: 'tank',                        // the strand thread: why the crew could not leave
-  leads: ['doom', 'ride'],              // the leads the threads set, for the audit
+  leads: ['doom', 'ride', 'call'],      // the leads the threads set, for the audit
+  went: 'some',                         // who goes toward the call: 'all', 'some', 'one', or 'none'
+  goers: ['Bo', 'Tam'],                 // the names of the people who go
+  beacon: 3,                            // the day the crew put the beacon on the mast, 2 to 6
   entries: [
     { slot: 'landing',        title: 'Landing',    day: 1,   text: '…' },
     { slot: 'world.cold',     title: '',           day: 12,  text: '…' },
+    { slot: 'call.click',     title: '',           day: 20,  text: '…' },
     { slot: 'fauna.walkbig',  title: '',           day: 32,  text: '…' },
     …
     { slot: 'end.ride',       title: 'Last entry', day: 179, text: '…' },
@@ -66,11 +71,14 @@ log does not read that bound: a source stands where `makeSource()` put it, whoev
 }
 ```
 
-A log holds 8 to 20 entries, and since the strand thread most hold 15 or more. `slot` names the thread the entry came from, or the act: `landing`
-for the first entry and `end.<kind>` for the last one. A middle entry carries no title, and the
-card then shows the day alone. The card does not read `lost`, `cause`, or `leads`; the audit reads
-them, to prove that no entry after that day names that person, that the strand thread ran to its
-last beat, and that the ending fits the story.
+A log holds 8 to 20 entries. Since the strand thread most hold 15 or more, and since the call
+thread a log of a world with a ruin holds 18 or more. `slot` names the thread the entry came from,
+or the act: `landing` for the first entry and `end.<kind>` for the last one. A middle entry carries
+no title, and the card then shows the day alone. The card does not read `lost`, `cause`, `leads`,
+`went`, `goers`, or `beacon`; the audit reads them, to prove that no entry after that day names that
+person, that the strand thread ran to its last beat, that the ending fits the story, and that the
+call holds. `went`, `goers`, and `beacon` stand on a world with a ruin only. A log of a world with
+no ruin carries none of the three keys, so it is the log it was before the ruin, byte for byte.
 
 The page must not show any of this before the reader finds the wreck. The log stands nowhere else
 on the world: no other field of `world` holds the text.
@@ -99,6 +107,12 @@ The place of the source, `world.source.dir`, comes from `makeRng(seed + '|source
 different stream. The motif of the source takes a third one in `music.js`. The three never mix.
 The ruin of phase 2 takes a fourth, `makeRng(seed + '|ruin')`, and it mixes with none of them.
 
+On a world with a ruin the writer draws two numbers more from its own stream: the call thread, and
+the day of the beacon. Both draws stand behind the test `world.ruin`, so a world with no ruin draws
+nothing more and its log does not move. p2-40 moved the hash of the log on every world with a ruin,
+on purpose, and on no other world; the baseline of `tools/world-checksum.mjs` moved in that commit
+and in no other column.
+
 ## The shape of a log
 
 A log is a story, and it has three parts.
@@ -106,8 +120,8 @@ A log is a story, and it has three parts.
 | Part | Entries | Holds |
 |---|---|---|
 | The landing | 1 | one real fact of this world, and the plan to get home |
-| The beats | 6 to 18 | the threads, interleaved, rising in force |
-| The ending | 1 | the last entry. Its kind follows what the threads did |
+| The beats | 6 to 18 | the threads, interleaved, rising in force. On a world with a ruin, the call among them |
+| The ending | 1 | the last entry. Its kind follows what the threads did. On a world with a ruin it names the band of the ruin and says who goes toward it |
 
 ### A thread, a beat, a wording
 
@@ -116,12 +130,14 @@ or more**, and the writer takes one of them. That is what keeps two wrecks from 
 busiest beats carry five or six wordings, and a wording is a different small event with a different
 detail, not the same sentence with one word changed. The audit fails a beat under three wordings.
 
-`writeLog()` takes one strand thread, one world thread, one or two crew threads, and the fauna
-thread when the world carries beasts. There are four kinds.
+`writeLog()` takes one strand thread, one call thread when the world holds a ruin, one world
+thread, one or two crew threads, and the fauna thread when the world carries beasts. There are
+five kinds.
 
 | Kind | Gate | Holds |
 |---|---|---|
 | `strand` | none | why the crew cannot leave. Exactly one per log, never shortened |
+| `call` | a ruin on the world | the click of the ruin. Exactly one per log of a world with a ruin, none without. See "The call" |
 | `world` | tags, and a **salience** | a real fact of the world |
 | `crew` | none | the people. It also carries a **coda** and a **lead** |
 | `fauna` | `beasts` and a **motion tag** | the one species the log names |
@@ -130,7 +146,9 @@ A thread may run a prefix of its beats, never fewer than three, so a short log i
 and not a cut one. The trim takes one beat at a time off whichever thread is longest. It used to
 shorten from the back, which always cut the crew threads, because they are chosen last, and the
 ending then stopped following them. A thread that retires a person is never shortened, because the
-beat that takes the person out is its last.
+beat that takes the person out is its last. The call thread is the one thread that does not run a
+prefix: the trim drops its middle beats and keeps its last one, because the last beat gives the
+direction the ending pays off. `callBeats()` holds the rule.
 
 ### Why the crew cannot leave
 
@@ -264,12 +282,50 @@ impersonal "it" is fine, because it stands for nothing: "It is colder.", "It rai
 The audit enforces both halves, with a tight list of impersonal openings that a writer must extend
 by hand.
 
+### The call
+
+Phase 2, p2-40, decisions 1, 2, 6, and 10 of `docs/issues/p2-00-the-second-signal.md`. The ruin
+of a world sends on a band that is not on the band plan, and the radio of the crew hears it as a
+click. A log of a world with a ruin takes exactly one thread of `CALL_THREADS`, and a log of a
+world with no ruin takes none. `CALL_THREADS` holds three threads, `click`, `tape`, and `answer`:
+a click heard under the static at night, a click found on the night tapes, and a second click that
+comes back after every click of the beacon. Every one of them holds five beats in one order,
+because the trim keeps the first beats and the last one and drops the middle:
+
+| Beat | Holds | Runs |
+|---|---|---|
+| 0 | the click is heard, and logged as a fault | always |
+| 1 | **the reply**, decision 6: the click began on day `{beacon}`, the day the crew put the beacon on the mast. Every wording states both days, and they are one day | always |
+| 2 | the click is not a fault of this ship | with four beats or more |
+| 3 | the click is on a band the plan leaves empty | with five beats |
+| 4 | **the direction**: every wording names `{from}`, the compass word of the ruin | always |
+
+So a call thread of three beats reads: heard, the reply, the direction. **The number of the band
+never prints in a thread.** A beat says "the band", "a band the plan leaves empty", or "the click",
+and the last entry is the one place the number stands. `{from}` stands in the last beat and nowhere
+else in the thread. The busiest beats, the three that always run, carry six wordings each, and
+nearly every sentence of them carries a name or a day, so a sentence differs from world to world.
+The thread carries the lead `call`, and it earns it always, because its last beat always runs.
+Every call ending is gated on `leadcall`, so no log without the thread can reach one.
+
+**The day of the beacon.** `{beacon}` is a day from 2 to 6, drawn after `layDays()`, and it always
+falls before the day of the first beat of the call thread. The entry after the landing can be day
+2, so the first beat of the call thread never stands first: when the sort by force puts it there,
+it changes places with the beat after it, which is the first beat of another thread, and no thread
+runs out of order. The jitter is smaller than the step between two beats of one thread, so the
+beat after it can be no other beat. The reply beat then falls after `{beacon}`, because the days
+rise.
+
+The job of the radio is the natural subject, and a crew may hold no radio role, so a wording
+names the job only as "our {onejob}", as every thread does.
+
 ### How the beats interleave
 
 Every beat carries the force of its place in its thread: beat `i` of `n` takes `(i + 1) / n`, plus
 a small jitter. `writeLog()` sorts every beat of every thread by that force. So the whole log rises
 from the landing to the ending, and a thread never runs out of order, because the jitter is smaller
-than the step between two beats of one thread.
+than the step between two beats of one thread. The one exception is the first beat of the call
+thread, which never stands first; see "The call".
 
 ### The days
 
@@ -353,6 +409,37 @@ the people of that thread. Every other ending takes the first two people who are
 there is room for it inside five sentences. So the last entry is about these people and not only
 about the world. A `cut` ending takes no coda, because it stops in the middle of a sentence.
 
+**The call endings.** On a world with a ruin the last entry comes from `CALL_ENDINGS` and from no
+other pool. It holds the same 12 kinds, three wordings per kind or more, and every wording prints
+`{freq}`, the band of the ruin, exactly once: `7.316 MHz`. The number stands in the last entry and
+nowhere else in the log. Every wording is gated on `leadcall`, and the leads of the threads pick
+the kind as they pick it on a world with no ruin, so a quarrel still gives a split, a hurt keeper
+the second hand, and a harsh world the calm doom. A wording carries the outcome of decision 2 of
+p2-00 as `went`, and the roles of the people who go as `goers`; `writeLog()` writes `log.went` and
+`log.goers`, the names of those people.
+
+| Kind | `went` | The call wording |
+|---|---|---|
+| `walk` | `all` | everybody still here walks or drives toward the click, with the rover and the spare radio; on an island, on the raft |
+| `joke` | `all` | the last joke is about the click, and then everybody goes to look |
+| `ride`, `catch`, `follow` | `some` | the reckless plan points at the click: the animal walks, runs, or flies that way. The two people of the fauna thread go |
+| `split` | `some`, `one` | two go toward the click and the keeper stays with the beacon; or one person goes alone |
+| `second` | `one`, `none` | the second hand writes the band the keeper wrote on the hatch, and goes alone, or cannot |
+| `doom` | `none` | the crew cannot reach it, points the aerial at it, and hands the band to the reader |
+| `message` | `none` | "Whoever finds this:" and the band, and the direction |
+| `cut` | `none` | the entry stops after the number. The card prints the note under it |
+| `stay` | `none` | the crew stays and makes a life, and leaves the click to whoever comes |
+| `launch` | `none` | the crew climbs on the patched line and leaves the band behind for the reader |
+
+`all` takes every person still here, the keeper and the crew less the person a thread took out,
+and lists no roles. `some` always holds two people and never everybody, because a crew holds three
+people or more and a thread retires one only when the crew holds four or more, so two people
+besides the keeper are always here. A wording that walks or drives is shut to an island,
+`!mostlysea`, where the click comes from over the water. The weights of the call wordings are set
+so that the spread of the kinds over 200 worlds stays near the spread of the endings of today, and
+no value of `went` passes half of the logs: over the audit seeds `none` takes about 43 per cent,
+`some` 28, `all` 22, and `one` 6.
+
 ## The gates
 
 Every thread and every line names the tags it needs and the tags it forbids, in the gate syntax of
@@ -364,7 +451,7 @@ Every thread and every line names the tags it needs and the tags it forbids, in 
 | the axis | `upright`, `tilted`, `sidetilt`, `retrograde` | `sourceTags()` |
 | the site | `polarnight`, `harsh` | `sourceTags()` |
 | the life | `beasts`, and one of the eleven motion tags | `sourceTags()`, `motionOf()` |
-| the story | `leaddoom`, `leadride`, `leadsecond`, … | `leadTags()`, per log |
+| the story | `leaddoom`, `leadride`, `leadsecond`, `leadcall`, … | `leadTags()`, per log |
 
 `Lore.makeEnv()` does not read the lean of the axis, so `sourceTags()` adds it. The lean the
 climate feels is the smaller of the obliquity and its supplement: a world turned past 135 degrees
@@ -434,6 +521,13 @@ list. `BEAST_TOKENS` lists the ones that name the animal.
 | `{kind}`, `{kinds}`, `{Kind}`, `{Kinds}` | the short form: the last word of the name, bare. "hopper", "hoppers", "Hoppers" |
 | `{size}`, `{n}`, `{diet}` | the size text, the group count, and the diet of that animal |
 | `{pet}` | the name the crew gives one animal |
+| `{freq}` | the band of the ruin with its unit, `7.316 MHz`: `world.ruin.freq` and ` MHz`. A call ending only, once |
+| `{from}` | the compass word of the ruin, `world.ruin.from`. The last beat of a call thread, and a call ending |
+| `{beacon}` | the day the crew put the beacon on the mast, 2 to 6. The reply beat of a call thread only |
+
+The three tokens of the call are filled on a world with a ruin only, so `CALL_TOKENS` lists them
+and the audit confines each to its place. A line that used one elsewhere would print the token
+itself on a world with no ruin.
 
 `{kind}` is the last word of the name. `species.js` builds a name as "[place] adjective NOUN", so
 that word is always the noun it picked for the locomotion — hopper, strider, whale, ribbon, keel —
@@ -521,11 +615,12 @@ rules keep the last line in sight:
 ## The audit
 
 `node tools/lore-audit/log-sample.mjs 0 3 forage` prints whole logs of real worlds, filtered by a
-cause or a slot. Read a log whole after every change to the text: the audit proves that a line is
-honest, and only a reader can tell that a log holds together.
+cause, a slot, the outcome of the call as `went.one`, or `ruin` / `^noruin$`. The header prints
+`went`, the goers, and the day of the beacon. Read a log whole after every change to the text: the
+audit proves that a line is honest, and only a reader can tell that a log holds together.
 
 `node tools/lore-audit/audit.mjs` sweeps the landing pool, the threads, the asides, and the endings. The source
-pass runs ten checks.
+pass runs twelve checks.
 
 1. **Coverage.** Every world reaches the landing pool, at least three world threads, at least one
    crew thread, at least one fauna thread for **every one of the eleven ways of moving** when it
@@ -559,7 +654,17 @@ pass runs ten checks.
    thread must give the name in every one of its wordings.
 9. **Salience.** Every world thread must carry `sal()`, or the loudest fact of a world can lose.
 10. **Variety.** Three wordings per beat or more, no two wordings alike, no sentence in two pools,
-   ten ending kinds, three wordings per ending kind, six threads of each kind, 60 given names.
+   ten ending kinds, three wordings per ending kind, six threads of each kind, 60 given names. The
+   call keeps a floor of three threads, because one runs per log.
+11. **The call in the pools.** `{freq}` stands in a call ending only, once per wording. `{beacon}`
+   stands in the reply beat of a call thread, in every wording of it, and nowhere else. `{from}`
+   stands in the last beat of a call thread, in every wording of it, and in a call ending, and
+   nowhere else. No call thread states a number of MHz. Every call thread holds five beats and the
+   lead `call`. Every call ending is gated on `leadcall`, carries one of the four values of `went`
+   with goers to match, and a `second` wording never sends the keeper. Every kind holds three call
+   wordings or more, and every value of `went` is reachable. Under `leadcall` every sky, every way
+   of moving, and every set of leads reaches a call thread and four call endings or more.
+12. **The call on a real world**, with `--seeds`; see the consistency check below.
 
 Four facts of the sweep live in the audit:
 
@@ -593,15 +698,36 @@ the log of every source. It checks that:
 - no entry leaves a token unfilled, claims a fact the world does not have, or breaks the style lint
   on the filled text;
 - the species the log names is a species of that world, and the genome test of the fauna thread and
-  of the ending is true of that animal.
+  of the ending is true of that animal;
+- on a world with a ruin: the log runs exactly one call thread, to three beats or more; the last
+  entry prints `world.ruin.freq` with its unit exactly once and no other entry prints a band; the
+  ending is a call wording of its kind that fits this world and sends `log.went`; `log.went` is one
+  of the four values, the goers are people of the crew who are still here, `all` holds every one
+  of them, `one` holds one, `some` two or more and not all, `none` nobody, and the keeper never
+  goes in a `second` ending; `log.beacon` is 2 to 6 and falls before the first call beat, exactly
+  one call entry states that day, and it falls after it; `world.ruin.from` is `compass8()` of the
+  bearing from the wreck to the ruin, computed again from `cell-grid.js`, and the last beat of the
+  call names it and no earlier call beat does;
+- on a world with no ruin: no call thread, no `went`, `goers`, or `beacon` key, no band in any
+  entry, and an ending of the pool of today.
 
-It then reports four spreads over the 200 worlds: the ending kinds, the threads, the ways of moving
-with one sample line each, and the repetition. Both of the repetition numbers matter:
+It then reports five spreads over the 200 worlds: the ending kinds, the threads, the ways of moving
+with one sample line each, the values of `went` over the logs with a ruin, and the repetition. No
+value of `went` may pass half of the logs with a ruin, and the check fails when one does. Both of
+the repetition numbers matter:
 
-- **the share of logs that hold the commonest sentence.** Under 8 per cent.
+- **the share of logs that hold the commonest sentence.** Under 8 per cent. The report prints the
+  three commonest, and the commonest sentence of the call alone: the entries of the call thread and
+  the ending on a world with a ruin. Since p2-40 the three commonest sentences are lines of
+  `SOUND_LANDING`, at about 9 per cent, and the commonest sentence of the call stands under 8.
 - **the count of neighbour pairs in seed order that share any sentence.** This one cannot be driven
   to zero, because two wrecks in a row may honestly run the same thread on the same kind of world.
   Report what it reaches and widen the busiest beats when it climbs.
+
+No audit seed lacks a ruin, so the case of a world with no ruin is proved by hand: wrap
+`SourceLore.writeLog` on the shared module object so that it passes `{ ...world, ruin: null }` to
+the real writer, build the seeds again, and compare the logs with the logs of the build before the
+call. p2-40 did that over 200 seeds, and every log was byte-equal.
 
 The motion lexicon does not run again here. The pool sweep already reads every wording against
 every way of moving, which is complete, and the filled text has lost the tokens the subject-scoped
