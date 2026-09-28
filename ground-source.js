@@ -20,7 +20,7 @@
 // The ruin of phase 2 stands here too: SourceRuin has the shape of SourceWreck, and Ground takes the
 // class by patch.source.kind. See "The ruin on its patch" in docs/ruin.md. p2-41.
 import * as THREE from 'three';
-import { motifOf } from './music.js';
+import { motifOf, ruinMotifOf } from './music.js';
 import { wreckGeometry, hullOf } from './wreck-geometry.js';
 import { ruinGeometry } from './ruin-geometry.js';
 import { protoRow, ruinCard } from './ruin-types.js';
@@ -232,13 +232,8 @@ const FLOAT_LIFT = 1.4;         // units: how far a slab of the floaters rises a
 const FLOAT_RATE = [0.3, 0.55]; // rad/s: the range of the rate of the lift of one slab
 const GOLDEN = 2.399963;        // rad: the golden angle, so no two slabs lift in step
 
-// The rhythm the glow of the ruin blinks: the motif of the wreck at half the speed. p2-44 gives the
-// ruin a motif of its own and swaps this function for it; the glow reads only the fields of
-// motifOf() and its period, so nothing else changes then.
-export function ruinRhythm(world) {
-  const m = motifOf(world);
-  return { ...m, stepDur: m.stepDur * 2, barSeconds: m.barSeconds * 2, period: m.period * 2 };
-}
+// The rhythm the glow of the ruin blinks is ruinMotifOf() of music.js: the motif the ear hears on
+// the ruin bus, the steps of the wreck at twice their length. p2-44.
 
 // The parts of a welded geometry: a label per vertex, one for each group of triangles that share
 // a corner. weld() in ruin-geometry.js keeps no mark of its parts, and the slabs of the floaters
@@ -331,11 +326,8 @@ export class SourceRuin {
     // and the groups off `outer`, and ground.js keeps the cover and the wandering herds off it.
     this.disc = row ? row.disc : 24;
     this.outer = this.disc * (1 + RUIN_EDGE);
-    this.rhythm = ruinRhythm(world);
-    this.wreckPeriod = motifOf(world).period;
+    this.rhythm = ruinMotifOf(world);
     this.t0 = -1;
-    this._bar = null;
-    this._half = 0;
     this.marked = false;
     this.ring = null;
     this.light = null;
@@ -405,18 +397,13 @@ export class SourceRuin {
       + (g.orbit ? g.orbit.attributes.position.count : 0)) / 3;
   }
 
-  // The clock of the glow: the seconds inside the period of ruinRhythm(). The bar clock of the song
-  // runs over one period of the motif of the wreck, and the ruin plays it at half the speed, so each
-  // wrap of that clock moves the glow to the other half of its own period. With no sound the glow
-  // takes the clock of the landing.
+  // The clock of the glow: the seconds since the start of the last call of the ruin, inside the
+  // period of ruinMotifOf(). When the sound runs it is ruinClock() of the song, so the glow lights on
+  // the notes of the ruin bus. With no sound the glow takes the clock of the landing over the same
+  // period, so the rhythm is the same rhythm. p2-44.
   _clock(t) {
-    const bar = this.music && this.music.barClock ? this.music.barClock() : null;
-    if (bar != null) {
-      if (this._bar != null && bar < this._bar) this._half ^= 1;
-      this._bar = bar;
-      return bar + this._half * this.wreckPeriod;
-    }
-    this._bar = null;
+    const c = this.music && this.music.ruinClock ? this.music.ruinClock() : null;
+    if (c != null) return c;
     if (this.t0 < 0) this.t0 = t;
     const p = this.rhythm.period;
     return ((t - this.t0) % p + p) % p;
@@ -783,7 +770,7 @@ export class RuinInspector {
     const key = `${world.seed}|${world.type}|${world.ruin.proto}`;
     if (this.key !== key) { this._drop(); this._build(world); this.key = key; }
     this.glowColor.set(glow || carrierColour(world, 2));
-    this.rhythm = ruinRhythm(world);
+    this.rhythm = ruinMotifOf(world);
     this.ground.material.color.set(groundColor || '#6fa85a');
     if (accent) this.card.style.setProperty('--ruin', accent);
 
@@ -893,7 +880,7 @@ export class RuinInspector {
   }
 
   // One frame of the card: the body turns, the slabs of the floaters turn on it, and the glow
-  // blinks the rhythm of the glow on the ground, ruinRhythm(), on the clock of the card.
+  // blinks the rhythm of the glow on the ground, ruinMotifOf(), on the clock of the card.
   frame(t) {
     this.pivot.rotation.y = t * RUIN_SPIN;
     if (this.orbit) this.orbit.rotation.y = t * RUIN_ORBIT_SPIN;

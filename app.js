@@ -906,8 +906,9 @@ function step(now) {
     ground.update(t, dt);
     ground.render();
     probeHud.update(ground.telemetry(), now);
-    // Twice a second: the address bar follows the ground camera, and the motif of the source
-    // follows the distance to the wreck. Both are cheap and neither needs a frame of its own.
+    // Twice a second: the address bar follows the ground camera, and the motif of the source that
+    // runs follows the distance to it: the wreck in chapter 1, the ruin in chapter 2 (p2-44). Both
+    // are cheap and neither needs a frame of its own.
     if (t - hashAt > 0.5) { hashAt = t; writeHash(); setCarrierLevel(); }
     return;
   }
@@ -934,7 +935,9 @@ function step(now) {
       current.cloudGroup.visible = op > 0.02;
     }
     stars.update(t, camera);
-    updateCarrierGroup(carrierGroup, dt);   // the fade of a new wedge, and nothing else
+    // the fade of a new wedge, the models of the finds, and the lamp of the mini ruin, which blinks
+    // the motif of the ruin on the clock of the song (p2-44)
+    updateCarrierGroup(carrierGroup, dt, music);
     for (const m of current.moons) {
       m.angle += m.speed * dt;
       m.mesh.position.set(Math.cos(m.angle) * m.dist, 0, Math.sin(m.angle) * m.dist);
@@ -2034,7 +2037,7 @@ function onRuinFound() {
   probeHud.setPulse(false);
   renderInfo(current.world);
   renderWorlds();
-  setCarrierLevel();
+  setCarrierLevel();     // the motif of the ruin joins the song of this world, at 0.6 in orbit. p2-44.
 }
 
 // ---------------------------------------------------------------- the motif in the song, slice 5
@@ -2052,20 +2055,31 @@ function onRuinFound() {
 // holds the band of the ruin, so the cell of the wreck no longer raises the motif of the wreck. In
 // orbit the motif of the wreck stays in the song after its find, in both chapters. p2-38.
 //
-// Since p2-41 the ruin stands on its cell, so in chapter 2 the level there reads the distance to the
-// edge of the ruin, as the range of the overlay does. Until p2-44 gives the ruin a bus of its own,
-// that level opens the bus of the motif of the wreck, and the glow of the ruin blinks the same
-// steps at half the speed.
-const CARRIER_NEAR = 40;      // units from the wreck where the motif stands full
+// The ruin has a voice of its own, p2-44: the motif of the wreck played back, slower and an octave
+// lower, on the ruin bus of music.js. Each bus follows the rule above for its own source, and the
+// ruin speaks in chapter 2 only:
+//
+//                                  wreck bus                  ruin bus
+//   ground, chapter 1, the wreck   the level of its range     0
+//   ground, chapter 2, the ruin    0                          the level of its range
+//   ground, any other cell         0                          0
+//   orbit                          CARRIER_ORBIT after the    CARRIER_ORBIT after the find of
+//                                  find of the wreck          the ruin, in chapter 2
+//
+// So after both finds both motifs play in orbit, over a song that stays whole. The range of the
+// ruin is the range the overlay states, to the edge of its stones. p2-41.
+const CARRIER_NEAR = 40;      // units from the source where the motif stands full
 const CARRIER_EDGE = 0.15;    // the level at the edge of the reach
 const CARRIER_ORBIT = 0.6;    // the level in orbit after the find
 
-function carrierLevel() {
+// The level of the motif of one kind of source, 'wreck' or 'ruin', 0 to 1.
+function carrierLevel(kind) {
   const src = current && activeSource(current.world, carrierRecord);
   if (!src) return 0;
   if (mode === 'ground' && ground) {
     const w = ground.source;
-    if (!w || w.kind !== src.kind) return 0;   // this cell is not the cell of the source that runs
+    // The receiver holds one band: the body on this cell sounds only when it is the source that runs.
+    if (src.kind !== kind || !w || w.kind !== kind) return 0;
     const p = ground.camera.position;
     // The distance the range of the overlay states: to the edge of a ruin, to the middle of the
     // wreck. p2-41.
@@ -2074,10 +2088,17 @@ function carrierLevel() {
     const k = 1 - THREE.MathUtils.smoothstep(r, CARRIER_NEAR, far);
     return CARRIER_EDGE + (1 - CARRIER_EDGE) * k;
   }
-  return carrierRecord && carrierRecord.found ? CARRIER_ORBIT : 0;
+  const found = kind === 'ruin'
+    ? src.kind === 'ruin' && !!(carrierRecord && carrierRecord.ruin && carrierRecord.ruin.found)
+    : !!(carrierRecord && carrierRecord.found);
+  return found ? CARRIER_ORBIT : 0;
 }
 
-function setCarrierLevel() { music.setCarrier(carrierLevel()); }
+// Both levels, twice a second and on every change of the mode, the tune, and a find.
+function setCarrierLevel() {
+  music.setCarrier(carrierLevel('wreck'));
+  music.setRuin(carrierLevel('ruin'));
+}
 
 // The value of the Carrier row: the words of carrierState(), the Clear chip while the chapter that
 // runs holds a fix, the Tune chip, and the Aim chips in orbit. "Not heard" is a link to the record

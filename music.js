@@ -1,5 +1,6 @@
 // myworlds — procedural chip-tune for each world, seeded by the world.
 // Web Audio only: pulse and triangle voices, a pad, light percussion, a noise wash for the wind, a small reverb and an echo.
+// Over the song, the motif of each source on a bus of its own: a sine for the wreck, a bell for the ruin.
 const STORE_KEY = 'myworlds.music';
 const STEP_LOOK = 0.5;      // seconds of notes scheduled ahead
 const FADE_IN = 8, FADE_OUT = 1.6, SWAP_IN = 5;
@@ -64,6 +65,18 @@ const STEPS = BARS * 16;
 const MOTIF_STEPS = 16, MOTIF_BARS = 4, MOTIF_PERIOD = MOTIF_STEPS * MOTIF_BARS;
 // The places a motif note may fall after step 0: the eighths and a few off-beats.
 const MOTIF_SLOTS = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14];
+// The motif of the ruin plays the motif of the wreck back, p2-44: each step at RUIN_SLOW times its
+// length and RUIN_DROP semitones lower. One call fills two bars of the song, and the period is four
+// bars of the ruin motif, eight bars of the song. The call starts on bar RUIN_AT of the eight
+// (0-based), so it follows the call of the wreck on bar 0 and ends before the call on bar 4.
+const RUIN_SLOW = 2, RUIN_DROP = 12, RUIN_AT = 2, RUIN_PERIOD = MOTIF_PERIOD * RUIN_SLOW;
+const RUIN_VERB = 2.5;      // the send of the ruin bus into the hall, against 1 for the source bus
+// The level of a bell against the level of the same note of the wreck. The bell rings on where the
+// sine of the wreck stops, so at the same level it measured 8 dB louder (A-weighted, windows of
+// 85 ms) and 11 dB louder (windows of 0.34 s). 0.35 takes 9 dB off: over five worlds a call of the
+// ruin then measures 1 dB under a call of the wreck in the short windows and 1 to 4 dB over it in
+// the long ones. The listen test of p2-44 can move it.
+const RUIN_LEVEL = 0.35;
 
 const pickWith = (rng) => (arr) => arr[Math.floor(rng() * arr.length)];
 const gaussWith = (rng) => () => { let s = 0; for (let i = 0; i < 4; i++) s += rng(); return (s - 2) / 1.15; };
@@ -138,6 +151,30 @@ class Synth {
       o.start(t); o.stop(end);
     }
     oscs[0].onended = () => { for (const o of oscs) o.disconnect(); g.disconnect(); };
+  }
+  // A soft bell: a sine carrier with a sine that bends its frequency at three times the pitch, the
+  // FM of a chime. The bend is strong at the strike and falls fast, so the tone starts bright and
+  // settles to a near sine. The ratio is a whole number, so every partial stands on the harmonic
+  // series of the note and the bell is in tune with the song. The level falls from the strike with
+  // the time constant `tau` and then fades over the long release `r`.
+  bell({ midi, t, dur, level, index = 2.2, bend = 0.35, tau = 0.7, a = 0.006, r = 1.4, out }) {
+    const ctx = this.ctx, f = midiHz(midi), end = t + dur + r + 0.05, mf = f * 3;
+    const car = ctx.createOscillator(); car.frequency.value = f;
+    const mod = ctx.createOscillator(); mod.frequency.value = mf;
+    const mg = ctx.createGain();
+    mg.gain.setValueAtTime(index * mf, t);
+    mg.gain.exponentialRampToValueAtTime(index * mf * 0.12, t + bend);
+    mod.connect(mg).connect(car.frequency);
+    const g = ctx.createGain(), hold = t + Math.max(a, dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(level, t + a);
+    g.gain.setTargetAtTime(0, t + a, tau);
+    // The value of that curve at the end of the note, so the release starts with no step.
+    g.gain.setValueAtTime(Math.max(0.0002, level * Math.exp(-(hold - t - a) / tau)), hold);
+    g.gain.exponentialRampToValueAtTime(0.0001, hold + r);
+    car.connect(g).connect(out);
+    car.start(t); mod.start(t); car.stop(end); mod.stop(end);
+    car.onended = () => { car.disconnect(); mod.disconnect(); mg.disconnect(); g.disconnect(); };
   }
   // A soft sustained voice: two detuned oscillators through a lowpass, slow attack and release.
   pad({ midi, t, dur, level, a, r, waves, detune, cutoff, out }) {
@@ -240,11 +277,20 @@ export function motifOf(world) {
   const barSeconds = stepDur * MOTIF_STEPS;
   return { seed: w.seed, steps, stepsPerBar: MOTIF_STEPS, bars: MOTIF_BARS, stepDur, barSeconds, period: barSeconds * MOTIF_BARS };
 }
+// The rhythm of the motif of the ruin from the seed alone, with the fields of `motifOf()`. The ruin
+// sends the beacon of the crew back, slower: the same steps, each at twice its length. So it takes no
+// stream of its own and draws no number. The glow of the ruin and the lamp of its mini model blink
+// it on `ruinClock()`, or on the clock of the landing when no sound runs. p2-44.
+export function ruinMotifOf(world) {
+  const m = motifOf(world), stepDur = m.stepDur * RUIN_SLOW, barSeconds = stepDur * MOTIF_STEPS;
+  return { seed: m.seed, steps: m.steps, stepsPerBar: MOTIF_STEPS, bars: MOTIF_BARS, stepDur, barSeconds, period: barSeconds * MOTIF_BARS };
+}
 
 // The song is a 32-bar loop of note events, written once from the seed, and played like a person:
 // timing jitter, accents by beat, a crescendo into each phrase, legato and staccato, a bass line that moves
 // against the lead, a soft pad under the chords, light percussion, and a figure that changes when it returns.
-// "Motif" names one thing only: the short tune of the source. The song calls its own cell a figure.
+// "Motif" names one thing only: the short tune of a source, the wreck or the ruin. The song calls
+// its own cell a figure.
 function compose(world) {
   const rng = mulberry32(cyrb32('music:' + world.seed)), pick = pickWith(rng), weighted = weightedWith(rng), gauss = gaussWith(rng);
   const { mood, bpm, stepDur } = tempoOf(world); // stepDur is one sixteenth
@@ -409,6 +455,28 @@ function compose(world) {
       a: 0.004, d: 0.05, s: 0.12, r: 0.14, out: song.srcBus });
   };
 
+  // ---- the motif of the ruin, p2-44
+  // The ruin plays the motif of the wreck back: the notes above, each step at twice its length and
+  // an octave lower. It reads the notes and draws no number, so no note of the song and no note of
+  // the motif of the wreck moves, and it stands in the mode and on the root as they do.
+  const ruinStep = stepDur * RUIN_SLOW;
+  const ruinByStep = Array.from({ length: RUIN_PERIOD }, () => null);
+  const ruinNotes = motifNotes.map((n) => {
+    const ev = { step: n.step, midi: n.midi - RUIN_DROP, len: n.len, level: n.level * RUIN_LEVEL };
+    ruinByStep[RUIN_AT * MOTIF_STEPS + n.step * RUIN_SLOW] = ev;
+    return ev;
+  });
+  // `at` is the start of the call inside the period of eight bars, in seconds. `ruinClock()` counts
+  // from it, so the lamps of the ruin read the steps of `ruinMotifOf()` from 0.
+  song.ruin = { steps: motif.steps, notes: ruinNotes, stepsPerBar: MOTIF_STEPS, bars: MOTIF_BARS,
+    stepDur: ruinStep, barSeconds: ruinStep * MOTIF_STEPS, period: ruinStep * MOTIF_PERIOD,
+    at: stepDur * MOTIF_STEPS * RUIN_AT };
+  // A soft bell with a long release on a bus with more hall. The wreck is a short plain sine an
+  // octave higher, so a listener tells the two apart when both play.
+  song.playRuin = (synth, ev, t) => {
+    synth.bell({ midi: ev.midi, t, dur: ruinStep * ev.len, level: ev.level, out: song.ruinBus });
+  };
+
   // ---- playback
   // Swing delays the off-beat eighth of each pair: `swing` is where it lands in the pair (0.5 = straight).
   song.stepTime = (i) => {
@@ -443,7 +511,8 @@ function compose(world) {
     }
     // The motif keeps straight time while the song swings: a machine transmits on a clock. The lamp
     // of the wreck can then blink the same steps from the seed with no audio. The song loop holds
-    // 32 bars, so the four-bar period of the motif never slips against it.
+    // 32 bars, so the four-bar period of the motif never slips against it. The motif of the ruin
+    // takes the same straight clock, and its period of eight bars divides the loop too.
     if (!song.srcBus) return;
     for (let k = Math.max(0, Math.floor((t0 - song.t0) / stepDur) - 1); ; k++) {
       const t = song.t0 + k * stepDur;
@@ -451,6 +520,8 @@ function compose(world) {
       if (t < t0) continue;
       const ev = motifByStep[k % MOTIF_PERIOD];
       if (ev) song.playMotif(synth, ev, t);
+      const rv = song.ruinBus && ruinByStep[k % RUIN_PERIOD];
+      if (rv) song.playRuin(synth, rv, t);
     }
   };
   return song;
@@ -486,6 +557,7 @@ export class Music {
     this.ctx = null; this.master = null; this.comp = null; this.synth = null;
     this.song = null; this.pending = null;
     this.carrier = 0; // the level of the source, 0 to 1. Kept while no song plays.
+    this.ruinLevel = 0; // the level of the motif of the ruin, 0 to 1. Kept while no song plays. p2-44.
     this.timer = 0;
     this.onchange = null; // UI callback
     this._unlock = () => this.unlock();
@@ -576,16 +648,27 @@ export class Music {
     this.carrier = clamp(+k || 0, 0, 1);
     this._applyCarrier(0.4);
   }
-  _applyCarrier(secs) {
-    const g = this.song?.srcBus;
+  _applyCarrier(secs) { this._ramp(this.song?.srcBus, this.carrier, secs); }
+  // The level of the motif of the ruin, 0 to 1, on the pattern of `setCarrier()`. On the ground it
+  // follows the distance to the edge of the ruin in chapter 2; in orbit it is 0.6 after the find of
+  // the ruin. Safe with no song, with no audio, and while muted. p2-44.
+  setRuin(k) {
+    this.ruinLevel = clamp(+k || 0, 0, 1);
+    this._applyRuin(0.4);
+  }
+  _applyRuin(secs) { this._ramp(this.song?.ruinBus, this.ruinLevel, secs); }
+  // Ramp the gain of a bus of a source to `k * 0.5` over `secs` seconds, from the value it holds now.
+  _ramp(g, k, secs) {
     if (!g || !this.ctx) return;
     const now = this.ctx.currentTime;
     g.gain.cancelScheduledValues(now);
     g.gain.setValueAtTime(g.gain.value, now);
-    g.gain.linearRampToValueAtTime(this.carrier * 0.5, now + secs);
+    g.gain.linearRampToValueAtTime(k * 0.5, now + secs);
   }
   // The rhythm and the clock of the motif from the seed alone. See `motifOf()`.
   motif(world) { return motifOf(world); }
+  // The rhythm and the clock of the motif of the ruin from the seed alone. See `ruinMotifOf()`.
+  ruinMotif(world) { return ruinMotifOf(world); }
   // The seconds inside the four-bar period of the motif, or null when no audio runs. The lamp of
   // the wreck reads it, so the eye and the ear agree. With no sound the lamp takes the clock of the
   // landing and the period of `motifOf()`.
@@ -593,6 +676,17 @@ export class Music {
     const song = this.song;
     if (!this.playing || song.stopping || song.t0 === undefined || !song.motif) return null;
     const period = song.motif.period, t = this.ctx.currentTime - song.t0;
+    return ((t % period) + period) % period;
+  }
+  // The seconds since the start of the last call of the ruin, inside its period of eight bars, or
+  // null when no audio runs. The call starts on bar RUIN_AT of the eight and not on bar 0, so this
+  // clock has a phase of its own. The glow of the ruin and the lamp of its mini model read it with
+  // `ruinMotifOf()`, so the eye and the ear agree. With no sound a lamp takes the clock of the
+  // landing and the period of `ruinMotifOf()`. p2-44.
+  ruinClock() {
+    const song = this.song;
+    if (!this.playing || song.stopping || song.t0 === undefined || !song.ruin) return null;
+    const period = song.ruin.period, t = this.ctx.currentTime - song.t0 - song.ruin.at;
     return ((t % period) + period) % period;
   }
   // Play the song of a world. Muted: remember it and start on unmute.
@@ -625,11 +719,18 @@ export class Music {
     // of the world by, so the beacon stays hard and far from the song, and it takes the same hall.
     const srcBus = song.srcBus = ctx.createGain(); srcBus.gain.value = 0;
     srcBus.connect(out); srcBus.connect(verb.input);
-    song.nodes.push(bus, lp, padBus, srcBus, out, ...verb.nodes, ...echo.nodes);
+    // The ruin has a bus of its own too, silent until `setRuin()` opens it. It passes the lowpass by
+    // as the source does, and it sends RUIN_VERB times as much into the hall, so the bell rings far
+    // off. p2-44.
+    const ruinBus = song.ruinBus = ctx.createGain(); ruinBus.gain.value = 0;
+    const ruinSend = ctx.createGain(); ruinSend.gain.value = RUIN_VERB;
+    ruinBus.connect(out); ruinBus.connect(ruinSend).connect(verb.input);
+    song.nodes.push(bus, lp, padBus, srcBus, ruinBus, ruinSend, out, ...verb.nodes, ...echo.nodes);
     const w = song.mood.wind, level = w.g * song.windK * 0.025;
     if (level > 0.001) song.nodes.push(...synth.noiseBed({ f: w.f * song.windPitch, q: w.q, type: w.low ? 'lowpass' : 'bandpass', level, lfo: w.lfo, out }));
     song.t0 = now + 0.05; song.cursor = song.t0;
     this._applyCarrier(0.4); // the song takes the level the app set before it started
+    this._applyRuin(0.4);
     this._startTimer();
   }
   _stopSong(song) {
