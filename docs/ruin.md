@@ -30,6 +30,7 @@ on. `CONTEXT.md` holds the words to avoid.
 | 4. Build the body | `ruin-geometry.js`, `ruinGeometry()` | Main thread, tools | the body, the glow, the orbit, and the lamp. See "The body" |
 | 5. Follow the ruin | `site.js`, `carrier-store.js`, `carrier-globe.js`, `app.js` | Main thread | chapter 2 of the search, after the tune (p2-38) |
 | 6. Tune the receiver | `tuner.js`, `app.js`, `ground-source.js` | Main thread | the field the reader types the frequency into (p2-39) |
+| 7. Stand the ruin on its cell | `generate.js`, `patchRuin()`; `ground-source.js`, `SourceRuin` | Web Worker; main thread | the disc and `patch.source`; the body, the glow, the light, the well (p2-41). See "The ruin on its patch" |
 
 `world.ruin` rides back with the world as plain data, so `worker.js` clones it with the rest:
 
@@ -300,6 +301,126 @@ size:
 height, and the maker, and prints this table. `tools/ruin-lab.html` shows every proto on every
 type it fits, with the counts, a person of 1.8 units, and the wreck of chapter 1 for scale.
 
+## The ruin on its patch
+
+p2-41. A landing on the cell of the ruin shows the ruin, whether the reader has tuned or not,
+because a patch depends only on its arguments. A reader who lands on it by chance finds it.
+
+### The disc
+
+`patchRuin()` in `generate.js` runs when the cell of the patch is the cell of `world.ruin`, by
+the rule of `kindIn()`. The patch asks for the ruin after the source, and a cell holds one of the
+two and never both, because `makeRuin()` keeps the ruin off the cell of the wreck. It gives
+`patch.source = { kind: 'ruin', proto, x, y, z, yaw }` in units of the box: the middle of the
+disc, its height, and the turn of the body.
+
+- **The stream.** The place and the yaw roll from `makeRng(pseed + '|ruin')` and from no other
+  stream, so every other patch is byte for byte the patch it was, and `tools/world-checksum.mjs`
+  proves it. The stream draws three numbers: the angle and the distance of the draw, then the yaw.
+  The camp of p2-43 draws after them from the same stream, in `ruinCamp()`, and nothing else
+  draws from it.
+- **The walk.** `placeDisc()` holds the walk of the wreck, and `patchSource()` and `patchRuin()`
+  share it with the disc as an argument. From the draw it takes the nearest node that is dry, under
+  `SOURCE_STAND`, clear of the phenomenon, and dry at the rim of the disc. The ruin adds two tests:
+  the rim takes a point every 12 units of arc and not 8 points, and the ground at the edge of the
+  flat disc stands within 0.25 units per unit of radius of the middle, so a big disc does not cut a
+  deep terrace into a hill. When no node passes, the source takes the driest and flattest node,
+  as the wreck does, and the rim may then reach the water.
+- **The reach.** The middle stands inside the walk limit, `reachOf()` of `ground.js`, less the
+  whole disc with its soft edge. So the reader can walk round the ruin, and the needle leads to a
+  place the walk reaches. The draw takes `SOURCE_PLACE` of that bound, as the wreck does.
+- **The flat part and the soft edge.** The `disc` of `RUIN_PROTOS` is the flat part, and the
+  ground eases back over `RUIN_EDGE`, 0.4 of the disc, outside it. The wreck keeps its soft edge
+  inside its 14 units, because its parts stand near the middle. The parts of a ruin reach the edge
+  of the disc of the table, so a soft edge inside it would lift or sink the ends of the arches and
+  the small hives. The yaw turns the body about the middle of the disc and keeps every distance, so
+  the line of the arches fits the disc at every yaw.
+- **The floor.** The disc takes no scorch, because nothing burnt here. Its colour moves toward the
+  rock of the palette, 0.35 of the way at the middle and none at the outer edge, as stone that feet
+  and weather wore flat. The surface of each node takes a share of bare rock of up to 0.8, so the
+  fine pattern of `ground-detail.js` draws the floor as stone.
+- **The mask.** The plants and the group anchors keep off the whole disc with its soft edge. A
+  group asks the mask with its spread, so no member starts on the disc either; the masks of the
+  phenomenon and of the wreck read the point alone, so no patch of theirs moved.
+
+| Proto | Flat disc | With the soft edge |
+|---|---|---|
+| spires, floaters | 24 | 33.6 |
+| well, ring | 30 | 42 |
+| dome | 36 | 50.4 |
+| colossus | 38 | 53.2 |
+| arches | 52 | 72.8 |
+| hive | 55 | 77 |
+
+### The body, the light, and the well
+
+`SourceRuin` in `ground-source.js` has the shape of `SourceWreck`: `create()`, `update(t)`,
+`pickAt()`, `mark()`, `unmark()`, and `dispose()`. `Ground` takes the class by
+`patch.source.kind`, so the rest of `ground.js` reads `ground.source` and does not care which kind
+stands there.
+
+- **The body** is one mesh of the body of `ruinGeometry()`, in a flat-shaded standard material with
+  the colours of the vertices. It stands on the height the terrain mesh draws at the middle, and it
+  casts and takes shadows on HIGH.
+- **The glow** is one mesh with one material in the colour of chapter 2, `carrierColour(world, 2)`,
+  so the ruin, its wedges, and its card read in one colour. It draws with the fog off, as the lamp
+  of the wreck does, so the reader walks to it out of the mist. It blinks with the rules of
+  `lampLevel()`: a floor that never goes out, a tail, and a breath. Until p2-44 gives the ruin a
+  motif of its own, the rhythm is `ruinRhythm(world)`: the motif of the wreck at half the speed.
+  The clock is `music.barClock()`, which runs over one period of the motif of the wreck, so each
+  wrap of it moves the glow to the other half of its own period. With no sound the glow takes the
+  clock of the landing.
+- **The light.** HIGH adds one point light at the lamp, in the colour of the glow, which blinks
+  with it. LOW keeps the glow alone.
+- **The floaters** turn their orbit about the core, once in about 105 seconds, and each slab and
+  each ring rises and falls 1.4 units on its own phase. `weld()` keeps no mark of the parts, so
+  `SourceRuin` finds them again: the triangles that share a corner are one part. The lift moves the
+  vertices, so the shadow follows the slab. No other proto moves.
+- **The well opens the ground.** The terrain of a patch is one grid with no hole. `SourceRuin`
+  gives `hole`, the middle and the radius of the mouth plus 0.2 units, and `Ground._openHole()`
+  passes it to the terrain material in a uniform. Its fragment shader discards inside that circle.
+  The shaft wall of the body hides the edge from inside, and the rim of the well covers the band
+  from the mouth out to the circle from above. The rim, the flora, and the cover do not reach the
+  mouth, because the disc keeps them off. Only the patch of the well compiles this program. The
+  terrain casts no shadow, so no depth material needs the hole.
+- **The mark.** A tap on the ruin marks it with the ring the wreck takes, on the edge of the flat
+  disc, and the floating button reads "Study the ruin". `onSelectSource()` fires as it does for
+  the wreck. A thing this big takes a grace of its size in the tap: the far wall of the well and a
+  spire over a ridge stand further past the ground than the hull does. The card is p2-42, and
+  `inspectRuin()` in `app.js` is where it opens.
+- **The herds.** `Ground` passes the disc with its soft edge to `GroundCover`, which grows no blade
+  and no stone on it, and to `GroundFauna`, where a walker that wanders turns away from it with its
+  spread, as it turns from the water.
+
+### The carrier on the cell
+
+On the cell of the ruin in chapter 2 the needle and the range stop reading the globe and read the
+ruin, measured from the camera, as they do for the wreck. The needle points at the middle of the
+ruin. The range measures to the edge of the ruin: `rangeFrom(x, z)` gives the distance to the
+convex outline of its parts on the ground, and 0 inside it. The hive is 110 units across, so a
+range to its middle would state 50 units to a reader who stands at its doors. The level of the
+motif in `carrierLevel()` reads the same range. Until p2-44 gives the ruin a bus of its own, that
+level opens the bus of the motif of the wreck. In chapter 1 the ruin stands on its cell and the
+needle keeps the bearing of the wreck.
+
+### The frame and the memory
+
+Measured on 2026-09-28 in a hidden pane at 1280 by 800 and a pixel ratio of 1, on HIGH at the
+reveal camera: 100 calls of `renderer.render()` with a read of one pixel at the end, eight rounds,
+with the group of the ruin shown and hidden in turn. The ruin adds no time the measure can see:
+
+| Proto | Seed | With the ruin | Hidden | Difference of the medians |
+|---|---|---|---|---|
+| hive | `p241-t` | 7.71 ms | 7.88 ms | -0.17 ms |
+| well | `p241-21` | 7.36 ms | 7.41 ms | -0.05 ms |
+| spires | `p241-5` | 7.77 ms | 7.82 ms | -0.05 ms |
+| floaters | `p241-9` | 8.60 ms | 8.61 ms | -0.01 ms |
+
+The noise between two rounds is about 0.15 ms. The discard of the well, against the same terrain
+program with no discard, measured +0.09 ms on the medians and -0.01 ms on the mean of the paired
+rounds. `update()` of the floaters costs 0.004 ms. `renderer.info.memory` of the orbit of
+`p241-21` read 16 geometries and 10 textures before a landing on the well and after the recall.
+
 ## The frequency, the compass word, and the way on
 
 - `freqOf(seed)` gives the frequency as `'N.NNN'`, from 3.000 to 29.999 MHz. It always prints three
@@ -355,8 +476,8 @@ the frequency there, and the landing that tunes takes the first fix of chapter 2
 - **The Carrier row** reads "Found", then "Tuned", then "1 fix", "3 fixes", and "Found 2 of 2".
   The Clear chip drops the fixes of the chapter that runs. After both finds the Aim chip offers
   both sources, "Wreck" and "Ruin". A saved world with both finds carries two marks on its thumb.
-- **The ground.** p2-41 puts the body of the ruin on its cell. Until then a landing on the cell of
-  the ruin shows the needle, the range in kilometres, and "Here", and no body. On the cell of the
+- **The ground.** p2-41 puts the body of the ruin on its cell; see "The ruin on its patch". In
+  chapter 2 the needle there points at the ruin and the range falls to its edge. On the cell of the
   wreck in chapter 2 the needle keeps the bearing of the ruin, and the motif of the wreck stays
   silent: the receiver holds the other band.
 
@@ -486,7 +607,12 @@ The labels keep their grey, and the rest of the overlay keeps its blue.
   too, and every 25th again after another world. It tests the hashes of `ruin-types.js`, the place,
   the maker, the tiers, and the cache, and it prints the share of each band. `placeFacts()` of
   `generate.js` gives it the numbers of the field that the tests read; the page never calls it.
-- `node tools/world-checksum.mjs --check` must match its baseline: the ruin moves no other stream.
+  Part 5 builds the patch of the ruin on 70 of those worlds, every proto among them, 8 of them on
+  HIGH too: the shape of `patch.source`, the flat and dry disc, the whole disc inside the reach, no
+  plant, no group, and no member on it, the body on the flat disc, the stone of the floor, the same
+  patch after another world, and no ruin on the cell next door. p2-41.
+- `node tools/world-checksum.mjs --check` must match its baseline: the ruin moves no other stream,
+  and every patch off the cell of the ruin hashes as it did before p2-41.
 - `node tools/world-checksum.mjs --source` prints the ruin of each seed on both tiers.
 - `node tools/carrier-check.mjs` runs every check of the carrier with the wreck and with the ruin
   as the source, and `node tools/carrier-fix-check.mjs` tests the two chapters of the store and of

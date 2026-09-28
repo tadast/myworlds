@@ -357,14 +357,16 @@ function coverMaterial(kind, uniforms, macro, macroBig, low) {
 export class GroundCover {
   // heights, colors, surface: the arrays of the patch, and patch its description. tone(k): the
   // lightness noise the terrain gives node k. heightAt(x, z): the ground.
+  // keepOut: [x, z, radius] of the disc of the ruin, or null. ground.js reads it off the ruin.
   constructor({ renderer, type, tier, patch, heights, colors, surface, seaLevel = null,
-    wind = 0, tone = () => 1, heightAt }) {
+    wind = 0, tone = () => 1, heightAt, keepOut = null }) {
     const { n, grid } = patch, half = patch.size / 2;
-    // The disc of the phenomenon and the disc of the wreck grow nothing, as the worker keeps the
-    // plants off them.
+    // The disc of the phenomenon, the disc of the wreck, and the disc of the ruin grow nothing, as
+    // the worker keeps the plants off them. p2-41.
     const blocks = [];
     if (patch.activity && patch.activity.radius) blocks.push([0, 0, patch.activity.radius]);
-    if (patch.source) blocks.push([patch.source.x, patch.source.z, SOURCE_DISC]);
+    if (patch.source && patch.source.kind === 'wreck') blocks.push([patch.source.x, patch.source.z, SOURCE_DISC]);
+    if (keepOut) blocks.push(keepOut);
     const low = !tier.shadows;
     this.cfg = TIERS[low ? 'low' : 'high'];
     this.heightAt = heightAt;

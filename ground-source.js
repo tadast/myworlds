@@ -16,9 +16,15 @@
 // The lamp blinks the rhythm of the motif of the source. The clock is the bar clock of music.js
 // when the sound runs, and the clock of the landing when it does not, so a reader with the sound off
 // loses no fact. Decision 12 of issue 34.
+//
+// The ruin of phase 2 stands here too: SourceRuin has the shape of SourceWreck, and Ground takes the
+// class by patch.source.kind. See "The ruin on its patch" in docs/ruin.md. p2-41.
 import * as THREE from 'three';
 import { motifOf } from './music.js';
 import { wreckGeometry, hullOf } from './wreck-geometry.js';
+import { ruinGeometry } from './ruin-geometry.js';
+import { protoRow } from './ruin-types.js';
+import { carrierColour } from './carrier-globe.js';
 
 const DISC_R = 12;           // units, the ring of the mark. The worker flattens 14.
 const RING_BAND = 0.06;      // the part of the radius the band of the ring takes
@@ -201,6 +207,298 @@ export class SourceWreck {
     this.body = null;
     this.lamp = null;
     this.halo = null;
+    this.ring = null;
+    this.light = null;
+  }
+}
+
+// ---------------------------------------------------------------- the ruin on the ground, p2-41
+// The second source. The worker placed the ruin, flattened the disc of its proto, and wore the
+// floor; see patchRuin() in generate.js. This class draws the body of ruinGeometry(), blinks the
+// glow, turns the slabs of the floaters, opens the ground over the well, and answers a tap. It has
+// the shape of SourceWreck, so ground.js reads ground.source and does not care which kind it is.
+//
+// The glow takes the colour of chapter 2 from carrierColour(), so the ruin, its wedges, and its
+// card read in one colour. It draws with the fog off, as the lamp of the wreck does: the reader
+// walks to it out of the mist on the needle.
+const RUIN_EDGE = 0.4;          // RUIN_EDGE of generate.js: the soft edge outside the flat disc
+const RUIN_RING_BAND = 0.035;   // the part of the radius the band of the ring of the ruin takes
+const RUIN_LIGHT_CD = 1400;     // candela at the lamp, in the light scale of ground.js
+const RUIN_LIGHT_RANGE = 320;   // units, how far the lamp light reaches on HIGH
+const RUIN_PICK_PAD = 2;        // units: the tap box of the ruin stands this far out from the body
+const RUIN_GRACE = 20;          // units: the least grace of the tap, the WRECK_GRACE of ground.js
+const FLOAT_TURN = 0.06;        // rad/s: the orbit of the floaters turns once in about 105 s
+const FLOAT_LIFT = 1.4;         // units: how far a slab of the floaters rises and falls
+const FLOAT_RATE = [0.3, 0.55]; // rad/s: the range of the rate of the lift of one slab
+const GOLDEN = 2.399963;        // rad: the golden angle, so no two slabs lift in step
+
+// The rhythm the glow of the ruin blinks: the motif of the wreck at half the speed. p2-44 gives the
+// ruin a motif of its own and swaps this function for it; the glow reads only the fields of
+// motifOf() and its period, so nothing else changes then.
+export function ruinRhythm(world) {
+  const m = motifOf(world);
+  return { ...m, stepDur: m.stepDur * 2, barSeconds: m.barSeconds * 2, period: m.period * 2 };
+}
+
+// The parts of a welded geometry: a label per vertex, one for each group of triangles that share
+// a corner. weld() in ruin-geometry.js keeps no mark of its parts, and the slabs of the floaters
+// must lift one by one. A part is a closed box or ring, so its triangles all share corners.
+function partsOf(geo) {
+  const p = geo.attributes.position, n = p.count;
+  const up = new Int32Array(n);
+  for (let i = 0; i < n; i++) up[i] = i;
+  const root = (i) => { while (up[i] !== i) { up[i] = up[up[i]]; i = up[i]; } return i; };
+  const join = (a, b) => { a = root(a); b = root(b); if (a !== b) up[b] = a; };
+  const seen = new Map();
+  for (let i = 0; i < n; i++) {
+    const key = `${Math.round(p.getX(i) * 1e3)},${Math.round(p.getY(i) * 1e3)},${Math.round(p.getZ(i) * 1e3)}`;
+    const k = seen.get(key);
+    if (k === undefined) seen.set(key, i); else join(k, i);
+    if (i % 3 === 2) { join(i - 2, i - 1); join(i - 2, i); }
+  }
+  const label = new Uint16Array(n), ids = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = root(i);
+    if (!ids.has(r)) ids.set(r, ids.size);
+    label[i] = ids.get(r);
+  }
+  return { label, count: ids.size };
+}
+
+// The outline of the footprint of the ruin on the ground: the convex hull of the parts, in the
+// frame of the patch. The range of the overlay measures to it, so the range falls to nothing at the
+// edge of the ruin and not at its middle.
+function footprint(geos, matrix) {
+  const pts = [], v = new THREE.Vector3(), seen = new Set();
+  for (const g of geos) {
+    if (!g) continue;
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(matrix);
+      const key = `${Math.round(v.x * 4)},${Math.round(v.z * 4)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pts.push([v.x, v.z]);
+    }
+  }
+  pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const q of pts) {
+    while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop();
+    lo.push(q);
+  }
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const q = pts[i];
+    while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop();
+    hi.push(q);
+  }
+  lo.pop(); hi.pop();
+  return lo.concat(hi);   // counter-clockwise in (x, z)
+}
+
+// The distance from a point to a convex outline, 0 inside it.
+function hullDistance(hull, x, z) {
+  let inside = true, best = Infinity;
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length];
+    const ex = b[0] - a[0], ez = b[1] - a[1], px = x - a[0], pz = z - a[1];
+    if (ex * pz - ez * px < 0) inside = false;
+    const t = Math.max(0, Math.min(1, (px * ex + pz * ez) / (ex * ex + ez * ez || 1)));
+    best = Math.min(best, Math.hypot(px - ex * t, pz - ez * t));
+  }
+  return inside ? 0 : best;
+}
+
+export class SourceRuin {
+  // The ruin of this patch, or null when the patch carries none.
+  static create(opts) {
+    const src = opts && opts.patch && opts.patch.source;
+    if (!src || src.kind !== 'ruin') return null;
+    return new SourceRuin(opts);
+  }
+
+  constructor({ world, patch, tier, heightAt, music }) {
+    const src = patch.source;
+    const row = protoRow(src.proto);
+    this.kind = src.kind;
+    this.proto = src.proto;
+    this.world = world;
+    this.music = music || null;
+    this.full = tier ? tier.shadows !== false : true;   // HIGH keeps the light; LOW keeps the glow
+    this.at = { x: src.x, z: src.z };
+    // The radius of the flat disc, and of the disc with its soft edge. The worker keeps the plants
+    // and the groups off `outer`, and ground.js keeps the cover and the wandering herds off it.
+    this.disc = row ? row.disc : 24;
+    this.outer = this.disc * (1 + RUIN_EDGE);
+    this.rhythm = ruinRhythm(world);
+    this.wreckPeriod = motifOf(world).period;
+    this.t0 = -1;
+    this._bar = null;
+    this._half = 0;
+    this.marked = false;
+    this.ring = null;
+    this.light = null;
+    this.hole = null;
+
+    // The ground the worker flattened. The drawn height is read here and not taken from src.y,
+    // because the mesh of the terrain is what the reader sees the ruin stand on.
+    const y = heightAt ? heightAt(src.x, src.z) : src.y;
+    this.group = new THREE.Group();
+    this.group.position.set(src.x, y, src.z);
+    this.group.rotation.y = src.yaw || 0;
+    this.group.updateMatrixWorld(true);
+
+    const g = ruinGeometry(src.proto, world);
+    const shadows = !!(tier && tier.shadows);
+    this.stone = new THREE.MeshStandardMaterial({
+      vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0,
+    });
+    this.body = new THREE.Mesh(g.body, this.stone);
+    this.body.castShadow = shadows;
+    this.body.receiveShadow = shadows;
+    this.group.add(this.body);
+
+    this.glowColor = new THREE.Color(carrierColour(world, 2));
+    this.glowMat = new THREE.MeshBasicMaterial({ color: this.glowColor.clone(), fog: false, toneMapped: false });
+    this.glow = g.glow ? new THREE.Mesh(g.glow, this.glowMat) : null;
+    if (this.glow) this.group.add(this.glow);
+
+    // The floaters: the slabs and the rings turn about the core, and each part lifts on its own
+    // phase. The lift moves the vertices of a part, so the shadow follows it.
+    this.orbit = null;
+    if (g.orbit) {
+      this.orbit = new THREE.Mesh(g.orbit, this.stone);
+      this.orbit.castShadow = shadows;
+      this.orbit.receiveShadow = shadows;
+      const pos = g.orbit.attributes.position;
+      const parts = partsOf(g.orbit);
+      this.orbitPart = parts.label;
+      this.orbitY = Float32Array.from({ length: pos.count }, (_, i) => pos.getY(i));
+      this.lift = new Float32Array(parts.count);
+      this.liftRate = Float32Array.from({ length: parts.count }, (_, k) =>
+        FLOAT_RATE[0] + (FLOAT_RATE[1] - FLOAT_RATE[0]) * ((k * 0.618034) % 1));
+      pos.setUsage(THREE.DynamicDrawUsage);
+      g.orbit.boundingSphere.radius += FLOAT_LIFT;
+      this.group.add(this.orbit);
+    }
+
+    const L = g.lamp;
+    if (this.full) {
+      // One light at the lamp, on HIGH only, as the wreck has. LOW keeps the glow alone.
+      this.light = new THREE.PointLight(this.glowColor, RUIN_LIGHT_CD, RUIN_LIGHT_RANGE, 2);
+      this.light.position.set(L[0], L[1], L[2]);
+      this.group.add(this.light);
+    }
+
+    // The well opens the ground. The terrain of a patch is one grid with no hole, so ground.js
+    // passes this circle to the terrain material and its fragment shader discards inside it. The
+    // circle takes a little more than the mouth: the rim of the well covers that band from above.
+    if (g.body.userData.hole) this.hole = { x: src.x, z: src.z, r: g.body.userData.hole + 0.2 };
+
+    // The tap: a thing this big takes the grace of its size, so a hit on the far wall of the well
+    // or on a spire over a ridge still marks it. See _onUp() in ground.js.
+    const bb = g.body.boundingBox;
+    this.grace = Math.max(RUIN_GRACE, bb.max.y, -bb.min.y + 10);
+    this.hull = footprint([g.body, g.glow, g.orbit], this.group.matrixWorld);
+    this.tris = (g.body.attributes.position.count + (g.glow ? g.glow.attributes.position.count : 0)
+      + (g.orbit ? g.orbit.attributes.position.count : 0)) / 3;
+  }
+
+  // The clock of the glow: the seconds inside the period of ruinRhythm(). The bar clock of the song
+  // runs over one period of the motif of the wreck, and the ruin plays it at half the speed, so each
+  // wrap of that clock moves the glow to the other half of its own period. With no sound the glow
+  // takes the clock of the landing.
+  _clock(t) {
+    const bar = this.music && this.music.barClock ? this.music.barClock() : null;
+    if (bar != null) {
+      if (this._bar != null && bar < this._bar) this._half ^= 1;
+      this._bar = bar;
+      return bar + this._half * this.wreckPeriod;
+    }
+    this._bar = null;
+    if (this.t0 < 0) this.t0 = t;
+    const p = this.rhythm.period;
+    return ((t - this.t0) % p + p) % p;
+  }
+
+  update(t) {
+    // The rules of the lamp of the wreck: a floor that never goes out, a tail, and a breath.
+    const k = lampLevel(this.rhythm, this._clock(t));
+    this.glowMat.color.copy(this.glowColor).multiplyScalar(0.35 + 0.65 * k);
+    if (this.light) this.light.intensity = RUIN_LIGHT_CD * k;
+    if (this.orbit) this._turn(t);
+  }
+
+  _turn(t) {
+    this.orbit.rotation.y = t * FLOAT_TURN;
+    const lift = this.lift, rate = this.liftRate;
+    for (let k = 0; k < lift.length; k++) lift[k] = FLOAT_LIFT * Math.sin(t * rate[k] + k * GOLDEN);
+    const attr = this.orbit.geometry.attributes.position, a = attr.array;
+    const part = this.orbitPart, y0 = this.orbitY;
+    for (let i = 0; i < part.length; i++) a[i * 3 + 1] = y0[i] + lift[part[i]];
+    attr.needsUpdate = true;
+  }
+
+  // Units over the ground from a point to the edge of the ruin, 0 on it. The needle points at the
+  // middle, and the range falls to nothing as the reader reaches the stones.
+  rangeFrom(x, z) {
+    return hullDistance(this.hull, x, z);
+  }
+
+  // The ruin under a point of the screen, or null. A ray against the parts is exact. The box of the
+  // parts answers a tap that misses a thin spire from far out.
+  pickAt(nx, ny, camera) {
+    if (!this.body) return null;
+    _ndc.set(nx, ny);
+    _ray.setFromCamera(_ndc, camera);
+    const hit = _ray.intersectObjects([this.body, this.glow, this.orbit].filter(Boolean), false)[0];
+    if (hit) return { point: hit.point.clone(), dist: hit.distance };
+    this.group.updateWorldMatrix(true, false);
+    const box = this.body.geometry.boundingBox.clone().expandByScalar(RUIN_PICK_PAD)
+      .applyMatrix4(this.group.matrixWorld);
+    const p = _ray.ray.intersectBox(box, _a);
+    if (!p) return null;
+    return { point: p.clone(), dist: camera.position.distanceTo(p) };
+  }
+
+  // The mark: the ring of the wreck, on the edge of the flat disc.
+  mark() {
+    if (!this.ring) {
+      const geo = new THREE.RingGeometry(this.disc * (1 - RUIN_RING_BAND), this.disc, 96);
+      geo.rotateX(-Math.PI / 2);
+      const pal = (this.world && this.world.palette) || {};
+      const ring = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: new THREE.Color((pal.fauna && pal.fauna.accent) || '#ffffff'),
+        transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, fog: true,
+      }));
+      ring.position.y = RING_LIFT;
+      ring.renderOrder = 2;
+      ring.frustumCulled = false;
+      this.ring = ring;
+      this.group.add(ring);
+    }
+    this.marked = true;
+    this.ring.visible = true;
+  }
+
+  unmark() {
+    this.marked = false;
+    if (this.ring) this.ring.visible = false;
+  }
+
+  dispose() {
+    const mats = new Set();
+    this.group.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) mats.add(o.material);
+    });
+    mats.forEach((m) => m.dispose());
+    if (this.group.parent) this.group.parent.remove(this.group);
+    this.group.clear();
+    this.body = null;
+    this.glow = null;
+    this.orbit = null;
     this.ring = null;
     this.light = null;
   }

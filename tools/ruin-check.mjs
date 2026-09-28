@@ -3,7 +3,7 @@
 //   node tools/ruin-check.mjs                500 seeds on LOW; every tenth also on HIGH
 //   node tools/ruin-check.mjs --seeds 100    another count of seeds
 //
-// Later issues of phase 2 add to this file. Four checks run now:
+// Later issues of phase 2 add to this file. Five checks run now:
 //
 // 1. The hashes of ruin-types.js. parseFreq() takes every form p2-35 names and refuses the rest.
 //    compass8() gives its eight words and puts a bearing on the line between two words clockwise.
@@ -21,16 +21,27 @@
 // 4. The tiers and the cache. A world rides back through worker.js, so the ruin must survive the
 //    clone. HIGH and LOW give one ruin, key for key. A world built again after another world gives
 //    the same ruin.
+// 5. The patch of the ruin, p2-41. On every tenth world with a ruin, on the first two worlds of
+//    each proto, and on HIGH for every 50th seed, the patch of the cell of the ruin holds
+//    patch.source = { kind: 'ruin', proto, x, y, z, yaw } and nothing more. The disc of the proto
+//    is flat and dry, and the whole disc with its soft edge stands inside the reach, so the reader
+//    can walk round the ruin. No plant stands on the disc with its soft edge, no group anchor stands
+//    within its spread of it, and no member starts on it. Every part of the body that touches the
+//    ground stands on the flat disc at the yaw of the patch, so the line of the arches fits. The
+//    floor takes the stone of the fine pattern. On every 50th seed the patch is the same when it
+//    builds again after another world, and the cell next to the ruin holds no ruin.
+//    tools/world-checksum.mjs proves that every patch off the cell of the ruin did not move.
 //
-// The copies of the rules below come from the text of p2-35 and p2-00, and not from
+// The copies of the rules below come from the text of p2-35, p2-00, and p2-41, and not from
 // generate.js, so a slip in generate.js cannot pass its own check. The ground tests read the field
 // of the globe, which only generate.js holds, so placeFacts() gives the check those numbers.
 //
-// site.js takes three.js by a bare name; three-hook.mjs resolves it in Node.
+// site.js and ruin-geometry.js take three.js by a bare name; three-hook.mjs resolves it in Node.
 import { root } from './three-hook.mjs';
 
-const { TIERS, worldOpts } = await import(root + 'tiers.js');
-const { CELL, dirCell, cellDir, sameCell } = await import(root + 'cell-grid.js');
+const { TIERS, worldOpts, patchOpts } = await import(root + 'tiers.js');
+const { CELL, dirCell, cellDir, cellSite, sameCell } = await import(root + 'cell-grid.js');
+const { ruinGeometry } = await import(root + 'ruin-geometry.js');
 const S = await import(root + 'site.js');
 const R = await import(root + 'ruin-types.js');
 const { Species } = await import(root + 'species.js');
@@ -155,6 +166,116 @@ function world(seed, tier) {
   return reply.result.world;
 }
 
+function patch(seed, site, tier) {
+  reply = null;
+  globalThis.self.onmessage({ data: { type: 'patch', seed, site: { ...site, kind: -1 }, opts: patchOpts(tier) } });
+  if (!reply) throw new Error(`the patch of "${seed}" sent no reply`);
+  if (reply.type === 'error') throw new Error(reply.message);
+  return reply.result;
+}
+
+// ---------------------------------------------------------------- 5. the patch of the ruin
+// The rules of p2-41, copied from its text and from docs/ruin.md.
+const PATCH_EVERY = 10;     // every tenth world with a ruin builds the patch of the ruin on LOW
+const PATCH_HIGH = 50;      // every 50th seed builds it on HIGH too, and again after another world
+const PATCH_FIRST = 2;      // and the first two worlds of each proto, so every proto is tested
+const RUIN_EDGE = 0.4;      // the soft edge outside the flat disc, as a part of the disc
+const PATCH_KEYS = 'kind,proto,x,y,z,yaw';
+const STONE_MIN = 6;        // fifteenths of bare rock the middle of the floor holds at least
+const patchByProto = {};
+let patchRuns = 0, patchHigh = 0, patchCold = 0;
+let flatWorst = 0, reachSlack = Infinity, plantGap = Infinity, groupGap = Infinity, footWorst = 0;
+
+const hashOf = (p) => {
+  let h = 2166136261;
+  for (const arr of [p.heights, p.colors, p.flora, p.surface, p.groups, p.members]) {
+    const b = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+    for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 16777619); }
+  }
+  return `${(h >>> 0).toString(16)} ${JSON.stringify(p.patch.source)}`;
+};
+
+// The patch of the cell of the ruin on one tier, held to the rules above. Gives the hash.
+function checkRuinPatch(seed, w, tier, tag) {
+  const r = w.ruin;
+  const site = cellSite(dirCell(r.dir[0], r.dir[1], r.dir[2]));
+  const p = patch(seed, site, tier);
+  const P = p.patch, s = P.source, row = R.protoRow(r.proto);
+  const where = `${seed} ${tag} (${w.type}, ${r.proto})`;
+  if (!s || s.kind !== 'ruin') { hole(`${where}: the cell of the ruin holds ${s ? s.kind : 'nothing'}`); return null; }
+  if (Object.keys(s).join(',') !== PATCH_KEYS) hole(`${where}: patch.source holds ${Object.keys(s).join(', ')}`);
+  if (s.proto !== r.proto) hole(`${where}: the patch holds a ${s.proto}`);
+  if (!(s.yaw >= 0 && s.yaw < Math.PI * 2)) hole(`${where}: yaw ${s.yaw}`);
+  if (P.activity) hole(`${where}: the cell of the ruin holds the phenomenon too`);
+  const flat = row.disc, outer = flat * (1 + RUIN_EDGE);
+  const half = P.size / 2, reach = half - P.floraEdge, n = P.n, g = P.grid;
+  // the reach: the reader can walk round the whole disc
+  const slack = reach - (Math.hypot(s.x, s.z) + outer);
+  reachSlack = Math.min(reachSlack, slack);
+  if (slack < -1e-6) hole(`${where}: the disc reaches ${(-slack).toFixed(1)} units past the reach`);
+  // the disc is flat and dry, and its floor is stone
+  if (!(s.y > 0)) hole(`${where}: the middle stands at ${s.y.toFixed(2)}, in the water`);
+  const at = (x, z) => ((Math.round((z + half) / g)) * n + Math.round((x + half) / g));
+  for (let j = 0; j < n; j++) {
+    const z = -half + j * g;
+    if (Math.abs(z - s.z) > flat) continue;
+    for (let i = 0; i < n; i++) {
+      const x = -half + i * g;
+      if (Math.hypot(x - s.x, z - s.z) > flat) continue;
+      const dev = Math.abs(p.heights[j * n + i] - s.y);
+      flatWorst = Math.max(flatWorst, dev);
+      if (dev > 1e-3) { hole(`${where}: the disc is not flat at ${x}, ${z}: ${dev.toFixed(3)}`); break; }
+    }
+  }
+  if ((p.surface[at(s.x, s.z)] >> 4) < STONE_MIN) hole(`${where}: the floor holds ${p.surface[at(s.x, s.z)] >> 4} fifteenths of rock`);
+  // nothing grows on it, and no group starts on it
+  for (let k = 0; k < p.flora.length; k += 8) {
+    const d = Math.hypot(p.flora[k] - s.x, p.flora[k + 2] - s.z);
+    plantGap = Math.min(plantGap, d - outer);
+    if (d < outer) { hole(`${where}: a plant stands ${d.toFixed(1)} units from the middle of a disc of ${outer.toFixed(1)}`); break; }
+  }
+  const gs = p.groups, ms = p.members;
+  for (let k = 0; k < gs.length; k += 6) {
+    const d = Math.hypot(gs[k] - s.x, gs[k + 1] - s.z) - gs[k + 4];
+    groupGap = Math.min(groupGap, d - outer);
+    if (d < outer) hole(`${where}: a group of spread ${gs[k + 4].toFixed(1)} stands ${(d + gs[k + 4]).toFixed(1)} units from the middle`);
+  }
+  // A member stands at its offset from the anchor, and the formation turns with the anchor, so the
+  // test takes the length of the offset and not its way.
+  for (let k = 0; k < ms.length; k += 4) {
+    const a = ms[k] * 6, d = Math.hypot(gs[a] - s.x, gs[a + 1] - s.z) - Math.hypot(ms[k + 1], ms[k + 2]);
+    if (d < outer) { hole(`${where}: a member can start ${d.toFixed(1)} units from the middle`); break; }
+  }
+  // The body stands on the flat disc: every vertex that touches the ground lies inside the disc.
+  // The yaw turns the body about the middle of the disc and keeps every distance, so the line of
+  // the arches fits the disc at every yaw. ruin-geometry-check.mjs holds the parts inside disc + 1,
+  // and the same margin holds here.
+  const geo = ruinGeometry(r.proto, w).body, pos = geo.attributes.position;
+  for (let v = 0; v < pos.count; v++) {
+    if (pos.getY(v) > 0.5) continue;
+    const d = Math.hypot(pos.getX(v), pos.getZ(v));
+    footWorst = Math.max(footWorst, d - flat);
+    if (d > flat + 1) { hole(`${where}: a part touches the ground ${d.toFixed(1)} units out, past the disc of ${flat}`); break; }
+  }
+  geo.dispose();
+  patchRuns++;
+  patchByProto[r.proto] = (patchByProto[r.proto] || 0) + 1;
+  return hashOf(p);
+}
+
+// The patch after another world is the same patch, and the cell next to the ruin holds no ruin.
+function checkRuinCache(seed, w, tier, first, other) {
+  const r = w.ruin, cell = dirCell(r.dir[0], r.dir[1], r.dir[2]);
+  world(other, tier);
+  const site = cellSite(cell);
+  const again = hashOf(patch(seed, site, tier));
+  if (again !== first) hole(`${seed}: the patch of the ruin differs after another world`);
+  const next = { face: cell.face, i: cell.i > 0 ? cell.i - 1 : cell.i + 1, j: cell.j, n: cell.n };
+  const np = patch(seed, cellSite(next), tier);
+  if (np.patch.source && np.patch.source.kind === 'ruin') hole(`${seed}: the cell next to the ruin holds a ruin`);
+  patchCold++;
+}
+
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const mid = (d) => cellDir(dirCell(d[0], d[1], d[2]), 0.5, 0.5, [0, 0, 0]);
 const byBand = [0, 0, 0];
@@ -248,6 +369,16 @@ for (let i = 0; i < SEEDS; i++) {
     const again = world(seed, TIERS.LOW);
     if (JSON.stringify(again.ruin) !== JSON.stringify(r)) hole(`${seed}: a second build gives another ruin`);
   }
+
+  // The patch of the ruin. p2-41.
+  if (ruins % PATCH_EVERY === 1 || (patchByProto[r.proto] || 0) < PATCH_FIRST || i % PATCH_HIGH === 0) {
+    checkRuinPatch(seed, w, TIERS.LOW, 'LOW');
+  }
+  if (i % PATCH_HIGH === 0) {
+    patchHigh++;
+    const first = checkRuinPatch(seed, w, TIERS.HIGH, 'HIGH');
+    if (first) checkRuinCache(seed, w, TIERS.HIGH, first, `ruin-${i + 1}`);
+  }
 }
 
 // ---------------------------------------------------------------- the report
@@ -263,6 +394,12 @@ console.log(`  arc:    ${arcMin.toFixed(2)} to ${arcMax.toFixed(2)} cells from t
 console.log(`  protos: ${list(byProto)}`);
 console.log(`  makers: ${list(byMotion)} (${pct(rolled, ruins)} rolled)`);
 console.log(`  from:   ${list(byFrom)}`);
+console.log(`  patch:  ${patchRuns} patches of the ruin, ${patchHigh} of them on HIGH, ${patchCold} built again after another world;`
+  + ` by proto ${list(patchByProto)}`);
+console.log(`          the disc flat to ${flatWorst.toExponential(1)} units, the nearest plant ${plantGap.toFixed(1)} and the nearest group`
+  + ` ${groupGap.toFixed(1)} units outside the soft edge, ${reachSlack.toFixed(1)} units of the reach to spare at the least,`
+  + ` and the body at most ${footWorst.toFixed(2)} units past the flat disc`);
+if (Object.keys(patchByProto).length !== PROTO_ORDER.length) hole(`the patch check reached ${Object.keys(patchByProto).length} protos of ${PROTO_ORDER.length}`);
 if (fellBack.length) console.log(`  fell back, because no cell of the first band passed the tests: ${fellBack.join(', ')}`);
 if (missing.length) console.log(`  no ruin, because no cell of any band passed the tests: ${missing.join(', ')}`);
 if (holes.length) {
