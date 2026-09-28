@@ -30,6 +30,10 @@ _Avoid_: alien, builder
 The band the ruin sends on, in MHz with three decimals, from 3.000 to 29.999. The log and the overlay print it as `7.316 MHz`; the code keeps it as `freq`, the string `'7.316'`.
 _Avoid_: channel, signal
 
+**Tuner**:
+The field the reader types the frequency into: under the last entry of the card of the wreck, and under the Carrier row of the sidebar. A lock tunes the world, and the store keeps `tuned`. `tuner.js` holds it.
+_Avoid_: dial, unlock
+
 ### The globe and the ground
 
 **Cell grid**:

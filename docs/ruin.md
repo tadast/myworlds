@@ -6,8 +6,8 @@ it before you change `ruin-types.js`, `makeRuin()` in `generate.js`, or `tools/r
 Read `docs/source.md` and `docs/issues/p2-00-the-second-signal.md` first. The first holds the
 wreck, which the ruin copies in many ways. The second holds the terms, the decisions, and the
 contracts of phase 2. The later issues of phase 2 add to this file: the geometry (p2-36), the
-carrier (p2-38), the patch (p2-41), the card (p2-42), the second log (p2-43), and the voice
-(p2-44).
+carrier (p2-38), the tuner (p2-39), the patch (p2-41), the card (p2-42), the second log (p2-43),
+and the voice (p2-44).
 
 ## What a ruin is
 
@@ -28,6 +28,7 @@ on. `CONTEXT.md` holds the words to avoid.
 | 2. Place the ruin | `generate.js`, `makeRuin()` | Web Worker | `world.ruin` |
 | 3. Show the place | `app.js`, `?ruin` | Main thread | a cyan dot on the globe, for the eye check |
 | 4. Follow the ruin | `site.js`, `carrier-store.js`, `carrier-globe.js`, `app.js` | Main thread | chapter 2 of the search, after the tune (p2-38) |
+| 5. Tune the receiver | `tuner.js`, `app.js`, `ground-source.js` | Main thread | the field the reader types the frequency into (p2-39) |
 
 `world.ruin` rides back with the world as plain data, so `worker.js` clones it with the rest:
 
@@ -256,9 +257,10 @@ the frequency there, and the landing that tunes takes the first fix of chapter 2
   wreck in chapter 2 the needle keeps the bearing of the ruin, and the motif of the wreck stays
   silent: the receiver holds the other band.
 
-`window.__mw.tune()` tunes the world on the screen, even when the wreck is not found, and p2-39
-puts the field of the tuner in front of it. `__mw.landAt(lat, lon)` and `__mw.recall()` land and
-recall the probe by script, so a test can walk a whole search.
+The reader tunes through the field of the tuner; see "The tuner" below. `window.__mw.tune()` stays
+for the tests: it tunes the world on the screen, even when the wreck is not found.
+`__mw.landAt(lat, lon)` and `__mw.recall()` land and recall the probe by script, so a test can
+walk a whole search.
 
 ### The length of the search
 
@@ -283,6 +285,98 @@ median is 3, inside the three or four of decision 9. On `p238-charlie` the cross
 stood on the cell of the ruin itself. The walk by hand of the manager is still open, and it
 decides `RUIN_NEAR` and `RUIN_FAR`.
 
+## The tuner
+
+p2-39. The last entry of the log of the wreck states the frequency of the ruin, and the reader types
+it into the receiver. The lock tunes the world, and chapter 2 of the search starts.
+
+### Why a field and not a button
+
+The design asks the reader to read the number and type it. A button would start chapter 2 for a
+reader who never read the last entry, and the call of the log would then mean nothing. A field
+also keeps the secret: the page gives the reader no list and no hint, so only the log tells the
+number. The overlay shows `406.025 MHz` for the whole of chapter 1, so the reader knows the look of
+a frequency before the log states one.
+
+### Where it stands
+
+`makeTuner()` of `tuner.js` builds the form: a label, the field, the unit `MHz`, a Tune button, and
+a line of answer, plus a locked view for after the tune. The page calls it once for each place, so
+the two places cannot drift:
+
+1. **Under the last entry of the card of the wreck.** `SourceInspector.show()` of
+   `ground-source.js` takes the element as its last argument and puts it under the entries, inside
+   the scroll of the log, so the number stays in sight while the reader types.
+2. **Under the Carrier row of the sidebar.** A Tune chip in the row opens the form under the row, in
+   orbit and on the ground, so a reader who closed the card can still tune. The form takes a whole
+   line of the grid, because on a phone the grid holds two rows side by side. A second press of the
+   chip, or Escape in the field, closes it.
+
+Both places show only on a world with a ruin, and only after the find of the wreck. The card of the
+wreck opens only on its cell, and that first open is the find. After the tune both places show the
+locked band and no field: the card under the last entry, and the sidebar under the row, for good.
+The Tune chip then goes away. A world with no ruin shows neither place. The store does not test the
+find, because a find of the ruin by chance tunes the world too (p2-42), so a tuned world shows the
+locked band even when the wreck is not found.
+
+Each place keeps its own tuner, so the text in the field and the last answer survive a render of
+the sidebar, and the focus comes back to the field after the render. A new world clears both.
+
+### The field
+
+- `type="text"` with `inputmode="decimal"`, so a phone shows the keys of numbers, and
+  `autocomplete="off"`, so the browser offers no earlier entry. The placeholder is `406.025`, the
+  band the reader knows. The field takes 12 characters at most, so the longest number still prints
+  as a number.
+- Enter submits, as the Tune button does.
+- The Tune chip puts the focus in the field. The field of the card takes no focus when the card
+  opens: the reader reads the log first, and a phone would raise its keyboard over the log.
+- While the field holds the focus the ground takes no key. `Ground._onKey()` leaves every key to an
+  editable element, so W, A, S, D, the arrows, Space, Q, E, R, F, C, and + and - type into the field
+  and do not move the probe. The `/` key of the page types a slash into a field and does not jump to
+  the seed input.
+
+### The answers
+
+`parseFreq()` of `ruin-types.js` reads the text, so `7.316`, `7,316`, `7316`, and `7.316 MHz` are one
+number. `tuneAnswer(text, freq)` of `tuner.js` gives one of five answers, word for word. The near
+miss and the static print the typed number to three decimals. The lock prints the band the receiver
+now holds.
+
+| Typed | Answer | Result |
+|---|---|---|
+| not a number | "The receiver takes a number in MHz, for example 406.025." | nothing |
+| 406.025 | "The receiver holds the distress band." | nothing |
+| within 0.0005 of the frequency | "Locked on 7.316 MHz. The probe hears a second source." | `markTuned()`, then chapter 2 starts |
+| within 0.050 of it | "A pattern under the static on 7.313 MHz." | nothing |
+| anything else | "Static on 7.313 MHz." | nothing |
+
+- The rows are tested in that order, and both bands include their edge: `LOCK_BAND` is 0.0005 and
+  `NEAR_BAND` is 0.050, each with a slack of 1e-9 for the error of a float. The distress band takes
+  the band of the lock.
+- The answer line has `aria-live="polite"`, so a screen reader reads each answer.
+- **Nothing else gives the frequency away.** Before the lock the frequency stays in the closure of
+  `makeTuner()`: no attribute, no list, no title, no pattern, and no address holds it, and no
+  answer but the lock prints it. The near miss prints the typed number and not the frequency, so it
+  says only that the number is within 0.050.
+
+### The moment of the tune
+
+The lock calls `tune()` in `app.js`, the path of the debug hook of p2-38. `markTuned()` sets the
+tune in the store, and the globe builds the group of the carrier again for chapter 2.
+
+- **On the ground** the landing reads the carrier again, for the ruin. The carrier block turns to
+  the bearing of the ruin, prints its frequency, takes the colour of chapter 2, and pulses for the
+  brief "Unknown signal". The landing takes the first fix of chapter 2 at once, so a reader who
+  tunes at the wreck sees the first wedge of the ruin at the end of the ascent.
+- **In orbit** the tune takes no fix. The Carrier row reads "Tuned", and the next landing takes the
+  first fix.
+
+The colour of the carrier block is the colour of the wedges of chapter 2, `carrierColour(world, 2)`,
+lightened until its luminance reaches 0.3, as the drawings of the brief take it. `ProbeHud.setTint()`
+writes it to `--hud-tint`: the needle, the bearing, the ring of the dial, and the pulse take it.
+The labels keep their grey, and the rest of the overlay keeps its blue.
+
 ## The checks
 
 - `node tools/ruin-check.mjs` runs 500 seeds through `worker.js` on LOW, every tenth of them on HIGH
@@ -294,5 +388,9 @@ decides `RUIN_NEAR` and `RUIN_FAR`.
 - `node tools/carrier-check.mjs` runs every check of the carrier with the wreck and with the ruin
   as the source, and `node tools/carrier-fix-check.mjs` tests the two chapters of the store and of
   the group. p2-38.
+- `node tools/carrier-fix-check.mjs` part F tests the answers of the tuner: every row of the table
+  above, the other spellings of the frequency, and the frequency of 500 seeds against numbers 0.001,
+  0.050, and 0.051 off it. p2-39. The page part of the tuner needs a browser, and p2-39 tested it
+  there; see its "What the build changed".
 - Add `?ruin` to the address, with `?source`, to see the two dots on the globe, for example
   `http://localhost:5555/?ruin&source#Auralis`. The ruin is cyan and the wreck is pink.

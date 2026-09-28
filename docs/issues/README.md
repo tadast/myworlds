@@ -30,7 +30,8 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
 | `music.js` | Chip-tune per world, and the motif of the source. `motifOf()` gives the rhythm of that motif with no audio, `setCarrier()` sets its level, and `barClock()` gives the clock the lamp of the wreck blinks on. |
-| `ground-source.js` | The source on the ground: the wreck of the older probe, its lamp, its mark, the tap that finds it, and the preview the log card turns. `wreckGeometry()` and `WRECK_HULL` also build the mini wreck of the globe. Issue 34. |
+| `ground-source.js` | The source on the ground: the wreck of the older probe, its lamp, its mark, the tap that finds it, and the preview the log card turns. `wreckGeometry()` and `WRECK_HULL` also build the mini wreck of the globe. `SourceInspector.show()` takes an element to put under the last entry, the tuner of p2-39. Issue 34. |
+| `tuner.js` | The tuner of p2-39: the field the reader types the frequency of the log into. `makeTuner({ onLock, onEscape })` builds one form, and `app.js` stands one under the last entry of the log card and one under the Carrier row of the sidebar. `tuneAnswer(text, freq)` gives the five answers and holds no DOM, so `tools/carrier-fix-check.mjs` tests it in Node. p2-39. |
 | `carrier-store.js` | The fixes of the search in `localStorage`, under `myworlds.carrier.v1`, for both chapters. `loadFixes()`, `addFix()`, `markFound()`, `markBriefed()`, `clearFixes()`, `markTuned()`, `foundSeeds()`. No three.js. Issue 34, p2-38. |
 | `carrier-globe.js` | The fixes on the globe: a wedge per fix, which the terrain shader and the ocean shader paint, a dot per fix, and the mini wreck a find stands at the source. One group under `current.planet` for the marks, and one set of uniforms for the paint. The group paints the chapter that runs, in the colour of that chapter; `carrierColour()` gives the colour of each chapter. Issue 34, p2-38. |
 | `probe-hud.js` | The instrument of the probe over the ground: the air, the height, the hour of the star, the uplink, and the noise at the edge of the reach. Reads `Ground.telemetry()`. |
@@ -249,7 +250,7 @@ Issue 34. One thing on a world with a surface transmits, and the probe reads a b
 - `sourceFreq(src)` gives the band the receiver holds, and `WRECK_FREQ` is `'406.025'`.
 - The fix of a landing goes into the chapter that runs, so no landing before the tune stores a fix of chapter 2. A tune on the ground reads the carrier of that landing again, so the landing that tunes takes the first fix of chapter 2.
 - On the ground, `carrierLevel()` reads the body on the patch only when it is the source that runs, so the cell of the wreck raises no motif in chapter 2. In orbit the motif of the wreck stays in the song after its find.
-- `window.__mw.tune()` is the debug hook of the tune: it calls `markTuned()` on the world on the screen, even when the wreck is not found, and builds the group again. p2-39 gives the reader the field. `__mw.landAt(lat, lon)` and `__mw.recall()` land and recall the probe by script and each give a promise; while the page is hidden they step the frame on a timer, so a test in a hidden tab still ends.
+- The reader tunes through the field of the tuner; see **The tuner** below. `window.__mw.tune()` stays as the debug hook of the tune, for the tests: it calls `markTuned()` on the world on the screen, even when the wreck is not found, and builds the group again. `__mw.landAt(lat, lon)` and `__mw.recall()` land and recall the probe by script and each give a promise; while the page is hidden they step the frame on a timer, so a test in a hidden tab still ends.
 
 **The store.** The fixes live under a key of their own, `myworlds.carrier.v1`, and never under `myworlds.v1`. `persist()` drops its oldest worlds on a quota error, and a search must not go with them.
 
@@ -330,6 +331,25 @@ world.ruin = {
 - `tools/world-checksum.mjs` leaves `world.ruin` out of the facts of a world, so the baseline of
   the worlds before the ruin still holds. `tools/ruin-check.mjs` proves the ruin over 500 seeds,
   and `node tools/world-checksum.mjs --source` prints it on both tiers.
+
+### The tuner
+
+p2-39. "The tuner" in `docs/ruin.md` holds the rules.
+
+- `tuner.js` gives `makeTuner({ onLock, onEscape })`, `tuneAnswer(text, freq)`, `ANSWERS`,
+  `LOCK_BAND` (0.0005), and `NEAR_BAND` (0.050). `tuneAnswer()` gives `{ kind, text }`, with `kind`
+  one of `'nan'`, `'distress'`, `'lock'`, `'near'`, and `'static'`; only `'lock'` tunes.
+- `makeTuner()` gives `{ el, field, answer, set({ seed, freq, tuned }), focus() }`. The frequency
+  goes into `set()` and stays in the closure: the tuner writes it into the page only after the lock.
+  A new seed clears the field and the answer.
+- `app.js` keeps two tuners, one for the card of the wreck and one for the sidebar, and
+  `syncTuners()` gives both the state of the world on the screen. A world takes the tuner when it
+  holds a ruin and its record is found or tuned. A lock calls `tune()`.
+- `SourceInspector.show(log, accent, groundColor, motif, hull, tail)` puts `tail` under the last
+  entry of the log.
+- `ProbeHud.setTint(col)` gives the carrier block the colour of chapter 2, or the blue of the
+  overlay for null. `setBriefPulse()` in `app.js` calls it on every landing and on a tune.
+- `window.__mw.tuners` gives `{ card, side }`, the two tuners, for the tests.
 
 ### Metres for a creature
 
