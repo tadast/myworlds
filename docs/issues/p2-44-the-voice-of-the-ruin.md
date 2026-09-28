@@ -94,7 +94,17 @@ Built on 2026-09-28. Every deviation from the plan above, and the reason:
 - **`ruinRhythm()` is gone.** p2-41 made it the one function to swap. `SourceRuin` now reads
   `ruinMotifOf()` of `music.js` and `ruinClock()`, and the count of the wraps of `barClock()` of
   p2-41 went with it. `Music.ruinMotif(world)` gives the same rhythm, as `Music.motif()` does for the
-  wreck.
+  wreck. After the rebase onto p2-42 the glow of the card of the ruin, `RuinInspector`, reads
+  `ruinMotifOf()` too, on the clock of the card, as the lamp of the card of the wreck does.
+- **The lamp of the mini ruin takes the music as an argument.** p2-42 gave the lamp on the globe a
+  rhythm function of its own, `ruinLampRhythm()` in `carrier-globe.js`, and a copy of the rules of
+  `lampLevel()`, because `ground-source.js` imports `carrier-globe.js`. The function is gone: the lamp
+  reads `ruinMotifOf()`, and `updateCarrierGroup(group, dt, music)` takes the `Music` of the app as
+  an optional third argument, so the lamp reads `music.ruinClock()` while the sound runs and the
+  clock of the group when it does not. The copy of the rules stays, for the same cycle.
+  `tools/carrier-fix-check.mjs` part "ruin" now tests that the lamp takes `ruinMotifOf()`, stands
+  full on each step of `ruinClock()` and on its floor off them. `onRuinFound()` of p2-42 already
+  called `setCarrierLevel()`, so the ruin joins the song in orbit at 0.6 from the find.
 - **Eight worlds and not five.** The music check compares the song and the motif of the wreck on
   the seven worlds of `tools/music-lab/worlds.js` (one of each type) and `Vesper`. The check now also
   compares the note events of the motif of the wreck, and not only the song, and it takes the file
@@ -128,6 +138,14 @@ Built on 2026-09-28. Every deviation from the plan above, and the reason:
     onset between the notes: 6 of 6 on `p244-c`, 4 of 4 on `p244-k`, and 5 of 5 on `p244-j`. With
     the sound off, the glow lit on the steps of `ruinMotifOf()` in the clock of the landing, within
     1 ms. The glow never fell under the floor of 0.14.
+- **After the rebase onto p2-42,** on `p244-c`: a landing on the cell of the ruin in chapter 1 set
+  both buses to 0. The card of the ruin opened, its glow took `ruinMotifOf()`, and the find by
+  chance tuned the world and opened the ruin bus at the level of its range, 0.15 at the reveal
+  camera. After the recall the ruin bus read 0.6 at once and the mini ruin stood on the globe. With
+  the sound on, over one period, the lamp of the mini ruin had one onset 0.1 to 2.5 ms after each of
+  the 6 bell notes and no other onset, and the ruin bus read a gain of 0.3. With the sound off it lit
+  on the 6 steps of `ruinMotifOf()` in the clock of the group, within 1 ms. On `p244-k` a find
+  through `__mw.onRuinFound()` in orbit set the ruin bus from 0 to 0.6 in the same call.
 - **Frame time.** `SourceRuin.update()` costs 0.0003 ms with the sound off and 0.0004 ms with it
   on. The clock of p2-41 counted wraps; the new one reads one number.
 
@@ -138,7 +156,3 @@ Built on 2026-09-28. Every deviation from the plan above, and the reason:
   `p244-j` serve): the motif of the ruin must stand in tune with the song, it must read as the
   motif of the wreck played back, and after both finds the two must stay apart. The listen may move
   `RUIN_LEVEL`, `RUIN_VERB`, the bend and the release of `Synth.bell()`, and `RUIN_AT`.
-- **The lamp of the mini model on the globe.** p2-42 builds the mini model. After the merge of
-  p2-42 its lamp must read `ruinMotifOf()` on `music.ruinClock()`, or on the clock of the globe with
-  no sound, and the find of p2-42 must call `setCarrierLevel()`, so the ruin joins the song in orbit
-  at 0.6.

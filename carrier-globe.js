@@ -52,7 +52,7 @@ import { wreckGeometry, hullOf, WRECK_HULL } from './wreck-geometry.js';
 // MINI_UNIT globe radii per unit of the box. ruin-geometry.js takes no DOM and imports no file of
 // the page but ruin-types.js, so this import makes no cycle. p2-42.
 import { ruinGeometry, ruinPalette, MINI_UNIT } from './ruin-geometry.js';
-import { motifOf } from './music.js';
+import { ruinMotifOf } from './music.js';
 
 // The number of wedges the shader holds. Four uniform slots of three vec3 and two floats cost 44
 // floats, which every driver carries with room to spare. The first build held eight, and after
@@ -620,13 +620,9 @@ const RUIN_LAMP_R = 0.0012;     // globe radii: the lamp at its own size
 const RUIN_LAMP_MIN = 0.0035;   // the least radius of the lamp, as a part of the distance from the camera
 const RUIN_EMIS = 0.3;          // the share of its own colour the stone gives back on the night side
 
-// The rhythm the lamp of the mini ruin blinks: the motif of the wreck at half the speed, the rhythm
-// ruinRhythm() of ground-source.js gives the glow on the ground. p2-44 gives the ruin a motif of its
-// own and swaps this function for it; the lamp reads only the fields of motifOf().
-export function ruinLampRhythm(world) {
-  const m = motifOf(world);
-  return { ...m, stepDur: m.stepDur * 2, barSeconds: m.barSeconds * 2, period: m.period * 2 };
-}
+// The lamp of the mini ruin blinks ruinMotifOf() of music.js, the motif of the ruin, as the glow on
+// the ground does: on music.ruinClock() when the sound runs, so the eye and the ear agree, and on the
+// clock of the group when it does not. updateCarrierGroup() takes the music for that clock. p2-44.
 
 // The level of the lamp, 0 to 1, at one point of the period of the rhythm: a floor that never goes
 // out, a fast tail on each step, and a breath once a bar. These are the rules of lampLevel() in
@@ -709,15 +705,16 @@ function makeRuinModel(world, hm) {
 
   return {
     obj, geo, mat, pinGeo, pinMat, pin, float, body, lamp, lampGeo, lampMat, colour,
-    rhythm: ruinLampRhythm(world), t: 0,
+    rhythm: ruinMotifOf(world), t: 0,
   };
 }
 
 // The model of the ruin turns and bobs as the model of the wreck does, and its lamp blinks.
-function floatRuin(r, dt) {
+function floatRuin(r, dt, music) {
   floatWreck(r, dt);
   const p = r.rhythm.period;
-  r.level = ruinLampLevel(r.rhythm, ((r.t % p) + p) % p);
+  const c = music && music.ruinClock ? music.ruinClock() : null;
+  r.level = ruinLampLevel(r.rhythm, c != null ? c : ((r.t % p) + p) % p);
   r.lampMat.color.copy(r.colour).multiplyScalar(0.3 + 0.7 * r.level);
 }
 
@@ -929,12 +926,13 @@ export function setFound(group, world, heightMap, { chapter = 1 } = {}) {
 }
 
 // The model on the pin of a find, the pulse of the goal, and the fade of a new wedge, in seconds. The fading
-// fix stands last in the uniforms, so the fade writes one float.
-export function updateCarrierGroup(group, dt) {
+// fix stands last in the uniforms, so the fade writes one float. `music` is the Music of the app, or
+// null: the lamp of the mini ruin reads its ruinClock(). p2-44.
+export function updateCarrierGroup(group, dt, music = null) {
   if (!group) return;
   const u = group.userData;
   if (u.wreck) floatWreck(u.wreck, dt);
-  if (u.ruin) floatRuin(u.ruin, dt);
+  if (u.ruin) floatRuin(u.ruin, dt, music);
   if (u.fade) {
     u.fade.t += dt;
     const k = THREE.MathUtils.clamp(u.fade.t / FADE_S, 0, 1);

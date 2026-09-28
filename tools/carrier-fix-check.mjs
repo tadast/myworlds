@@ -759,12 +759,26 @@ let ruinRow = '';
   ok('ruin', lamp.lo > G.PIN_H + tall * 0.9, `the lamp of the spires stands ${lamp.lo.toFixed(5)} over the ground and not at the tip`);
   const stock = THREE.Mesh.prototype.raycast;
   ok('ruin', [u.ruin.pin, u.ruin.body, u.ruin.lamp].every((m) => m.raycast !== stock), 'a part of the pin of the ruin answers a ray');
-  // the lamp blinks the rhythm of ruinLampRhythm(): the motif of the wreck at half the speed
-  const rh = G.ruinLampRhythm(world), m = M.motifOf(world);
+  // the lamp blinks the motif of the ruin, ruinMotifOf(): the steps of the wreck at twice their
+  // length. p2-44. With no music it takes the clock of the group; with music, ruinClock().
+  const rh = u.ruin.rhythm, m = M.motifOf(world);
+  ok('ruin', JSON.stringify(rh) === JSON.stringify(M.ruinMotifOf(world)), 'the lamp of the ruin does not take ruinMotifOf()');
   ok('ruin', Math.abs(rh.period - 2 * m.period) < 1e-9 && Math.abs(rh.stepDur - 2 * m.stepDur) < 1e-9 && rh.steps.join() === m.steps.join(), 'the lamp of the ruin does not take the motif of the wreck at half the speed');
   const levels = new Set();
   for (let k = 0; k < 40; k++) { G.updateCarrierGroup(group, rh.period / 40); levels.add(u.ruin.level.toFixed(3)); }
   ok('ruin', levels.size > 5, `the lamp of the ruin took ${levels.size} levels over one period and does not blink`);
+  // On the clock of the song: at each step of the motif the lamp is full, and a bar and a half of the
+  // ruin after the last step it stands on its floor, whatever the clock of the group says.
+  let atStep = 1, clockNow = 0;
+  const song = { ruinClock: () => clockNow };
+  for (const st of rh.steps) { clockNow = st * rh.stepDur; G.updateCarrierGroup(group, 0.37, song); atStep = Math.min(atStep, u.ruin.level); }
+  clockNow = rh.steps[rh.steps.length - 1] * rh.stepDur + rh.barSeconds * 1.5;
+  G.updateCarrierGroup(group, 0.37, song);
+  const off = u.ruin.level;
+  ok('ruin', atStep > 0.99 && off < 0.5, `the lamp of the ruin reads ${atStep.toFixed(3)} on the steps and ${off.toFixed(3)} off them on ruinClock()`);
+  clockNow = null;
+  G.updateCarrierGroup(group, 0.01, song);   // no sound: the clock of the group again
+  ok('ruin', Number.isFinite(u.ruin.level), 'the lamp of the ruin takes no clock when ruinClock() gives null');
   ok('ruin', u.ruin.float.rotation.y !== 0, 'the mini ruin does not turn');
   // every proto builds a mini inside the budget, with a lamp
   for (const p of R.RUIN_PROTOS) {

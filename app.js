@@ -935,7 +935,9 @@ function step(now) {
       current.cloudGroup.visible = op > 0.02;
     }
     stars.update(t, camera);
-    updateCarrierGroup(carrierGroup, dt);   // the fade of a new wedge, and nothing else
+    // the fade of a new wedge, the models of the finds, and the lamp of the mini ruin, which blinks
+    // the motif of the ruin on the clock of the song (p2-44)
+    updateCarrierGroup(carrierGroup, dt, music);
     for (const m of current.moons) {
       m.angle += m.speed * dt;
       m.mesh.position.set(Math.cos(m.angle) * m.dist, 0, Math.sin(m.angle) * m.dist);
@@ -2034,7 +2036,7 @@ function onRuinFound() {
   probeHud.setPulse(false);
   renderInfo(current.world);
   renderWorlds();
-  setCarrierLevel();
+  setCarrierLevel();     // the motif of the ruin joins the song of this world, at 0.6 in orbit. p2-44.
 }
 
 // ---------------------------------------------------------------- the motif in the song, slice 5

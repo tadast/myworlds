@@ -770,7 +770,7 @@ export class RuinInspector {
     const key = `${world.seed}|${world.type}|${world.ruin.proto}`;
     if (this.key !== key) { this._drop(); this._build(world); this.key = key; }
     this.glowColor.set(glow || carrierColour(world, 2));
-    this.rhythm = ruinRhythm(world);
+    this.rhythm = ruinMotifOf(world);
     this.ground.material.color.set(groundColor || '#6fa85a');
     if (accent) this.card.style.setProperty('--ruin', accent);
 
@@ -880,7 +880,7 @@ export class RuinInspector {
   }
 
   // One frame of the card: the body turns, the slabs of the floaters turn on it, and the glow
-  // blinks the rhythm of the glow on the ground, ruinRhythm(), on the clock of the card.
+  // blinks the rhythm of the glow on the ground, ruinMotifOf(), on the clock of the card.
   frame(t) {
     this.pivot.rotation.y = t * RUIN_SPIN;
     if (this.orbit) this.orbit.rotation.y = t * RUIN_ORBIT_SPIN;
