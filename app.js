@@ -10,7 +10,7 @@ import { loadFixes, addFix, markFound, markBriefed, clearFixes, markTuned, found
 import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, carrierColour, showMarker, wedgePlanes, inWedge, goalCell } from './carrier-globe.js';
 import { sameCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
-import { SourceInspector } from './ground-source.js';
+import { SourceInspector, RuinInspector } from './ground-source.js';
 import { makeTuner } from './tuner.js';
 import { hullOf } from './wreck-geometry.js';
 import { Ground } from './ground.js';
@@ -2006,6 +2006,36 @@ function onSourceFound() {
   setCarrierLevel();     // the motif joins the song of this world for good. Issue 34, slice 5.
 }
 
+// The reader has found the ruin, p2-42. inspectRuin() calls this the first time the card of the ruin
+// opens, and window.__mw.onRuinFound is the other way in. The find stands in the store under
+// chapter 2, and the store drops the fixes of chapter 2 with it. The globe then stands the mini
+// ruin at the ruin beside the mini wreck, the Carrier row reads "Found 2 of 2" when both are found,
+// and the thumb of the saved world carries two marks.
+//
+// A reader can reach the ruin before the tune, by chance. That find is a find all the same, and the
+// card states the band, so the find tunes the world too: markTuned(). The receiver then holds the
+// band of the ruin, so a probe on the ground reads the carrier again, as a tune there does. The fix
+// the landing took for the wreck stays a fix of chapter 1, and the globe paints chapter 2 now.
+//
+// The group is built again from the record, because a find by chance moves the search to chapter 2.
+// The reader is on the ground, so the new group stands there at the end of the ascent.
+function onRuinFound() {
+  if (!current || !current.world.ruin || !current.world.source) return;
+  const seed = current.world.seed;
+  carrierRecord = markFound(seed, { chapter: 2 });
+  if (!carrierRecord.tuned) carrierRecord = markTuned(seed);
+  pendingFix = null;     // the find drops the fix of this landing, or it stands in chapter 1
+  rebuildCarrierGroup();
+  if (mode === 'ground' && ground && lockedSite) {
+    ground.setCarrier(hearCarrier());
+    setBriefPulse();
+  }
+  probeHud.setPulse(false);
+  renderInfo(current.world);
+  renderWorlds();
+  setCarrierLevel();
+}
+
 // ---------------------------------------------------------------- the motif in the song, slice 5
 // The source has a voice of its own, and its level says how near the probe stands. The song itself
 // never changes, so a reader who does not search loses nothing. Decision 11 of issue 34.
@@ -2196,22 +2226,24 @@ function renderInfo(w) {
 }
 
 // ---------------------------------------------------------------- the study card
-// One card element carries three subjects. An animal is a subject of the world, so its card opens
+// One card element carries four subjects. An animal is a subject of the world, so its card opens
 // from orbit and from the ground. A plant is a subject of a patch: the lore of a plant reads the
 // biome it stands on, and the patch is the only place that biome is known, so the plant card only
 // opens while the probe is down. See docs/flora.md. The wreck of issue 34 is a subject of one cell
-// of one world, and its card holds the log and no preview text.
+// of one world, and its card holds the log and no preview text. The ruin of p2-42 is a subject of
+// one cell too, and its card holds the rows of what the probe reads of it.
 //
 // Each inspector owns its own canvas, because a WebGLRenderer owns the canvas it draws to. The
-// card shows one of the three and hides the others.
+// card shows one of the four and hides the others.
 const creatureCard = $('#creature');
-const creatureCanvas = $('#ccv'), plantCanvas = $('#pcv'), sourceCanvas = $('#scv');
+const creatureCanvas = $('#ccv'), plantCanvas = $('#pcv'), sourceCanvas = $('#scv'), ruinCanvas = $('#rcv');
 const inspector = new Inspector({ card: creatureCard, canvas: creatureCanvas });
 const plantInspector = new PlantInspector({ card: creatureCard, canvas: plantCanvas });
 const sourceInspector = new SourceInspector({ card: creatureCard, canvas: sourceCanvas });
-// What the card shows: 'animal', 'plant', or 'source'. The arrows and the close read it.
-const cardOpen = () => inspector.open || plantInspector.open || sourceInspector.open;
-function closeCard() { inspector.hide(); plantInspector.hide(); sourceInspector.hide(); }
+const ruinInspector = new RuinInspector({ card: creatureCard, canvas: ruinCanvas });   // p2-42
+// What the card shows: 'animal', 'plant', 'source', or 'ruin'. The arrows and the close read it.
+const cardOpen = () => inspector.open || plantInspector.open || sourceInspector.open || ruinInspector.open;
+function closeCard() { inspector.hide(); plantInspector.hide(); sourceInspector.hide(); ruinInspector.hide(); }
 function discColor() {
   const pal = current.world.palette;
   return current.world.type === 'gas' ? pal.atmo : (pal.ground || '#7fa860');
@@ -2224,10 +2256,10 @@ function inspect(kind) {
   markedPlant = null; markedSource = false;
   if (ground && ground.flora) ground.flora.unmark();
   if (ground && ground.source) ground.source.unmark();
-  plantInspector.hide(); sourceInspector.hide();
-  creatureCard.classList.add('show');    // the three share the card, so a swap must not fade it out
+  plantInspector.hide(); sourceInspector.hide(); ruinInspector.hide();
+  creatureCard.classList.add('show');    // the subjects share the card, so a swap must not fade it out
   creatureCard.hidden = false;
-  plantCanvas.hidden = true; sourceCanvas.hidden = true; creatureCanvas.hidden = false;
+  plantCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = true; creatureCanvas.hidden = false;
   inspector.show(current.world.species[kind], current.world.palette, discColor(), 3 + kind);
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'animal';
@@ -2238,10 +2270,10 @@ function inspectPlant(kind) {
   markedKind = null; markedSource = false;
   if (ground && ground.fauna) ground.fauna.unmark();
   if (ground && ground.source) ground.source.unmark();
-  inspector.hide(); sourceInspector.hide();
+  inspector.hide(); sourceInspector.hide(); ruinInspector.hide();
   creatureCard.classList.add('show');
   creatureCard.hidden = false;
-  creatureCanvas.hidden = true; sourceCanvas.hidden = true; plantCanvas.hidden = false;
+  creatureCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = true; plantCanvas.hidden = false;
   plantInspector.show(p, current.world.palette, discColor(), groundVariant);
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'plant';
@@ -2260,10 +2292,10 @@ function inspectSource() {
   markedKind = null; markedPlant = null;
   if (ground.fauna) ground.fauna.unmark();
   if (ground.flora) ground.flora.unmark();
-  inspector.hide(); plantInspector.hide();
+  inspector.hide(); plantInspector.hide(); ruinInspector.hide();
   creatureCard.classList.add('show');
   creatureCard.hidden = false;
-  creatureCanvas.hidden = true; plantCanvas.hidden = true; sourceCanvas.hidden = false;
+  creatureCanvas.hidden = true; plantCanvas.hidden = true; ruinCanvas.hidden = true; sourceCanvas.hidden = false;
   const pal = current.world.palette || {};
   // The tuner of p2-39 stands under the last entry, so the frequency of the log is in sight while
   // the reader types it. The first open is the find, and the tuner shows from the find on.
@@ -2275,16 +2307,37 @@ function inspectSource() {
   setCarrierLevel();
 }
 
-// The card of the ruin. The button reads "Study the ruin" on a marked ruin, and this is where it
-// leads. p2-42 builds the card, and its first open is the find of chapter 2. Until then the button
-// opens nothing, and the page shows nothing of the ruin that the ground does not show. p2-41.
-function inspectRuin() {}
+// The card of the ruin, p2-42. The button reads "Study the ruin" on a marked ruin, and this is where
+// it leads. The reader must stand on the cell and tap the thing itself, as for the wreck, and the
+// first open is the find of chapter 2, so onRuinFound() runs here.
+//
+// The card states the frequency, the day of the beacon, and the maker, so it opens only on the
+// cell of the ruin. RuinInspector in ground-source.js draws it, and ruinCard() of ruin-types.js
+// writes its text. The glow and the text take the colour of chapter 2, as the wedges of the ruin
+// do; the text takes it lightened, as the drawings of the brief do, because the card is dark.
+function inspectRuin() {
+  const ruin = current && current.world.ruin;
+  if (!ruin || !ground || !ground.source || ground.source.kind !== 'ruin') return;
+  markedKind = null; markedPlant = null;
+  if (ground.fauna) ground.fauna.unmark();
+  if (ground.flora) ground.flora.unmark();
+  inspector.hide(); plantInspector.hide(); sourceInspector.hide();
+  creatureCard.classList.add('show');
+  creatureCard.hidden = false;
+  creatureCanvas.hidden = true; plantCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = false;
+  creatureCard.dataset.subject = 'ruin';
+  ruinInspector.show(current.world, {
+    glow: carrierColour(current.world, 2), accent: briefColour(current.world), groundColor: discColor(),
+  });
+  if (!(carrierRecord && carrierRecord.ruin && carrierRecord.ruin.found)) onRuinFound();
+}
 creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
 creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) closeCard(); });
 creatureCard.querySelector('.cprev').addEventListener('click', () => cycleInspect(-1));
 creatureCard.querySelector('.cnext').addEventListener('click', () => cycleInspect(1));
 function cycleInspect(dir) {
-  if (creatureCard.dataset.subject === 'source') return;   // a world holds one source and no more
+  // a world holds one wreck and one ruin, and each card stands alone
+  if (creatureCard.dataset.subject === 'source' || creatureCard.dataset.subject === 'ruin') return;
   if (creatureCard.dataset.subject === 'plant') return cyclePlant(dir);
   // On the ground the list also carries the species of the patch: the pull and the niches can
   // put an animal on the ground that the globe sample never drew, and the arrows must reach it.
@@ -2329,7 +2382,7 @@ addEventListener('resize', () => {
 // the layout, a media query moves it, or the card grows. The observer measures again each time, so
 // the camera keeps the aspect of the box and the preview never stretches.
 if (window.ResizeObserver) {
-  const previews = new Map([[creatureCanvas, inspector], [plantCanvas, plantInspector], [sourceCanvas, sourceInspector]]);
+  const previews = new Map([[creatureCanvas, inspector], [plantCanvas, plantInspector], [sourceCanvas, sourceInspector], [ruinCanvas, ruinInspector]]);
   const ro = new ResizeObserver((entries) => {
     for (const e of entries) {
       const ins = previews.get(e.target);
@@ -2552,7 +2605,7 @@ async function recall() {
 // debug handle (harmless in production)
 window.__mw = {
   scene, camera, controls, renderer, generate, inspect, inspector, music, descend, ascend, perf,
-  inspectPlant, plantInspector, inspectSource, sourceInspector,
+  inspectPlant, plantInspector, inspectSource, sourceInspector, inspectRuin, ruinInspector,
   get current() { return current; },
   get site() { return site; },
   get mode() { return mode; },
@@ -2562,6 +2615,7 @@ window.__mw = {
   // the search of this world: the record of the store and the group of wedges under the planet
   get carrier() { return { record: carrierRecord, group: carrierGroup, pending: pendingFix, stage: carrierStage, chapter: carrierChapter() }; },
   onSourceFound,
+  onRuinFound,                   // p2-42: the find of the ruin, as the first open of its card makes it
   briefCarrier: openBrief,       // opens the brief of the distress signal, as the block does
   aimAtSource,
   tune,                          // p2-38: tunes the receiver to the ruin, for the tests. The reader tunes in the field, p2-39

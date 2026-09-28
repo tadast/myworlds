@@ -414,11 +414,67 @@ button.probe[hidden] { display: none; }
 #creature[data-subject="source"] .cnav { display: none; }
 #creature:not([data-subject="source"]) .clog,
 #creature:not([data-subject="source"]) .ccrew { display: none; }
+/* The card of the ruin, p2-42. It takes the shell of the card of the wreck: the same dark ground,
+   the preview at the left, and the text at the right. The rows are short, so the card takes the
+   height of its text, never less than the preview, and the rows scroll only on a short screen.
+   --ruin is the colour of chapter 2, made light enough to read on this ground; app.js sets it. */
+#creature[data-subject="ruin"] .ccard {
+  --side: 264px;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: rgba(11, 15, 32, 0.93);
+  width: min(920px, 100%);
+  min-height: calc(var(--side) + 44px);
+  max-height: min(700px, calc(100vh - 24px)); max-height: min(700px, calc(100dvh - 24px));
+  padding: 22px 8px 0 calc(var(--side) + 46px);
+}
+#creature[data-subject="ruin"] .cview {
+  position: absolute; left: 22px; top: 22px; width: var(--side); height: var(--side);
+}
+#creature[data-subject="ruin"] .ctext { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+#creature[data-subject="ruin"] .cname { font-size: 26px; margin: 2px 44px 0 0; letter-spacing: 0.01em; }
+#creature[data-subject="ruin"] .clatin {
+  margin: 2px 44px 8px 0; font-style: normal; letter-spacing: 0.03em; color: var(--ruin, var(--accent));
+}
+#creature[data-subject="ruin"] .cruin {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 6px 22px 26px 0;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 8px, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 8px, #000 calc(100% - 22px), transparent 100%);
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+/* A row is a label and one or two sentences, as a page of a survey reads: the label is quiet, as
+   the day of an entry of the log is, and the text takes the measure of the log. */
+.crows { margin: 0; }
+.crow { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 14px; padding: 11px 0; border-top: 1px solid var(--line); }
+.crow:first-child { border-top: 0; padding-top: 4px; }
+.crow dt {
+  margin: 0; padding-top: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em; line-height: 1.2;
+  text-transform: uppercase; color: var(--muted);
+}
+.crow dd { margin: 0; max-width: 62ch; font-size: 14.5px; line-height: 1.6; color: #dfe4ff; }
+.crow dd p { margin: 0; }
+/* The way on: the line of glyphs in the colour of the ruin, the chip beside it, and the sentence
+   under it. The chip is a label and not a control, so it takes no pointer. */
+.cway dt { color: var(--ruin, var(--accent)); }
+.cglyphs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 2px 0 8px; color: var(--ruin, var(--accent)); }
+.cglyphs svg { display: block; max-width: 100%; height: auto; }
+.csoon {
+  border: 1px solid currentColor; border-radius: 999px; padding: 2px 9px; font-size: 11px; line-height: 16px;
+  letter-spacing: 0.04em; white-space: nowrap; opacity: 0.9;
+}
+.cruin-crew:empty { display: none; }
+#creature[data-subject="ruin"] .ctags,
+#creature[data-subject="ruin"] .cstory,
+#creature[data-subject="ruin"] .cnav,
+#creature[data-subject="ruin"] .clog,
+#creature[data-subject="ruin"] .ccrew { display: none; }
+#creature:not([data-subject="ruin"]) .cruin { display: none; }
 /* A short window: the wreck gives its height to the crew. */
 @media (max-height: 600px) and (min-width: 721px) {
   #creature[data-subject="source"] .ccard { --side: 200px; }
   #creature[data-subject="source"] .cview { height: 140px; }
   #creature[data-subject="source"] .ccrew { top: 176px; }
+  #creature[data-subject="ruin"] .ccard { --side: 200px; }
 }
 @media (max-width: 720px) {
   .ccard { grid-template-columns: 1fr; gap: 12px; padding: 14px; }
@@ -446,6 +502,22 @@ button.probe[hidden] { display: none; }
   #creature[data-subject="source"] .ccrew i { margin-left: 5px; }
   #creature[data-subject="source"] .clog { padding: 12px 10px 40px 6px; margin-left: 0; }
   .clog-entry p { font-size: 14px; line-height: 1.55; }
+  /* One column for the ruin too: the ruin as a band across the top, the name, and the rows, each
+     label over its text, so the text takes the whole width of a phone. */
+  #creature[data-subject="ruin"] .ccard {
+    gap: 12px; padding: 14px 6px 0 14px; min-height: 0;
+    max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px);
+  }
+  #creature[data-subject="ruin"] .cview {
+    position: relative; left: auto; top: auto; flex: 0 0 auto;
+    width: calc(100% - 8px); height: clamp(110px, 21vh, 180px);
+  }
+  #creature[data-subject="ruin"] .cname { font-size: 21px; margin-right: 8px; }
+  #creature[data-subject="ruin"] .clatin { margin: 2px 8px 6px 0; }
+  #creature[data-subject="ruin"] .cruin { padding: 4px 10px 24px 0; }
+  .crow { grid-template-columns: minmax(0, 1fr); padding: 9px 0; }
+  .crow dt { padding-top: 0; }
+  .crow dd { font-size: 14px; line-height: 1.55; }
 }
 
 /* ---------- about, and the brief of the carrier

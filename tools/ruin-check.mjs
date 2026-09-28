@@ -3,7 +3,7 @@
 //   node tools/ruin-check.mjs                500 seeds on LOW; every tenth also on HIGH
 //   node tools/ruin-check.mjs --seeds 100    another count of seeds
 //
-// Later issues of phase 2 add to this file. Five checks run now:
+// Later issues of phase 2 add to this file. Six checks run now:
 //
 // 1. The hashes of ruin-types.js. parseFreq() takes every form p2-35 names and refuses the rest.
 //    compass8() gives its eight words and puts a bearing on the line between two words clockwise.
@@ -31,6 +31,11 @@
 //    floor takes the stone of the fine pattern. On every 50th seed the patch is the same when it
 //    builds again after another world, and the cell next to the ruin holds no ruin.
 //    tools/world-checksum.mjs proves that every patch off the cell of the ruin did not move.
+// 6. The card, p2-42. The script of 26 glyphs, and glyphsOf() over the seeds of the way on of part
+//    1: two seeds of the way on give two lines. On every world with a ruin, the text of ruinCard():
+//    the name, the rows in order, the makers row against the species or the rolled body and the
+//    fauna card, the door or the steps, the day and the ship of the call, the glyphs of the way on,
+//    and no sentence over 20 words.
 //
 // The copies of the rules below come from the text of p2-35, p2-00, and p2-41, and not from
 // generate.js, so a slip in generate.js cannot pass its own check. The ground tests read the field
@@ -147,6 +152,109 @@ for (const p of portals) {
   if (R.portalSeed({ seed: p }).toLowerCase() === p.toLowerCase()) hole(`portalSeed(${p}) names its own world`);
 }
 if (freqZeroEnd === 0) hole('no frequency ends in 0 over 2,000 seeds, so the three decimals went untested');
+
+// ---------------------------------------------------------------- 1b. the glyphs, p2-42
+// One fixed script of 26 glyphs, one for each letter. Every point stands in the box of 1 by 1,
+// every glyph hangs from the rule at y = 0, no two glyphs are one glyph, and glyphsOf() gives the
+// same strokes for a letter in either case, every time. Two portal seeds give two lines, and one
+// portal seed gives one line.
+const GLYPH_KEY = (g) => JSON.stringify(g);
+if (R.GLYPHS.length !== 26) hole(`the script holds ${R.GLYPHS.length} glyphs, not 26`);
+const glyphKeys = new Set();
+R.GLYPHS.forEach((g, k) => {
+  const ch = String.fromCharCode(97 + k);
+  if (!g.length) hole(`the glyph of '${ch}' holds no stroke`);
+  let hangs = false;
+  for (const s of g) {
+    if (!s.length) hole(`the glyph of '${ch}' holds an empty stroke`);
+    for (const [x, y] of s) {
+      if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) hole(`the glyph of '${ch}' has the point ${x}, ${y} outside its box`);
+      if (y === 0) hangs = true;
+    }
+  }
+  if (!hangs) hole(`the glyph of '${ch}' does not hang from the rule`);
+  glyphKeys.add(GLYPH_KEY(g));
+  if (R.glyphsOf(ch)[0] !== g || R.glyphsOf(ch.toUpperCase())[0] !== g) hole(`glyphsOf('${ch}') does not give its glyph`);
+});
+if (glyphKeys.size !== 26) hole(`the script holds ${26 - glyphKeys.size} glyphs twice`);
+if (R.glyphsOf('Ka-vek').length !== 6 || R.glyphsOf('Ka-vek')[2].length !== 0) hole('glyphsOf() does not give a gap for a character that is not a letter');
+const lines = new Map();
+for (const p of portals) {
+  const line = GLYPH_KEY(R.glyphsOf(p));
+  if (line !== GLYPH_KEY(R.glyphsOf(p))) hole(`the glyphs of ${p} change from call to call`);
+  if (R.glyphsOf(p).length !== p.length) hole(`the glyphs of ${p} are not one glyph per letter`);
+  const seen = lines.get(line);
+  if (seen && seen !== p.toLowerCase()) hole(`the portal seeds ${seen} and ${p} give one line of glyphs`);
+  lines.set(line, p.toLowerCase());
+}
+
+// ---------------------------------------------------------------- 6. the card, p2-42
+// The text of the card of the ruin, from ruinCard() of ruin-types.js. The rules are the rows of
+// p2-42, copied from its text:
+//   the name of the proto, and 'Ruin · sends on 7.316 MHz' under it;
+//   Size, Age, Stone, Makers, The call, and The way on, in this order;
+//   Makers names the species of the world and the limbs of its body, or a rolled body that no animal
+//   of the world has, and says that a door or the steps fit the body where the proto sizes one;
+//   The call names the day of the beacon and the ship of the log of the wreck;
+//   The way on draws the glyphs of portalSeed(), and no text says "Coming soon", which only the chip
+//   says; every sentence holds 20 words or less, as every sentence of the log does.
+// The legs of the body the fauna card shows, from legPlan() of fauna.js: a slinger, a plough, and a
+// winged animal carry none.
+const CARD_ROWS = ['Size', 'Age', 'Stone', 'Makers', 'The call', 'The way on'];
+const FAUNA_LEGS = { monopod: 1, biped: 2, tripod: 3, quad: 4, hexapod: 6, serpent: 0, slinger: 0, plough: 0, wings: 0 };
+const WORDS = { no: 0, one: 1, two: 2, three: 3, four: 4, six: 6 };
+let cardRuns = 0, cardSpecies = 0, cardRolled = 0, cardFits = 0, cardLongest = 0;
+function checkCard(seed, w) {
+  const r = w.ruin, c = R.ruinCard(w);
+  cardRuns++;
+  if (!c) { hole(`${seed}: a world with a ruin gives no card`); return; }
+  const row = R.protoRow(r.proto);
+  if (c.name !== row.name) hole(`${seed}: the card names '${c.name}' and not '${row.name}'`);
+  if (c.sub !== `Ruin · sends on ${r.freq} MHz`) hole(`${seed}: the line under the name reads '${c.sub}'`);
+  if (c.rows.map((x) => x.label).join('|') !== CARD_ROWS.join('|')) hole(`${seed}: the rows read ${c.rows.map((x) => x.label).join(', ')}`);
+  const text = Object.fromEntries(c.rows.map((x) => [x.label, x.text]));
+  for (const x of c.rows) {
+    if (/coming soon/i.test(x.text)) hole(`${seed}: the row ${x.label} says "Coming soon"`);
+    for (const sent of x.text.split(/(?<=\.)\s+/)) {
+      const n = sent.split(/\s+/).length;
+      cardLongest = Math.max(cardLongest, n);
+      if (n > 20) hole(`${seed}: a sentence of ${n} words in the row ${x.label}: ${sent}`);
+    }
+  }
+  if (!text.Size.includes(`${row.height} metres high`) || !text.Size.includes(`${row.disc * 2} metres across`)) hole(`${seed}: the size row reads '${text.Size}'`);
+  if (text.Stone !== (w.type === 'lava' ? 'A stone that takes the heat and holds it.' : 'A stone this world does not make.')) hole(`${seed}: the stone row reads '${text.Stone}' on a ${w.type} world`);
+  // Makers
+  const mk = r.maker, mt = text.Makers;
+  const body = /a body with (\w+) legs?( and two wings)?/.exec(mt);
+  if (!body || !(body[1] in WORDS)) { hole(`${seed}: the makers row states no body: '${mt}'`); return; }
+  const legs = WORDS[body[1]], wings = body[2] ? 2 : 0;
+  if (legs + wings !== mk.limbs) hole(`${seed}: the makers row states ${legs} legs and ${wings} wings for a maker of ${mk.limbs} limbs`);
+  if (mk.rolled) {
+    cardRolled++;
+    if (!mt.includes('No animal of this world has that body.')) hole(`${seed}: a rolled maker and the row does not say no animal has that body`);
+    const h = /a height of about ([\d.]+) metres/.exec(mt);
+    if (!h || Math.abs(Number(h[1]) - mk.height) > 0.25) hole(`${seed}: a rolled maker of ${mk.height} m and the row reads '${mt}'`);
+  } else {
+    cardSpecies++;
+    const g = w.species[mk.species];
+    if (!mt.includes(`It is the body of the ${g.lore.name.toLowerCase()}.`)) hole(`${seed}: the makers row does not name ${g.lore.name}: '${mt}'`);
+    const live = FAUNA_LEGS[g.loco];
+    const noLegsNow = mt.includes('The ones that live here now have no legs.');
+    if (live === legs && noLegsNow) hole(`${seed}: a ${g.loco} maker of ${legs} legs and the row says the living ones have none`);
+    if (live !== legs && !(live === 0 && noLegsNow)) hole(`${seed}: the carvings show ${legs} legs, the fauna card of the ${g.loco} shows ${live}, and the row does not say so`);
+  }
+  const part = R.MAKER_PARTS[r.proto];
+  const fits = !!part && part.k * mk.height <= part.hi;
+  if (fits) cardFits++;
+  if (fits !== !!(part && mt.includes(part.line))) hole(`${seed}: the ${r.proto} of a maker of ${mk.height} m and the row reads '${mt}'`);
+  // The call
+  const log = w.source.log;
+  if (!text['The call'].startsWith(`It began to send on day ${log.beacon} of the log of ${log.probe}.`)) hole(`${seed}: the call row reads '${text['The call']}', and the log has day ${log.beacon} and ${log.probe}`);
+  // The way on
+  const way = c.rows[c.rows.length - 1];
+  if (GLYPH_KEY(way.glyphs) !== GLYPH_KEY(R.glyphsOf(R.portalSeed(w)))) hole(`${seed}: the way on does not draw the glyphs of portalSeed()`);
+  if (JSON.stringify(R.ruinCard(w)) !== JSON.stringify(c)) hole(`${seed}: the card gives two texts`);
+}
 
 // ---------------------------------------------------------------- 2 to 4. the worlds
 // The check runs generation through worker.js, as world-checksum.mjs does, so it reads the world
@@ -357,6 +465,9 @@ for (let i = 0; i < SEEDS; i++) {
     if (mk.height !== metres) hole(`${seed}: the maker is ${mk.height} m and the species ${metres} m`);
   }
 
+  // The card. p2-42.
+  checkCard(seed, w);
+
   // The tiers, and a build after another world.
   if (i % HIGH_EVERY === 0) {
     highRuns++;
@@ -399,6 +510,9 @@ console.log(`  patch:  ${patchRuns} patches of the ruin, ${patchHigh} of them on
 console.log(`          the disc flat to ${flatWorst.toExponential(1)} units, the nearest plant ${plantGap.toFixed(1)} and the nearest group`
   + ` ${groupGap.toFixed(1)} units outside the soft edge, ${reachSlack.toFixed(1)} units of the reach to spare at the least,`
   + ` and the body at most ${footWorst.toFixed(2)} units past the flat disc`);
+console.log(`  glyphs: ${R.GLYPHS.length} glyphs, all apart; ${lines.size} lines of glyphs for ${new Set(portals.map((p) => p.toLowerCase())).size} seeds of the way on`);
+console.log(`  card:   ${cardRuns} cards, ${cardSpecies} makers of a species and ${cardRolled} rolled, ${cardFits} with a door or steps that fit;`
+  + ` the longest sentence holds ${cardLongest} words`);
 if (Object.keys(patchByProto).length !== PROTO_ORDER.length) hole(`the patch check reached ${Object.keys(patchByProto).length} protos of ${PROTO_ORDER.length}`);
 if (fellBack.length) console.log(`  fell back, because no cell of the first band passed the tests: ${fellBack.join(', ')}`);
 if (missing.length) console.log(`  no ruin, because no cell of any band passed the tests: ${missing.join(', ')}`);

@@ -31,6 +31,7 @@ on. `CONTEXT.md` holds the words to avoid.
 | 5. Follow the ruin | `site.js`, `carrier-store.js`, `carrier-globe.js`, `app.js` | Main thread | chapter 2 of the search, after the tune (p2-38) |
 | 6. Tune the receiver | `tuner.js`, `app.js`, `ground-source.js` | Main thread | the field the reader types the frequency into (p2-39) |
 | 7. Stand the ruin on its cell | `generate.js`, `patchRuin()`; `ground-source.js`, `SourceRuin` | Web Worker; main thread | the disc and `patch.source`; the body, the glow, the light, the well (p2-41). See "The ruin on its patch" |
+| 8. Read the ruin | `ruin-types.js`, `ruinCard()` and `glyphsOf()`; `ground-source.js`, `RuinInspector`; `app.js`, `inspectRuin()` and `onRuinFound()`; `carrier-globe.js` | Main thread, tools | the card, the find of chapter 2, and the mini ruin on the globe (p2-42). See "The card of the ruin" |
 
 `world.ruin` rides back with the world as plain data, so `worker.js` clones it with the rest:
 
@@ -272,8 +273,9 @@ gives the row of a type.
 `mini: true` gives the body only, in one colour, the stone of the type, with the big parts alone: no
 rubble, no pavers, no bands, no doors, no steps, and no glow, except the core of the floaters,
 which the mini keeps as stone because it is the shape. The slabs of the floaters go into the body.
-`glow` and `orbit` are null. The globe draws that body beside the mini wreck after the find, at
-`MINI_UNIT` globe radii per unit: `WRECK_MODEL_H` of 0.012, the `MODEL_H` of `carrier-globe.js`,
+`glow` and `orbit` are null. The globe draws that body on a pin of its own after the find of the
+ruin, beside the pin of the mini wreck, at `MINI_UNIT` globe radii per unit (p2-42; see "The mini
+ruin on the globe"): `WRECK_MODEL_H` of 0.012, the `MODEL_H` of `carrier-globe.js`,
 over the mast of the wreck of 18 units, so the spires stand 4.9 times the mini wreck and the
 colossus 1.2 times. `miniHeight(proto)` gives the height of a mini in globe radii. The constant is
 a copy, because `carrier-globe.js` imports this file for the mini ruin.
@@ -386,8 +388,8 @@ stands there.
 - **The mark.** A tap on the ruin marks it with the ring the wreck takes, on the edge of the flat
   disc, and the floating button reads "Study the ruin". `onSelectSource()` fires as it does for
   the wreck. A thing this big takes a grace of its size in the tap: the far wall of the well and a
-  spire over a ridge stand further past the ground than the hull does. The card is p2-42, and
-  `inspectRuin()` in `app.js` is where it opens.
+  spire over a ridge stand further past the ground than the hull does. The button calls
+  `inspectRuin()` in `app.js`, which opens the card of p2-42; see "The card of the ruin".
 - **The herds.** `Ground` passes the disc with its soft edge to `GroundCover`, which grows no blade
   and no stone on it, and to `GroundFauna`, where a walker that wanders turns away from it with its
   spread, as it turns from the water.
@@ -437,7 +439,8 @@ rounds. `update()` of the floaters costs 0.004 ms. `renderer.info.memory` of the
   fixed list of 16, capitalised, with no syllable twice in a row. p2-42 draws it as glyphs, and a
   later issue opens that world. It never equals the seed of its own world. No word of two to four
   of the syllables is a word of the word list of macOS (`/usr/share/dict/words` and
-  `propernames`), so it reads as a name.
+  `propernames`), so it reads as a name. The card of p2-42 draws it in the script of the makers;
+  see "The glyphs".
 
 ## Chapter 2 of the search
 
@@ -601,6 +604,125 @@ lightened until its luminance reaches 0.3, as the drawings of the brief take it.
 writes it to `--hud-tint`: the needle, the bearing, the ring of the dial, and the pulse take it.
 The labels keep their grey, and the rest of the overlay keeps its blue.
 
+## The card of the ruin
+
+p2-42. The ruin can be read. A tap on the ruin marks it, and the floating button "Study the ruin"
+opens its card. The card opens only on the cell of the ruin, as the card of the wreck opens only on
+its cell, because it states the frequency, the day of the beacon, and the maker. The first open is
+the find of chapter 2.
+
+### The shell
+
+`RuinInspector` in `ground-source.js` draws the card in the shell of the card of the wreck, on the
+same element, with a canvas of its own, `#rcv`. The preview at the left turns the body of
+`ruinGeometry()` on its own axis, with its glow and, for the floaters, its orbit, over a disc in the
+ground colour of the world. The text reads at the right. At 720 pixels and under, the card is one
+column: the ruin as a band, the name, and the rows, each label over its text.
+
+- **The fit.** The protos differ in shape: the spires stand 88 units on a disc of 24, and the hive
+  stands 30 on a disc of 55. So the card fits the ball that holds the turning body and its disc into
+  the view, and the eye stands higher over a flat ruin than over a tall one.
+- **The well.** The shaft goes 46 units into the ground. The disc of the card is a ring with the
+  mouth open, and a fragment of the body under the ground shows only when the ray from the eye to it
+  crosses the ground inside the mouth. `mouthTest()` patches the fragment shader of the stone and of
+  the glow with that rule, so the shaft shows through the mouth and never hangs under the disc.
+- **The glow** takes the colour of chapter 2, as on the ground, and blinks `ruinRhythm()` on the clock
+  of the card. The text takes the same colour, made lighter until it reads on the dark card, as the
+  drawings of the brief take it.
+- **The height.** The card takes the height of its text, and never less than the preview. The rows
+  scroll inside the card only on a short screen.
+
+### The rows
+
+`ruinCard(world)` of `ruin-types.js` writes the text, with no DOM, so `tools/ruin-check.mjs` reads
+it on every world. The name is the name of the proto in `RUIN_PROTOS`, and the line under it reads
+"Ruin · sends on 7.316 MHz". The rows follow, in this order, each a label and one to four plain
+sentences in the voice of the log:
+
+| Row | Text |
+|---|---|
+| Size | "It stands 88 metres high and 48 metres across.": the height and twice the disc of the table, in metres of the lore |
+| Age | "Older than the rock it stands on. The probe cannot date it." |
+| Stone | "A stone this world does not make." On a lava world: "A stone that takes the heat and holds it." |
+| Makers | decision 4; see below |
+| The call | decision 6: "It began to send on day 3 of the log of Lantern 10. That was the day the crew put the beacon on the mast." The day is `log.beacon` and the ship is `log.probe` of the log of the wreck |
+| The way on | decision 12: the line of glyphs of `portalSeed(world)`, the chip "Coming soon" beside it, and under it "The probe reads the name of another world here. It cannot read it yet." |
+
+**The makers.** A maker of a species: "The carvings show a body with six legs. It is the body of the
+hardpan long-day hopper." The name is the name of the fauna card, in the case of a sentence, as the
+log writes it. The body takes the words of the locomotion of the genome: one leg, two, three, four,
+or six legs, no legs for a serpent, two legs for a slinger, four for a plough, and two legs and two
+wings for a winged maker, which is `limbs` 4 of p2-35. A slinger, a plough, and a winged animal carry
+no leg on the fauna card, so for those three the row adds "The ones that live here now have no
+legs.", and the card never disagrees with the fauna card. A rolled maker: "The carvings show a body
+with four legs and a height of about 3 metres. No animal of this world has that body." The height
+takes the nearest half metre.
+
+Three protos have a part the maker sizes: the door of the dome, the doors of the hive, and the steps
+of the well. `MAKER_PARTS` of `ruin-types.js` holds the numbers that `ruin-geometry.js` builds them
+with: `k` times the height of the maker, inside `[lo, hi]` units. Where `k` times the height stays
+under `hi`, the part follows the body, and the row adds "The door in the base ring fits that body.",
+"The doors of the mounds fit that body.", or "The steps down the shaft fit that body." Where `hi`
+cuts the part, the row says nothing of it. Over 500 seeds, 104 of the 191 worlds with a dome, a hive,
+or a well take the sentence.
+
+**The voice.** The log holds no sentence over 20 words, and the card holds none either: the longest
+has 15. So the call row states the day and the ship in one sentence and the beacon in a second.
+"Coming soon" stands in the chip and in no sentence.
+
+### The glyphs
+
+The makers write in one script of 26 glyphs, one for each letter from a to z, and every world shares
+it. `GLYPHS` of `ruin-types.js` holds the strokes, and `glyphsOf(word)` gives the glyph of each
+letter of a word, in either case, and an empty glyph for a character that is not a letter. A glyph is
+a list of strokes in a box of 1 by 1, x to the right and y down, and a stroke of one point is a dot.
+Every glyph hangs from a rule at y = 0, which the card draws across the whole word, so the line reads
+as one script, and no glyph reads as a letter of the Latin alphabet.
+
+The card draws the line as inline SVG in the colour of the ruin, one glyph per letter of
+`portalSeed(world)`. The SVG holds no text, and no attribute holds the seed, so the page does not
+print the name the glyphs spell. One seed gives one line on every open, and two seeds of the way on
+give two lines: over the 1,482 seeds of the way on of `tools/ruin-check.mjs`, no two share a line.
+The later issue that opens the way reads the same script. Do not change a glyph.
+
+### The find of chapter 2
+
+`inspectRuin()` in `app.js` opens the card and calls `onRuinFound()` the first time:
+
+- `markFound(seed, { chapter: 2 })` in the store. The store drops the fixes of chapter 2 with it, and
+  a clear of the fixes keeps the find.
+- **A find by chance.** A reader can land on the cell of the ruin before the tune, and a patch shows
+  the ruin whether or not the reader tuned. That find is a find all the same, and the card states the
+  band, so `onRuinFound()` calls `markTuned()` too. The receiver then holds the band of the ruin: a
+  probe on the ground reads the carrier again, as a tune there does, and the overlay prints the band
+  of the ruin. The fix that landing took for the wreck stays a fix of chapter 1. The Carrier row reads
+  "Found 1 of 2", and the locked band takes the place of the Tune chip.
+- The group of the carrier is built again from the record, because a find by chance moves the
+  search to chapter 2. After both finds the Carrier row reads "Found 2 of 2" and offers "Wreck" and
+  "Ruin", and the thumb of the saved world carries two marks.
+
+### The mini ruin on the globe
+
+The find stands a second pin at the cell of the ruin, on the pattern of the pin of the wreck:
+`makeRuinModel()` in `carrier-globe.js`. The pin of the wreck stays.
+
+- The pin takes the colour of chapter 2 and drapes on the terrain of the cell, its axis along the
+  surface normal, `PIN_H` tall, with the least width of the pin of the wreck.
+- The model on top is `ruinGeometry(proto, world, { mini: true })` at `MINI_UNIT` globe radii per
+  unit, see-through, in the stone of the type with a little of the colour of chapter 2 as emissive,
+  so it reads on the night side. It takes the least size of the mini wreck, so the two keep their
+  ratio at every zoom: the spires stand 4.9 times the mini wreck. It turns and bobs as the mini wreck
+  does. No part answers a ray, so a pick still names the cell under it.
+- **The lamp.** A small point in the colour of chapter 2 stands at the lamp of the body: the tip of
+  the spires, the palm of the colossus, the mouth of the well. It holds a least radius of 0.0035 of
+  the distance from the camera, a few pixels at the home zoom, and it blinks with the rules of the
+  lamp of the wreck: a floor, a tail, and a breath. Its rhythm is `ruinLampRhythm(world)`, the motif
+  of the wreck at half the speed, which is the rhythm of `ruinRhythm()` on the ground. p2-44 swaps
+  both functions for the motif of the ruin.
+- `setFound(group, world, heightMap, { chapter: 2 })` stands it on a group that exists, and
+  `makeCarrierGroup()` stands it for a record with `ruin.found`. A world with no ruin never stands it.
+  `disposeCarrierGroup()` gives its three geometries and its three materials back.
+
 ## The checks
 
 - `node tools/ruin-check.mjs` runs 500 seeds through `worker.js` on LOW, every tenth of them on HIGH
@@ -611,6 +733,14 @@ The labels keep their grey, and the rest of the overlay keeps its blue.
   HIGH too: the shape of `patch.source`, the flat and dry disc, the whole disc inside the reach, no
   plant, no group, and no member on it, the body on the flat disc, the stone of the floor, the same
   patch after another world, and no ruin on the cell next door. p2-41.
+- `node tools/ruin-check.mjs` part 6 tests the card of p2-42: the script of 26 glyphs, two seeds of
+  the way on against two lines, and on every world with a ruin the text of `ruinCard()`: the name,
+  the rows in order, the makers row against the species and its fauna card or against the rolled
+  body, the door or the steps, the day and the ship of the call, the glyphs of the way on, and no
+  sentence over 20 words.
+- `node tools/carrier-fix-check.mjs` part G tests the pin of the ruin: both pins after both finds,
+  in the colour of each chapter, the mini ruin on its pin at `MINI_UNIT`, the lamp at the lamp of the
+  body and its blink, a find by chance, and a world with no ruin. p2-42.
 - `node tools/world-checksum.mjs --check` must match its baseline: the ruin moves no other stream,
   and every patch off the cell of the ruin hashes as it did before p2-41.
 - `node tools/world-checksum.mjs --source` prints the ruin of each seed on both tiers.

@@ -85,8 +85,11 @@
            hides the blocks the open subject does not use, by the data-subject attribute app.js
            sets. The log may hold twenty entries, so .clog scrolls inside the card and the crew and
            the close button stay where they are. The tuner of p2-39 stands inside .clog, under the
-           last entry; tuner.js builds it. -->
-      <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas><canvas id="scv" hidden></canvas></div>
+           last entry; tuner.js builds it.
+           The ruin of p2-42 is the fourth subject: its preview takes #rcv, and its rows take .cruin,
+           which scrolls as .clog does. .cruin-crew is the slot of p2-43 for the crew at the ruin;
+           it stays empty until then, and an empty slot takes no room. -->
+      <div class="cview"><canvas id="ccv"></canvas><canvas id="pcv" hidden></canvas><canvas id="scv" hidden></canvas><canvas id="rcv" hidden></canvas></div>
       <div class="ctext">
         <div class="cname"></div>
         <div class="clatin"></div>
@@ -94,6 +97,10 @@
         <dl class="ctags"></dl>
         <p class="cstory"></p>
         <div class="clog"></div>
+        <div class="cruin">
+          <dl class="crows"></dl>
+          <section class="cruin-crew" aria-label="The crew at the ruin"></section>
+        </div>
         <div class="cnav"><button type="button" class="ghost cprev">‹ Previous</button><button type="button" class="ghost cnext">Next ›</button></div>
       </div>
     </div>
