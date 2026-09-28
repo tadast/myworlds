@@ -14,7 +14,7 @@ import { GroundCover } from './ground-cover.js';
 import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
-import { SourceWreck } from './ground-source.js';
+import { SourceWreck, SourceRuin } from './ground-source.js';
 import { applyDetail } from './ground-detail.js';
 import { perf } from './perf.js';
 import { TIERS } from './tiers.js';
@@ -227,6 +227,9 @@ const PICK_GRACE = 2;
 // the tap. The hull is 13 units long and the mast 18 tall, so a hit on the body can measure a few
 // units further out than the ground the same ray meets beside it.
 const WRECK_GRACE = 20;
+// The body of the source on its cell, by patch.source.kind. Each class has the same shape, so the
+// rest of this file reads this.source and does not care which kind stands there. p2-41.
+const SOURCE_KINDS = { wreck: SourceWreck, ruin: SourceRuin };
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM in
@@ -319,7 +322,7 @@ export class Ground {
     this.renderer = renderer;
     this.onSelect = onSelect || null;       // (kind) => void, a tap marked an animal of this species
     this.onSelectPlant = onSelectPlant || null; // (kind) => void, a tap marked a plant of this kind
-    this.onSelectSource = onSelectSource || null; // () => void, a tap marked the wreck. Issue 34.
+    this.onSelectSource = onSelectSource || null; // () => void, a tap marked the wreck (issue 34) or the ruin (p2-41)
     this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took every mark off
     // The music of the app. The lamp of the wreck reads its bar clock, so the eye and the ear keep
     // one rhythm. It is null in a session with no music and the lamp then takes the clock of the
@@ -338,7 +341,8 @@ export class Ground {
     this.fauna = null;
     this.sea = null;
     this.phenomena = null;
-    this.source = null;     // the wreck of issue 34, on the one cell that holds it
+    this.source = null;     // the wreck of issue 34 or the ruin of p2-41, on the one cell that holds it
+    this.keepOut = null;    // the disc of the ruin, [x, z, radius], or null. See load().
     this.atCeiling = false;
     // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
     // it. _driveLod() moves it from the frame time; the last settled value comes from the store,
@@ -541,12 +545,19 @@ export class Ground {
       // The source of the world, when this cell is the cell that holds it. The worker picked the
       // place, flattened the disc, and scorched it; this raises the wreck on that disc. It comes
       // after the terrain for the same reason the phenomenon does: it reads the drawn height.
-      // Issue 34, slice 3. See ground-source.js.
-      this.source = SourceWreck.create({
+      // Issue 34, slice 3. See ground-source.js. The ruin of p2-41 stands the same way, and the
+      // well of the ruin opens the terrain over its shaft.
+      const Kind = p.source && SOURCE_KINDS[p.source.kind];
+      this.source = Kind ? Kind.create({
         world: this.world, patch: p, tier: this.tier, music: this.music,
         heightAt: (x, z) => this.heightAt(x, z),
-      });
+      }) : null;
       if (this.source) this.content.add(this.source.group);
+      if (this.source && this.source.hole) this._openHole(this.source.hole);
+      // The disc of the ruin with its soft edge, [x, z, radius]: the cover grows nothing on it, and
+      // the herds turn away from it. The worker keeps the plants and the groups off the same disc.
+      this.keepOut = this.source && this.source.outer
+        ? [this.source.at.x, this.source.at.z, this.source.outer] : null;
       this._buildCover(result);
     } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
@@ -567,6 +578,9 @@ export class Ground {
       heightAt: (x, z) => this.heightAt(x, z), lod: this.lod,
       // Issue 17: the shadow of a flyer falls opposite the sun, and it goes out after sundown.
       sunDir: this.sunDir, night: this.sky.night,
+      // p2-41: the worker starts no group on the disc of the ruin, and a herd that wanders turns
+      // away from it as it turns from the water.
+      keepOut: this.keepOut,
     });
     this.content.add(this.fauna.group);
 
@@ -661,6 +675,33 @@ export class Ground {
     if (this.rim) this.content.add(this._mesh(this._rimGeometry(), mat));
   }
 
+  // p2-41: the well opens the ground. The terrain of a patch is one grid with no hole, so the
+  // fragment shader of the terrain discards inside the mouth, `hole` = { x, z, r } in units of the
+  // box. The shaft wall of the body hides the edge, and the rim of the well covers it from above.
+  // Only the patch of the well compiles this program: every other patch keeps the terrain as it was.
+  // The terrain casts no shadow, so no depth material needs the hole.
+  _openHole(hole) {
+    const mat = this.terrainMat;
+    if (!mat) return;
+    const u = { uHole: { value: new THREE.Vector3(hole.x, hole.z, hole.r) } };
+    const first = mat.onBeforeCompile;
+    mat.onBeforeCompile = (sh, r) => {
+      if (first) first.call(mat, sh, r);
+      Object.assign(sh.uniforms, u);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vHoleXZ;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHoleXZ = position.xz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec3 uHole;\nvarying vec2 vHoleXZ;')
+        .replace('#include <clipping_planes_fragment>',
+          '#include <clipping_planes_fragment>\nif (distance(vHoleXZ, uHole.xy) < uHole.z) discard;');
+    };
+    const key = mat.customProgramCacheKey ? mat.customProgramCacheKey() : '';
+    mat.customProgramCacheKey = () => `${key}|hole`;
+    mat.userData.hole = u;
+    mat.needsUpdate = true;
+  }
+
   // The blades and the stones around the camera. The graphics card places them from the heights,
   // the colours, and the biomes of the patch. See ground-cover.js.
   _buildCover(result) {
@@ -671,6 +712,7 @@ export class Ground {
       seaLevel: this.sea ? this.sea.level : null, wind: this.wind,
       tone: (k) => 1 + (hash1(k) - 0.5) * 2 * JITTER,
       heightAt: (x, z) => this.heightAt(x, z),
+      keepOut: this.keepOut,
     });
     this.content.add(this.cover.group);
   }
@@ -987,7 +1029,8 @@ export class Ground {
   //             view. See below: it is an angle in the box and not the bearing less an azimuth.
   //   rangeKm   kilometres to the source inside CARRIER_RANGE cells of arc, else null. Decision 7.
   //   range     units from the camera to the wreck on this patch, or null off its cell. The
-  //             overlay then states the range in units and the word "here". Decision 7.
+  //             overlay then states the range in units and the word "here". Decision 7. On the
+  //             cell of the ruin it is the units to the edge of the ruin. p2-41.
   //   freq      the band the receiver holds, as the overlay prints it with no unit: '406.025' in
   //             chapter 1, and the frequency of the ruin in chapter 2. p2-38.
   //
@@ -1016,11 +1059,14 @@ export class Ground {
     let d = c.dir;
     let range = null;
     // The wreck stands on this patch, in the same units as the camera, so the needle takes the true
-    // way to it and the range is the plain distance over the ground.
+    // way to it and the range is the plain distance over the ground. The ruin is up to 110 units
+    // across, so the needle points at its middle and the range measures to its edge, which
+    // rangeFrom() gives. p2-41.
     if (heard) {
       const wx = heard.at.x - p.x, wz = heard.at.z - p.z;
-      range = Math.hypot(wx, wz);
-      if (range > 1e-6) d = [wx / range, wz / range];
+      const r = Math.hypot(wx, wz);
+      range = heard.rangeFrom ? heard.rangeFrom(p.x, p.z) : r;
+      if (r > 1e-6) d = [wx / r, wz / r];
     }
     let rel = 0;
     if (d && fl > 1e-9) {
@@ -1820,8 +1866,11 @@ export class Ground {
     // beast; and the ground itself when the ray meets the ground first, because the wreck then
     // stands behind the hill the reader tapped. The second rule matters for the padded box of
     // SourceWreck.pickAt(), which knows nothing about the terrain.
+    // A ruin states a grace of its own size: the far wall of the well and a spire over a ridge
+    // stand further past the ground than the hull does. p2-41.
     let wreck = this.pickSource ? this.pickSource(nx, ny) : null;
-    if (wreck && hit && wreck.dist > this.camera.position.distanceTo(hit) + WRECK_GRACE) wreck = null;
+    const grace = (this.source && this.source.grace) || WRECK_GRACE;
+    if (wreck && hit && wreck.dist > this.camera.position.distanceTo(hit) + grace) wreck = null;
     if (wreck && !((creature && creature.dist + PICK_GRACE < wreck.dist)
       || (plant && plant.dist + PICK_GRACE < wreck.dist))) {
       if (this.flora) this.flora.unmark();
@@ -1920,6 +1969,7 @@ export class Ground {
   _clear() {
     if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
     if (this.source) { this.source.dispose(); this.source = null; }
+    this.keepOut = null;
     if (this.flora) { this.flora.dispose(); this.flora = null; }
     if (this.cover) { this.cover.dispose(); this.cover = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }

@@ -236,10 +236,13 @@ export class GroundFauna {
   // lod is the shared LOD knob of the ground: { distance, min, max } in metres.
   // sunDir is the direction of the sun in the ground frame, and night is 0 by day and 1 at night.
   // The shadow of a flyer reads both: it falls opposite the sun, and it fades out after sundown.
-  constructor({ result, world, tier, heightAt, camera, canvas, lod, sunDir, night }) {
+  // keepOut is [x, z, radius] of the disc of the ruin, or null. A walker turns away from it as it
+  // turns from the water, so no herd walks onto the ruin. p2-41.
+  constructor({ result, world, tier, heightAt, camera, canvas, lod, sunDir, night, keepOut = null }) {
     this.world = world;
     this.tier = tier;
     this.heightAt = heightAt;
+    this.keepOut = keepOut;
     this.camera = camera;
     this.canvas = canvas;
     this.lod = lod || DEFAULT_LOD;
@@ -573,6 +576,14 @@ export class GroundFauna {
     this.stepMs = this.stepMs ? this.stepMs * 0.9 + ms * 0.1 : ms;
   }
 
+  // True when a point with a pad round it reaches the disc of the ruin. p2-41.
+  _kept(x, z, pad) {
+    const k = this.keepOut;
+    if (!k) return false;
+    const r = k[2] + pad;
+    return (x - k[0]) * (x - k[0]) + (z - k[1]) * (z - k[1]) < r * r;
+  }
+
   // One anchor. It is not drawn: it carries the group and the activity of the group.
   _stepGroup(g, t, dt) {
     const st = g.mover;
@@ -580,9 +591,10 @@ export class GroundFauna {
     stepAny(st, t, dt);
     let x = g.x0 + st.u, z = g.z0 + st.v;
     const lim = this.limit;
-    // a walker turns away from the water and from the edge of the patch; a flyer only from the edge
+    // a walker turns away from the water, from the disc of the ruin, and from the edge of the
+    // patch; a flyer only from the edge. The disc takes the spread, so the whole herd keeps off it.
     const blocked = Math.abs(x) > lim || Math.abs(z) > lim
-      || (!g.flies && this.heightAt(x, z) < WATER_MARGIN);
+      || (!g.flies && (this.heightAt(x, z) < WATER_MARGIN || this._kept(x, z, g.spread)));
     if (blocked) {
       // A mover that throws ends its throw here: a throw holds one heading, so it would drive the
       // body into the same water or the same edge for the rest of it.
@@ -662,7 +674,8 @@ export class GroundFauna {
       // to need no test of its own, because it hung on the anchor and the anchor kept it out of the
       // sea. A member that throws itself does not, so it takes the same test and the same refusal.
       const st = m.mover, lim = this.limit;
-      if (Math.abs(nx) > lim || Math.abs(nz) > lim || (!g.flies && this.heightAt(nx, nz) < WATER_MARGIN)) {
+      if (Math.abs(nx) > lim || Math.abs(nz) > lim
+        || (!g.flies && (this.heightAt(nx, nz) < WATER_MARGIN || this._kept(nx, nz, 0)))) {
         nx = m.x; nz = m.z;
         st.heading += Math.PI * 0.75; st.spd = 0;
         impulseBlocked(st);

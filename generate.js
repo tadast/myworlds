@@ -27,7 +27,7 @@ import { SourceLore } from './source-lore.js';     // the log of the source, wri
 import { Lore } from './lore.js';                 // the lore engine, shared with the flora
 import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, siteCell, cellSite, sameCell, cellArc, tangentFrame } from './cell-grid.js';
 import { TYPES, TYPE_LABEL, TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE } from './world-types.js';
-import { protoOf, freqOf, compass8 } from './ruin-types.js';   // the protos and the hashes of the ruin
+import { protoOf, protoRow, freqOf, compass8 } from './ruin-types.js';   // the protos and the hashes of the ruin
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -2503,7 +2503,9 @@ function patchFauna(ctx, maxFauna = 0, pulled, g) {
       const ang = rng() * Math.PI * 2, r = Math.sqrt(rng()) * reach;
       x = Math.cos(ang) * r; z = Math.sin(ang) * r;
       if (G.cls !== 'air' && hAt(x, z) <= 0) continue;   // a walker and a burrower stand on land
-      if (g.blocked && g.blocked(x, z)) continue;        // and none of them stands in the crater
+      // and none of them stands in the crater. The spread lets the mask of the ruin keep the whole
+      // group off its disc; the other masks read the point alone. p2-41.
+      if (g.blocked && g.blocked(x, z, spread)) continue;
       let clear = true;
       for (const p of anchors) {
         const need = Math.max(spread, p.spread) * 2;     // groups sit at least spread * 2 apart
@@ -2662,34 +2664,45 @@ function patchSlope(heights, n, grid, i, j) {
   return Math.hypot(dhx, dhz);
 }
 
-// The place and the paint of the wreck. It rewrites the heights in place and gives back the paint
-// pass, the mask the plants read, the window of the grid the paint covers, and the numbers the main
-// thread needs. A kind the ground cannot draw yet gives null, and the patch then builds as before.
-function patchSource(ctx, kind, s) {
-  if (kind !== 'wreck') return null;
-  const { heights, n, grid, half, pseed, avoid } = s;
-  const P = ctx.P;
-  const rng = makeRng(`${pseed}|source`);
-  const reach = Math.max(grid * 4, half - FLORA_EDGE);
-  const ang = rng() * Math.PI * 2;
-  const rad = Math.sqrt(rng()) * reach * SOURCE_PLACE;
-  const yaw = rng() * Math.PI * 2;
+// The walk limit of the ground, in units from the site: reachOf() of ground.js.
+const sourceReach = (s) => Math.max(s.grid * 4, s.half - FLORA_EDGE);
+
+// The place and the floor of a source: the walk from the draw to a node that holds the disc, and
+// the disc itself. patchSource() and patchRuin() share it. Each draws its own numbers first and
+// passes them in, so the walk draws nothing and each stream stays its own.
+//
+//   ang, rad  the draw: the angle and the distance from the site
+//   bound     the farthest the middle may stand from the site
+//   outer     the radius of the disc, with the soft edge
+//   soft      the part of `outer` that is flat
+//   rim       the count of points on the edge of the disc that the walk tests
+//   rise      the most the ground at the edge of the flat part may stand over or under the middle,
+//             or 0 for no test. The wreck takes no test.
+//
+// It rewrites the heights in place and gives back the middle, its height, and the window of the
+// grid the disc covers.
+function placeDisc(s, { ang, rad, bound, outer, soft, rim, rise = 0 }) {
+  const { heights, n, grid, half, avoid } = s;
   const toI = (m) => clamp(Math.round((m + half) / grid), 0, n - 1);
   const toM = (i) => -half + i * grid;
+  const flat = outer * soft;
 
   // The walk: the nearest node to the draw that is dry, flat enough, and clear of the phenomenon
   // when the cell holds one. The test runs on the rim of the disc as well as at the middle, because
   // a middle that stands a metre over the water still gives a disc that reaches the sea.
   const ok = (i, j) => {
     const x = toM(i), z = toM(j);
-    if (Math.hypot(x, z) > reach) return false;
+    if (Math.hypot(x, z) > bound) return false;
     if (patchSlope(heights, n, grid, i, j) >= SOURCE_STAND) return false;
-    if (heights[j * n + i] <= 0) return false;
-    for (let k = 0; k < SOURCE_RIM; k++) {
-      const t = k * Math.PI * 2 / SOURCE_RIM;
-      const px = x + Math.cos(t) * SOURCE_DISC, pz = z + Math.sin(t) * SOURCE_DISC;
+    const h = heights[j * n + i];
+    if (h <= 0) return false;
+    for (let k = 0; k < rim; k++) {
+      const t = k * Math.PI * 2 / rim;
+      const c = Math.cos(t), sn = Math.sin(t);
+      const px = x + c * outer, pz = z + sn * outer;
       if (heights[toI(pz) * n + toI(px)] <= 0) return false;
       if (avoid && avoid(px, pz)) return false;
+      if (rise > 0 && Math.abs(heights[toI(z + sn * flat) * n + toI(x + c * flat)] - h) > rise) return false;
     }
     return !(avoid && avoid(x, z));
   };
@@ -2702,7 +2715,7 @@ function patchSource(ctx, kind, s) {
   };
   const si = toI(Math.cos(ang) * rad), sj = toI(Math.sin(ang) * rad);
   take(si, sj);
-  const maxD = Math.ceil(reach / grid);
+  const maxD = Math.ceil(bound / grid);
   // The search runs out in rings, so the first node it takes is the nearest one that passes.
   for (let d = 1; bi < 0 && d <= maxD; d++) {
     for (let t = -d; t <= d; t++) {
@@ -2710,15 +2723,15 @@ function patchSource(ctx, kind, s) {
     }
   }
   if (bi < 0) {
-    // No node passed. The cell is all water, or every dry part of it is a cliff. The wreck still
+    // No node passed. The cell is all water, or every dry part of it is a cliff. The source still
     // stands, because a landing on the cell of the source must always show the source: it takes the
-    // driest and flattest node inside the reach, and the disc may then reach the water at its rim.
+    // driest and flattest node inside the bound, and the disc may then reach the water at its rim.
     let best = -Infinity;
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
         const x = toM(i), z = toM(j);
-        if (Math.hypot(x, z) > reach) continue;
-        const v = heights[j * n + i] - patchSlope(heights, n, grid, i, j) * SOURCE_DISC;
+        if (Math.hypot(x, z) > bound) continue;
+        const v = heights[j * n + i] - patchSlope(heights, n, grid, i, j) * outer;
         if (v > best) { best = v; bi = i; bj = j; }
       }
     }
@@ -2726,23 +2739,40 @@ function patchSource(ctx, kind, s) {
   }
 
   // The disc. The middle takes the height of the node the walk found, and the rim eases back into
-  // the ground the patch raised, so the wreck stands on a flat floor with no step around it.
+  // the ground the patch raised, so the source stands on a flat floor with no step around it.
   const sx = toM(bi), sz = toM(bj);
   const hs = heights[bj * n + bi];
-  const i0 = Math.max(0, Math.floor((sx + half - SOURCE_DISC) / grid));
-  const i1 = Math.min(n - 1, Math.ceil((sx + half + SOURCE_DISC) / grid));
-  const j0 = Math.max(0, Math.floor((sz + half - SOURCE_DISC) / grid));
-  const j1 = Math.min(n - 1, Math.ceil((sz + half + SOURCE_DISC) / grid));
+  const i0 = Math.max(0, Math.floor((sx + half - outer) / grid));
+  const i1 = Math.min(n - 1, Math.ceil((sx + half + outer) / grid));
+  const j0 = Math.max(0, Math.floor((sz + half - outer) / grid));
+  const j1 = Math.min(n - 1, Math.ceil((sz + half + outer) / grid));
   for (let j = j0; j <= j1; j++) {
     const zm = -half + j * grid;
     for (let i = i0; i <= i1; i++) {
       const xm = -half + i * grid;
-      const d = Math.hypot(xm - sx, zm - sz) / SOURCE_DISC;
+      const d = Math.hypot(xm - sx, zm - sz) / outer;
       if (d >= 1) continue;
       const k = j * n + i;
-      heights[k] += (hs - heights[k]) * smoothstep(1, SOURCE_SOFT, d);
+      heights[k] += (hs - heights[k]) * smoothstep(1, soft, d);
     }
   }
+  return { sx, sz, hs, i0, i1, j0, j1 };
+}
+
+// The place and the paint of the wreck. It rewrites the heights in place and gives back the paint
+// pass, the mask the plants read, the window of the grid the paint covers, and the numbers the main
+// thread needs. A kind the ground cannot draw yet gives null, and the patch then builds as before.
+function patchSource(ctx, kind, s) {
+  if (kind !== 'wreck') return null;
+  const P = ctx.P;
+  const rng = makeRng(`${s.pseed}|source`);
+  const reach = sourceReach(s);
+  const ang = rng() * Math.PI * 2;
+  const rad = Math.sqrt(rng()) * reach * SOURCE_PLACE;
+  const yaw = rng() * Math.PI * 2;
+  const { sx, sz, hs, i0, i1, j0, j1 } = placeDisc(s, {
+    ang, rad, bound: reach, outer: SOURCE_DISC, soft: SOURCE_SOFT, rim: SOURCE_RIM,
+  });
 
   // The scorch. The ground under the wreck reads as burnt, so the disc darkens toward the dark end
   // of the palette and lets the biome back in over the last part of its radius.
@@ -2759,6 +2789,89 @@ function patchSource(ctx, kind, s) {
     paint, i0, i1, j0, j1,
     blocked: (x, z) => (x - sx) * (x - sx) + (z - sz) * (z - sz) < SOURCE_DISC * SOURCE_DISC,
   };
+}
+
+// ---------------------------------------------------------------- the ruin of a patch, p2-41
+// The second source. When the landing cell is the cell of world.ruin (see kindIn()), the patch
+// places the ruin on the pattern of the wreck: the same walk, a disc of the proto, a paint, and the
+// same mask for the plants, the cover, and the groups. ground-source.js draws the body.
+//
+// The disc of the proto is the flat part, and the soft edge lies outside it. The wreck keeps its
+// soft edge inside its 14 units, because its parts stand near the middle. The parts of a ruin reach
+// the edge of the disc of the table (ruin-geometry.js keeps them inside it), so a soft edge inside
+// the disc would lift or sink the arches at the ends of the line and the small hives of the colony.
+// The walk bounds the middle by the reach less the whole disc, so the reader can walk round the
+// ruin. The arches lay their line along the yaw, and the line stays inside the disc at every yaw.
+//
+// The ruin rolls from makeRng(pseed + '|ruin') and from no other stream, so every other patch is
+// byte for byte the patch it was. The stream draws the place and the yaw first, three numbers. The
+// camp of p2-43 draws after them from the same stream, in ruinCamp(); nothing else draws from it.
+const RUIN_EDGE = 0.4;         // the soft edge outside the flat disc, as a part of the disc
+const RUIN_RISE = 0.25;        // the most the edge of the flat disc stands off the middle, per unit of radius
+const RUIN_RIM_STEP = 12;      // units of arc between two points of the rim the walk tests
+const RUIN_WORN = 0.35;        // how far the floor moves toward the rock of the palette at the middle
+const RUIN_STONE = 0.8;        // the share of bare rock the fine pattern of the floor takes
+
+function patchRuin(ctx, ruin, s) {
+  const row = ruin && protoRow(ruin.proto);
+  if (!row) return null;
+  const P = ctx.P;
+  const rng = makeRng(`${s.pseed}|ruin`);
+  const flat = row.disc, outer = flat * (1 + RUIN_EDGE);
+  const bound = Math.max(s.grid * 4, sourceReach(s) - outer);
+  const ang = rng() * Math.PI * 2;
+  const rad = Math.sqrt(rng()) * bound * SOURCE_PLACE;
+  const yaw = rng() * Math.PI * 2;
+  const { sx, sz, hs, i0, i1, j0, j1 } = placeDisc(s, {
+    ang, rad, bound, outer, soft: flat / outer,
+    rim: Math.max(SOURCE_RIM, Math.ceil(2 * Math.PI * outer / RUIN_RIM_STEP)),
+    rise: flat * RUIN_RISE,
+  });
+  const camp = ruinCamp(ctx, ruin, rng, { x: sx, y: hs, z: sz, yaw, flat, outer }, s);
+
+  // The worn floor. The ground colour lifts a little toward the rock of the palette, as stone that
+  // feet and weather wore flat, and the biome comes back over the soft edge. It takes no scorch,
+  // because nothing burnt here. The fine pattern of the terrain reads the floor as rock.
+  const rock = P.rock || P.rock2 || P.beach;
+  const wear = (xm, zm) => {
+    const d = Math.hypot(xm - sx, zm - sz);
+    return d >= outer ? 0 : smoothstep(outer, flat, d);
+  };
+  const paint = (xm, zm, out, o) => {
+    const k = wear(xm, zm) * RUIN_WORN;
+    if (k <= 0) return;
+    out[o] = lerp(out[o], rock[0], k);
+    out[o + 1] = lerp(out[o + 1], rock[1], k);
+    out[o + 2] = lerp(out[o + 2], rock[2], k);
+  };
+  // The surface of a node, for the fine pattern: the biome stays, and the share of bare rock rises
+  // to RUIN_STONE in the middle. A node that carries no surface keeps none. See packSurface().
+  const stone = (xm, zm, surface, k) => {
+    const rk = Math.round(wear(xm, zm) * RUIN_STONE * 15);
+    if (rk <= 0 || !(surface[k] & 15)) return;
+    surface[k] = (surface[k] & 15) | (Math.max(surface[k] >> 4, rk) << 4);
+  };
+
+  // The mask. The plants and the cover keep off the whole disc with its soft edge. A group asks
+  // with its spread as `pad`, so no member of it starts on the disc either.
+  const on = (x, z, pad) => (x - sx) * (x - sx) + (z - sz) * (z - sz) < (outer + pad) * (outer + pad);
+  const blocked = camp
+    ? (x, z, pad = 0) => on(x, z, pad) || camp.blocked(x, z, pad)
+    : (x, z, pad = 0) => on(x, z, pad);
+  const info = { kind: 'ruin', proto: ruin.proto, x: sx, y: hs, z: sz, yaw };
+  if (camp) info.camp = camp.info;
+  return { info, paint, stone, i0, i1, j0, j1, blocked };
+}
+
+// The camp of the crew at the ruin, or null. p2-43 fills it. It draws the place of the camp from
+// `rng`, which has drawn the place and the yaw of the ruin and nothing more, and it gives back
+// `{ info, blocked }`: `info` rides on patch.source.camp, and `blocked(x, z, pad)` keeps the plants
+// and the groups off the camp. `ruin` is world.ruin, and `at` is the ruin on this patch: the middle,
+// its height, the yaw, and the radii of the flat disc and of the soft edge. Until p2-43 no crew
+// went, and the stream draws nothing after the yaw.
+// eslint-disable-next-line no-unused-vars
+function ruinCamp(ctx, ruin, rng, at, s) {
+  return null;
 }
 
 // The ground of one landing: a square height grid and a colour per vertex, in the frame of the box
@@ -2937,15 +3050,21 @@ function patch(seed, site, opts = {}, post = () => {}) {
   // phenomenon, so the wreck can stand clear of a cone the same cell might hold. By the 4-cell rule
   // of makeSource() the two never meet, and the guard costs nothing on the cells where they do not.
   // Issue 34, slice 3.
+  //
+  // p2-41: the ruin, when this cell is the cell of world.ruin. The patch asks for it after the
+  // source, and a cell holds one of the two and never both: makeRuin() keeps the ruin off the cell
+  // of the wreck. So the one `src` below carries either one, and the rest of the patch does not
+  // care which kind stands there.
   const srcKind = kindIn(ctx.world.source, cell);
-  const src = srcKind
-    ? patchSource(ctx, srcKind, {
-      heights, n, grid, half, pseed, avoid: act ? act.blocked : null,
-    }) : null;
-  // The plants and the group anchors keep off both footprints.
+  const ruinHere = !srcKind && kindIn(ctx.world.ruin, cell) === 'ruin';
+  const srcAt = { heights, n, grid, half, pseed, avoid: act ? act.blocked : null };
+  const src = srcKind ? patchSource(ctx, srcKind, srcAt)
+    : ruinHere ? patchRuin(ctx, ctx.world.ruin, srcAt) : null;
+  // The plants and the group anchors keep off both footprints. A group passes its spread as the
+  // third argument, and only the mask of the ruin reads it.
   const blockAct = act ? act.blocked : null, blockSrc = src ? src.blocked : null;
   const blocked = blockAct && blockSrc
-    ? (x, z) => blockAct(x, z) || blockSrc(x, z) : (blockAct || blockSrc);
+    ? (x, z, pad) => blockAct(x, z, pad) || blockSrc(x, z, pad) : (blockAct || blockSrc);
 
   post(66, 'Painting the ground');
   const colors = new Float32Array(n * n * 3);
@@ -3006,11 +3125,15 @@ function patch(seed, site, opts = {}, post = () => {}) {
       for (let i = act.i0; i <= act.i1; i++) act.paint(-half + i * grid, zm, colors, (jn + i) * 3);
     }
   }
-  // The scorch of the wreck, on its own window of the grid, for the same reason. Issue 34.
+  // The scorch of the wreck, on its own window of the grid, for the same reason. Issue 34. The ruin
+  // paints its worn floor here, and it also sets the stone of the floor in the surface. p2-41.
   if (src) {
     for (let j = src.j0; j <= src.j1; j++) {
       const zm = -half + j * grid, jn = j * n;
-      for (let i = src.i0; i <= src.i1; i++) src.paint(-half + i * grid, zm, colors, (jn + i) * 3);
+      for (let i = src.i0; i <= src.i1; i++) {
+        src.paint(-half + i * grid, zm, colors, (jn + i) * 3);
+        if (src.stone) src.stone(-half + i * grid, zm, surface, jn + i);
+      }
     }
   }
 
@@ -3157,7 +3280,8 @@ function patch(seed, site, opts = {}, post = () => {}) {
       marks: { tried: grown.marks, placed: grown.fixed, colossus: grown.big, mega: grown.mega },
       activity: act ? act.info : null,
       // Issue 34: the wreck of the source at its place on this patch, in units of the box, or null
-      // on every cell but one. See patchSource() and ground-source.js.
+      // on every cell but one. See patchSource() and ground-source.js. On the cell of the ruin it is
+      // { kind: 'ruin', proto, x, y, z, yaw }; see patchRuin(). p2-41.
       source: src ? src.info : null,
       biome,
       // The temperature at the site, in degrees Celsius. The stats card of the world states the

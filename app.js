@@ -1500,7 +1500,8 @@ function updateCreatureFloat() {
       if (p) label = `Study the ${p.lore.name}`;   // the same form the animal takes, so one button reads one way
     } else if (markedSource) {
       // The wreck is not a subject to study. The probe pulls the log off its recorder, so the button says that.
-      label = 'Download the log';
+      // The ruin is a subject, and the button takes the form the animal and the plant take. p2-41.
+      label = ground && ground.source && ground.source.kind === 'ruin' ? 'Study the ruin' : 'Download the log';
     }
   }
   if (label === creatureLabel) return;
@@ -1512,7 +1513,7 @@ if (creatureFloat) {
   creatureFloat.addEventListener('click', () => {
     if (markedKind !== null) inspect(markedKind);
     else if (markedPlant !== null) inspectPlant(markedPlant);
-    else if (markedSource) inspectSource();
+    else if (markedSource) (ground && ground.source && ground.source.kind === 'ruin' ? inspectRuin : inspectSource)();
   });
 }
 
@@ -2017,9 +2018,13 @@ function onSourceFound() {
 // inside. See patchSource() in generate.js and reachOf() in ground.js.
 //
 // On the ground the level reads the source of the chapter that runs. After the tune the receiver
-// holds the band of the ruin, so the cell of the wreck no longer raises the motif of the wreck. The
-// ruin is silent until p2-44 gives it a voice. In orbit the motif of the wreck stays in the song
-// after its find, in both chapters. p2-38.
+// holds the band of the ruin, so the cell of the wreck no longer raises the motif of the wreck. In
+// orbit the motif of the wreck stays in the song after its find, in both chapters. p2-38.
+//
+// Since p2-41 the ruin stands on its cell, so in chapter 2 the level there reads the distance to the
+// edge of the ruin, as the range of the overlay does. Until p2-44 gives the ruin a bus of its own,
+// that level opens the bus of the motif of the wreck, and the glow of the ruin blinks the same
+// steps at half the speed.
 const CARRIER_NEAR = 40;      // units from the wreck where the motif stands full
 const CARRIER_EDGE = 0.15;    // the level at the edge of the reach
 const CARRIER_ORBIT = 0.6;    // the level in orbit after the find
@@ -2031,7 +2036,9 @@ function carrierLevel() {
     const w = ground.source;
     if (!w || w.kind !== src.kind) return 0;   // this cell is not the cell of the source that runs
     const p = ground.camera.position;
-    const r = Math.hypot(w.at.x - p.x, w.at.z - p.z);
+    // The distance the range of the overlay states: to the edge of a ruin, to the middle of the
+    // wreck. p2-41.
+    const r = w.rangeFrom ? w.rangeFrom(p.x, p.z) : Math.hypot(w.at.x - p.x, w.at.z - p.z);
     const far = Math.max(CARRIER_NEAR + 1, ground.reach);
     const k = 1 - THREE.MathUtils.smoothstep(r, CARRIER_NEAR, far);
     return CARRIER_EDGE + (1 - CARRIER_EDGE) * k;
@@ -2248,7 +2255,8 @@ function inspectPlant(kind) {
 // SourceInspector in ground-source.js for the preview, which turns the wreck on its own axis.
 function inspectSource() {
   const src = current && current.world.source;
-  if (!src || !ground || !ground.source) return;
+  // The log belongs to the wreck. On the cell of the ruin the page must not show it. p2-41.
+  if (!src || !ground || !ground.source || ground.source.kind !== 'wreck') return;
   markedKind = null; markedPlant = null;
   if (ground.fauna) ground.fauna.unmark();
   if (ground.flora) ground.flora.unmark();
@@ -2266,6 +2274,11 @@ function inspectSource() {
   syncTuners(tunerState(current.world, carrierRecord));
   setCarrierLevel();
 }
+
+// The card of the ruin. The button reads "Study the ruin" on a marked ruin, and this is where it
+// leads. p2-42 builds the card, and its first open is the find of chapter 2. Until then the button
+// opens nothing, and the page shows nothing of the ruin that the ground does not show. p2-41.
+function inspectRuin() {}
 creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
 creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) closeCard(); });
 creatureCard.querySelector('.cprev').addEventListener('click', () => cycleInspect(-1));

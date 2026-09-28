@@ -31,7 +31,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
 | `music.js` | Chip-tune per world, and the motif of the source. `motifOf()` gives the rhythm of that motif with no audio, `setCarrier()` sets its level, and `barClock()` gives the clock the lamp of the wreck blinks on. |
-| `ground-source.js` | The source on the ground: the wreck of the older probe, its lamp, its mark, the tap that finds it, and the preview the log card turns. `wreckGeometry()` and `WRECK_HULL` also build the mini wreck of the globe. `SourceInspector.show()` takes an element to put under the last entry, the tuner of p2-39. Issue 34. |
+| `ground-source.js` | The source on the ground: the wreck of the older probe, its lamp, its mark, the tap that finds it, and the preview the log card turns. `wreckGeometry()` and `WRECK_HULL` also build the mini wreck of the globe. `SourceInspector.show()` takes an element to put under the last entry, the tuner of p2-39. Issue 34. `SourceRuin` draws the ruin on its cell with the shape of `SourceWreck`, and `ruinRhythm()` gives the rhythm its glow blinks. p2-41. |
 | `tuner.js` | The tuner of p2-39: the field the reader types the frequency of the log into. `makeTuner({ onLock, onEscape })` builds one form, and `app.js` stands one under the last entry of the log card and one under the Carrier row of the sidebar. `tuneAnswer(text, freq)` gives the five answers and holds no DOM, so `tools/carrier-fix-check.mjs` tests it in Node. p2-39. |
 | `carrier-store.js` | The fixes of the search in `localStorage`, under `myworlds.carrier.v1`, for both chapters. `loadFixes()`, `addFix()`, `markFound()`, `markBriefed()`, `clearFixes()`, `markTuned()`, `foundSeeds()`. No three.js. Issue 34, p2-38. |
 | `carrier-globe.js` | The fixes on the globe: a wedge per fix, which the terrain shader and the ocean shader paint, a dot per fix, and the mini wreck a find stands at the source. One group under `current.planet` for the marks, and one set of uniforms for the paint. The group paints the chapter that runs, in the colour of that chapter; `carrierColour()` gives the colour of each chapter. Issue 34, p2-38. |
@@ -197,7 +197,7 @@ Ground frame: x east, y up, z south. Origin at the site at sea level, so `height
 
 ### The patch protocol
 
-Request: `postMessage({ type: 'patch', seed, site: { lat, lon, kind }, opts: patchOpts(tier) })`. `kind` is the species id the site was pulled to, or `-1`. On the one cell that holds the phenomenon of the world, the patch raises the shape at its origin. Issue 14. On the one cell that holds the source of the world, the patch picks a place for the wreck, flattens a disc of 14 units under it, scorches that disc, and keeps the plants, the grass, and the group anchors off it. Issue 34. `patch.activity` and `patch.source` say what the patch holds.
+Request: `postMessage({ type: 'patch', seed, site: { lat, lon, kind }, opts: patchOpts(tier) })`. `kind` is the species id the site was pulled to, or `-1`. On the one cell that holds the phenomenon of the world, the patch raises the shape at its origin. Issue 14. On the one cell that holds the source of the world, the patch picks a place for the wreck, flattens a disc of 14 units under it, scorches that disc, and keeps the plants, the grass, and the group anchors off it. Issue 34. On the one cell that holds `world.ruin`, the patch places the ruin with the same walk, from `makeRng(pseed + '|ruin')` only: it flattens the `disc` of the proto, eases the ground back over a soft edge of `RUIN_EDGE` (0.4) of the disc outside it, wears the floor toward the rock of the palette, and keeps the plants, the cover, and the groups off the whole of it. A group takes its spread as a pad, so no member starts on it. The whole disc stands inside the walk limit, `reachOf()` of `ground.js`. p2-41. A cell holds the wreck or the ruin and never both, because `makeRuin()` keeps the ruin off the cell of the wreck, and the patch asks for the ruin after the source. `patch.activity` and `patch.source` say what the patch holds.
 
 Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or `{ type: 'error', message }`. Transfer the buffers.
 
@@ -215,7 +215,11 @@ Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or 
     activity,                                     // issue 14: the phenomenon at the origin, or null.
                                                   // volcano: { kind, radius, peak, crater }. geyser: { kind, radius, pool }. units
     source,                                       // issue 34: the wreck of the source, or null.
-                                                  // { kind, x, y, z, yaw } in units of the box, yaw in radians
+                                                  // { kind, x, y, z, yaw } in units of the box, yaw in radians.
+                                                  // p2-41: on the cell of the ruin,
+                                                  // { kind: 'ruin', proto, x, y, z, yaw }, with
+                                                  // (x, z) the middle of the disc and y its height.
+                                                  // p2-43 may add `camp`; see ruinCamp() in generate.js
   },
   heights: Float32Array(n * n),                   // row-major, row = z from north (-) to south (+), col = x from west to east
   colors:  Float32Array(n * n * 3),               // per vertex, linear RGB 0..1
@@ -241,7 +245,7 @@ Issue 34. One thing on a world with a surface transmits, and the probe reads a b
 - **Two frames, two jobs.** The bearing of the globe uses the east of `groundBasis()` in `ground-sky.js`: `(sin lon, 0, -cos lon)`, the direction of falling lon, with north the part of `+y` in the tangent plane. The three digits and the wedge of a fix keep that bearing, because the wedge is drawn on the globe. The needle on the ground keeps the frame of the box instead, because the reader walks the terrain and the wreck of slice 3 stands on it. `patch()` in `generate.js` lays the box on the axes of the cell of the cube grid, x along u and z against v, which is a right-handed set as the frame of `groundBasis()` is. The box was the mirror of that frame until 2026-09-19; see "The box is right-handed" in `docs/probe.md`. The map of the box still holds no angle, so the needle comes from the slope of that map and not from the bearing less a twist.
 - `boxPoint(site, dir, size)` is the exact inverse of the map `patch()` builds the box with. It gives `{ x, z }` in units of the box, or null for a direction more than 80 degrees from the face of the cell. Slice 3 takes the range in units from it. `carrierBox()` gives the needle as a unit `{ x, z }` in the same frame, from the slope of that map at the site, so it holds at every arc.
 - `Ground.load(result, { sunDir, view, carrier })`. The app builds `carrier` from `carrierAt()` and adds `carrier.dir`, the `[x, z]` of `carrierBox()` **in the frame of the box**, `carrier.kind`, the kind of the source it reads, and `carrier.freq`, the band the receiver holds. `Ground.setCarrier(carrier)` swaps the reading while the probe stands on the ground, which a tune there does. `telemetry()` then returns `carrier: { brg, err, arc, rel, rangeKm, range, freq } | null`. `freq` is `'406.025'` in chapter 1 and `world.ruin.freq` in chapter 2, with no unit; the overlay prints it under the bearing as `406.025 MHz` on every landing that hears a carrier. p2-38. `rel` runs -180 to 180 degrees from the way the view points to the way the needle points, and a positive `rel` puts the needle to the right of the screen. Do not build `rel` from the digits less an azimuth: the box turns the sense of a bearing over. `range` is the units to the wreck on this patch, or null off its cell.
-- On the cell of the source the needle and `range` stop reading the globe and read the wreck itself: `patch.source` gives its place in the units of the box, and both numbers are measured from the **camera position**, the point the height of the overlay is measured from. So the needle turns and the range falls as the reader walks. Off that cell nothing changes. Issue 34, slice 3. The body on the patch takes the needle only when its kind is `carrier.kind`: in chapter 2 the wreck on its cell is not the carrier, and the needle there keeps the bearing of the ruin. p2-38.
+- On the cell of the source the needle and `range` stop reading the globe and read the wreck itself: `patch.source` gives its place in the units of the box, and both numbers are measured from the **camera position**, the point the height of the overlay is measured from. So the needle turns and the range falls as the reader walks. Off that cell nothing changes. Issue 34, slice 3. The body on the patch takes the needle only when its kind is `carrier.kind`: in chapter 2 the wreck on its cell is not the carrier, and the needle there keeps the bearing of the ruin. p2-38. On the cell of the ruin in chapter 2 the needle points at the middle of the ruin, and `range` is the units from the camera to the edge of the ruin, which `SourceRuin.rangeFrom()` gives: the distance to the convex outline of its parts on the ground, 0 inside it. The level of the motif in `carrierLevel()` reads the same range. A body with no `rangeFrom()`, the wreck, keeps the distance to its middle. p2-41.
 - `new Ground({ ..., music, onSelectSource })`. `music` is the `Music` instance of the app; the lamp of the wreck blinks the rhythm of `motifOf(world)` on `music.barClock()`, or on the clock of the landing when no sound runs. `onSelectSource()` fires when a tap marks the wreck, and the app then offers "Download the log" on the floating button. The find itself is not a job of `Ground`: `inspectSource()` in `app.js` calls `onSourceFound()` the first time the card opens.
 
 **Two chapters.** p2-38. The receiver hears one source at a time. Chapter 1 follows the wreck, and chapter 2 follows `world.ruin` after the reader tunes.
@@ -345,6 +349,19 @@ scales it by `MINI_UNIT` globe radii per unit. The builder reads `world.type` an
 `world.ruin.maker` and nothing else of the world. The budget is `BODY_BUDGET` 4,000 triangles for
 a body and `MINI_BUDGET` 1,500 for a mini; `tools/ruin-geometry-check.mjs` holds every proto to it.
 See `docs/ruin.md`, "The body".
+
+**The ground.** p2-41. `patchRuin()` in `generate.js` places the ruin on its cell; see "The patch
+protocol" above. `Ground` takes the class of the body by `patch.source.kind`, `SourceWreck` or
+`SourceRuin` of `ground-source.js`, and both have the same shape: `create()`, `update(t)`,
+`pickAt()`, `mark()`, `unmark()`, `dispose()`, `kind`, `at`, and `marked`. `SourceRuin` adds
+`rangeFrom(x, z)`, `disc` and `outer` (the flat disc and the disc with its soft edge), `grace` (the
+tap of a big body), and `hole`, `{ x, z, r }` of the mouth of the well or null. `Ground` passes
+`hole` to the terrain material, whose fragment shader discards inside it, and it passes
+`[x, z, outer]` as `keepOut` to `GroundCover` and to `GroundFauna`, so the cover grows nothing on
+the disc and a herd that wanders turns away from it. The glow takes `carrierColour(world, 2)`, and
+it blinks `ruinRhythm(world)`, the motif of the wreck at half the speed, until p2-44 swaps that
+function. A tap on the ruin calls `onSelectSource()`, and the floating button reads "Study the
+ruin"; `inspectRuin()` in `app.js` is the place p2-42 opens the card.
 
 ### The tuner
 
