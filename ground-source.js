@@ -255,7 +255,8 @@ export class SourceInspector {
 
   // log is world.source.log; see docs/source.md. `accent` is the colour of the lamp, `groundColor`
   // is the ground colour of the world, and `hull` is hullOf(world), so the card and the patch agree.
-  show(log, accent, groundColor, motif, hull) {
+  // `tail` is an element the page puts under the last entry, or null: the tuner of p2-39.
+  show(log, accent, groundColor, motif, hull, tail = null) {
     if (!this.renderer) {
       this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
       this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -315,6 +316,7 @@ export class SourceInspector {
     this.logEl.innerHTML = entries.length
       ? entries.map((e) => `<div class="clog-entry${e.title ? ' ctitled' : ''}"><h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p>${e.slot === ABRUPT_SLOT ? `<p class="cabrupt">${ABRUPT}</p>` : ''}</div>`).join('')
       : '<div class="clog-entry"><p>The recorder is dead. Nothing can be read from it.</p></div>';
+    if (tail) this.logEl.appendChild(tail);
     this.logEl.scrollTop = 0;
     this.card.hidden = false;
     requestAnimationFrame(() => this.card.classList.add('show'));

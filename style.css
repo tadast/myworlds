@@ -141,6 +141,41 @@ button.go:hover { filter: brightness(1.08); }
 }
 #info .carrier-lost:hover { color: var(--accent-2); }
 
+/* ---------- the tuner, p2-39
+   One form of tuner.js in two places: under the last entry of the log card, and under the Carrier
+   row of the sidebar. A label, a field, the unit, a button, and a line of answer; after the tune,
+   the locked band and no field. The field takes 16 px, so a phone does not zoom in on the focus. */
+.tuner[hidden], .tuner [hidden] { display: none; }
+.tuner-label {
+  display: block; margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
+  line-height: 1.2; text-transform: uppercase; color: var(--muted);
+}
+.tuner-row { display: flex; align-items: center; gap: 8px; }
+.tuner-field {
+  flex: 0 1 8.5em; width: 8.5em; min-width: 0;
+  background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line); color: var(--text);
+  border-radius: 10px; padding: 6px 10px; font: inherit; font-size: 16px; font-variant-numeric: tabular-nums;
+}
+.tuner-field::placeholder { color: var(--muted); opacity: 0.6; }
+.tuner-field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.2); }
+.tuner-unit { flex: none; color: var(--muted); font-size: 13px; }
+.tuner-go {
+  flex: none; background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 10px; padding: 6px 14px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.tuner-go:hover, .tuner-go:focus-visible { border-color: var(--accent); color: var(--accent); }
+.tuner-lock { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.tuner-lock .tuner-label { display: inline; margin: 0; }
+.tuner-band { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tuner-state { color: var(--muted); font-size: 12px; }
+/* The answer stands in the page from the start, empty, so a screen reader hears it change. */
+.tuner-answer { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.tuner-answer:empty { margin: 0; }
+.tuner-answer[data-kind="nan"] { color: var(--muted); }
+.tuner-answer[data-kind="lock"] { color: var(--accent); }
+/* In the sidebar the tuner takes a whole line of the grid under the Carrier row. */
+#info .tuner-slot { grid-column: 1 / -1; margin: 2px 0 6px; }
+
 /* ---------- your worlds */
 #worlds { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
 #worlds .empty { grid-column: 1 / -1; color: var(--muted); font-size: 13px; margin: 4px 2px; }
@@ -370,6 +405,10 @@ button.probe[hidden] { display: none; }
    the log, so it takes the quiet colour of the day label and italics, and never the accent. It stands
    inside the entry, so it scrolls with the entry and clears the fade at the foot of .clog. */
 .clog-entry .cabrupt { margin-top: 6px; font-size: 13px; font-style: italic; letter-spacing: 0.02em; color: var(--muted); }
+/* The tuner of p2-39 under the last entry. It stands on the column of the text of the entries, off
+   the rail, and it scrolls with the log, so the frequency of the last entry stays in sight. */
+.clog .tuner { margin: 20px 0 0 20px; padding-top: 14px; border-top: 1px solid var(--line); max-width: 62ch; }
+.clog-entry:has(+ .tuner) { border-left-color: transparent; padding-bottom: 0; }
 #creature[data-subject="source"] .ctags,
 #creature[data-subject="source"] .cstory,
 #creature[data-subject="source"] .cnav { display: none; }
@@ -647,6 +686,20 @@ button.probe[hidden] { display: none; }
 /* The hint states that the block is a control. It shows only while the block pulses. */
 .hud-hint { display: none; color: var(--accent); }
 .hud-carrier.pulse .hud-hint { display: block; }
+/* Chapter 2, p2-39. After the tune the block takes the colour of the wedges of the ruin, which
+   probe-hud.js writes to --hud-tint: the needle, the bearing, the ring of the dial, and the pulse.
+   The labels and the hint keep their grey, and the rest of the overlay keeps its blue. */
+.hud-carrier[data-chapter="2"] .hud-dial { border-color: color-mix(in srgb, var(--hud-tint) 30%, transparent); }
+.hud-carrier[data-chapter="2"] .hud-dial i::before { border-bottom-color: var(--hud-tint); }
+.hud-carrier[data-chapter="2"] .hud-read b {
+  color: var(--hud-tint); text-shadow: 0 0 10px color-mix(in srgb, var(--hud-tint) 45%, transparent);
+}
+.hud-carrier[data-chapter="2"]:hover { border-color: color-mix(in srgb, var(--hud-tint) 45%, transparent); }
+.hud-carrier[data-chapter="2"].pulse { animation-name: hud-carrier-pulse-2; }
+@keyframes hud-carrier-pulse-2 {
+  0%, 100% { border-color: color-mix(in srgb, var(--hud-tint) 35%, transparent); box-shadow: 0 0 0 transparent; }
+  50% { border-color: var(--hud-tint); box-shadow: 0 0 22px color-mix(in srgb, var(--hud-tint) 70%, transparent); }
+}
 
 /* the uplink block, inside the bottom left corner of the frame, clear of the floating buttons */
 .hud-link {
@@ -695,5 +748,9 @@ button.probe[hidden] { display: none; }
   .hud-carrier.pulse {
     animation: none;
     border-color: rgba(124, 196, 255, 1); box-shadow: 0 0 22px rgba(124, 196, 255, 0.7);
+  }
+  .hud-carrier[data-chapter="2"].pulse {
+    animation: none;
+    border-color: var(--hud-tint); box-shadow: 0 0 22px color-mix(in srgb, var(--hud-tint) 70%, transparent);
   }
 }

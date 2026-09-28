@@ -2,7 +2,7 @@
 //
 //   node tools/carrier-fix-check.mjs
 //
-// Four parts:
+// Six parts:
 //
 // A. The store. carrier-store.js runs against a fake localStorage: one fix per cell, the brief that
 //    a record from an older build reads as unread, the find that drops the fixes and survives a
@@ -36,6 +36,13 @@
 //    when three near fixes close on it, and keeps the pin of the wreck. The second colour stands
 //    apart from the first.
 //
+// F. The tuner, p2-39. tuneAnswer() of tuner.js gives the five answers of the table of p2-39 word
+//    for word: not a number, the distress band, the lock within 0.0005 of the frequency, the near
+//    miss within 0.050 of it, and the static. The three other spellings of the frequency lock, and
+//    over 500 seeds the frequency of freqOf() locks, a number 0.001 off gives the near miss, and no
+//    answer but the lock prints the frequency. The page part of the tuner needs a browser; see
+//    "The tuner" in docs/ruin.md for how it was tested.
+//
 // site.js takes three.js by a bare name; three-hook.mjs resolves it in Node.
 import { root } from './three-hook.mjs';
 
@@ -54,6 +61,8 @@ const THREE = await import('three');
 const S = await import(root + 'site.js');
 const C = await import(root + 'carrier-store.js');
 const G = await import(root + 'carrier-globe.js');
+const T = await import(root + 'tuner.js');
+const R = await import(root + 'ruin-types.js');
 
 const PAIRS = 300;              // pairs of a site and a source for the wedge
 // degrees: the slack on a bearing two files compute two ways. The defect this guards against is a
@@ -626,6 +635,63 @@ let chapterRow = '';
     + ` chapter 2 painted in ${c2} beside ${c1} and filled the cell of the ruin`;
 }
 
+// ---------------------------------------------------------------- F: the tuner, p2-39
+let tunerRow = '';
+{
+  // The table of p2-39, word for word, against a world whose frequency is 7.316. This check keeps
+  // its own copy of the words, so a change of tuner.js that is not a change of the table fails.
+  const NAN = 'The receiver takes a number in MHz, for example 406.025.';
+  const DISTRESS = 'The receiver holds the distress band.';
+  const LOCK = 'Locked on 7.316 MHz. The probe hears a second source.';
+  const rows = [
+    ['abc', NAN], ['', NAN], ['   ', NAN], ['7.3.1', NAN], ['-7.316', NAN], ['MHz', NAN],
+    ['406.025', DISTRESS], ['406,025', DISTRESS], ['406025', DISTRESS], ['406.025 MHz', DISTRESS],
+    ['7.316', LOCK], ['7,316', LOCK], ['7316', LOCK], ['7.316 MHz', LOCK], [' 7.316 mhz ', LOCK],
+    ['7.3155', LOCK], ['7.3165', LOCK], ['7.3160', LOCK],
+    ['7.313', 'A pattern under the static on 7.313 MHz.'],
+    ['7.31', 'A pattern under the static on 7.310 MHz.'],
+    ['7.266', 'A pattern under the static on 7.266 MHz.'],
+    ['7.366', 'A pattern under the static on 7.366 MHz.'],
+    ['7317', 'A pattern under the static on 7.317 MHz.'],
+    ['7.265', 'Static on 7.265 MHz.'],
+    ['7.367', 'Static on 7.367 MHz.'],
+    ['12', 'Static on 12.000 MHz.'],
+    ['406.030', 'Static on 406.030 MHz.'],
+    ['999999999999', 'Static on 999999999.999 MHz.'],
+  ];
+  for (const [typed, want] of rows) {
+    const a = T.tuneAnswer(typed, '7.316');
+    ok('tuner', a.text === want, `'${typed}' answered "${a.text}", not "${want}"`);
+    ok('tuner', (a.kind === 'lock') === (want === LOCK), `'${typed}' gave the kind ${a.kind}`);
+  }
+  // A frequency with a trailing zero: the log prints '5.070', and the reader may type less.
+  for (const typed of ['5.070', '5.07', '5,07', '5070', '5.07 MHz']) {
+    ok('tuner', T.tuneAnswer(typed, '5.070').kind === 'lock', `'${typed}' did not lock 5.070`);
+  }
+  // Every frequency of 500 seeds: the number locks, 0.001 off it is the near miss, 0.051 off it is
+  // static, and only the lock prints the frequency itself.
+  let seeds = 0;
+  for (let i = 0; i < 500; i++) {
+    const f = R.freqOf(`tuner-${i}`);
+    const v = Number(f);
+    const lock = T.tuneAnswer(f, f);
+    ok('tuner', lock.kind === 'lock' && lock.text === `Locked on ${f} MHz. The probe hears a second source.`, `${f} did not lock itself`);
+    ok('tuner', T.tuneAnswer(f.replace('.', ''), f).kind === 'lock', `${f} with no point did not lock`);
+    for (const d of [0.001, -0.001, 0.05, -0.05]) {
+      const a = T.tuneAnswer((v + d).toFixed(3), f);
+      ok('tuner', a.kind === 'near' && !a.text.includes(f), `${f} ${d > 0 ? '+' : ''}${d} gave ${a.kind}: ${a.text}`);
+    }
+    for (const d of [0.051, -0.051, 1]) {
+      const a = T.tuneAnswer((v + d).toFixed(3), f);
+      ok('tuner', a.kind === 'static' && !a.text.includes(f), `${f} ${d > 0 ? '+' : ''}${d} gave ${a.kind}: ${a.text}`);
+    }
+    seeds++;
+  }
+  ok('tuner', T.LOCK_BAND === 0.0005 && T.NEAR_BAND === 0.05, 'the bands of the tuner are not 0.0005 and 0.050');
+  tunerRow = `  tuner   ${rows.length} typed numbers answered as the table of p2-39 states; the frequency of ${seeds} seeds locked,`
+    + ' 0.001 and 0.050 off gave the near miss, 0.051 off gave static';
+}
+
 // ---------------------------------------------------------------- the report
 console.log('carrier-fix-check');
 console.log('  store   one fix per cell, the brief, the find that drops the fixes, both bounds, a quota error, and garbage');
@@ -639,6 +705,7 @@ console.log(fadeRow);
 console.log(markRow);
 console.log(goalRow);
 console.log(chapterRow);
+console.log(tunerRow);
 if (fails.length) {
   console.error('\nFAIL');
   for (const f of fails) console.error('  ' + f);

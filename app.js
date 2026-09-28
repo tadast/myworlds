@@ -11,6 +11,7 @@ import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrie
 import { sameCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector } from './ground-source.js';
+import { makeTuner } from './tuner.js';
 import { hullOf } from './wreck-geometry.js';
 import { Ground } from './ground.js';
 import { TIERS, worldOpts, patchOpts } from './tiers.js';
@@ -1781,7 +1782,9 @@ function carrierState(w) {
   let text;
   if (chapter === 2) text = part.found ? `Found ${finds} of 2` : n === 0 ? 'Tuned' : n === 1 ? '1 fix' : `${n} fixes`;
   else text = part.found ? 'Found' : n === 0 ? 'Not heard' : n === 1 ? '1 fix' : `${n} fixes`;
-  return { n, chapter, found: part.found, wreck, ruin, text };
+  // The Tune chip of p2-39: a world with a ruin, after the find of the wreck, before the tune.
+  const tune = !!(w.ruin && wreck && !rec.tuned);
+  return { n, chapter, found: part.found, wreck, ruin, text, tune, rec };
 }
 
 // ---------------------------------------------------------------- the brief of the carrier
@@ -1841,12 +1844,16 @@ function stageAt(world, site, carrier, before) {
 }
 
 // The pulse of the fifth block, from the stage of this landing and the stage the reader has read
-// in the chapter that runs.
+// in the chapter that runs. The block also takes the colour of the chapter: the blue of the
+// overlay in chapter 1, and in chapter 2 the colour of the wedges of the ruin, lightened as the
+// drawings of the brief take it. A landing and a tune on the ground both call this, so the block
+// changes colour at the moment of the tune. p2-39.
 function setBriefPulse() {
   const st = carrierStage;
   const chapter = carrierChapter();
   const part = chapterPart(carrierRecord, chapter);
   const on = !!st && !!carrierRecord && !part.found && part.briefed < st.n;
+  probeHud.setTint(chapter === 2 && current ? briefColour(current.world) : null);
   probeHud.setPulse(on, st ? BRIEF_HINT[chapter - 1][st.n] : null);
 }
 
@@ -1954,10 +1961,10 @@ function clearCarrier(seed) {
   }
 }
 
-// The debug hook of the tune, p2-38. It tunes the receiver of the world on the screen to the ruin,
-// even when the wreck is not found, and builds the group of the carrier again, so the globe paints
-// the fixes of chapter 2 in the colour of chapter 2. p2-39 gives the reader the field of the tuner,
-// which calls this in turn, and the tests keep the hook.
+// The tune. It tunes the receiver of the world on the screen to the ruin and builds the group of
+// the carrier again, so the globe paints the fixes of chapter 2 in the colour of chapter 2. The
+// reader tunes through the field of the tuner, which calls this on a lock (p2-39). The debug hook
+// __mw.tune() of p2-38 calls it too, for the tests: the hook tunes even when the wreck is not found.
 //
 // A tune while the probe stands on the ground reads the carrier of that landing again, for the ruin:
 // the overlay turns to the ruin at once, and the landing takes the first fix of chapter 2. So a
@@ -2035,13 +2042,16 @@ function carrierLevel() {
 function setCarrierLevel() { music.setCarrier(carrierLevel()); }
 
 // The value of the Carrier row: the words of carrierState(), the Clear chip while the chapter that
-// runs holds a fix, and the Aim chips in orbit. "Not heard" is a link to the record of the missing
-// carrier, in chapter 1 only. An Aim chip stands for each found source: one found source takes the
-// chip "Aim", and after both finds the row offers both, "Wreck" and "Ruin". p2-38.
+// runs holds a fix, the Tune chip, and the Aim chips in orbit. "Not heard" is a link to the record
+// of the missing carrier, in chapter 1 only. An Aim chip stands for each found source: one found
+// source takes the chip "Aim", and after both finds the row offers both, "Wreck" and "Ruin". p2-38.
+// The Tune chip opens the tuner under the row, in orbit and on the ground. p2-39.
 function carrierRow(c) {
   const words = c.chapter === 1 && c.n === 0 && !c.found
     ? `<button type="button" class="carrier-lost" title="Read the record of the incident">${c.text}</button>` : c.text;
   const clear = c.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this search">Clear</button>' : '';
+  const tune = c.tune
+    ? `<button type="button" class="chip carrier-tune" aria-expanded="${sideTunerOpen}" title="Type a frequency into the receiver">Tune</button>` : '';
   const aim = (kind, label) => `<button type="button" class="chip carrier-aim" data-aim="${kind}" title="Aim the probe at the ${kind}">${label}</button>`;
   let aims = '';
   if (mode !== 'ground') {
@@ -2049,12 +2059,91 @@ function carrierRow(c) {
     else if (c.wreck) aims = aim('wreck', 'Aim');
     else if (c.ruin) aims = aim('ruin', 'Aim');
   }
-  return words + clear + aims;
+  return words + clear + tune + aims;
+}
+
+// ---------------------------------------------------------------- the tuner, p2-39
+// The field the reader types the frequency of the log into. tuner.js builds it, and the page stands
+// it in two places: under the last entry of the card of the wreck, and under the Carrier row of the
+// sidebar, where the Tune chip opens it. Each place keeps its own tuner, so the text of one field
+// and its last answer outlive a render of the sidebar.
+//
+// Both places show only on a world with a ruin, and only after the find of the wreck: the card of
+// the wreck opens only on its cell, and that first open is the find. After the tune both places
+// show the locked band and no field. The sidebar then shows the band under the row for good, and
+// the Tune chip goes away. The store does not test the find, because a find of the ruin by chance
+// tunes the world too (p2-42), so a tuned world shows the locked band whether or not the wreck is
+// found.
+//
+// The lock calls tune(), the path of the debug hook of p2-38. On the ground the landing reads the
+// carrier again and takes the first fix of chapter 2, and the carrier block turns to the ruin and
+// takes the colour of chapter 2. In orbit the next landing takes the first fix.
+let sideTunerOpen = false;      // the reader pressed the Tune chip of the sidebar
+let sideTunerSeed = null;       // the world the sidebar tuner last showed
+const cardTuner = makeTuner({ onLock: lockTuner });
+const sideTuner = makeTuner({
+  onLock: lockTuner,
+  // Escape closes the form of the sidebar and gives the focus back to the chip.
+  onEscape: () => {
+    sideTunerOpen = false;
+    if (current) renderInfo(current.world);
+    const chip = infoBody.querySelector('.carrier-tune');
+    if (chip) chip.focus();
+  },
+});
+
+// The state of the tuner on a world, `{ seed, freq, tuned }`, or null where the world takes none.
+// The frequency goes to the closure of the tuner and not to the page; see tuner.js.
+function tunerState(w, rec) {
+  if (!w || !w.ruin || !w.source || w.type === 'gas' || !rec) return null;
+  if (!rec.found && !rec.tuned) return null;
+  return { seed: w.seed, freq: w.ruin.freq, tuned: !!rec.tuned };
+}
+
+function lockTuner(seed) {
+  if (!current || current.world.seed !== seed) return;
+  tune();
+}
+
+function syncTuners(st) {
+  for (const t of [cardTuner, sideTuner]) {
+    t.el.hidden = !st;
+    t.set(st);
+  }
+}
+
+// The Tune chip opens the form under the row and puts the focus in the field. A second press
+// closes it. The body of the sidebar is the one scroll region, so the form scrolls into view when
+// it stands under the edge.
+function toggleSideTuner() {
+  if (!current) return;
+  sideTunerOpen = !sideTunerOpen;
+  renderInfo(current.world);
+  if (!sideTunerOpen) {
+    const chip = infoBody.querySelector('.carrier-tune');
+    if (chip) chip.focus();
+    return;
+  }
+  sideTuner.focus();
+  const body = panel.querySelector('.body');
+  if (!body) return;
+  const b = body.getBoundingClientRect(), t = sideTuner.el.getBoundingClientRect();
+  if (t.top < b.top || t.bottom > b.bottom) sideTuner.el.scrollIntoView({ block: 'nearest' });
 }
 
 function renderInfo(w) {
   const s = w.stats;
   const carrier = carrierState(w);
+  if (sideTunerSeed !== w.seed) { sideTunerOpen = false; sideTunerSeed = w.seed; }
+  const tuner = carrier ? tunerState(w, carrier.rec) : null;
+  if (!tuner || tuner.tuned) sideTunerOpen = false;
+  // The form stands under the row while the chip holds it open, and the locked band stands there
+  // for good after the tune. It takes a whole line of the grid, because on a phone the grid holds
+  // two rows side by side and a quarter of the sheet is too narrow for a field.
+  const slot = tuner && (tuner.tuned || sideTunerOpen) ? '<dd class="tuner-slot"></dd>' : '';
+  // A render builds the rows again, and the field loses the focus when its old row goes. So the
+  // focus comes back to the field after the render.
+  const typing = sideTuner.el.contains(document.activeElement);
   infoBody.innerHTML = `
     <div class="iname">${escapeHtml(w.seed)}</div>
     <div class="itype">${escapeHtml(w.designation)} · ${escapeHtml(w.typeLabel)}</div>
@@ -2066,7 +2155,7 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
-      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrierRow(carrier)}</dd>` : ''}
+      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrierRow(carrier)}</dd>${slot}` : ''}
       ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
@@ -2076,6 +2165,15 @@ function renderInfo(w) {
   if (lostBtn) lostBtn.addEventListener('click', openLost);
   const clearBtn = infoBody.querySelector('.carrier-clear');
   if (clearBtn) clearBtn.addEventListener('click', () => clearCarrier(w.seed));
+  const tuneBtn = infoBody.querySelector('.carrier-tune');
+  if (tuneBtn) tuneBtn.addEventListener('click', toggleSideTuner);
+  // The card holds the other tuner, and it follows the same record. See syncTuners().
+  syncTuners(tuner);
+  const slotEl = infoBody.querySelector('.tuner-slot');
+  if (slotEl) {
+    slotEl.appendChild(sideTuner.el);
+    if (typing) sideTuner.focus();
+  }
   infoBody.querySelectorAll('.carrier-aim').forEach((b) => b.addEventListener('click', () => {
     aimAtSource(b.dataset.aim === 'ruin' ? w.ruin : w.source);
   }));
@@ -2159,10 +2257,13 @@ function inspectSource() {
   creatureCard.hidden = false;
   creatureCanvas.hidden = true; plantCanvas.hidden = true; sourceCanvas.hidden = false;
   const pal = current.world.palette || {};
+  // The tuner of p2-39 stands under the last entry, so the frequency of the log is in sight while
+  // the reader types it. The first open is the find, and the tuner shows from the find on.
   sourceInspector.show(src.log, (pal.fauna && pal.fauna.accent) || '#ffd27f', discColor(),
-    music.motif(current.world), hullOf(current.world));
+    music.motif(current.world), hullOf(current.world), cardTuner.el);
   creatureCard.dataset.subject = 'source';
   if (!(carrierRecord && carrierRecord.found)) onSourceFound();
+  syncTuners(tunerState(current.world, carrierRecord));
   setCarrierLevel();
 }
 creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
@@ -2361,9 +2462,13 @@ $('#about-open').addEventListener('click', () => aboutDlg.showModal());
 aboutDlg.addEventListener('click', (e) => { if (e.target === aboutDlg) aboutDlg.close(); });
 aboutDlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') aboutDlg.close(); });
 
+// A field that takes text. The slider of the volume is an input too, and it takes no slash.
+const isField = (el) => !!el && ((el.tagName === 'INPUT' && /^(text|search|number)$/.test(el.type))
+  || el.tagName === 'TEXTAREA' || el.isContentEditable);
 addEventListener('keydown', (e) => {
   if (modalOpen()) return;   // a modal dialog owns the keyboard while it is open
-  if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
+  // A slash typed into a field is a character of that field: the seed input, or the tuner of p2-39.
+  if (e.key === '/' && !isField(document.activeElement)) { e.preventDefault(); input.focus(); }
   if (e.key !== 'Escape') return;
   if (!creatureCard.hidden) closeCard();
   else if (markedKind !== null) { if (ground && ground.fauna) ground.fauna.unmark(); markedKind = null; }
@@ -2446,7 +2551,8 @@ window.__mw = {
   onSourceFound,
   briefCarrier: openBrief,       // opens the brief of the distress signal, as the block does
   aimAtSource,
-  tune,                          // p2-38: tunes the receiver to the ruin; p2-39 gives the reader the field
+  tune,                          // p2-38: tunes the receiver to the ruin, for the tests. The reader tunes in the field, p2-39
+  get tuners() { return { card: cardTuner, side: sideTuner }; },   // p2-39: the two tuners
   landAt,                        // p2-38: a scripted landing, as a promise
   recall,                        // p2-38: a scripted recall, as a promise
 };

@@ -112,6 +112,21 @@ export class ProbeHud {
     if (hint && this.elHint) this.elHint.textContent = hint;
   }
 
+  // The colour of the carrier block. Null keeps the blue of the overlay, for chapter 1. A colour
+  // marks chapter 2: the needle, the bearing, the dial, and the pulse take it, so the block reads
+  // as the band of the ruin from the moment of the tune. The rest of the overlay keeps its blue.
+  // p2-39.
+  setTint(col) {
+    if (!this.elCarrier) return;
+    if (col) {
+      this.elCarrier.dataset.chapter = '2';
+      this.elCarrier.style.setProperty('--hud-tint', col);
+    } else {
+      delete this.elCarrier.dataset.chapter;
+      this.elCarrier.style.removeProperty('--hud-tint');
+    }
+  }
+
   hide() {
     if (!this.root) return;
     this.root.hidden = true;
