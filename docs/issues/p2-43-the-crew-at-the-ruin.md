@@ -76,3 +76,136 @@ the same commit, and state that nothing but the log moved.
 - **The HITL read.** Read the first log and the second log together on ten worlds, with at least two
   of each of `all`, `some`, and `one`. The second log must read as what happened to those people
   next. State in the summary what the read changed.
+
+## What the build changed
+
+Built on 2026-09-28, on main at d965fd2 and then rebased on 4578eab after the merge of p2-44. Every
+deviation from the plan above, and the reason:
+
+- **The writer is a new file, `ruin-lore.js`.** The plan allows it. It imports `lore.js` and the
+  helpers and the traits of `source-lore.js`, which now exports `worldTokens()`, `beastTokens()`,
+  `layDays()`, and `travelOf()`, so the two logs share one voice and one engine.
+- **The log of the wreck carries two more keys on a world with a ruin: `by` and `traits`.** The
+  second log has to know how the goers travelled and which trait each person carries. The call
+  endings of p2-40 now carry `by` (`rover`, `foot`, `raft`, `ride`); a wording that states no way
+  takes the raft on an island with a liquid sea and goes on foot elsewhere (`travelOf()`). Two walk
+  wordings start in the rover and walk when the battery is flat, or spend its last charge; they go
+  on foot, so the camp at the ruin holds no rover. No text of those endings changed.
+- **The speeds of the raft and of the animal.** The plan gives the rover 40 km a day and a person
+  on foot 15. The raft takes 30, a raft of packing foam that the crew paddles and lets drift, and
+  the back of a big walker takes 25, an animal that stops to feed and to drink. The arrival is the
+  last day of the log of the wreck plus the whole days the arc takes at that speed; over the audit
+  seeds that is 15 to 221 turns, 60 at the median.
+- **Four beats always run, so a second log holds 6 to 8 entries and not 5 to 8.** The plan asks
+  for three to six beats about the ruin and the people, with one reply. The sight, the carvings, a
+  person with a trait, and the reply always run, and up to two of the work, the door or the steps,
+  the sky, the light, and a second person join them. A log with no person in it did not read as a
+  log of these people.
+- **The reply stands in every note too.** The plan asks it of every second log. The note of one
+  person states it as well, so the ear and the page agree on every world that has a trace. Every
+  note also names the case it lies in, which the cairn carries.
+- **The camp.** The plan names the dome, the flag, the crates of `campParts()`, and the rover. The
+  camp takes the shelter and the crates of the camp of the wreck, in its colours; the flag is new
+  (the wreck has none); the rover stands only when the goers came in it; and the solar array and the
+  tank of the fuel maker stay at the ship. `shelterParts()` and `crateParts()` in
+  `wreck-geometry.js` now build both camps, and the wreck is byte-equal to main on all four hulls,
+  with and without the camp. The camp stands at 0.8 and not 0.85, so it fits the band of 9.6 units
+  between the flat disc and the soft edge of the spires and the floaters, with 1.72 units to spare.
+- **The place is inside the soft edge, on a pad.** The plan says "at the edge of the disc, off the
+  body". The camp stands 1 unit past the flat disc, where no part of the body touches the ground,
+  and inside the disc with its soft edge, where the plants, the cover, and the herds keep off
+  already, so `ground.js` needed no change. The soft edge slopes, so `ruinCamp()` lays a pad at the
+  height of the floor under the camp, and the ground eases back over 3 units. The side is the way to
+  the wreck in the box, `boxHeading()`, turned by one draw of up to 0.5 radians.
+- **The cairn** is a pile of the loose stones of the ruin, in the stone of `ruinPalette()`, with the
+  case in the orange of a hatch on top.
+- **A tap on the camp marks the ruin.** The camp is a part of the find. The range still measures
+  to the stones.
+- **The end names no compass word for the way back.** The read found "the click comes from the
+  north-east" at the ship and "we start back to the west" at the ruin. On a sphere that is true: the
+  way back from the ruin is not the word opposite `{from}` when the arc runs near a pole. It reads
+  as a fault, so the end says "the way we came" and `generate.js` passes no such word.
+- **A person who stayed at the ship may stand in an end that goes back to that person,**
+  `{stayer}`, and the keeper of the wreck stands in the first entry when the log has a new keeper,
+  as the example of the plan has it. Neither is a person of the second log: its crew is the goers.
+- **The food on the trip.** The read found a log of the wreck that closes on "There is food for two
+  more days", and then a trip of 58 days. A log whose wreck ran the thread `crew.food` (8 of the
+  107 traces over the audit seeds) now says in one sentence how the crew ate on the way: the seed
+  store of the ship, or a plant a person can eat on a temperate world with liquid water.
+- **The fix of `fauna.fly`.** "{one} put a lamp on the mast. {count} {kinds} came" printed "five
+  flitters came" after a full stop. The wording is now one sentence. The audit fails any sentence
+  after the first that opens on a token whose fill starts with a small letter, and the first
+  sentence of an aside, a coda, and the plan of the landing, which join an entry with no capital.
+  No other wording of the two logs broke the rule.
+- **The card.** The crew section takes a label, "The crew at the ruin", the goers one to a row with
+  the keeper marked "keeps this log" or, for one person, "left this note", and the entries on the
+  rail and the dots of the log of the wreck. It takes classes of its own, `.cruin-goers` and
+  `.cruin-log`, because the card of the ruin hides `.ccrew` and `.clog`. `SourceInspector` did not
+  change, so the markup of an entry has a copy in `ruinCrewHtml()`.
+- **The audit.** Pass 8 sweeps the pools of the second log over 3,960 skies, every proto of the
+  type, every maker, and every story. The pools of the story and the pools of the ruin are swept
+  apart, so the sweep does not walk the product of the two. The whole audit runs in about 90 s.
+
+### The checks
+
+- All nine checks pass: `world-checksum --check` against the new baseline, `carrier-check`,
+  `carrier-fix-check`, `cell-grid-check`, `frame-check`, `ruin-geometry-check`, `ruin-check`, and
+  the audit with and without `--seeds 200`.
+- **The checksum.** Against the baseline of main, which had not moved since p2-40: 42 lines, 32
+  equal (all 30 patch lines and both lines of Mire), and 10 world lines moved (Auralis, Vesper,
+  Meridian, Tessaly, and Orin on both tiers), each in the last column only. The baseline moved by
+  those 10 hashes in the same commit. The camp lives on the patch of the ruin only, which the
+  checksum does not build; `tools/ruin-check.mjs` part 5 proves it.
+- **A world with no ruin.** Every audit seed has a ruin, so the proof is by hand, as p2-40 did it:
+  the writer of main and the writer of this build on the same 180 worlds with the ruin set to null.
+  178 logs were byte-equal, and the other 2 differed only in the fixed sentence of `fauna.fly`.
+- **`ruin-check`.** 420 worlds with a ruin: `none` 198, `some` 102, `all` 79, `one` 41, and the log
+  null exactly on `none`. The patch check built 28 camps (6 with the rover) and 7 cairns: the
+  nearest vertex of a body 0.57 units off a camp, 1.72 units inside the soft edge at the least, and
+  at most 28.3 degrees off the way to the wreck; the pad flat and no plant or group on it.
+- **The audit over 200 seeds.** 87 second logs, 20 notes, and 73 worlds with no trace. Entries per
+  second log 6, 7, 8 (min, median, max). The ways: foot 46, rover 29, ride 19, raft 13. The ends:
+  back and stay 25 each, wait 20, cut 17.
+
+### The four worlds in the browser
+
+On HIGH in the pane of the app, with `__mw.landAt()` on the cell of the ruin and `__mw.inspectRuin()`:
+
+| `went` | Seed | The ruin | The card |
+|---|---|---|---|
+| `all` | `p243-1` (exotic, hive, on foot) | the camp, no rover, 316 triangles | five goers, Quentin keeps the log, 7 entries |
+| `some` | `p243-13` (ice, spires, rover) | the camp with the rover, 704 triangles | two goers, Rhiannon keeps the log, 6 entries |
+| `one` | `p243-18` (terran, colossus, on foot) | the cairn with the case, 312 triangles | Leo, "left this note", one note |
+| `none` | `p243-12` (terran, dome) | nothing | no crew section; the slot is empty and hidden |
+
+The door of the shelter faces the stones, the flag and the crates stand by it, and the pad sits
+level with the floor while the ground behind it eases back to the hill. Over 8 rounds of 100
+renders on `p243-13`, the scene takes 12.00 ms with the camp and 11.98 ms without it.
+`renderer.info.memory` read 16 geometries and 2 textures after two recalls, before and after a
+second landing. At 390 by 844 the card holds the page width, and the last entry ends 24 pixels
+inside the scroll, clear of the fade.
+
+### The read
+
+Twelve worlds read whole, both logs together: `all` audit-6, 9, 20; `some` audit-0, 1, 2, 8; `one`
+audit-5, 12, 13, 24. The read changed:
+
+- the food on the trip for a crew that counted its food down, and the end with no compass word, as
+  above;
+- "the rest of us" out of the wordings a crew of two takes ("{one} said the name of {other} before
+  I could"), "the click led us" out of the trip, and "said {who} is glad of it" out of the trait
+  `unwilling`;
+- the note of one person names the case in every wording;
+- the busiest pools, the reply, the end, the first sight, and the carvings of a maker the crew
+  never saw, took more wordings and a name, a day, or the name of the ruin in nearly every sentence,
+  so the commonest sentence at the ruin fell from 14 to under 6 per cent of the traces;
+- the dish of the rover, which stood over the rover as wide as the rover.
+
+### Open
+
+- **The log of the wreck makes promises that a long trip strains.** A strand thread may say "the
+  food lasts 60 days", a second-hand ending sends one person on foot across a world at 675 °C, and
+  a ride takes 42 turns on the back of a grazer at 700 °C. The second log states only the trip and,
+  after `crew.food`, how the crew ate; the manager may gate those endings of p2-40.
+- **`{world}` prints the designation**, for example "PXX-7022 d", in six wordings of the second
+  log, most of them about the carvings; it reads stiff in a sentence, as it does in the first log.

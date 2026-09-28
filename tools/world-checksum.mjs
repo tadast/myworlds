@@ -86,20 +86,26 @@ const hashArray = (arr) => (arr ? hashBytes(new Uint8Array(arr.buffer, arr.byteO
 const hashJson = (obj) => hashBytes(new TextEncoder().encode(JSON.stringify(obj)));
 
 // The lore of a world: the story of every species, the log of the source, the fauna line of the
-// stats, and the plant words of flora-lore.js. The facts are the rest. A key
-// set to undefined drops out of JSON.stringify, so the facts keep the order of the keys they had.
+// stats, the plant words of flora-lore.js, and the second log of the ruin. The facts are the rest.
+// A key set to undefined drops out of JSON.stringify, so the facts keep the order of the keys they
+// had.
+//
+// The second log of p2-43, world.ruin.log, is lore: ruin-lore.js writes it from a stream of its
+// own. It stands in the lore only on a world with a ruin, so the lore of a world with no ruin hashes
+// as it did before p2-43.
 function splitWorld(w) {
   const lore = {
     species: (w.species || []).map((g) => g.lore),
     log: w.source ? w.source.log : null,
     fauna: w.stats && w.stats.fauna,
     floraTags: w.env && w.env.floraTags, plantWord: w.env && w.env.plantWord,
+    ...(w.ruin ? { ruinLog: w.ruin.log } : {}),
   };
-  // The ruin of phase 2 stays out of both parts. It came after the baseline, and a new key in the
+  // The ruin of phase 2 stays out of the facts. It came after the baseline, and a new key in the
   // facts would move that hash on every world, so the facts hash the worlds as they stood before
   // the ruin. tools/ruin-check.mjs proves the ruin instead, and --source below prints it on both
   // tiers. The ruin draws from a stream of its own, so the arrays above still prove that it moved
-  // no other stream.
+  // no other stream. Its second log alone stands in the lore, above.
   const facts = {
     ...w,
     ruin: undefined,

@@ -24,10 +24,11 @@
 import { Species } from './species.js';           // species genomes and lore
 import { FloraLore, FLORA_LORE } from './flora-lore.js';   // the plant vocabulary, written per patch
 import { SourceLore } from './source-lore.js';     // the log of the source, written per world
+import { RuinLore } from './ruin-lore.js';         // the second log, of the crew at the ruin (p2-43)
 import { Lore } from './lore.js';                 // the lore engine, shared with the flora
-import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, siteCell, cellSite, sameCell, cellArc, tangentFrame } from './cell-grid.js';
+import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, boxHeading, siteCell, cellSite, sameCell, cellArc, tangentFrame } from './cell-grid.js';
 import { TYPES, TYPE_LABEL, TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE } from './world-types.js';
-import { protoOf, protoRow, freqOf, compass8 } from './ruin-types.js';   // the protos and the hashes of the ruin
+import { protoOf, protoRow, freqOf, compass8, RUIN_CAMP, campLayout, campCircles } from './ruin-types.js';   // the protos, the hashes, and the camp of the ruin
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -999,6 +1000,12 @@ function generate(seed, opts = {}, post = () => {}) {
   // It rolls from a stream of its own, so no other stream draws one number more.
   if (world.source) {
     world.source.log = SourceLore.writeLog({ world, rng: makeRng(seed + '|source-lore') });
+  }
+  // p2-43. The second log, of the people the last entry sent toward the call. It reads the log of
+  // the wreck, so it stands after it, and it rolls from a stream of its own. It is null when nobody
+  // went.
+  if (world.ruin && world.source && world.source.log) {
+    world.ruin.log = RuinLore.writeRuinLog({ world, rng: makeRng(seed + '|ruin-lore') });
   }
 
   post(98, 'Almost there');
@@ -2863,15 +2870,84 @@ function patchRuin(ctx, ruin, s) {
   return { info, paint, stone, i0, i1, j0, j1, blocked };
 }
 
-// The camp of the crew at the ruin, or null. p2-43 fills it. It draws the place of the camp from
-// `rng`, which has drawn the place and the yaw of the ruin and nothing more, and it gives back
-// `{ info, blocked }`: `info` rides on patch.source.camp, and `blocked(x, z, pad)` keeps the plants
-// and the groups off the camp. `ruin` is world.ruin, and `at` is the ruin on this patch: the middle,
-// its height, the yaw, and the radii of the flat disc and of the soft edge. Until p2-43 no crew
-// went, and the stream draws nothing after the yaw.
-// eslint-disable-next-line no-unused-vars
+// The traces of the crew at the ruin, p2-43, or null. Decision 3 of p2-00: the goers of the log of
+// the wreck left a camp (`all`, `some`) or a cairn with a case on it (`one`), and nobody left
+// nothing (`none`, where world.ruin.log is null). RUIN_CAMP in ruin-types.js holds the layout, and
+// wreck-geometry.js builds the parts from the same numbers.
+//
+// The trace stands at the edge of the disc, off the body, on the side the crew came from: the way
+// from the middle of the cell toward the wreck, which boxHeading() of cell-grid.js gives in the
+// frame of the box. The wreck stands 12 cells or more away, so the way from the middle of the cell
+// and the way from the ruin differ by a fraction of a degree. The stream has drawn the place and
+// the yaw of the ruin; the trace draws one number more, a turn of up to CAMP_TURN off that way, so
+// two camps do not stand on one line. Nothing draws after it.
+//
+// The trace stands in the band between the flat disc and the outer edge of the soft edge: its
+// nearest part RUIN_CAMP.gap past the flat disc, where no part of the body touches the ground. The
+// band is 9.6 units on the smallest disc, and the camp fits it. The ground under the trace takes
+// the height of the floor of the ruin, as a pad that eases back to the ground over RUIN_CAMP.ease,
+// so the shelter stands level with the stones and the flat disc does not move. The door of the
+// shelter faces the middle of the ruin.
+//
+// It gives back `{ info, blocked }`: `info` rides on patch.source.camp as
+// `{ kind: 'camp' | 'cairn', x, y, z, yaw, rover }`, and `blocked(x, z, pad)` keeps the plants and
+// the groups off the pad. `ruin` is world.ruin, and `at` is the ruin on this patch: the middle, its
+// height, the yaw, and the radii of the flat disc and of the soft edge.
+const CAMP_TURN = 0.5;         // rad: the most the trace stands off the way to the wreck, each way
+
 function ruinCamp(ctx, ruin, rng, at, s) {
-  return null;
+  const log = ruin && ruin.log;
+  const wreck = ctx.world.source;
+  if (!log || !wreck || !wreck.dir) return null;
+  const kind = log.went === 'one' ? 'cairn' : 'camp';
+  const rover = kind === 'camp' && log.by === 'rover';
+
+  // The way to the wreck in the box, turned by one draw.
+  const cell = dirCell(ruin.dir[0], ruin.dir[1], ruin.dir[2]);
+  const h = boxHeading(cell, wreck.dir) || { x: 1, z: 0 };
+  const turn = (rng() * 2 - 1) * CAMP_TURN;
+  const c = Math.cos(turn), sn = Math.sin(turn);
+  const ux = h.x * c - h.z * sn, uz = h.x * sn + h.z * c;
+
+  // The middle of the trace: the nearest part of it RUIN_CAMP.gap past the flat disc. The x axis of
+  // the camp points at the middle of the ruin, the way -u, and campCircles() turns it by the yaw.
+  const layout = campLayout(kind, rover);
+  let inner = 0;
+  for (const [x, , r] of layout) inner = Math.max(inner, x + r);
+  const rc = at.flat + RUIN_CAMP.gap + inner;
+  const yaw = (Math.atan2(uz, -ux) + Math.PI * 2) % (Math.PI * 2);
+  const info = { kind, x: at.x + ux * rc, y: at.y, z: at.z + uz * rc, yaw, rover };
+  const circles = campCircles(info);
+
+  // The pad. A node under a circle takes the height of the floor, and the ground eases back over
+  // RUIN_CAMP.ease past it. The flat disc already stands at that height, so no node of it moves.
+  const { heights, n, grid, half } = s;
+  const ease = RUIN_CAMP.ease;
+  const toI = (m) => clamp(Math.round((m + half) / grid), 0, n - 1);
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const q of circles) {
+    x0 = Math.min(x0, q.x - q.r - ease); x1 = Math.max(x1, q.x + q.r + ease);
+    z0 = Math.min(z0, q.z - q.r - ease); z1 = Math.max(z1, q.z + q.r + ease);
+  }
+  for (let j = toI(z0); j <= toI(z1); j++) {
+    const zm = -half + j * grid;
+    for (let i = toI(x0); i <= toI(x1); i++) {
+      const xm = -half + i * grid;
+      let d = Infinity;
+      for (const q of circles) d = Math.min(d, Math.hypot(xm - q.x, zm - q.z) - q.r);
+      if (d >= ease) continue;
+      const k = j * n + i;
+      heights[k] += (at.y - heights[k]) * smoothstep(ease, 0, d);
+    }
+  }
+
+  return {
+    info,
+    blocked: (x, z, pad = 0) => circles.some((q) => {
+      const r = q.r + ease + pad;
+      return (x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < r * r;
+    }),
+  };
 }
 
 // The ground of one landing: a square height grid and a colour per vertex, in the frame of the box

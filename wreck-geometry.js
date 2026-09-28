@@ -16,6 +16,7 @@
 // This file takes no DOM and does nothing at import, so the ground, the card, and the globe all
 // build their wreck here. Each body is in its own frame: y up, the origin on the ground under it.
 import * as THREE from 'three';
+import { RUIN_CAMP } from './ruin-types.js';
 
 // The metal of a machine. It takes no colour from the palette: a wreck must read as a made thing on
 // a green world and on an ice world alike, and a hull in the colours of the biome would read as
@@ -207,10 +208,14 @@ const C_CRATE = '#7d735c';
 const C_SOLAR = '#27365a';
 const CAMP_K = 0.85;
 
-function campParts(cx, cz) {
+const SHELTER_R = 3;          // units, the radius of the dome of the shelter
+
+// The shelter: the dome, its ring, three windows a third of the way up, and the airlock along +x
+// with its door. The camp of the wreck and the camp at the ruin (p2-43) share it, so the reader
+// knows the one from the other.
+function shelterParts() {
   const p = [];
-  const R = 3;
-  // the dome, its ring, and three windows a third of the way up
+  const R = SHELTER_R;
   p.push(part(new THREE.SphereGeometry(R, 12, 5, 0, Math.PI * 2, 0, Math.PI / 2), C_PANEL, 0, 0.3, 0));
   p.push(part(new THREE.CylinderGeometry(R + 0.1, R + 0.25, 0.5, 12), C_HULL_DARK, 0, 0.25, 0));
   for (const a of [-0.9, 0.9, Math.PI]) {
@@ -218,13 +223,24 @@ function campParts(cx, cz) {
     p.push(part(new THREE.BoxGeometry(0.2, 0.5, 1.0), C_GLASS,
       R * Math.cos(e) * Math.cos(a), 0.3 + R * Math.sin(e), -R * Math.cos(e) * Math.sin(a), 0, a, e));
   }
-  // the airlock along +x, and its door
   p.push(part(new THREE.CylinderGeometry(1.0, 1.0, 2.2, 8), C_HULL, R + 0.3, 1.0, 0, 0, 0, Math.PI / 2));
   p.push(part(new THREE.BoxGeometry(0.2, 1.5, 1.0), C_DOOR, R + 1.45, 0.95, 0));
-  // crates by the door, one on another
-  p.push(part(new THREE.BoxGeometry(1.1, 1.1, 1.1), C_CRATE, R + 1.4, 0.55, 2.0, 0, 0.3, 0));
-  p.push(part(new THREE.BoxGeometry(0.9, 0.8, 0.9), C_CRATE, R + 1.5, 1.5, 1.9, 0, 0.8, 0));
-  p.push(part(new THREE.BoxGeometry(1.2, 0.8, 0.9), C_HULL_DARK, R + 0.6, 0.4, -2.3, 0, -0.4, 0));
+  return p;
+}
+
+// The crates by the door, one on another, and a dark case.
+function crateParts() {
+  const R = SHELTER_R;
+  return [
+    part(new THREE.BoxGeometry(1.1, 1.1, 1.1), C_CRATE, R + 1.4, 0.55, 2.0, 0, 0.3, 0),
+    part(new THREE.BoxGeometry(0.9, 0.8, 0.9), C_CRATE, R + 1.5, 1.5, 1.9, 0, 0.8, 0),
+    part(new THREE.BoxGeometry(1.2, 0.8, 0.9), C_HULL_DARK, R + 0.6, 0.4, -2.3, 0, -0.4, 0),
+  ];
+}
+
+function campParts(cx, cz) {
+  const p = [...shelterParts(), ...crateParts()];
+  const R = SHELTER_R;
   // the solar array behind, two panels on posts, tilted up
   for (const x of [-1.6, 1.3]) {
     p.push(strut([x, 0, 4.0], [x, 1.2, 4.0], 0.1, 0.1, C_LEG, 4));
@@ -239,6 +255,81 @@ function campParts(cx, cz) {
   const m = new THREE.Matrix4().compose(new THREE.Vector3(cx, 0, cz),
     new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)), new THREE.Vector3(CAMP_K, CAMP_K, CAMP_K));
   return pose(p, m);
+}
+
+// ---------------------------------------------------------------- the traces at the ruin, p2-43
+// The crew that went to the call left a camp at the ruin, or one person left a cairn. RUIN_CAMP of
+// ruin-types.js holds the layout, and generate.js places the trace from the same numbers, so the
+// pad of the ground and the parts here cannot part.
+//
+// The camp takes the shelter and the crates of the camp of the wreck, in the same colours, so the
+// reader knows it at once. It adds a flag, and the rover when the crew came in it. It leaves off the
+// solar array and the tank of the fuel maker: those stayed at the ship. The cairn is a pile of the
+// loose stones of the ruin, in the stone of the ruin, with a small case in the paint of a hatch on
+// top: the one made colour on it.
+//
+// Both builders give one flat-shaded geometry with a colour per vertex, in the frame of the camp: y
+// up, the origin on the ground under its middle, x toward the middle of the ruin, and the scale of
+// RUIN_CAMP applied. The yaw of patch.source.camp turns it into the patch.
+const C_FLAG = C_DOOR;
+const C_TYRE = C_BURN;
+
+// The flag: a pole, and a cloth of two bands that hangs from the top of it.
+function flagParts(x, z) {
+  const h = 5;
+  return [
+    strut([x, 0, z], [x, h, z], 0.07, 0.05, C_LEG, 5),
+    part(new THREE.BoxGeometry(1.6, 0.5, 0.05), C_FLAG, x + 0.82, h - 0.35, z),
+    part(new THREE.BoxGeometry(1.6, 0.5, 0.05), C_PANEL, x + 0.82, h - 0.85, z),
+  ];
+}
+
+// The rover of the crew: a body on six wheels, a cab at the front with a window, and a short mast
+// with a dish at the back. It stands along z, the edge of the disc.
+function roverParts(x, z) {
+  const p = [];
+  p.push(part(new THREE.BoxGeometry(2.0, 0.9, 3.6), C_HULL, x, 0.95, z));
+  p.push(part(new THREE.BoxGeometry(1.8, 0.7, 1.3), C_PANEL, x, 1.75, z + 0.95));
+  p.push(part(new THREE.BoxGeometry(1.6, 0.35, 0.05), C_GLASS, x, 1.8, z + 1.61));
+  for (const wz of [-1.25, 0, 1.25]) {
+    for (const s of [-1, 1]) {
+      p.push(part(new THREE.CylinderGeometry(0.45, 0.45, 0.35, 8), C_TYRE, x + s * 1.15, 0.45, z + wz, 0, 0, Math.PI / 2));
+    }
+  }
+  p.push(strut([x - 0.5, 1.4, z - 1.3], [x - 0.5, 2.6, z - 1.3], 0.06, 0.05, C_LEG, 4));
+  p.push(partS(dishGeo(), C_DISH, [x - 0.5, 2.6, z - 1.3], [0, 0, -0.5], [0.4, 0.4, 0.4]));
+  return p;
+}
+
+// The cairn: three rings of flat stones, and the case on top, its handle along the long side.
+function cairnParts(stone, dark) {
+  const p = [];
+  const layers = [[4, 0.5, 0.48, 0.3], [3, 0.3, 0.4, 0.75], [1, 0, 0.36, 1.1]];
+  let i = 0;
+  for (const [count, ring, r, y] of layers) {
+    for (let k = 0; k < count; k++) {
+      const a = k * 2 * Math.PI / count + (i % 2) * 0.6;
+      const g = new THREE.DodecahedronGeometry(r, 0);
+      p.push(partS(g, i % 3 === 1 ? dark : stone, [ring * Math.cos(a), y, ring * Math.sin(a)],
+        [0.3 * i, 0.7 * i, 0.2 * i], [1, 0.62, 1]));
+      i++;
+    }
+  }
+  p.push(part(new THREE.BoxGeometry(0.75, 0.32, 0.45), C_DOOR, 0, 1.47, 0, 0, 0.35, 0));
+  p.push(part(new THREE.BoxGeometry(0.4, 0.06, 0.08), C_HULL_DARK, 0, 1.66, 0, 0, 0.35, 0));
+  return p;
+}
+
+// The trace of one patch: `info` is patch.source.camp, { kind: 'camp' | 'cairn', rover }. `stone`
+// and `dark` are the colours of the stone of the ruin, ruinPalette() of ruin-geometry.js, for the
+// cairn.
+export function crewCampGeometry(info, { stone = '#8a8578', dark = '#5e5a52' } = {}) {
+  const k = RUIN_CAMP.scale;
+  const p = info && info.kind === 'cairn' ? cairnParts(stone, dark)
+    : [...shelterParts(), ...crateParts(), ...flagParts(...RUIN_CAMP.flag),
+      ...(info && info.rover ? roverParts(...RUIN_CAMP.roverAt) : [])];
+  pose(p, new THREE.Matrix4().makeScale(k, k, k));
+  return mergeParts(p);
 }
 
 // ---------------------------------------------------------------- the four hulls

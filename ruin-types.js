@@ -286,3 +286,72 @@ export function ruinCard(world) {
     ],
   };
 }
+
+// ---------------------------------------------------------------- the body of the maker, p2-43
+// The words for the body the carvings show, as the card states them: the words of the locomotion
+// for a maker of a species, and the count of the limbs for a rolled maker. `G` is the genome of the
+// species, or null for a rolled maker. `legless` is true when the carvings give legs to an animal
+// that has none now: a slinger, a plough, or a winged animal. `height` is the height of a rolled
+// maker to the nearest half metre, as the card prints it. The second log of the crew reads the same
+// words, so the log and the card never disagree on the body. Null for a world with no ruin.
+export function makerBody(world) {
+  const ruin = world && world.ruin;
+  if (!ruin) return null;
+  const maker = ruin.maker || { species: -1, limbs: 2, height: 1.8, rolled: true };
+  const G = !maker.rolled && maker.species >= 0 && world.species ? world.species[maker.species] || null : null;
+  if (G && G.lore) {
+    return { words: LOCO_BODY[G.loco] || limbWords(maker.limbs), G, legless: NO_LEGS_NOW.has(G.loco),
+      limbs: maker.limbs, height: halfMetre(maker.height) };
+  }
+  return { words: limbWords(maker.limbs), G: null, legless: false, limbs: maker.limbs, height: halfMetre(maker.height) };
+}
+
+// ---------------------------------------------------------------- the traces of the crew, p2-43
+// The crew that went to the call left traces at the ruin, by decision 3 of p2-00. `all` and `some`
+// left a camp: the shelter, its airlock, crates, a flag, and the rover when the crew came in it.
+// `one` left a cairn of stones with a small case on top. `none` left nothing.
+//
+// ruinCamp() in generate.js places the traces and keeps the plants off them, and wreck-geometry.js
+// builds them, so both read the layout here and the two cannot part. The layout is in the frame of
+// the camp, before the scale: x points at the middle of the ruin, so the door of the shelter faces
+// the stones, z runs along the edge of the disc, and y is up. A footprint is a list of circles
+// [x, z, r] that holds every part, and the mask of the plants and the pad of the ground read them.
+//
+//   scale   the camp of the wreck stands at 0.85. The band between the flat disc and the outer edge
+//           of the spires and of the floaters is 9.6 units, and the camp must fit inside it
+//   gap     units of clear ground between the flat disc and the nearest part of the camp. The body of
+//           a ruin touches the ground at most 0.52 units past the flat disc
+//   ease    units over which the pad of the camp eases back to the ground around it
+export const RUIN_CAMP = Object.freeze({
+  scale: 0.8,
+  gap: 1,
+  ease: 3,
+  // the shelter, its airlock, two crates by the door, and the flag with its cloth
+  camp: Object.freeze([[0, 0, 3.4], [3.6, 0, 1.1], [4.4, 2.0, 0.8], [3.6, -2.3, 0.8], [-0.2, -4.2, 1.0]]),
+  // the rover, parked along the edge of the disc beside the shelter
+  rover: Object.freeze([[-0.5, 5.3, 1.5], [-0.5, 7.7, 1.5]]),
+  // the cairn and its case
+  cairn: Object.freeze([[0, 0, 1.3]]),
+  // the parts the builder places, in the same frame and units
+  flag: Object.freeze([-1, -4.2]),        // the foot of the pole
+  roverAt: Object.freeze([-0.5, 6.5]),    // the middle of the rover
+});
+
+// The circles of the footprint of one trace, in the frame of the camp and after the scale. `kind` is
+// 'camp' or 'cairn', and `rover` says whether the rover stands at the camp.
+export function campLayout(kind, rover) {
+  const k = RUIN_CAMP.scale;
+  const list = kind === 'cairn' ? RUIN_CAMP.cairn : rover ? RUIN_CAMP.camp.concat(RUIN_CAMP.rover) : RUIN_CAMP.camp;
+  return list.map(([x, z, r]) => [x * k, z * k, r * k]);
+}
+
+// The circles of the footprint of a trace in the frame of the patch: `info` is patch.source.camp,
+// { kind, x, y, z, yaw, rover }. The yaw turns the camp about y as three.js turns a group: the x axis
+// of the camp goes to (cos yaw, -sin yaw) in the patch.
+export function campCircles(info) {
+  if (!info) return [];
+  const c = Math.cos(info.yaw || 0), s = Math.sin(info.yaw || 0);
+  return campLayout(info.kind, info.rover).map(([x, z, r]) => ({
+    x: info.x + c * x + s * z, z: info.z - s * x + c * z, r,
+  }));
+}

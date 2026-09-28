@@ -32,6 +32,7 @@ on. `CONTEXT.md` holds the words to avoid.
 | 6. Tune the receiver | `tuner.js`, `app.js`, `ground-source.js` | Main thread | the field the reader types the frequency into (p2-39) |
 | 7. Stand the ruin on its cell | `generate.js`, `patchRuin()`; `ground-source.js`, `SourceRuin` | Web Worker; main thread | the disc and `patch.source`; the body, the glow, the light, the well (p2-41). See "The ruin on its patch" |
 | 8. Read the ruin | `ruin-types.js`, `ruinCard()` and `glyphsOf()`; `ground-source.js`, `RuinInspector`; `app.js`, `inspectRuin()` and `onRuinFound()`; `carrier-globe.js` | Main thread, tools | the card, the find of chapter 2, and the mini ruin on the globe (p2-42). See "The card of the ruin" |
+| 9. Find the crew | `ruin-lore.js`, `writeRuinLog()`; `generate.js`, `ruinCamp()`; `wreck-geometry.js`, `crewCampGeometry()`; `ground-source.js`, `SourceRuin` and `RuinInspector` | Web Worker; main thread | `world.ruin.log`, `patch.source.camp`, the camp or the cairn on the ground, and the crew on the card (p2-43). See "The crew at the ruin" |
 
 `world.ruin` rides back with the world as plain data, so `worker.js` clones it with the rest:
 
@@ -44,11 +45,11 @@ world.ruin = {
   maker: { species: 0, limbs: 2, height: 3.1, rolled: false },
   from: 'south-east',               // the bearing from the wreck to the ruin, to eight points
   band: 0,                          // the band the place came from: 0, 1, or 2. See "The bands"
-  log: null,                        // the second log, p2-43; null when nobody went
+  log: { ... },                     // the second log of the goers, p2-43; null when nobody went
 } | null
 ```
 
-That is the ruin of `Auralis`. `world.ruin` is null on a gas giant, on a world with no wreck, and on
+That is the ruin of `Auralis`; "The crew at the ruin" below gives the shape of `log`. `world.ruin` is null on a gas giant, on a world with no wreck, and on
 a world where no cell of any band passes the tests. The page must not show `freq`, `from`, or `log`
 before the reader reads them in the log of the wreck or on the card of the ruin. The `?ruin` dot
 is a debug flag and it stays out of the interface.
@@ -319,8 +320,8 @@ disc, its height, and the turn of the body.
 - **The stream.** The place and the yaw roll from `makeRng(pseed + '|ruin')` and from no other
   stream, so every other patch is byte for byte the patch it was, and `tools/world-checksum.mjs`
   proves it. The stream draws three numbers: the angle and the distance of the draw, then the yaw.
-  The camp of p2-43 draws after them from the same stream, in `ruinCamp()`, and nothing else
-  draws from it.
+  The traces of the crew of p2-43 draw one number after them from the same stream, in
+  `ruinCamp()`, and nothing else draws from it.
 - **The walk.** `placeDisc()` holds the walk of the wreck, and `patchSource()` and `patchRuin()`
   share it with the disc as an argument. From the draw it takes the nearest node that is dry, under
   `SOURCE_STAND`, clear of the phenomenon, and dry at the rim of the disc. The ruin adds two tests:
@@ -824,8 +825,201 @@ baseline and it is optional. The check proves:
 - With a baseline: the song data and the note events of the motif of the wreck of every world of
   `worlds.js` are byte-equal to the baseline.
 
+## The crew at the ruin
+
+p2-43. The last entry of the log of the wreck sends people toward the call: everybody, two people,
+one person alone, or nobody (`log.went`, decision 2 of p2-00). The reader follows the same call to
+the ruin. Decision 3 says what the reader finds of those people there:
+
+| `went` | At the ruin | On the card |
+|---|---|---|
+| `all`, `some` | a camp: the shelter, the crates, a flag, and the rover when the crew came in it | the goers, and the second log of 6 to 8 entries |
+| `one` | a cairn of stones with a small case on top | the goer, and one note |
+| `none` | nothing | no crew section: the reader is the first to stand there |
+
+### The traces on the ground
+
+`ruinCamp()` in `generate.js` places the trace, from the stream of the patch of the ruin, and
+`crewCampGeometry()` in `wreck-geometry.js` builds it. Both read `RUIN_CAMP` and `campLayout()` of
+`ruin-types.js`, so the ground under the trace and the parts on it cannot part.
+
+- **The place.** The trace stands at the edge of the disc, on the side the crew came from: the way
+  from the middle of the cell toward the wreck, which `boxHeading()` of `cell-grid.js` gives in the
+  frame of the box. The stream draws one number after the yaw of the ruin, a turn of up to
+  `CAMP_TURN`, 0.5 radians, off that way, so two camps do not stand on one line. The nearest part
+  of the trace stands `RUIN_CAMP.gap`, 1 unit, past the flat disc. The body of a ruin touches the
+  ground at most 0.52 units past the flat disc, so the trace stands off the body.
+- **The band.** The trace stands inside the disc with its soft edge, where the plants, the cover,
+  and the herds keep off already. The band is 9.6 units on the spires and the floaters, the
+  smallest disc, and the camp with its rover fits it with 1.72 units to spare. The camp stands at
+  `RUIN_CAMP.scale`, 0.8, a little under the camp of the wreck, for that reason.
+- **The pad.** The soft edge slopes, so the worker lays a pad under the trace at the height of the
+  floor of the ruin, and the ground eases back over `RUIN_CAMP.ease`, 3 units. The flat disc
+  already stands at that height, so no node of it moves. `blocked(x, z, pad)` keeps the plants and
+  the group anchors off the pad and its ease.
+- **The parts.** The camp takes the shelter and the crates of the camp of the wreck in the same
+  colours, so the reader knows it at once: the white dome on its dark ring, the windows, the airlock
+  with the orange door, which faces the middle of the ruin, and the crates by the door. It adds a
+  flag of two bands, orange and white, and the rover when the goers came in it: a body on six
+  wheels, a cab with a window, and a mast with a dish. It leaves off the solar array and the tank
+  of the fuel maker: those stayed at the ship. The cairn is three rings of flat stones in the stone
+  and the dark of the ruin, `ruinPalette()`, with a small case in the orange of the door on top.
+  The camp holds 316 triangles, 704 with the rover, and the cairn 312.
+- **The draw.** `SourceRuin` adds the mesh as a child of the group of the ruin, at the place and the
+  yaw of `patch.source.camp`, on HIGH with shadows. A tap on the camp marks the ruin, because the
+  camp is a part of the find. The range of the overlay still measures to the stones.
+
+`patch.source.camp` is `{ kind: 'camp' | 'cairn', x, y, z, yaw, rover }`, in units of the box, and
+it is on the patch of the ruin only when somebody went. The yaw turns the camp about y as three.js
+turns a group, and the x axis of the camp points at the middle of the ruin.
+
+### The second log
+
+`ruin-lore.js` writes `world.ruin.log` in `generate()`, after the log of the wreck, from
+`makeRng(seed + '|ruin-lore')` and from no other stream. It imports `lore.js`, and the helpers and
+the traits of `source-lore.js`, so the two logs share one voice. A world where nobody went draws
+nothing from the stream, and its `log` is null.
+
+```js
+world.ruin.log = {
+  probe: 'Verge 10',                // the ship, as the log of the wreck names it
+  days: 275,                        // the day of the last entry, counted from the landing of the wreck
+  arrived: 267,                     // the day the goers reached the ruin
+  species: 'Shell grazer',          // the animal the log of the wreck names, or null
+  keeper: 'Sara',                   // the first goer
+  crew: [{ name: 'Sara', role: 'mechanic' }, { name: 'Mira', role: 'pilot' }],   // the goers
+  lost: null,                       // nobody leaves the story here
+  went: 'some',                     // log.went of the wreck
+  by: 'ride',                       // log.by of the wreck
+  entries: [
+    { slot: 'arrival',      title: 'Arrival',    day: 267, text: '…' },
+    { slot: 'ruin.sight',   title: '',           day: 268, text: '…' },
+    …
+    { slot: 'ruin.reply',   title: '',           day: 274, text: '…' },
+    { slot: 'end.back',     title: 'Last entry', day: 275, text: '…' },
+  ],
+} | null
+```
+
+That is the second log of `audit-0`, the first seed of the audit: two goers rode a grazer for 42
+turns from the last day of the wreck, day 225.
+
+- **The people are the goers, and only the goers.** `crew` is `log.goers` of the wreck in its
+  order, with the jobs of that log, and the first goer keeps the second log. When the keeper of the
+  wreck stayed with the beacon, the arrival opens on a line that says so: "This is Suri. Bo kept the
+  log at the ship. I keep this one." A person of the log of the wreck who did not go stands only
+  there and in an end that goes back to that person (`{stayer}`). The person a thread of that log
+  took out stands nowhere.
+- **The way and the days.** The log of the wreck now carries `by`, how the goers travel, from the
+  call ending it closes on: `rover`, `foot`, `raft`, or `ride`. A wording states its way, and a
+  wording that states none takes the raft on an island with a liquid sea and goes on foot
+  elsewhere; `travelOf()` of `source-lore.js` holds the rule. A wording that starts in the rover and
+  walks when the battery is flat goes on foot, so the camp holds no rover. The goers leave the
+  morning after the last entry of the wreck, and the arrival is the last day of that log plus the
+  days the trip takes: the arc between the wreck and the ruin, over the speed of the way.
+
+  | Way | Kilometres a day | Why |
+  |---|---|---|
+  | `rover` | 40 | p2-43; the log of the wreck says the battery of the rover gives forty kilometres |
+  | `foot` | 15 | p2-43 |
+  | `raft` | 30 | a raft of packing foam that the crew paddles and lets drift |
+  | `ride` | 25 | a big walker that stops to feed and to drink |
+
+  Over the audit seeds the trip takes 15 to 221 turns, and 60 at the median.
+- **The shape.** The arrival, four to six beats at the ruin, and an end: 6 to 8 entries. The beats
+  run in a fixed order, and four of them always run:
+
+  | Beat | Runs | Holds |
+  |---|---|---|
+  | `sight` | always | what the crew sees close to, by the proto |
+  | `work` | optional | the survey: the laser, the drill, the analyser, the map, the shelter and the flag |
+  | `carving` | always | the body of the maker, in the words of the card |
+  | `fit` | optional, when `makerFits()` | the door of the dome, the doors of the hive, or the steps of the well fit that body |
+  | `sky` | optional | one fact of the world over the ruin: rain, frost, a moon, the ring overhead, a storm |
+  | `people` | always | a goer with the trait of the log of the wreck |
+  | `light` | optional | the light of the proto at night, bright and dim and never out |
+  | `reply` | always, exactly once | the ruin sends the beacon of the crew back to them, slower and lower |
+  | `people` | optional | a second goer with a trait |
+
+  The arrival has up to four parts: a new keeper, the trip, the food on the trip, and the first
+  sight of the ruin. The food on the trip stands only in a log whose wreck ran the thread
+  `crew.food`, which counts the food down to a few days, because the trip takes weeks; the crew
+  says it ate the seed store of the ship, or a plant a person can eat on a temperate world with
+  liquid water.
+- **The call answers the crew**, decision 6 and the motif of p2-44. The reply beat of every second
+  log, and every note, states that the ruin sends the beacon of the crew back to them, slower, a
+  note lower, or at half the speed: the motif of the wreck at half the speed and an octave lower,
+  which the ruin plays. So the ear and the log agree.
+- **The end** is one of four kinds: `stay`, the crew stays at the ruin; `back`, the crew starts back
+  to the ship; `wait`, the crew waits for the reader; and `cut`, the entry stops in the middle of a
+  sentence. The card prints the note of p2-37 under an end of the kind `cut`, because it reads the
+  slot and not the text. A crew with people at the ship goes back more often, and a crew that left
+  nobody at the ship stays more often. No end names a compass word for the way back: on a sphere
+  the way back from the ruin is not the word opposite `{from}`, and a crew that came north-east goes
+  back west where the arc runs near a pole. That is true, and it reads as a fault, so the log says
+  "the way we came".
+- **The note** of one person is one entry of 2 to 5 sentences, slot `note`, on the day of the
+  arrival: who writes it, the trip, the reply, and the case on the cairn the note lies in. The
+  keeper of the wreck stayed at the ship (`split`) or died, and this person wrote the last entry of
+  that log (`second`); the note says which.
+- **The voice** is the voice of `docs/source.md`, in full. The log never states what the ruin is,
+  and it never names another world: the crew sees stones, carvings, and a light, and says what it
+  sees. The way on belongs to the card. The name of the ruin, `{site}`, is what the crew sees:
+  "the stone needles", "the broken dome", "the arches", "the shaft", "the floating stones", "the
+  stone figure", "the stone ring", "the mounds". The spires are needles, because the lexicon of the
+  audit ties "spire" to the crystal plants. `{site}` is a plural or a singular by the proto, so it
+  never stands as the subject of a verb in the present tense, and no pronoun stands for it.
+
+The tags of a story, which `storyTags()` of `ruin-lore.js` sets on top of the tags of the world at
+the latitude of the ruin: `at<proto>`; `makerspecies`, `makerrolled`, `makerknown` (the species the
+log of the wreck names), `makerlegless`, `makerlimbless`, and `makerfits`; `by<way>`; `went<value>`;
+`crewsolo`, `crewpair`, `crewgroup`; `samekeeper`, `newkeeper`, `deadkeeper`; `shipcrew`;
+`hungry`; and `after<kind>`, the kind of the last entry of the wreck.
+
+The tokens of the second log, beside the tokens of the world and of the animal:
+
+| Token | Holds |
+|---|---|
+| `{keeper}`, `{keeperjob}` | the first goer, who keeps this log |
+| `{one}`, `{two}` | the other goers; `{two}` only under `crewgroup` |
+| `{shipkeeper}` | the keeper of the log of the wreck, under `newkeeper` or `deadkeeper` |
+| `{stayer}` | a person who stayed at the ship, alive, in an end under `shipcrew` |
+| `{who}`, `{whojob}` | the goer a beat about the people is about |
+| `{trip}`, `{km}`, `{left}`, `{how}` | the days of the trip, its kilometres, the day the goers left, and "on foot" or "in the rover" |
+| `{site}`, `{Site}` | the name of the ruin, as the crew sees it |
+| `{height}`, `{across}` | the metres of the card: the height, and twice the disc |
+| `{makerbody}`, `{makerheight}` | the body of the carvings, and the height of a rolled maker |
+
+### The crew on the card
+
+The slot `.cruin-crew` of p2-42, under the rows of the card of the ruin, shows the crew:
+`ruinCrewHtml()` in `ground-source.js`. A label "The crew at the ruin", the goers one to a row with
+the job at the right, the keeper marked "keeps this log" or, for one person, "left this note", and
+the entries under them on the rail and the dots of the log of the wreck, with the titled entries in
+the colour of the ruin. An end of the kind `cut` takes the note "[log ends abruptly]". A world where
+nobody went holds no second log, so the slot stays empty and takes no room.
+
+The card opens only on the cell of the ruin, as it did, so the page shows no word of the second log
+before the find.
+
 ## The checks
 
+- `node tools/ruin-check.mjs` part 2 tests that `world.ruin.log` is null exactly on the worlds where
+  nobody went. Part 5 tests the traces on the patches of the ruin: a camp for `all` and `some`, a
+  cairn for `one`, and none for `none`; the rover when the goers came in it; the trace at the height
+  of the floor, on the side of the wreck within `CAMP_TURN`, off every vertex of the body, the glow,
+  and the orbit, past the flat disc by the gap, and inside the soft edge; the pad flat under it; and
+  no plant and no group on it. p2-43.
+- `node tools/lore-audit/audit.mjs` pass 8 sweeps the pools of the second log with the checks of
+  `docs/source.md`: coverage over every sky, proto, maker, and story, reachability, the lexicon, the
+  motion lexicon on the trip, the tokens, the style, the subject, the spans, the reply in every
+  reply beat and every note, the case in every note, no band, no word that says what the ruin is,
+  and three wordings in every bucket. `--seeds 200` checks every second log against the log of its
+  wreck: the crew is the goers, the keeper is the first goer, the jobs agree, no person of
+  `log.lost` stands in it, the arrival is the last day of the wreck plus the trip, the days rise,
+  the shape and the one reply, and the text by the rules above. A world with `went: 'none'` holds
+  `world.ruin.log === null`. It reports the traces, the ways, the ends, and the commonest sentences.
+- `node tools/lore-audit/log-sample.mjs` prints the second log after the log of the wreck.
 - `node tools/ruin-check.mjs` runs 500 seeds through `worker.js` on LOW, every tenth of them on HIGH
   too, and every 25th again after another world. It tests the hashes of `ruin-types.js`, the place,
   the maker, the tiers, and the cache, and it prints the share of each band. `placeFacts()` of

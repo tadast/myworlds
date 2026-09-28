@@ -60,6 +60,8 @@ log does not read that bound: a source stands where `makeSource()` put it, whoev
   went: 'some',                         // who goes toward the call: 'all', 'some', 'one', or 'none'
   goers: ['Bo', 'Tam'],                 // the names of the people who go
   beacon: 3,                            // the day the crew put the beacon on the mast, 2 to 6
+  by: 'rover',                          // how the goers travel, or null when nobody goes (p2-43)
+  traits: { Tam: 'boat', ... },         // the trait of every person but the keeper (p2-43)
   entries: [
     { slot: 'landing',        title: 'Landing',    day: 1,   text: '…' },
     { slot: 'world.cold',     title: '',           day: 12,  text: '…' },
@@ -75,10 +77,11 @@ A log holds 8 to 20 entries. Since the strand thread most hold 15 or more, and s
 thread a log of a world with a ruin holds 18 or more. `slot` names the thread the entry came from,
 or the act: `landing` for the first entry and `end.<kind>` for the last one. A middle entry carries
 no title, and the card then shows the day alone. The card does not read `lost`, `cause`, `leads`,
-`went`, `goers`, or `beacon`; the audit reads them, to prove that no entry after that day names that
-person, that the strand thread ran to its last beat, that the ending fits the story, and that the
-call holds. `went`, `goers`, and `beacon` stand on a world with a ruin only. A log of a world with
-no ruin carries none of the three keys, so it is the log it was before the ruin, byte for byte.
+`went`, `goers`, `beacon`, `by`, or `traits`; the audit reads them, to prove that no entry after
+that day names that person, that the strand thread ran to its last beat, that the ending fits the
+story, and that the call holds, and the second log at the ruin reads `went`, `goers`, `by`, and
+`traits` (p2-43; see "The second log at the ruin" below). The five keys stand on a world with a
+ruin only. A log of a world with no ruin carries none of them.
 
 The page must not show any of this before the reader finds the wreck. The log stands nowhere else
 on the world: no other field of `world` holds the text.
@@ -111,7 +114,9 @@ On a world with a ruin the writer draws two numbers more from its own stream: th
 the day of the beacon. Both draws stand behind the test `world.ruin`, so a world with no ruin draws
 nothing more and its log does not move. p2-40 moved the hash of the log on every world with a ruin,
 on purpose, and on no other world; the baseline of `tools/world-checksum.mjs` moved in that commit
-and in no other column.
+and in no other column. p2-43 moved it again: the log gained `by` and `traits`, one wording of
+`fauna.fly` changed, and the lore column now hashes `world.ruin.log` too. The second log draws from
+a stream of its own, `seed + '|ruin-lore'`, and this stream draws no number more for it.
 
 ## The shape of a log
 
@@ -431,6 +436,14 @@ p2-00 as `went`, and the roles of the people who go as `goers`; `writeLog()` wri
 | `stay` | `none` | the crew stays and makes a life, and leaves the click to whoever comes |
 | `launch` | `none` | the crew climbs on the patched line and leaves the band behind for the reader |
 
+**How the goers travel**, p2-43. A call wording that sends somebody also carries `by`, the way the
+goers travel: `rover`, `foot`, `raft`, or `ride`, on the back of the animal. A wording that states
+no way, the joke, the catch, the second hand, and some follows, takes the raft on an island with a
+liquid sea and goes on foot elsewhere; `travelOf()` holds the rule, and `writeLog()` writes it as
+`log.by`. Two walk wordings start in the rover and walk when the battery is flat, or spend its last
+charge; they go on foot, because the rover stops on the way. The second log at the ruin starts on
+the same way, so its arrival agrees with the last entry.
+
 `all` takes every person still here, the keeper and the crew less the person a thread took out,
 and lists no roles. `some` always holds two people and never everybody, because a crew holds three
 people or more and a thread retires one only when the crew holds four or more, so two people
@@ -439,6 +452,22 @@ besides the keeper are always here. A wording that walks or drives is shut to an
 so that the spread of the kinds over 200 worlds stays near the spread of the endings of today, and
 no value of `went` passes half of the logs: over the audit seeds `none` takes about 43 per cent,
 `some` 28, `all` 22, and `one` 6.
+
+## The second log at the ruin
+
+p2-43. The people the last entry sends toward the call reach the ruin, and they write a second log
+there: `world.ruin.log`, in the shape of this log, written by `ruin-lore.js` from
+`makeRng(seed + '|ruin-lore')` after this log is written. `docs/ruin.md`, "The crew at the ruin",
+holds the rules. Two rules tie it to this log:
+
+- **It takes the goers, and only the goers.** Its crew is `log.goers`, with the jobs of `log.crew`,
+  and the first goer keeps it. The person of `log.lost` never stands in it. The people carry the
+  traits of this log, `log.traits`, so a beat at the ruin tells what that person did there.
+- **Its days go on from the last day of this log.** The goers leave the morning after, and they
+  travel by `log.by`, so the arrival follows the last entry.
+
+A log of `went: 'none'` has no second log, and the ruin holds no trace of its crew. A log of
+`went: 'one'` has one note by that person.
 
 ## The gates
 
@@ -644,7 +673,11 @@ pass runs twelve checks.
    **once the tokens are filled**. A token is not one word: `{Other}` can print "The sea
    lamp-flanked sky whale" and `{size}` can print "Each shard a hand wide, the swarm 9 m". `WORST`
    in the audit holds the longest fill each token can take, and the lint counts with those. Raise a
-   number there when `species.js` grows a longer name or a longer size text.
+   number there when `species.js` grows a longer name or a longer size text. And no sentence after
+   the first opens on a token whose fill starts with a small letter: the writer capitalises the
+   first letter of an entry and of nothing else, so "{one} put a lamp on the mast. {count} {kinds}
+   came" printed "five flitters came" after a full stop until p2-43. An aside, a coda, and the plan
+   of the landing join an entry with no capital, so their first sentence counts too.
 7. **The subject.** Every entry stands on its own subject, as above. A fauna wording, and an ending
    that names a way of moving, may not let a pronoun or a stand-in phrase reach the reader before a
    naming token. Every other wording may not OPEN on a pronoun outside the impersonal list.
@@ -707,7 +740,11 @@ the log of every source. It checks that:
   goes in a `second` ending; `log.beacon` is 2 to 6 and falls before the first call beat, exactly
   one call entry states that day, and it falls after it; `world.ruin.from` is `compass8()` of the
   bearing from the wreck to the ruin, computed again from `cell-grid.js`, and the last beat of the
-  call names it and no earlier call beat does;
+  call names it and no earlier call beat does; `log.by` is one of the four ways when somebody goes
+  and null when nobody does, and a call wording of this kind and this outcome travels that way on
+  this world;
+- on a world with a ruin, the second log of p2-43 against this log; see "The checks" in
+  `docs/ruin.md`;
 - on a world with no ruin: no call thread, no `went`, `goers`, or `beacon` key, no band in any
   entry, and an ending of the pool of today.
 
@@ -727,7 +764,9 @@ the repetition numbers matter:
 No audit seed lacks a ruin, so the case of a world with no ruin is proved by hand: wrap
 `SourceLore.writeLog` on the shared module object so that it passes `{ ...world, ruin: null }` to
 the real writer, build the seeds again, and compare the logs with the logs of the build before the
-call. p2-40 did that over 200 seeds, and every log was byte-equal.
+call. p2-40 did that over 200 seeds, and every log was byte-equal. p2-43 did it again against
+the logs of main, because it fixed one wording of `fauna.fly` that every log may take: 178 of 180
+logs were byte-equal, and the other two differed only in that sentence.
 
 The motion lexicon does not run again here. The pool sweep already reads every wording against
 every way of moving, which is complete, and the filled text has lost the tokens the subject-scoped
