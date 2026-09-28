@@ -209,3 +209,24 @@ audit-5, 12, 13, 24. The read changed:
   after `crew.food`, how the crew ate; the manager may gate those endings of p2-40.
 - **`{world}` prints the designation**, for example "PXX-7022 d", in six wordings of the second
   log, most of them about the carvings; it reads stiff in a sentence, as it does in the first log.
+
+### The read of the manager, 2026-09-28
+
+The manager read 20 worlds with both logs together: `all` audit-9, 21, 28, 45, 51, 85; `some`
+audit-0, 1, 14, 23, 30, 77, 80; `one` audit-5, 12, 24, 52, 60, 76, 79. The second logs read as what
+happened to those people next, and the reply beat lands in every one. The read changed these things:
+
+- **The notes repeated.** Four of the seven notes were two pairs of one text. Three new notes join
+  the pool, and one new note of each keeper takes the food.
+- **A lone goer with two days of food walked 78 days.** A note of a goer whose log counted its food
+  down now always says how that person ate on the way (`hungry` notes, and `!hungry` on the rest).
+  `hungry` also reads the thread `crew.cook` now, and not only `crew.food`, because a log that ends
+  on "one meal left in the store" came from that thread.
+- **The two rafts shared one sentence.** Two new raft arrivals join the pool.
+- **"Close to,"** in five first sights reads as a phrase of one dialect. It is "Up close," now.
+- **The second hand walked alone at 675 °C.** The two `second` call endings of `one` are now
+  `!harsh`, and a harsh world takes two new wordings that take the rover (`by: 'rover'`).
+
+After the read: the audit passes, `--seeds 200` gives 86 second logs, 22 notes, and 72 worlds with no
+trace; `went` none 40, some 28, all 19, and one 12 per cent; the commonest sentence at the ruin stands
+in 6.5 per cent of the traces. The checksum moved the same 10 log hashes against main and nothing else.

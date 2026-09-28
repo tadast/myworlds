@@ -1,8 +1,8 @@
-Auralis HIGH world terran 56cb49c0 fd435b9a 29d9654f 204c2375 80cd41f2 26bdcf1f f125ccac 1eb91ded 1e622792
+Auralis HIGH world terran 56cb49c0 fd435b9a 29d9654f 204c2375 80cd41f2 26bdcf1f f125ccac 1eb91ded 2b7fb7c2
 Auralis HIGH patch fixed ocean 5602361b 88fcd9d6 ab3e7c0b e68c753d ab3e7c0b ab3e7c0b 5552be35 1ac8996e 6504af06 7c6d92c5 c570341f
 Auralis HIGH patch source forest cc3c023d 3b654fb2 b66aefe8 216365f7 829fa916 39ccef4e abfa4675 2ab4f598 15daf402 a6bc8883 abf11d33
 Auralis HIGH patch activity dry f87eb5f4 263e4f81 c91fd7cf 29ce698b ab3e7c0b ab3e7c0b 1e3635b5 db78975c d7f661b6 6027e258 e536e28a
-Auralis LOW world terran a5c05398 cf0efb4e e3702e1f ba0d2f0a 80cd41f2 093e3559 4c9c270b b64f017e 1e622792
+Auralis LOW world terran a5c05398 cf0efb4e e3702e1f ba0d2f0a 80cd41f2 093e3559 4c9c270b b64f017e 2b7fb7c2
 Auralis LOW patch fixed ocean 73569642 e3c89e1e ab3e7c0b 73dbb6b4 ab3e7c0b ab3e7c0b 4ce0e0f0 f173a231 42bd37fe db7fcb77 c570341f
 Auralis LOW patch source forest 195fda7b f40fb3dc 7bbb3c36 7b8ff575 829fa916 39ccef4e 7a14c372 77599eb2 3937a1a4 40c7e7cb 4aeae6c0
 Auralis LOW patch activity dry 791eeb93 4654410b 76794240 03889929 ab3e7c0b ab3e7c0b 72621a96 c3df8e1e f1ca0e4d c4f58c3e 188fa4ec

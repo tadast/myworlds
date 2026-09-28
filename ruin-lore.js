@@ -164,6 +164,8 @@ import { protoRow, makerBody, makerFits } from './ruin-types.js';
     { tags: 'byraft mostlysea waterliquid', t: 'We pulled the raft up on the shore on day {days}. {trip} days of water, {km} kilometres, and the click louder every night.' },
     { tags: 'byraft mostlysea waterliquid', t: '{trip} days on the raft. {one} steered by the hand radio, toward the click, and the click brought us to land.' },
     { tags: 'byraft mostlysea waterliquid', t: 'We crossed the water to the {from} for {trip} days. On day {days} the raft touched land, and we walked the last of the way.' },
+    { tags: 'byraft mostlysea waterliquid', t: '{trip} days on the water, and {one} kept the hand radio dry the whole way. On day {days} the raft ran up on a beach below the stones.' },
+    { tags: 'byraft mostlysea waterliquid', t: 'The raft carried us {km} kilometres in {trip} days. {one} saw land on the morning of day {days}, and the click came from it.' },
     // on the back of the animal
     { tags: 'byride beasts mwalk', t: 'The {kind} carried us for {trip} days and put us down on day {days}. We walked the last of the way.' },
     { tags: 'byride beasts mwalk', t: 'We rode the {kind} to the {from} for {trip} days. The {kind} went where the click came from, and we went with it.' },
@@ -193,10 +195,10 @@ import { protoRow, makerBody, makerFits } from './ruin-types.js';
     { tags: 'atspires', t: 'From a day out we saw a line on the sky and took it for a mast. The line is a needle of stone, and there are seven of them.' },
     { tags: 'atspires', t: 'The click comes from seven stone needles on a flat of bare rock. The tallest is five times the height of our mast.' },
     { tags: 'atspires', t: 'On day {days} the needles came up over the horizon one at a time. {one} counted seven.' },
-    { tags: 'atspires', t: '{one} saw the tallest needle first, a line on the sky at noon. Close to, there are seven of them on a flat of bare rock.' },
+    { tags: 'atspires', t: '{one} saw the tallest needle first, a line on the sky at noon. Up close, there are seven of them on a flat of bare rock.' },
     { tags: 'atdome', t: 'The click comes from a dome of stone ribs on a flat of bare rock. Some of the ribs are down.' },
     { tags: 'atdome', t: 'A broken dome stands on the flat ahead of us, a ring of stone ribs with gaps in it. There is a light inside.' },
-    { tags: 'atdome', t: 'We saw the ribs of the dome from a long way off, against the sky. Close to, six of the ribs are broken.' },
+    { tags: 'atdome', t: 'We saw the ribs of the dome from a long way off, against the sky. Up close, six of the ribs are broken.' },
     { tags: 'atdome', t: 'On day {days} a dome of stone ribs came up out of the flat ahead. {one} counted the gaps where ribs are down.' },
     { tags: 'atdome', t: '{one} walked ahead to the dome and stood in the door of the base ring, small under the ribs.' },
     { tags: 'atarches', t: 'A line of stone arches crosses the flat, each one lower than the one before. The click comes from the first arch.' },
@@ -211,8 +213,8 @@ import { protoRow, makerBody, makerFits } from './ruin-types.js';
     { tags: 'atwell', t: 'The posts came first, eight of them, leaning out. {one} reached the rim of the shaft between the posts and called me over.' },
     { tags: 'atfloaters', t: 'Slabs of stone hang in the air over a ring of standing stones. Nothing holds the slabs up.' },
     { tags: 'atfloaters', t: 'The click comes from a ring of standing stones. Over the ring, slabs of stone turn in the air around a light.' },
-    { tags: 'atfloaters', t: 'We saw the floating stones from a day out, against the sky. Close to, there are nine slabs and two rings, and they turn.' },
-    { tags: 'atfloaters', t: 'On day {days} we saw stones in the sky over the flat. Close to, the stones turn round a light.' },
+    { tags: 'atfloaters', t: 'We saw the floating stones from a day out, against the sky. Up close, there are nine slabs and two rings, and they turn.' },
+    { tags: 'atfloaters', t: 'On day {days} we saw stones in the sky over the flat. Up close, the stones turn round a light.' },
     { tags: 'atfloaters', t: '{one} stopped and pointed. Ahead, slabs of stone turn in the air over a ring of standing stones.' },
     { tags: 'atcolossus', t: 'A figure of stone lies on its side on the flat. One hand stands up out of the ground, open.' },
     { tags: 'atcolossus', t: 'The first thing we saw was a hand of stone, standing up out of the plain with the palm open.' },
@@ -222,7 +224,7 @@ import { protoRow, makerBody, makerFits } from './ruin-types.js';
     { tags: 'atring', t: 'A ring of stone blocks stands on its edge on the flat, taller than the mast. The sky shows through the middle.' },
     { tags: 'atring', t: 'The click comes from a great ring of stone blocks that stands on its edge. One block of the ring is missing.' },
     { tags: 'atring', t: 'We saw the stone ring from a long way off, a circle on the sky. The inner edge of the ring gives light.' },
-    { tags: 'atring', t: 'On day {days} a circle stood up on the horizon. Close to, it is a ring of stone blocks on its edge, taller than the mast.' },
+    { tags: 'atring', t: 'On day {days} a circle stood up on the horizon. Up close, it is a ring of stone blocks on its edge, taller than the mast.' },
     { tags: 'atring', t: '{one} walked under the ring first and looked up through the middle at the sky.' },
     { tags: 'athive', t: 'Mounds of stone cells stand on the flat, one great mound and three small ones, with paths between them.' },
     { tags: 'athive', t: 'On day {days} we reached a great mound of stone cells, with three small mounds around it.' },
@@ -500,14 +502,20 @@ import { protoRow, makerBody, makerFits } from './ruin-types.js';
   // arrival. The keeper of the wreck stayed at the ship (`newkeeper`), or died, and this person
   // wrote its last entry (`deadkeeper`).
   const NOTE = pool([
-    { tags: 'newkeeper', t: 'This is {keeper}, the {keeperjob} of {probe}. I came {how}, {trip} days from the ship. When I key the hand beacon, every click comes back from {site}, slower. I leave this note in the case on the stones, for {shipkeeper} or for whoever comes.' },
-    { tags: 'newkeeper', t: 'This is {keeper}. I got here on day {days}, {how}, alone. The stones answer the hand beacon, click for click, at half the speed. This case holds the note and the tape. {shipkeeper} has the rest of the log at the ship.' },
-    { tags: 'newkeeper', t: 'This is {keeper}, from {probe}. I came {how} in {trip} days, and I am here. The click is so loud here that the radio is not needed. I keyed the beacon, and the stones sent it back to me, lower and slower. The note goes in the case on the stones.' },
-    { tags: 'newkeeper', t: 'This is {keeper}. I stand at the stones the click comes from. When I send a click, a slower click comes back. I am leaving this case on the stones, and I will not be far.' },
-    { tags: 'newkeeper', t: '{keeper} writes this, the {keeperjob} of {probe}, on day {days}. I came {how}. Every click I send, the stones send back at half the speed. I have piled stones under this case so the next person finds it.' },
-    { tags: 'deadkeeper', t: 'This is {keeper}. I wrote the last entry of the log at the ship, after {shipkeeper} died. I came here {how}, in {trip} days. Every click of the hand beacon comes back from {site}, slower. I leave this note in the case, because {shipkeeper} wanted to see this.' },
-    { tags: 'deadkeeper', t: 'This is {keeper}, the last to write in the log of {probe}. I came {how}. When I key the beacon, the stones answer with the same clicks, lower and slower. This note goes in the case, on the stones.' },
-    { tags: 'deadkeeper', t: 'This is {keeper}. {shipkeeper} kept the log of {probe} and did not live to come here. I did. The stones send our beacon back to me, at half the speed. I leave the note in the case on this pile of stones.' },
+    { tags: 'newkeeper !hungry', t: 'This is {keeper}, the {keeperjob} of {probe}. I came {how}, {trip} days from the ship. When I key the hand beacon, every click comes back from {site}, slower. I leave this note in the case on the stones, for {shipkeeper} or for whoever comes.' },
+    { tags: 'newkeeper !hungry', t: 'This is {keeper}. I got here on day {days}, {how}, alone. The stones answer the hand beacon, click for click, at half the speed. This case holds the note and the tape. {shipkeeper} has the rest of the log at the ship.' },
+    { tags: 'newkeeper !hungry', t: 'This is {keeper}, from {probe}. I came {how} in {trip} days, and I am here. The click is so loud here that the radio is not needed. I keyed the beacon, and the stones sent it back to me, lower and slower. The note goes in the case on the stones.' },
+    { tags: 'newkeeper !hungry', t: 'This is {keeper}. I stand at the stones the click comes from. When I send a click, a slower click comes back. I am leaving this case on the stones, and I will not be far.' },
+    { tags: 'newkeeper !hungry', t: '{keeper} writes this, the {keeperjob} of {probe}, on day {days}. I came {how}. Every click I send, the stones send back at half the speed. I have piled stones under this case so the next person finds it.' },
+    { tags: 'deadkeeper !hungry', t: 'This is {keeper}. I wrote the last entry of the log at the ship, after {shipkeeper} died. I came here {how}, in {trip} days. Every click of the hand beacon comes back from {site}, slower. I leave this note in the case, because {shipkeeper} wanted to see this.' },
+    { tags: 'deadkeeper !hungry', t: 'This is {keeper}, the last to write in the log of {probe}. I came {how}. When I key the beacon, the stones answer with the same clicks, lower and slower. This note goes in the case, on the stones.' },
+    { tags: 'deadkeeper !hungry', t: 'This is {keeper}. {shipkeeper} kept the log of {probe} and did not live to come here. I did. The stones send our beacon back to me, at half the speed. I leave the note in the case on this pile of stones.' },
+    { tags: 'deadkeeper !hungry', t: 'This is {keeper}, alone at {site}. {shipkeeper} heard the click first and never saw where it came from. I have. The stones send the beacon back to me, lower and slower. I leave this note in the case on the stones.' },
+    { tags: 'newkeeper !hungry', t: '{keeper} writes this, alone, on day {days}. The trip took {trip} days, {how}. I keyed the hand beacon three times, and three answers came back from {site}, slower. The note and the tape go in the case, under a pile of stones.' },
+    { tags: 'newkeeper !hungry', t: 'This is {keeper}. The click led me {km} kilometres, to {site}. When I send the beacon, {site} sends it back at half the speed, a note lower. {shipkeeper}, if you read this, I made it. The note is in the case on the stones.' },
+    { w: 3, tags: 'newkeeper hungry', t: 'This is {keeper}. I came {how} in {trip} days, and the food ran out on the way. I ate the seed store a handful at a time. The stones send the hand beacon back to me, slower. This note goes in the case on the stones.' },
+    { tags: 'newkeeper hungry', t: '{keeper} writes this, the {keeperjob} of {probe}, on day {days}. I came {how}, in {trip} days. I ate the last of the seed store on the way. Every click I send, {site} sends back at half the speed. This note goes in the case on the stones.' },
+    { w: 3, tags: 'deadkeeper hungry', t: 'This is {keeper}. After {shipkeeper} died I came {how}, {trip} days, on the last of the seed store. The stones answer the hand beacon, click for click, at half the speed. The note goes in the case, for whoever comes.' },
   ]);
 
   // ---------------------------------------------------------------- the shape of the log
@@ -544,7 +552,7 @@ import { protoRow, makerBody, makerFits } from './ruin-types.js';
     if (endKind === 'second') tags.add('deadkeeper');
     else tags.add(first.goers[0] === first.keeper ? 'samekeeper' : 'newkeeper');
     if (first.went !== 'all') tags.add('shipcrew');
-    if (first.entries.some((e) => e.slot === 'crew.food')) tags.add('hungry');
+    if (first.entries.some((e) => e.slot === 'crew.food' || e.slot === 'crew.cook')) tags.add('hungry');
     return tags;
   }
 
