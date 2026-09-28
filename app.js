@@ -2018,10 +2018,10 @@ function onSourceFound() {
 //
 // A reader can reach the ruin before the tune, by chance. That find is a find all the same, and the
 // card states the band, so the find tunes the world too: markTuned(). The receiver then holds the
-// band of the ruin, so a probe on the ground reads the carrier again, as a tune there does. The fix
-// the landing took for the wreck stays a fix of chapter 1, and the globe paints chapter 2 now.
+// band of the ruin. The fix the landing took for the wreck stays a fix of chapter 1. While the wreck
+// is not found, activeSource() gives the wreck again, so the search of chapter 1 can still end.
 //
-// The group is built again from the record, because a find by chance moves the search to chapter 2.
+// The group is built again from the record, because the find changes the chapter the record runs.
 // The reader is on the ground, so the new group stands there at the end of the ascent.
 function onRuinFound() {
   if (!current || !current.world.ruin || !current.world.source) return;
@@ -2064,7 +2064,7 @@ function onRuinFound() {
 //   ground, chapter 2, the ruin    0                          the level of its range
 //   ground, any other cell         0                          0
 //   orbit                          CARRIER_ORBIT after the    CARRIER_ORBIT after the find of
-//                                  find of the wreck          the ruin, in chapter 2
+//                                  find of the wreck          the ruin
 //
 // So after both finds both motifs play in orbit, over a song that stays whole. The range of the
 // ruin is the range the overlay states, to the edge of its stones. p2-41.
@@ -2088,8 +2088,10 @@ function carrierLevel(kind) {
     const k = 1 - THREE.MathUtils.smoothstep(r, CARRIER_NEAR, far);
     return CARRIER_EDGE + (1 - CARRIER_EDGE) * k;
   }
+  // In orbit a find is a find, whatever chapter runs: after a find of the ruin by chance the
+  // receiver follows the wreck again (activeSource()), and the ruin keeps its voice all the same.
   const found = kind === 'ruin'
-    ? src.kind === 'ruin' && !!(carrierRecord && carrierRecord.ruin && carrierRecord.ruin.found)
+    ? !!(carrierRecord && carrierRecord.ruin && carrierRecord.ruin.found)
     : !!(carrierRecord && carrierRecord.found);
   return found ? CARRIER_ORBIT : 0;
 }
