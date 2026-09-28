@@ -38,7 +38,9 @@
 // group paints the fixes of the chapter that runs, in the colour of that chapter: the second colour
 // of pickCarrierColour() stands far from the surface and far from the first colour, so the reader
 // never takes a wedge of chapter 2 for a wedge of chapter 1. The pin and the mini wreck of the find
-// of chapter 1 stand on their cell in both chapters, in the colour of chapter 1. p2-38.
+// of chapter 1 stand on their cell in both chapters, in the colour of chapter 1. p2-38. The find of
+// chapter 2 stands a second pin at the ruin, with the mini ruin and a lamp that blinks, in the
+// colour of chapter 2, and the pin of the wreck stays. p2-42.
 import * as THREE from 'three';
 import { CELL, cellDir, groundRadius, siteCell, siteDir, sourceSite, activeSource, activeChapter } from './site.js';
 import { tangentFrame } from './cell-grid.js';
@@ -46,6 +48,11 @@ import { tangentFrame } from './cell-grid.js';
 // builds that body in wreckGeometry(hullOf(world)), which takes no DOM and does nothing at import, so the two
 // models come from one builder and they cannot drift apart.
 import { wreckGeometry, hullOf, WRECK_HULL } from './wreck-geometry.js';
+// The mini ruin of the find of chapter 2 is the ruin of the ground too, with the big parts only, at
+// MINI_UNIT globe radii per unit of the box. ruin-geometry.js takes no DOM and imports no file of
+// the page but ruin-types.js, so this import makes no cycle. p2-42.
+import { ruinGeometry, ruinPalette, MINI_UNIT } from './ruin-geometry.js';
+import { motifOf } from './music.js';
 
 // The number of wedges the shader holds. Four uniform slots of three vec3 and two floats cost 44
 // floats, which every driver carries with room to spare. The first build held eight, and after
@@ -600,6 +607,129 @@ function dropWreck(u) {
   u.wreck = null;
 }
 
+// ---------------------------------------------------------------- the pin of the find of the ruin
+// The find of chapter 2 stands a second pin, at the cell of the ruin, in the colour of chapter 2.
+// The model on top is the mini body of ruinGeometry(), in the stone of the world type, at MINI_UNIT
+// globe radii per unit: the spires stand 4.9 times the mini wreck and the colossus 1.2 times, and
+// the model takes the least size of the mini wreck, so the two keep their ratio at every zoom. The
+// pin of the wreck stays. p2-42.
+//
+// The model carries a lamp at the lamp of the ruin: a small point in the colour of chapter 2 that
+// blinks and holds a least size on the screen, so the reader finds the ruin from the home zoom.
+const RUIN_LAMP_R = 0.0012;     // globe radii: the lamp at its own size
+const RUIN_LAMP_MIN = 0.0035;   // the least radius of the lamp, as a part of the distance from the camera
+const RUIN_EMIS = 0.3;          // the share of its own colour the stone gives back on the night side
+
+// The rhythm the lamp of the mini ruin blinks: the motif of the wreck at half the speed, the rhythm
+// ruinRhythm() of ground-source.js gives the glow on the ground. p2-44 gives the ruin a motif of its
+// own and swaps this function for it; the lamp reads only the fields of motifOf().
+export function ruinLampRhythm(world) {
+  const m = motifOf(world);
+  return { ...m, stepDur: m.stepDur * 2, barSeconds: m.barSeconds * 2, period: m.period * 2 };
+}
+
+// The level of the lamp, 0 to 1, at one point of the period of the rhythm: a floor that never goes
+// out, a fast tail on each step, and a breath once a bar. These are the rules of lampLevel() in
+// ground-source.js. That file imports this one, so the rules stand here as a copy and not an import.
+function ruinLampLevel(m, clock) {
+  let k = 0;
+  for (const st of m.steps) {
+    const age = clock - st * m.stepDur;
+    if (age < 0 || age > m.stepDur * 4) continue;
+    k = Math.max(k, Math.exp(-age / (m.stepDur * 0.42)));
+  }
+  const floor = 0.14 + 0.3 * (0.5 - 0.5 * Math.cos((2 * Math.PI * clock) / (m.period / 4)));
+  return floor + (1 - floor) * k;
+}
+
+function makeRuinModel(world, hm) {
+  const ruin = world && world.ruin;
+  const at = ruin && ruin.proto && sourceSite(world, ruin);
+  if (!at) return null;
+  const colour = new THREE.Color(carrierColour(world, 2));
+
+  const obj = new THREE.Group();
+  obj.name = 'carrier-ruin';
+  const dir = siteDir(at.lat, at.lon, new THREE.Vector3());
+  obj.position.copy(dir).multiplyScalar(drapeR(world, hm, dir) - DRAPE_LIFT);
+  obj.quaternion.setFromUnitVectors(_yUp, dir);
+
+  const pinGeo = new THREE.CylinderGeometry(PIN_R, PIN_R * 0.25, PIN_H, 6, 1);
+  pinGeo.translate(0, PIN_H / 2, 0);
+  const pinMat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.9, toneMapped: false });
+  const pin = new THREE.Mesh(pinGeo, pinMat);
+  pin.renderOrder = RENDER_ORDER;
+  pin.raycast = () => {};
+  pin.onBeforeRender = (renderer, scene, camera) => {
+    const d = _camAt.setFromMatrixPosition(obj.matrixWorld).distanceTo(camera.position);
+    const k = Math.max(1, d * PIN_MIN / PIN_R);
+    pin.scale.set(k, 1, k);
+  };
+  obj.add(pin);
+
+  const { body: geo, lamp: L } = ruinGeometry(ruin.proto, world, { mini: true });
+  geo.computeBoundingBox();
+  const foot = Math.min(geo.boundingBox.min.y, 0);
+  const stone = new THREE.Color(ruinPalette(world.type).stone);
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.85, metalness: 0,
+    emissive: stone.clone().lerp(colour, 0.35).multiplyScalar(RUIN_EMIS),
+    transparent: true, opacity: MODEL_ALPHA, depthWrite: false,
+  });
+  const float = new THREE.Group();
+  float.position.y = PIN_H;
+  obj.add(float);
+  const body = new THREE.Mesh(geo, mat);
+  body.position.y = -foot * MINI_UNIT;
+  body.scale.setScalar(MINI_UNIT);
+  body.renderOrder = RENDER_ORDER + 1;
+  body.raycast = () => {};
+  // The least size of the mini wreck, so the ruin keeps its ratio to the wreck at every zoom.
+  const least = (camera) => Math.max(1, _camAt.setFromMatrixPosition(obj.matrixWorld).distanceTo(camera.position) * MODEL_MIN / MODEL_H);
+  body.onBeforeRender = (renderer, scene, camera) => { float.scale.setScalar(least(camera)); };
+  float.add(body);
+
+  // The lamp stands on the lamp of the body, inside the float, so it turns and bobs with the model.
+  // The stone writes no depth, so the lamp draws over it: the lamp of the well stands in the mouth,
+  // and the reader must see it. The globe still hides the lamp on its far side.
+  const lampGeo = new THREE.OctahedronGeometry(RUIN_LAMP_R, 0);
+  const lampMat = new THREE.MeshBasicMaterial({
+    color: colour, transparent: true, opacity: 0.95, depthWrite: false,
+    blending: THREE.AdditiveBlending, toneMapped: false,
+  });
+  const lamp = new THREE.Mesh(lampGeo, lampMat);
+  lamp.position.set(L[0] * MINI_UNIT, (L[1] - foot) * MINI_UNIT, L[2] * MINI_UNIT);
+  lamp.renderOrder = RENDER_ORDER + 2;
+  lamp.raycast = () => {};
+  lamp.onBeforeRender = (renderer, scene, camera) => {
+    const d = _camAt.setFromMatrixPosition(obj.matrixWorld).distanceTo(camera.position);
+    lamp.scale.setScalar(Math.max(1, (d * RUIN_LAMP_MIN) / (RUIN_LAMP_R * least(camera))));
+  };
+  float.add(lamp);
+
+  return {
+    obj, geo, mat, pinGeo, pinMat, pin, float, body, lamp, lampGeo, lampMat, colour,
+    rhythm: ruinLampRhythm(world), t: 0,
+  };
+}
+
+// The model of the ruin turns and bobs as the model of the wreck does, and its lamp blinks.
+function floatRuin(r, dt) {
+  floatWreck(r, dt);
+  const p = r.rhythm.period;
+  r.level = ruinLampLevel(r.rhythm, ((r.t % p) + p) % p);
+  r.lampMat.color.copy(r.colour).multiplyScalar(0.3 + 0.7 * r.level);
+}
+
+// Take the pin of the ruin off a group and give its buffers back.
+function dropRuin(u) {
+  if (!u.ruin) return;
+  const r = u.ruin;
+  r.obj.removeFromParent();
+  for (const x of [r.geo, r.pinGeo, r.lampGeo, r.mat, r.pinMat, r.lampMat]) x.dispose();
+  u.ruin = null;
+}
+
 // The colour of the carrier on one world: the wedges, the visited cells, and the pin of a find.
 //
 // The first build took the accent of the fauna palette, which a world can also hold in its terrain,
@@ -698,11 +828,12 @@ export function carrierColour(world, chapter = 1) {
 // record of issue 34 holds no tune, so it runs chapter 1 as it did.
 //
 // `heightMap` is the height map the worker sent with the world, which buildWorld() in app.js reads
-// off the same reply. The mini wreck stands on the terrain and needs it.
+// off the same reply. The mini wreck and the mini ruin stand on the terrain and need it.
 //
 // The group holds no mesh during the search: the wedges, the visited cells, and the goal cell all
 // ride in the uniforms of the terrain and of the sea. A chapter whose source is found paints none
-// of them. The find of the wreck stands the mini wreck at the wreck, in both chapters.
+// of them. The find of the wreck stands the mini wreck at the wreck, in both chapters, and the find
+// of the ruin stands the mini ruin at the ruin. p2-42.
 export function makeCarrierGroup(world, record, heightMap = null) {
   if (!world || !world.source || !world.source.dir) return null;
   const chapter = activeChapter(world, record);
@@ -716,8 +847,11 @@ export function makeCarrierGroup(world, record, heightMap = null) {
     fixes: (Array.isArray(part.fixes) ? part.fixes : []).slice(),
     found: !!part.found,                      // the source of this chapter is found
     wreckFound: !!(record && record.found),   // the wreck is found, in either chapter
+    // the ruin is found. A world with no ruin has nothing to find, whatever the record holds.
+    ruinFound: !!(world.ruin && record && record.ruin && record.ruin.found),
     fade: null,       // { fix, t, k } while one wedge fades in
     wreck: null,      // the mini wreck of a find. makeWreckModel() builds it.
+    ruin: null,       // the mini ruin of the find of chapter 2. makeRuinModel() builds it. p2-42
     goal: null,       // the site of the goal cell, or null. goalCell() finds it.
     goalT: 0,         // seconds: the clock of the pulse of the goal
   };
@@ -736,6 +870,13 @@ function rebuild(group) {
     if (u.wreck && u.wreck.obj.parent !== group) group.add(u.wreck.obj);
   } else {
     dropWreck(u);
+  }
+  // The find of the ruin stands its own pin at the ruin, in the colour of chapter 2. p2-42.
+  if (u.ruinFound) {
+    if (!u.ruin) u.ruin = makeRuinModel(u.world, u.hm);
+    if (u.ruin && u.ruin.obj.parent !== group) group.add(u.ruin.obj);
+  } else {
+    dropRuin(u);
   }
   writeUniforms(group);
 }
@@ -771,13 +912,15 @@ export function addWedge(group, fix, { fade = false } = {}) {
 // the terrain, so a caller that gives a new world gives its height map with it.
 //
 // A find of the chapter that runs takes its wedges away. A find of the wreck while chapter 2 runs
-// stands the mini wreck and leaves the wedges of the ruin as they are. p2-38.
+// stands the mini wreck and leaves the wedges of the ruin as they are. p2-38. A find of the ruin
+// stands the mini ruin at the ruin, beside the mini wreck. p2-42.
 export function setFound(group, world, heightMap, { chapter = 1 } = {}) {
   if (!group) return;
   const u = group.userData;
   if (world) u.world = world;
   if (heightMap) u.hm = heightMap;
   if (chapter !== 2) u.wreckFound = true;
+  else if (u.world && u.world.ruin) u.ruinFound = true;
   if ((chapter === 2 ? 2 : 1) === u.chapter) {
     u.fade = null;
     u.found = true;
@@ -791,6 +934,7 @@ export function updateCarrierGroup(group, dt) {
   if (!group) return;
   const u = group.userData;
   if (u.wreck) floatWreck(u.wreck, dt);
+  if (u.ruin) floatRuin(u.ruin, dt);
   if (u.fade) {
     u.fade.t += dt;
     const k = THREE.MathUtils.clamp(u.fade.t / FADE_S, 0, 1);
@@ -814,6 +958,7 @@ export function disposeCarrierGroup(group) {
   const u = group.userData;
   clearUniforms(group);
   dropWreck(u);
+  dropRuin(u);
   if (group.parent) group.parent.remove(group);
   group.clear();
   group.userData = {};

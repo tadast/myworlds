@@ -3,7 +3,9 @@
 // docs/issues/p2-00-the-second-signal.md.
 //
 // It holds no three.js and no DOM, on the pattern of world-types.js, so the worker, the page, and
-// the tools import it. makeRuin() in generate.js places the ruin; this file names it.
+// the tools import it. makeRuin() in generate.js places the ruin; this file names it. Since p2-42
+// it also holds the script of the glyphs and the text of the card of the ruin, so the Node checks
+// test both with no browser.
 //
 // Every pick here is a hash of the seed and not a draw from a stream of generate.js, as hullOf()
 // in wreck-geometry.js picks a hull. So no stream of a world draws one number more, and the
@@ -142,4 +144,145 @@ export const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 's
 export function compass8(brg) {
   const b = ((Number(brg) % 360) + 360) % 360;
   return COMPASS[Math.round(b / 45) % 8];
+}
+
+// ---------------------------------------------------------------- the glyphs, p2-42
+// The script of the makers: 26 glyphs, one for each letter from a to z. Every world shares this one
+// script, so the line of the way on on two worlds with one portal seed is one line, and the later
+// issue that opens the way reads the same glyphs. Do not change a glyph: a reader may have drawn it.
+//
+// A glyph is a list of strokes in a box of 1 by 1, with x to the right and y down. A stroke is a
+// list of points [x, y], and the card draws it as one line through them. A stroke of one point is
+// a dot. The glyphs hang from a rule at y = 0 that the card draws across the whole word, so most
+// glyphs start a stroke on that rule. No glyph is a letter of the Latin alphabet, so the line does
+// not read as a word.
+export const GLYPHS = Object.freeze([
+  /* a */ [[[0.5, 0], [0.5, 0.7], [0.2, 1]], [[0.8, 0.45]]],
+  /* b */ [[[0.25, 0], [0.25, 1]], [[0.75, 0], [0.75, 0.45], [0.25, 0.75]]],
+  /* c */ [[[0.5, 0], [0.5, 0.4]], [[0.5, 0.4], [0.15, 1], [0.85, 1], [0.5, 0.4]]],
+  /* d */ [[[0.2, 0], [0.2, 0.6], [0.8, 0.6], [0.8, 1]]],
+  /* e */ [[[0.8, 0], [0.8, 0.6], [0.2, 0.6], [0.2, 1]]],
+  /* f */ [[[0.5, 0], [0.5, 1]], [[0.5, 0.35], [0.15, 0.65]], [[0.5, 0.35], [0.85, 0.65]]],
+  /* g */ [[[0.5, 0], [0.5, 0.45]], [[0.5, 0.45], [0.15, 0.72], [0.5, 1], [0.85, 0.72], [0.5, 0.45]]],
+  /* h */ [[[0.2, 0], [0.2, 1]], [[0.2, 0.3], [0.8, 0.3], [0.8, 0.8]]],
+  /* i */ [[[0.5, 0], [0.5, 0.72]], [[0.5, 0.95]]],
+  /* j */ [[[0.2, 0], [0.8, 0.5], [0.2, 1]]],
+  /* k */ [[[0.8, 0], [0.2, 0.5], [0.8, 1]]],
+  /* l */ [[[0.5, 0], [0.5, 1]], [[0.15, 0.5], [0.85, 0.5]]],
+  /* m */ [[[0.2, 0], [0.2, 0.7], [0.5, 1], [0.8, 0.7], [0.8, 0]]],
+  /* n */ [[[0.5, 0], [0.5, 0.3]], [[0.15, 1], [0.15, 0.3], [0.85, 0.3], [0.85, 1]]],
+  /* o */ [[[0.5, 0], [0.5, 0.35]], [[0.2, 0.35], [0.8, 0.35], [0.8, 1], [0.2, 1], [0.2, 0.35]]],
+  /* p */ [[[0.2, 0], [0.2, 1]], [[0.7, 0.35]], [[0.7, 0.75]]],
+  /* q */ [[[0.5, 0], [0.15, 0.5], [0.5, 1], [0.85, 0.5], [0.5, 0]]],
+  /* r */ [[[0.2, 0], [0.2, 0.4], [0.8, 0.4]], [[0.5, 0.4], [0.5, 1]]],
+  /* s */ [[[0.8, 0], [0.2, 0.35], [0.8, 0.7], [0.2, 1]]],
+  /* t */ [[[0.2, 0], [0.8, 1]], [[0.8, 0], [0.8, 0.4]]],
+  /* u */ [[[0.15, 0], [0.15, 0.8]], [[0.5, 0], [0.5, 1]], [[0.85, 0], [0.85, 0.8]]],
+  /* v */ [[[0.5, 0], [0.5, 0.5]], [[0.15, 1], [0.5, 0.5], [0.85, 1]]],
+  /* w */ [[[0.2, 0], [0.5, 0.45], [0.8, 0]], [[0.5, 0.45], [0.5, 1]]],
+  /* x */ [[[0.5, 0], [0.5, 1]], [[0.2, 0.25], [0.8, 0.5]], [[0.2, 0.55], [0.8, 0.8]]],
+  /* y */ [[[0.2, 0], [0.2, 0.5], [0.8, 1]], [[0.8, 0], [0.8, 0.5]]],
+  /* z */ [[[0.5, 0], [0.5, 0.6]], [[0.15, 0.6], [0.85, 0.6]], [[0.5, 0.92]]],
+].map((g) => Object.freeze(g.map((s) => Object.freeze(s.map((p) => Object.freeze(p)))))));
+
+// The glyphs of one word, one for each character, in order. The case does not count, so 'Kavek'
+// and 'kavek' give one line. A character that is not a letter from a to z gives an empty glyph, a
+// gap. It is a pure function of the word: the same word gives the same strokes on every call.
+export function glyphsOf(word) {
+  return Array.from(String(word == null ? '' : word).toLowerCase(), (ch) => {
+    const k = ch.charCodeAt(0) - 97;
+    return k >= 0 && k < GLYPHS.length ? GLYPHS[k] : [];
+  });
+}
+
+// ---------------------------------------------------------------- the card, p2-42
+// The parts of a proto that the maker sizes: the door of the dome, the doors of the hive, and the
+// steps of the well. ruin-geometry.js builds each part at `k` times the height of the maker, inside
+// [lo, hi] units, because a part must fit the wall it stands in. The card says that the part fits
+// the body of the maker only when the top of that range does not cut it. The hive holds its doors
+// under the step of a terrace, 5 units, less 0.8.
+export const MAKER_PARTS = Object.freeze({
+  dome: Object.freeze({ k: 1.3, lo: 3, hi: 9, line: 'The door in the base ring fits that body.' }),
+  hive: Object.freeze({ k: 1.15, lo: 1.2, hi: 4.2, line: 'The doors of the mounds fit that body.' }),
+  well: Object.freeze({ k: 0.8, lo: 0.9, hi: 4, line: 'The steps down the shaft fit that body.' }),
+});
+
+// True when the maker sets the part of the proto and the top of its range does not cut it.
+export function makerFits(proto, maker) {
+  const p = MAKER_PARTS[proto];
+  return !!p && p.k * ((maker && maker.height) || 1.8) <= p.hi;
+}
+
+// The words for the body of a maker. A species maker takes the words of its locomotion, the way the
+// fauna card shows the body; a rolled maker takes the count of its limbs. A winged maker has two
+// legs and two wings, which is `limbs` 4 in world.ruin.maker.
+const COUNT = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
+const LOCO_BODY = {
+  monopod: 'one leg', biped: 'two legs', tripod: 'three legs', quad: 'four legs', hexapod: 'six legs',
+  serpent: 'no legs', slinger: 'two legs', plough: 'four legs', wings: 'two legs and two wings',
+};
+// A slinger, a plough, and a winged animal carry no leg on the fauna card, and the limbs of p2-35
+// give their makers legs. The carvings show the makers, so the card states the legs and then what
+// the living animal has, and the card and the fauna card never disagree.
+const NO_LEGS_NOW = new Set(['slinger', 'plough', 'wings']);
+export function limbWords(limbs) {
+  const n = Math.max(0, Math.round(Number(limbs) || 0));
+  if (n === 1) return 'one leg';
+  return `${COUNT[n] || String(n)} legs`;
+}
+
+// A height in metres to the nearest half metre, as the card prints it: '3', '3.5', '1.5'.
+const halfMetre = (h) => {
+  const v = Math.round(Number(h) * 2) / 2;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+};
+
+// The text of the card of the ruin: the name, the line under it, and the rows in the order of p2-42.
+// Each row is a label and one or two plain sentences in the voice of the log. It reads the world and
+// writes nothing, and it holds no DOM, so tools/ruin-check.mjs tests it in Node. Null for a world
+// with no ruin.
+//
+//   name   the name of the proto on the card
+//   sub    'Ruin · sends on 7.316 MHz'
+//   rows   [{ key, label, text }], and the last row, `way`, also holds `glyphs`
+export function ruinCard(world) {
+  const ruin = world && world.ruin;
+  if (!ruin) return null;
+  const row = protoRow(ruin.proto) || RUIN_PROTOS[0];
+  const maker = ruin.maker || { species: -1, limbs: 2, height: 1.8, rolled: true };
+  const G = !maker.rolled && maker.species >= 0 && world.species ? world.species[maker.species] : null;
+  const log = world.source && world.source.log;
+
+  // Makers, decision 4. The name of a species is the name of the fauna card, in the case of a
+  // sentence, as the log writes it.
+  const makers = [];
+  if (G && G.lore) {
+    makers.push(`The carvings show a body with ${LOCO_BODY[G.loco] || limbWords(maker.limbs)}.`);
+    makers.push(`It is the body of the ${G.lore.name.toLowerCase()}.`);
+    if (NO_LEGS_NOW.has(G.loco)) makers.push('The ones that live here now have no legs.');
+  } else {
+    makers.push(`The carvings show a body with ${limbWords(maker.limbs)} and a height of about ${halfMetre(maker.height)} metres.`);
+    makers.push('No animal of this world has that body.');
+  }
+  if (makerFits(ruin.proto, maker)) makers.push(MAKER_PARTS[ruin.proto].line);
+
+  // The call, decision 6: the day of the beacon and the ship, from the log of the wreck. Two
+  // sentences, because the log holds no sentence over 20 words.
+  const ship = log && log.probe ? ` of the log of ${log.probe}` : ' of the log';
+  const call = log && log.beacon
+    ? `It began to send on day ${log.beacon}${ship}. That was the day the crew put the beacon on the mast.`
+    : 'It began to send on the day the crew put the beacon on the mast.';
+
+  return {
+    name: row.name,
+    sub: `Ruin · sends on ${ruin.freq} MHz`,
+    rows: [
+      { key: 'size', label: 'Size', text: `It stands ${row.height} metres high and ${row.disc * 2} metres across.` },
+      { key: 'age', label: 'Age', text: 'Older than the rock it stands on. The probe cannot date it.' },
+      { key: 'stone', label: 'Stone', text: world.type === 'lava' ? 'A stone that takes the heat and holds it.' : 'A stone this world does not make.' },
+      { key: 'makers', label: 'Makers', text: makers.join(' ') },
+      { key: 'call', label: 'The call', text: call },
+      { key: 'way', label: 'The way on', text: 'The probe reads the name of another world here. It cannot read it yet.', glyphs: glyphsOf(portalSeed(world)) },
+    ],
+  };
 }

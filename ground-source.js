@@ -23,7 +23,7 @@ import * as THREE from 'three';
 import { motifOf } from './music.js';
 import { wreckGeometry, hullOf } from './wreck-geometry.js';
 import { ruinGeometry } from './ruin-geometry.js';
-import { protoRow } from './ruin-types.js';
+import { protoRow, ruinCard } from './ruin-types.js';
 import { carrierColour } from './carrier-globe.js';
 
 const DISC_R = 12;           // units, the ring of the mark. The worker flattens 14.
@@ -521,6 +521,35 @@ const CARD_DISC = 2.2;       // units: the ground disc under the wreck
 const ABRUPT_SLOT = 'end.cut';
 const ABRUPT = '[log ends abruptly]';
 
+// The stage of a card: the camera, the sun with its shadow, the sky light, the fill, and the pivot
+// the body turns on. The card of the wreck and the card of the ruin take one stage each, because
+// each owns its own canvas. `shadow` is the half width of the box the shadow of the sun covers.
+function cardStage(shadow = 3) {
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 50);
+  const sun = new THREE.DirectionalLight('#fff4e0', 2.4); sun.position.set(2.5, 4, 3);
+  sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0005;
+  const sc = sun.shadow.camera; sc.left = -shadow; sc.right = shadow; sc.top = shadow; sc.bottom = -shadow; sc.near = 1; sc.far = 14;
+  scene.add(sun, new THREE.HemisphereLight('#9fbfff', '#3a2a1a', 0.75));
+  const fill = new THREE.DirectionalLight('#6a86d8', 0.5); fill.position.set(-3, 1, -2);
+  scene.add(fill);
+  // The body turns and the disc under it does not, so the pivot carries the body alone.
+  const pivot = new THREE.Group();
+  scene.add(pivot);
+  return { scene, camera, fill, pivot };
+}
+
+// The renderer of a card, on its own canvas. It is built on the first open, so a reader who never
+// opens the card pays for no context.
+function cardRenderer(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  return renderer;
+}
+
 export class SourceInspector {
   constructor({ card, canvas }) {
     this.card = card; this.canvas = canvas;
@@ -530,23 +559,13 @@ export class SourceInspector {
     this.logEl = card.querySelector('.clog');
     this.renderer = null; this.open = false;
     this.clock = new THREE.Clock();
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(36, 1, 0.1, 50);
-    const sun = new THREE.DirectionalLight('#fff4e0', 2.4); sun.position.set(2.5, 4, 3);
-    sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0005;
-    const sc = sun.shadow.camera; sc.left = -3; sc.right = 3; sc.top = 3; sc.bottom = -3; sc.near = 1; sc.far = 14;
-    this.scene.add(sun, new THREE.HemisphereLight('#9fbfff', '#3a2a1a', 0.75));
-    this.fill = new THREE.DirectionalLight('#6a86d8', 0.5); this.fill.position.set(-3, 1, -2);
-    this.scene.add(this.fill);
+    Object.assign(this, cardStage());
     this.ground = new THREE.Mesh(
       new THREE.CircleGeometry(CARD_DISC, 28),
       new THREE.MeshStandardMaterial({ color: '#6fa85a', roughness: 1, flatShading: true }));
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;
     this.scene.add(this.ground);
-    // The wreck turns and the disc under it does not, so the pivot carries the body alone.
-    this.pivot = new THREE.Group();
-    this.scene.add(this.pivot);
     this.mesh = null;
     this.lamp = null;
   }
@@ -555,13 +574,7 @@ export class SourceInspector {
   // is the ground colour of the world, and `hull` is hullOf(world), so the card and the patch agree.
   // `tail` is an element the page puts under the last entry, or null: the tuner of p2-39.
   show(log, accent, groundColor, motif, hull, tail = null) {
-    if (!this.renderer) {
-      this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
-      this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-      this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    }
+    if (!this.renderer) this.renderer = cardRenderer(this.canvas);
     this.motif = motif || null;
     // The card outlives a world, and the next world may carry another hull.
     if (this.mesh && this.hull !== hull) {
@@ -655,6 +668,251 @@ export class SourceInspector {
   dispose() {
     if (this.mesh) { this.mesh.geometry.dispose(); this.mesh.material.dispose(); this.mesh = null; }
     if (this.lamp) { this.lamp.geometry.dispose(); this.lamp.material.dispose(); this.lamp = null; }
+    if (this.renderer) { this.renderer.dispose(); this.renderer = null; }
+  }
+}
+
+// ---------------------------------------------------------------- the card of the ruin, p2-42
+// The card of the ruin takes the shell of the card of the wreck: the preview turns the body of
+// ruinGeometry() on its own axis at the left, and the text reads at the right. ruinCard() of
+// ruin-types.js writes the text, so tools/ruin-check.mjs tests it in Node, and this class only
+// draws it. The first open of the card is the find of chapter 2; inspectRuin() in app.js holds
+// that rule, as inspectSource() holds it for the wreck.
+//
+// The protos differ in shape: the spires stand 88 units high on a disc of 24, and the hive stands 30
+// on a disc of 55. So the card fits the ball that holds the turning body into the view, and not the
+// height, and the eye stands higher over a flat ruin than over a tall one.
+//
+// The well goes 46 units into the ground. The disc of the card is a ring with the mouth open, and
+// every fragment of the body under the ground must stand behind the mouth: the ray from the eye
+// to it crosses the ground inside the mouth. mouthTest() holds that rule, so the shaft shows
+// through the mouth and never hangs under the disc.
+const RUIN_FRAME_R = 2.3;          // units: the radius of the ball the turning body fills
+const RUIN_SPIN = 0.16;            // radians per second: one turn in about 39 seconds
+const RUIN_TILT = [0.16, 0.5];     // radians: the eye over the horizon, for a tall ruin and a flat one
+const RUIN_ORBIT_SPIN = 0.12;      // radians per second: the slabs of the floaters turn on the pivot
+const RUIN_DISC_PAD = 1.12;        // the disc of the card reaches this far past the parts
+// The line of glyphs, in the units of one glyph: its width, the gap, and the stroke. GLYPH_PX is the
+// pixels of one unit, the height of a glyph.
+const GLYPH_W = 0.7;
+const GLYPH_GAP = 0.4;
+const GLYPH_STROKE = 0.085;
+const GLYPH_PX = 20;
+
+// The rule of the mouth of the well, as a patch of the fragment shader: a fragment under the ground
+// shows only when the ray from the eye crosses the ground inside the mouth, whose radius `uMouth`
+// holds. A ruin with no mouth takes 0, so no part of it shows under the ground. The pivot turns the
+// body about y through the origin, which moves neither the ground nor the mouth.
+function mouthTest(material, mouth) {
+  material.onBeforeCompile = (sh) => {
+    sh.uniforms.uMouth = mouth;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRuinWorld;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvRuinWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRuinWorld;\nuniform float uMouth;')
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+  if (vRuinWorld.y < -0.001) {
+    vec3 ruinRay = vRuinWorld - cameraPosition;
+    if (ruinRay.y >= 0.0) discard;
+    vec2 ruinHit = cameraPosition.xz - ruinRay.xz * (cameraPosition.y / ruinRay.y);
+    if (length(ruinHit) > uMouth) discard;
+  }`);
+  };
+  material.customProgramCacheKey = () => 'ruin-card-mouth';
+  return material;
+}
+
+// The line of glyphs as inline SVG: a rule across the whole word at y = 0, and the strokes of each
+// glyph hanging from it. It holds no text, so the page does not print the name the glyphs spell.
+const f3 = (v) => String(Math.round(v * 1000) / 1000);
+export function glyphSvg(glyphs) {
+  const n = glyphs.length;
+  const w = Math.max(n * GLYPH_W + (n - 1) * GLYPH_GAP, GLYPH_W);
+  const lines = [], dots = [];
+  glyphs.forEach((g, i) => {
+    const x0 = i * (GLYPH_W + GLYPH_GAP);
+    for (const s of g) {
+      if (s.length === 1) dots.push(`<circle cx="${f3(x0 + s[0][0] * GLYPH_W)}" cy="${f3(s[0][1])}" r="0.075"/>`);
+      else lines.push(`<polyline points="${s.map(([x, y]) => `${f3(x0 + x * GLYPH_W)},${f3(y)}`).join(' ')}"/>`);
+    }
+  });
+  const pad = 0.2, top = -0.15, h = 1.3, vw = w + pad * 2;
+  return `<svg class="cglyph-line" viewBox="${f3(-pad)} ${top} ${f3(vw)} ${h}" width="${Math.round(vw * GLYPH_PX)}" height="${Math.round(h * GLYPH_PX)}"`
+    + ' role="img" aria-label="A line of glyphs. The probe cannot read it." focusable="false">'
+    + `<g fill="none" stroke="currentColor" stroke-width="${GLYPH_STROKE}" stroke-linecap="round" stroke-linejoin="round">`
+    + `<line x1="${f3(-pad * 0.6)}" y1="0" x2="${f3(w + pad * 0.6)}" y2="0"/>${lines.join('')}</g>`
+    + `<g fill="currentColor">${dots.join('')}</g></svg>`;
+}
+
+// One row of the card. The way on also holds the line of glyphs and the chip; the chip is the only
+// place the copy says "Coming soon".
+function ruinRowHtml(r) {
+  if (r.key === 'way') {
+    return `<div class="crow cway" data-row="${r.key}"><dt>${esc(r.label)}</dt><dd>`
+      + `<div class="cglyphs">${glyphSvg(r.glyphs || [])}<span class="csoon">Coming soon</span></div>`
+      + `<p>${esc(r.text)}</p></dd></div>`;
+  }
+  return `<div class="crow" data-row="${r.key}"><dt>${esc(r.label)}</dt><dd>${esc(r.text)}</dd></div>`;
+}
+
+export class RuinInspector {
+  constructor({ card, canvas }) {
+    this.card = card; this.canvas = canvas;
+    this.nameEl = card.querySelector('.cname');
+    this.latinEl = card.querySelector('.clatin');
+    this.rowsEl = card.querySelector('.crows');
+    this.scrollEl = card.querySelector('.cruin');
+    this.renderer = null; this.open = false;
+    this.clock = new THREE.Clock();
+    Object.assign(this, cardStage(4));
+    this.mouth = { value: 0 };      // the uniform of mouthTest(), in units of the card
+    this.key = null;                // the ruin the stage holds: the seed, the type, and the proto
+    this.ground = null; this.body = null; this.glow = null; this.glowMat = null; this.orbit = null;
+    this.glowColor = new THREE.Color('#ffffff');
+    this.rhythm = null;
+  }
+
+  // `glow` is the colour of chapter 2 on this world, the colour of the glow on the ground. `accent`
+  // is that colour made light enough to read on the dark card, for the text. `groundColor` is the
+  // ground colour of the world.
+  show(world, { glow, accent, groundColor } = {}) {
+    const text = ruinCard(world);
+    if (!text) return;
+    if (!this.renderer) this.renderer = cardRenderer(this.canvas);
+    const key = `${world.seed}|${world.type}|${world.ruin.proto}`;
+    if (this.key !== key) { this._drop(); this._build(world); this.key = key; }
+    this.glowColor.set(glow || carrierColour(world, 2));
+    this.rhythm = ruinRhythm(world);
+    this.ground.material.color.set(groundColor || '#6fa85a');
+    if (accent) this.card.style.setProperty('--ruin', accent);
+
+    this.nameEl.textContent = text.name;
+    this.latinEl.textContent = text.sub;
+    this.rowsEl.innerHTML = text.rows.map(ruinRowHtml).join('');
+    if (this.scrollEl) this.scrollEl.scrollTop = 0;
+    this.card.hidden = false;
+    requestAnimationFrame(() => this.card.classList.add('show'));
+    if (!this.open) { this.open = true; this.clock.start(); this.loop(); }
+    this.resize();
+  }
+
+  // The body, the glow, and the orbit of the ruin of one world, fitted into the ball of the view.
+  _build(world) {
+    const proto = world.ruin.proto;
+    const g = ruinGeometry(proto, world);
+    // The reach of the parts over the ground: the radius the turning body sweeps, and the height.
+    let reach = 0, top = 0;
+    const v = new THREE.Vector3();
+    for (const geo of [g.body, g.glow, g.orbit]) {
+      if (!geo) continue;
+      const p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i);
+        if (v.y < 0) continue;
+        reach = Math.max(reach, Math.hypot(v.x, v.z));
+        top = Math.max(top, v.y);
+      }
+    }
+    const row = protoRow(proto);
+    top = Math.max(top, 1);
+    // The disc of the card reaches past the parts, and the ball holds the disc too.
+    const disc = Math.max(reach, row ? row.disc : reach, 1) * RUIN_DISC_PAD;
+    const s = RUIN_FRAME_R / Math.hypot(disc, top / 2);
+    this.fit = s;
+    this.mid = (top * s) / 2;
+    // A tall ruin takes a low eye, and a flat one a high eye, so both read as a thing on the ground.
+    const flat = THREE.MathUtils.clamp(1 - top / 2 / disc, 0, 1);
+    this.tilt = THREE.MathUtils.lerp(RUIN_TILT[0], RUIN_TILT[1], flat);
+
+    const hole = g.body.userData.hole || 0;
+    this.mouth.value = hole * s;
+    const stone = mouthTest(new THREE.MeshStandardMaterial({
+      vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0,
+    }), this.mouth);
+    this.body = new THREE.Mesh(g.body, stone);
+    this.body.scale.setScalar(s);
+    this.body.castShadow = true; this.body.receiveShadow = true;
+    this.pivot.add(this.body);
+    if (g.glow) {
+      this.glowMat = mouthTest(new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), this.mouth);
+      this.glow = new THREE.Mesh(g.glow, this.glowMat);
+      this.glow.scale.setScalar(s);
+      this.pivot.add(this.glow);
+    }
+    if (g.orbit) {
+      this.orbit = new THREE.Mesh(g.orbit, stone);
+      this.orbit.scale.setScalar(s);
+      this.orbit.castShadow = true; this.orbit.receiveShadow = true;
+      this.pivot.add(this.orbit);
+    }
+
+    // The ground: a disc past the parts, or a ring with the mouth open for the well.
+    const r = disc * s;
+    const geo = hole ? new THREE.RingGeometry(hole * s, r, 48, 1) : new THREE.CircleGeometry(r, 48);
+    this.ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: '#6fa85a', roughness: 1, flatShading: true }));
+    this.ground.rotation.x = -Math.PI / 2;
+    this.ground.receiveShadow = true;
+    this.scene.add(this.ground);
+
+    // The eye looks at the middle of the ball from far enough that the whole ball fits the height
+    // of the view. The top of the ball over a flat ruin holds nothing, so the eye aims lower there.
+    const dist = RUIN_FRAME_R / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.04;
+    const aim = this.mid * (1 - 0.5 * flat);
+    this.camera.position.set(0, aim + dist * Math.sin(this.tilt), dist * Math.cos(this.tilt));
+    this.camera.lookAt(0, aim, 0);
+  }
+
+  // Give back the body of the last ruin. The card outlives a world, and the next world holds another.
+  _drop() {
+    const mats = new Set();
+    for (const m of [this.body, this.glow, this.orbit, this.ground]) {
+      if (!m) continue;
+      m.removeFromParent();
+      m.geometry.dispose();
+      mats.add(m.material);
+    }
+    mats.forEach((m) => m.dispose());
+    this.body = null; this.glow = null; this.glowMat = null; this.orbit = null; this.ground = null;
+    this.key = null;
+  }
+
+  hide() {
+    if (!this.open) return;
+    this.open = false;
+    this.card.classList.remove('show');
+    // The card is shared with the other subjects. See SourceInspector.hide().
+    setTimeout(() => { if (!this.open && !this.card.classList.contains('show')) this.card.hidden = true; }, 250);
+  }
+
+  resize() {
+    if (!this.renderer) return;
+    const w = this.canvas.clientWidth || 300, h = this.canvas.clientHeight || 300;
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+  }
+
+  // One frame of the card: the body turns, the slabs of the floaters turn on it, and the glow
+  // blinks the rhythm of the glow on the ground, ruinRhythm(), on the clock of the card.
+  frame(t) {
+    this.pivot.rotation.y = t * RUIN_SPIN;
+    if (this.orbit) this.orbit.rotation.y = t * RUIN_ORBIT_SPIN;
+    if (this.rhythm && this.glowMat) {
+      const p = this.rhythm.period;
+      const k = lampLevel(this.rhythm, ((t % p) + p) % p);
+      this.glowMat.color.copy(this.glowColor).multiplyScalar(0.35 + 0.65 * k);
+    }
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  loop() {
+    if (!this.open) return;
+    requestAnimationFrame(() => this.loop());
+    this.frame(this.clock.getElapsedTime());
+  }
+
+  dispose() {
+    this._drop();
     if (this.renderer) { this.renderer.dispose(); this.renderer = null; }
   }
 }

@@ -2,7 +2,7 @@
 //
 //   node tools/carrier-fix-check.mjs
 //
-// Six parts:
+// Seven parts:
 //
 // A. The store. carrier-store.js runs against a fake localStorage: one fix per cell, the brief that
 //    a record from an older build reads as unread, the find that drops the fixes and survives a
@@ -42,6 +42,12 @@
 //    over 500 seeds the frequency of freqOf() locks, a number 0.001 off gives the near miss, and no
 //    answer but the lock prints the frequency. The page part of the tuner needs a browser; see
 //    "The tuner" in docs/ruin.md for how it was tested.
+//
+// G. The find of the ruin, p2-42. A record with both finds stands two pins: the pin of the wreck in
+//    the colour of chapter 1 and the pin of the ruin in the colour of chapter 2, with the mini body
+//    of ruinGeometry() on top at MINI_UNIT and a lamp at the lamp of the body that blinks the motif
+//    of the wreck at half the speed. setFound() of chapter 2 stands the pin of the ruin, a find by
+//    chance stands it alone, and a world with no ruin never stands it.
 //
 // site.js takes three.js by a bare name; three-hook.mjs resolves it in Node.
 import { root } from './three-hook.mjs';
@@ -692,6 +698,104 @@ let tunerRow = '';
     + ' 0.001 and 0.050 off gave the near miss, 0.051 off gave static';
 }
 
+// ---------------------------------------------------------------- G: the find of the ruin, p2-42
+// The find of chapter 2 stands a second pin at the cell of the ruin, with the mini body of
+// ruinGeometry() on top and a lamp that blinks, in the colour of chapter 2. The pin of the wreck
+// stays. Every vertex is read back in the local frame of the planet, as part D reads the wreck.
+let ruinRow = '';
+{
+  const { ruinGeometry, miniHeight, MINI_BUDGET, triangles } = await import(root + 'ruin-geometry.js');
+  const M = await import(root + 'music.js');
+  const wreckDir = snapDir(randDir());
+  const world = worldWith('Ruin', wreckDir);
+  const col = new Float32Array(3 * 600);
+  for (let i = 0; i < 600; i++) { col[i * 3] = 0.05; col[i * 3 + 1] = 0.3 + 0.01 * (i % 7); col[i * 3 + 2] = 0.04; }
+  G.pickCarrierColour(world, col, null);
+  const hex = (c) => new THREE.Color(c).getHex();
+  // the ruin 20 cells from the wreck, on the middle of its cell
+  const wreckSite = S.sourceSite(world);
+  const ruinDir = snapDir(dirAt(wreckSite, 60, 20 * S.CELL));
+  world.type = 'ice';
+  world.ruin = { kind: 'ruin', proto: 'spires', dir: [ruinDir.x, ruinDir.y, ruinDir.z], freq: '7.316',
+    maker: { species: -1, limbs: 6, height: 3, rolled: true }, from: 'north-east', band: 0, log: null };
+  const at = S.sourceSite(world, world.ruin);
+  const up = S.siteDir(at.lat, at.lon, new THREE.Vector3());
+  const ground = drapeR(world, up) - G.DRAPE_LIFT;
+  const reach = (mesh) => {
+    mesh.updateMatrixWorld(true);
+    const pos = mesh.geometry.attributes.position, v = new THREE.Vector3();
+    let lo = Infinity, hi = -Infinity, arc = 0;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      const over = v.dot(up) - ground;
+      lo = Math.min(lo, over); hi = Math.max(hi, over);
+      arc = Math.max(arc, S.arcTo(at, v.clone().normalize()) / S.CELL);
+    }
+    return { lo, hi, arc };
+  };
+
+  // A tuned record with both finds: the group runs chapter 2 and stands both pins.
+  const record = { fixes: [], found: true, briefed: 0, ts: 0, tuned: true, ruin: { fixes: [], found: true, briefed: 0 } };
+  let group = G.makeCarrierGroup(world, record, HM);
+  let u = group.userData;
+  ok('ruin', u.chapter === 2 && u.found, 'a record with both finds did not run a found chapter 2');
+  ok('ruin', !!u.wreck && u.wreck.obj.parent === group, 'the pin of the wreck went away after the find of the ruin');
+  ok('ruin', !!u.ruin && u.ruin.obj.parent === group, 'the find of the ruin stood no pin at the ruin');
+  ok('ruin', u.ruin.pinMat.color.getHex() === hex(G.carrierColour(world, 2)), 'the pin of the ruin is not in the colour of chapter 2');
+  ok('ruin', u.wreck.pinMat.color.getHex() === hex(G.carrierColour(world, 1)), 'the pin of the wreck left the colour of chapter 1');
+  const uni = G.carrierUniforms();
+  ok('ruin', uni.uWedgeCount.value === 0 && uni.uGoalK.value > 0 && G.inCell(uni.uGoalN.value, up) > 0, 'the found ruin does not keep its cell filled with no wedge');
+  u.ruin.obj.updateMatrixWorld(true);
+  const pin = reach(u.ruin.pin);
+  ok('ruin', Math.abs(pin.lo) < 1e-6 && Math.abs(pin.hi - G.PIN_H) < 1e-6, `the pin of the ruin runs ${pin.lo.toFixed(5)} to ${pin.hi.toFixed(5)} over the ground`);
+  const model = reach(u.ruin.body);
+  const tall = miniHeight('spires');
+  ok('ruin', Math.abs(model.lo - G.PIN_H) < 1e-4, `the mini ruin stands ${model.lo.toFixed(5)} over the ground and not on the pin`);
+  ok('ruin', Math.abs(model.hi - model.lo - tall) < 1e-4, `the mini ruin stands ${(model.hi - model.lo).toFixed(5)} tall and not ${tall.toFixed(5)}`);
+  ok('ruin', model.arc < 1.5, `the mini ruin spreads ${model.arc.toFixed(2)} cells from its cell`);
+  const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(u.ruin.obj.quaternion).normalize();
+  ok('ruin', axis.angleTo(up) < 1e-6, `the pin of the ruin stands ${axis.angleTo(up).toFixed(6)} rad off the surface normal`);
+  const lamp = reach(u.ruin.lamp);
+  ok('ruin', lamp.lo > G.PIN_H + tall * 0.9, `the lamp of the spires stands ${lamp.lo.toFixed(5)} over the ground and not at the tip`);
+  const stock = THREE.Mesh.prototype.raycast;
+  ok('ruin', [u.ruin.pin, u.ruin.body, u.ruin.lamp].every((m) => m.raycast !== stock), 'a part of the pin of the ruin answers a ray');
+  // the lamp blinks the rhythm of ruinLampRhythm(): the motif of the wreck at half the speed
+  const rh = G.ruinLampRhythm(world), m = M.motifOf(world);
+  ok('ruin', Math.abs(rh.period - 2 * m.period) < 1e-9 && Math.abs(rh.stepDur - 2 * m.stepDur) < 1e-9 && rh.steps.join() === m.steps.join(), 'the lamp of the ruin does not take the motif of the wreck at half the speed');
+  const levels = new Set();
+  for (let k = 0; k < 40; k++) { G.updateCarrierGroup(group, rh.period / 40); levels.add(u.ruin.level.toFixed(3)); }
+  ok('ruin', levels.size > 5, `the lamp of the ruin took ${levels.size} levels over one period and does not blink`);
+  ok('ruin', u.ruin.float.rotation.y !== 0, 'the mini ruin does not turn');
+  // every proto builds a mini inside the budget, with a lamp
+  for (const p of R.RUIN_PROTOS) {
+    const g = ruinGeometry(p.id, { type: p.fits[0], ruin: { maker: { limbs: 4, height: 3 } } }, { mini: true });
+    ok('ruin', triangles(g.body) <= MINI_BUDGET && g.glow === null && g.lamp.length === 3, `the mini of ${p.id} breaks the budget or holds a glow`);
+  }
+  const lampTop = lamp.lo;
+  G.disposeCarrierGroup(group);
+  ok('ruin', u.ruin == null && u.wreck == null, 'the dispose left a pin behind');
+
+  // setFound() of chapter 2 on a group of the search stands the pin of the ruin, and the wreck keeps
+  // its pin; a find of the ruin by chance, with the wreck not found, stands the ruin alone.
+  group = G.makeCarrierGroup(world, { ...record, ruin: { fixes: [], found: false, briefed: 0 } }, HM);
+  u = group.userData;
+  ok('ruin', !u.ruin && !!u.wreck, 'the group stood a pin at the ruin before its find');
+  G.setFound(group, world, HM, { chapter: 2 });
+  ok('ruin', !!u.ruin && !!u.wreck && u.found, 'setFound() of chapter 2 did not stand the pin of the ruin beside the pin of the wreck');
+  G.disposeCarrierGroup(group);
+  group = G.makeCarrierGroup(world, { ...record, found: false }, HM);
+  u = group.userData;
+  ok('ruin', !!u.ruin && !u.wreck, 'a find of the ruin with the wreck not found did not stand the ruin alone');
+  G.disposeCarrierGroup(group);
+  // a world with no ruin stands no pin of the ruin, whatever the record holds
+  group = G.makeCarrierGroup({ ...world, ruin: null }, record, HM);
+  ok('ruin', !group.userData.ruin, 'a world with no ruin stood a pin of the ruin');
+  G.disposeCarrierGroup(group);
+
+  ruinRow = `  ruin    the pin of the ruin stands ${pin.hi.toFixed(3)} radii tall beside the pin of the wreck, the mini spires`
+    + ` ${(model.hi - model.lo).toFixed(4)} tall on top with the lamp at ${lampTop.toFixed(4)}, ${levels.size} levels of the lamp over one period`;
+}
+
 // ---------------------------------------------------------------- the report
 console.log('carrier-fix-check');
 console.log('  store   one fix per cell, the brief, the find that drops the fixes, both bounds, a quota error, and garbage');
@@ -706,6 +810,7 @@ console.log(markRow);
 console.log(goalRow);
 console.log(chapterRow);
 console.log(tunerRow);
+console.log(ruinRow);
 if (fails.length) {
   console.error('\nFAIL');
   for (const f of fails) console.error('  ' + f);

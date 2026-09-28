@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 // The table of protos: the ids, the fits, the disc, and the height. ruin-types.js holds it, so the
 // worker and the tools read the same rows with no three.js.
-import { RUIN_PROTOS, protoRow } from './ruin-types.js';
+import { RUIN_PROTOS, protoRow, MAKER_PARTS } from './ruin-types.js';
 
 // ---------------------------------------------------------------- the stone
 // The stone of a ruin is fixed per world type: the stone, the dark, and an accent. It does not take
@@ -281,6 +281,10 @@ function weld(parts, colors) {
 // maker is in metres, from 0.3 for a small animal to 30 for a giant, and the door stays inside
 // [lo, hi] units, because a door must fit the wall it stands in.
 const makerSize = (B, k, lo, hi) => Math.min(hi, Math.max(lo, k * ((B.maker && B.maker.height) || 1.8)));
+// The part the card of p2-42 names: the door of the dome, the doors of the hive, and the steps of
+// the well. MAKER_PARTS of ruin-types.js holds the numbers, so the card says "fits" only where the
+// top of the range does not cut the part this file builds.
+const makerPartSize = (B, id) => { const p = MAKER_PARTS[id]; return makerSize(B, p.k, p.lo, p.hi); };
 
 // ---------------------------------------------------------------- the eight protos
 const BUILD = {
@@ -313,7 +317,7 @@ const BUILD = {
     const r = B.r, R = 28, n = 14, seg = B.mini ? 6 : 12;
     const reach = [12, 12, 5, 12, 8, 3, 12, 10, 12, 4, 12, 7, 12, 11];
     // the base ring, with a gap for the door between the first two ribs
-    const doorH = makerSize(B, 1.3, 3, 9), doorW = makerSize(B, 0.9, 2.6, 8);
+    const doorH = makerPartSize(B, 'dome'), doorW = makerSize(B, 0.9, 2.6, 8);
     const doorA = Math.PI / n, gap = doorW / R;
     add(B, 'dark', ringWall(R - 1.6, R + 1.6, 2.2, B.mini ? 18 : 36, doorA + gap / 2, Math.PI * 2 - gap), 0, 0, 0);
     if (!B.mini) {
@@ -398,7 +402,7 @@ const BUILD = {
     B.lamp = [0, 2, 0];
     // the steps: a stair down the wall, one step per rise, the rise from the maker
     if (!B.mini) {
-      const rise = makerSize(B, 0.8, 0.9, 4), pitch = 0.45 * (rise / 1.5), along = 4.2 * (rise / 1.5);
+      const rise = makerPartSize(B, 'well'), pitch = 0.45 * (rise / 1.5), along = 4.2 * (rise / 1.5);
       const steps = Math.floor((depth - 2) / rise);
       for (let i = 0; i < steps; i++) {
         const a = i * pitch;
@@ -516,7 +520,7 @@ const BUILD = {
   // outer wall and nothing more.
   hive(B) {
     const r = B.r, rc = 2.6, gap = 0.12, STEP = 5, a = rc + gap, sq = Math.sqrt(3);
-    const doorH = makerSize(B, 1.15, 1.2, STEP - 0.8), doorW = doorH * 0.7;
+    const doorH = makerPartSize(B, 'hive'), doorW = doorH * 0.7;   // the table holds STEP - 0.8
     // face k of a cell looks at the neighbour at this step of the axial grid
     const NB = [[0, 1], [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1]];
     const key = (q, s) => q + ',' + s;
