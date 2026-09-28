@@ -463,6 +463,26 @@ button.probe[hidden] { display: none; }
   letter-spacing: 0.04em; white-space: nowrap; opacity: 0.9;
 }
 .cruin-crew:empty { display: none; }
+/* The crew at the ruin, p2-43: the goers, one to a row, and the second log under them. The rows
+   take the look of the crew of the wreck and the entries take the rail and the dots of its log, so
+   the reader knows both at once. The keeper of the second log is marked; one person who went alone
+   is marked as the writer of the note. The titled entries take the colour of the ruin. The log
+   stands a little in from the edge, so the dots on the rail are not cut. */
+.cruin-crew { margin: 4px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.cruin-head {
+  margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em; line-height: 1.2;
+  text-transform: uppercase; color: var(--ruin, var(--accent));
+}
+.cruin-goers { display: flex; flex-direction: column; max-width: 62ch; margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+.cruin-goers span { display: flex; justify-content: space-between; gap: 12px; padding: 7px 2px; border-top: 1px solid var(--line); }
+.cruin-goers span:last-child { border-bottom: 1px solid var(--line); }
+.cruin-goers i { font-style: normal; opacity: 0.75; text-align: right; }
+.cruin-goers .ckeeper { color: var(--text); }
+.cruin-goers .ckeeper i::after { content: ' · keeps this log'; color: var(--ruin, var(--accent)); opacity: 1; }
+.cruin-goers.cnote .ckeeper i::after { content: ' · left this note'; }
+.cruin-log { padding: 2px 0 0 6px; }
+.cruin-log .clog-entry.ctitled h3 { color: var(--ruin, var(--accent)); }
+.cruin-log .clog-entry.ctitled h3::before { background: var(--ruin, var(--accent)); }
 #creature[data-subject="ruin"] .ctags,
 #creature[data-subject="ruin"] .cstory,
 #creature[data-subject="ruin"] .cnav,

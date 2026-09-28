@@ -45,7 +45,7 @@
 import { root } from './three-hook.mjs';
 
 const { TIERS, worldOpts, patchOpts } = await import(root + 'tiers.js');
-const { CELL, dirCell, cellDir, cellSite, sameCell } = await import(root + 'cell-grid.js');
+const { CELL, dirCell, cellDir, cellSite, sameCell, boxHeading } = await import(root + 'cell-grid.js');
 const { ruinGeometry } = await import(root + 'ruin-geometry.js');
 const S = await import(root + 'site.js');
 const R = await import(root + 'ruin-types.js');
@@ -311,7 +311,8 @@ function checkRuinPatch(seed, w, tier, tag) {
   const P = p.patch, s = P.source, row = R.protoRow(r.proto);
   const where = `${seed} ${tag} (${w.type}, ${r.proto})`;
   if (!s || s.kind !== 'ruin') { hole(`${where}: the cell of the ruin holds ${s ? s.kind : 'nothing'}`); return null; }
-  if (Object.keys(s).join(',') !== PATCH_KEYS) hole(`${where}: patch.source holds ${Object.keys(s).join(', ')}`);
+  const keys = r.log ? PATCH_KEYS + ',camp' : PATCH_KEYS;
+  if (Object.keys(s).join(',') !== keys) hole(`${where}: patch.source holds ${Object.keys(s).join(', ')}`);
   if (s.proto !== r.proto) hole(`${where}: the patch holds a ${s.proto}`);
   if (!(s.yaw >= 0 && s.yaw < Math.PI * 2)) hole(`${where}: yaw ${s.yaw}`);
   if (P.activity) hole(`${where}: the cell of the ruin holds the phenomenon too`);
@@ -365,10 +366,86 @@ function checkRuinPatch(seed, w, tier, tag) {
     footWorst = Math.max(footWorst, d - flat);
     if (d > flat + 1) { hole(`${where}: a part touches the ground ${d.toFixed(1)} units out, past the disc of ${flat}`); break; }
   }
+  // The traces of the crew, p2-43, decision 3 of p2-00: a camp for `all` and `some`, a cairn for
+  // `one`, and nothing for `none`. The rover stands at the camp when the goers came in it.
+  checkCamp(where, w, r, p, s, geo, flat, outer);
   geo.dispose();
   patchRuns++;
   patchByProto[r.proto] = (patchByProto[r.proto] || 0) + 1;
   return hashOf(p);
+}
+
+// The rules of p2-43, from its text and from docs/ruin.md: the trace stands at the edge of the
+// disc, on the side the crew came from, off the body, and inside the disc with its soft edge, on a
+// pad at the height of the floor. No plant and no group stands on it.
+const CAMP_GAP = 1;         // units of clear ground from the flat disc to the nearest part
+const CAMP_TURN = 0.5;      // rad: the most the trace stands off the way to the wreck
+const CAMP_EASE = 3;        // units: the pad eases back to the ground over this
+let campRuns = 0, cairnRuns = 0, roverRuns = 0, campBody = Infinity, campEdge = Infinity, campTurn = 0;
+function checkCamp(where, w, r, p, s, geo, flat, outer) {
+  const log = r.log, c = s.camp;
+  if (!log) { if (c) hole(`${where}: nobody went and the ruin holds a trace`); return; }
+  if (!c) { hole(`${where}: went "${log.went}" and the ruin holds no trace`); return; }
+  const kind = log.went === 'one' ? 'cairn' : 'camp';
+  if (c.kind !== kind) hole(`${where}: went "${log.went}" and the trace is a ${c.kind}`);
+  if (c.rover !== (kind === 'camp' && log.by === 'rover')) hole(`${where}: the goers came by ${log.by} and the rover ${c.rover ? 'stands' : 'does not stand'} at the camp`);
+  if (kind === 'camp') campRuns++; else cairnRuns++;
+  if (c.rover) roverRuns++;
+  if (Math.abs(c.y - s.y) > 1e-9) hole(`${where}: the trace stands at ${c.y}, and the floor at ${s.y}`);
+  // The side the crew came from: the way to the wreck in the box, within the turn of the draw.
+  const cell = dirCell(r.dir[0], r.dir[1], r.dir[2]);
+  const h = boxHeading(cell, w.source.dir);
+  const dx = c.x - s.x, dz = c.z - s.z;
+  const turn = Math.acos(Math.max(-1, Math.min(1, (dx * h.x + dz * h.z) / Math.hypot(dx, dz))));
+  campTurn = Math.max(campTurn, turn);
+  if (turn > CAMP_TURN + 1e-6) hole(`${where}: the trace stands ${(turn * 180 / Math.PI).toFixed(1)} degrees off the way to the wreck`);
+  // Inside the disc with its soft edge, and off the body: every vertex of the body, the glow, and
+  // the orbit, at any height, stands clear of every circle of the footprint.
+  const circles = R.campCircles(c);
+  const parts = ruinGeometry(r.proto, w);
+  const cy = Math.cos(s.yaw), sy = Math.sin(s.yaw);
+  let clear = Infinity;
+  for (const g of [parts.body, parts.glow, parts.orbit]) {
+    if (!g) continue;
+    const pos = g.attributes.position;
+    for (let v = 0; v < pos.count; v++) {
+      const lx = pos.getX(v), lz = pos.getZ(v);
+      const x = s.x + cy * lx + sy * lz, z = s.z - sy * lx + cy * lz;
+      for (const q of circles) clear = Math.min(clear, Math.hypot(x - q.x, z - q.z) - q.r);
+    }
+    g.dispose();
+  }
+  campBody = Math.min(campBody, clear);
+  if (clear < CAMP_GAP * 0.5) hole(`${where}: the ${c.kind} stands ${clear.toFixed(2)} units from the body`);
+  for (const q of circles) {
+    const d = Math.hypot(q.x - s.x, q.z - s.z);
+    campEdge = Math.min(campEdge, outer - (d + q.r));
+    if (d + q.r > outer) hole(`${where}: the ${c.kind} reaches ${(d + q.r - outer).toFixed(2)} units past the soft edge`);
+    if (d - q.r < flat + CAMP_GAP - 1e-6) hole(`${where}: the ${c.kind} reaches into the flat disc`);
+  }
+  // The pad: every node under a circle stands at the height of the floor.
+  const half = p.patch.size / 2, n = p.patch.n, g = p.patch.grid;
+  for (const q of circles) {
+    for (let j = Math.floor((q.z - q.r + half) / g); j <= Math.ceil((q.z + q.r + half) / g); j++) {
+      for (let i = Math.floor((q.x - q.r + half) / g); i <= Math.ceil((q.x + q.r + half) / g); i++) {
+        if (i < 0 || j < 0 || i >= n || j >= n) continue;
+        if (Math.hypot(-half + i * g - q.x, -half + j * g - q.z) > q.r) continue;
+        const dev = Math.abs(p.heights[j * n + i] - s.y);
+        if (dev > 1e-3) { hole(`${where}: the pad of the ${c.kind} is not flat: ${dev.toFixed(3)}`); return; }
+      }
+    }
+  }
+  // No plant on the pad, and no group within its spread of it.
+  for (let k = 0; k < p.flora.length; k += 8) {
+    for (const q of circles) {
+      if (Math.hypot(p.flora[k] - q.x, p.flora[k + 2] - q.z) < q.r + CAMP_EASE) { hole(`${where}: a plant stands on the ${c.kind}`); return; }
+    }
+  }
+  for (let k = 0; k < p.groups.length; k += 6) {
+    for (const q of circles) {
+      if (Math.hypot(p.groups[k] - q.x, p.groups[k + 1] - q.z) - p.groups[k + 4] < q.r + CAMP_EASE) hole(`${where}: a group stands on the ${c.kind}`);
+    }
+  }
 }
 
 // The patch after another world is the same patch, and the cell next to the ruin holds no ruin.
@@ -387,7 +464,7 @@ function checkRuinCache(seed, w, tier, first, other) {
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const mid = (d) => cellDir(dirCell(d[0], d[1], d[2]), 0.5, 0.5, [0, 0, 0]);
 const byBand = [0, 0, 0];
-const byProto = {}, byMotion = {}, byFrom = {};
+const byProto = {}, byMotion = {}, byFrom = {}, byWent = {};
 let surface = 0, wrecks = 0, ruins = 0, rolled = 0, highRuns = 0, coldRuns = 0;
 let arcMin = Infinity, arcMax = -Infinity;
 const missing = [], fellBack = [];
@@ -407,7 +484,11 @@ for (let i = 0; i < SEEDS; i++) {
 
   // The shape and the hashes.
   if (r.kind !== 'ruin') hole(`${seed}: kind is ${r.kind}`);
-  if (r.log !== null) hole(`${seed}: the log is not null`);
+  // The second log of p2-43: null when nobody went, and a log of the goers when somebody did.
+  const went = w.source.log && w.source.log.went;
+  if ((r.log === null) !== (went === 'none')) hole(`${seed}: went "${went}" and the second log is ${r.log === null ? 'null' : 'written'}`);
+  if (r.log && r.log.went !== went) hole(`${seed}: the second log went "${r.log.went}" and the first "${went}"`);
+  if (went) byWent[went] = (byWent[went] || 0) + 1;
   if (r.proto !== R.protoOf(w) || !TYPE_PROTOS[w.type].includes(r.proto)) hole(`${seed}: proto ${r.proto} on a ${w.type} world`);
   if (r.freq !== R.freqOf(seed)) hole(`${seed}: freq ${r.freq} is not freqOf() of the seed`);
   byProto[r.proto] = (byProto[r.proto] || 0) + 1;
@@ -513,6 +594,10 @@ console.log(`          the disc flat to ${flatWorst.toExponential(1)} units, the
 console.log(`  glyphs: ${R.GLYPHS.length} glyphs, all apart; ${lines.size} lines of glyphs for ${new Set(portals.map((p) => p.toLowerCase())).size} seeds of the way on`);
 console.log(`  card:   ${cardRuns} cards, ${cardSpecies} makers of a species and ${cardRolled} rolled, ${cardFits} with a door or steps that fit;`
   + ` the longest sentence holds ${cardLongest} words`);
+console.log(`  crew:   went ${list(byWent)}; at the patches ${campRuns} camps (${roverRuns} with the rover) and ${cairnRuns} cairns,`
+  + ` the nearest body ${campBody.toFixed(2)} units off, ${campEdge.toFixed(2)} units inside the soft edge at the least,`
+  + ` at most ${(campTurn * 180 / Math.PI).toFixed(1)} degrees off the way to the wreck`);
+if (!campRuns || !cairnRuns || !roverRuns) hole(`the patch check reached ${campRuns} camps, ${roverRuns} rovers, and ${cairnRuns} cairns`);
 if (Object.keys(patchByProto).length !== PROTO_ORDER.length) hole(`the patch check reached ${Object.keys(patchByProto).length} protos of ${PROTO_ORDER.length}`);
 if (fellBack.length) console.log(`  fell back, because no cell of the first band passed the tests: ${fellBack.join(', ')}`);
 if (missing.length) console.log(`  no ruin, because no cell of any band passed the tests: ${missing.join(', ')}`);

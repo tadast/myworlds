@@ -21,8 +21,8 @@
 // class by patch.source.kind. See "The ruin on its patch" in docs/ruin.md. p2-41.
 import * as THREE from 'three';
 import { motifOf, ruinMotifOf } from './music.js';
-import { wreckGeometry, hullOf } from './wreck-geometry.js';
-import { ruinGeometry } from './ruin-geometry.js';
+import { wreckGeometry, hullOf, crewCampGeometry } from './wreck-geometry.js';
+import { ruinGeometry, ruinPalette } from './ruin-geometry.js';
 import { protoRow, ruinCard } from './ruin-types.js';
 import { carrierColour } from './carrier-globe.js';
 
@@ -395,6 +395,29 @@ export class SourceRuin {
     this.hull = footprint([g.body, g.glow, g.orbit], this.group.matrixWorld);
     this.tris = (g.body.attributes.position.count + (g.glow ? g.glow.attributes.position.count : 0)
       + (g.orbit ? g.orbit.attributes.position.count : 0)) / 3;
+
+    // The traces of the crew, p2-43: the camp, or the cairn of one person, or nothing. The worker
+    // placed the trace on a pad at the height of the floor, at the edge of the disc on the side the
+    // crew came from; see ruinCamp() in generate.js. The parts take the colours of the camp of the
+    // wreck, and the stones of a cairn take the stone of the ruin. The mesh is a child of the group
+    // of the ruin, so it takes the place and the yaw of patch.source.camp in the frame of the ruin.
+    // A tap on the camp marks the ruin, because the camp is a part of the find. The range still
+    // measures to the stones.
+    this.camp = null;
+    const camp = src.camp;
+    if (camp) {
+      const pal = ruinPalette(world && world.type);
+      const geo = crewCampGeometry(camp, { stone: pal.stone, dark: pal.dark });
+      this.camp = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+      this.camp.castShadow = shadows;
+      this.camp.receiveShadow = shadows;
+      const yaw = src.yaw || 0, dx = camp.x - src.x, dz = camp.z - src.z;
+      const cy = heightAt ? heightAt(camp.x, camp.z) : camp.y;
+      this.camp.position.set(dx * Math.cos(yaw) - dz * Math.sin(yaw), cy - y, dx * Math.sin(yaw) + dz * Math.cos(yaw));
+      this.camp.rotation.y = (camp.yaw || 0) - yaw;
+      this.group.add(this.camp);
+      this.tris += geo.attributes.position.count / 3;
+    }
   }
 
   // The clock of the glow: the seconds since the start of the last call of the ruin, inside the
@@ -439,7 +462,7 @@ export class SourceRuin {
     if (!this.body) return null;
     _ndc.set(nx, ny);
     _ray.setFromCamera(_ndc, camera);
-    const hit = _ray.intersectObjects([this.body, this.glow, this.orbit].filter(Boolean), false)[0];
+    const hit = _ray.intersectObjects([this.body, this.glow, this.orbit, this.camp].filter(Boolean), false)[0];
     if (hit) return { point: hit.point.clone(), dist: hit.distance };
     this.group.updateWorldMatrix(true, false);
     const box = this.body.geometry.boundingBox.clone().expandByScalar(RUIN_PICK_PAD)
@@ -486,6 +509,7 @@ export class SourceRuin {
     this.body = null;
     this.glow = null;
     this.orbit = null;
+    this.camp = null;
     this.ring = null;
     this.light = null;
   }
@@ -734,6 +758,23 @@ export function glyphSvg(glyphs) {
 
 // One row of the card. The way on also holds the line of glyphs and the chip; the chip is the only
 // place the copy says "Coming soon".
+// The crew at the ruin, p2-43: the goers of the log of the wreck, one to a row, and the second log
+// under the rows, on the rail and the dots of the log of the wreck. An entry takes the markup of an
+// entry of that log, and an end of the kind `cut` takes the note of p2-37. One person left one note,
+// and the row marks that person as its writer. A world where nobody went holds no second log, so the
+// slot stays empty and takes no room: the reader is the first to stand at the ruin.
+function ruinCrewHtml(log) {
+  if (!log || !log.entries || !log.entries.length) return '';
+  const note = log.went === 'one';
+  const rows = (log.crew || []).map((c) =>
+    `<span${c.name === log.keeper ? ' class="ckeeper"' : ''}>${esc(c.name)}<i>${esc(c.role)}</i></span>`).join('');
+  const entries = log.entries.map((e) => `<div class="clog-entry${e.title ? ' ctitled' : ''}">`
+    + `<h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p>`
+    + `${e.slot === ABRUPT_SLOT ? `<p class="cabrupt">${ABRUPT}</p>` : ''}</div>`).join('');
+  return `<h3 class="cruin-head">The crew at the ruin</h3>`
+    + `<div class="cruin-goers${note ? ' cnote' : ''}">${rows}</div><div class="cruin-log">${entries}</div>`;
+}
+
 function ruinRowHtml(r) {
   if (r.key === 'way') {
     return `<div class="crow cway" data-row="${r.key}"><dt>${esc(r.label)}</dt><dd>`
@@ -750,6 +791,7 @@ export class RuinInspector {
     this.latinEl = card.querySelector('.clatin');
     this.rowsEl = card.querySelector('.crows');
     this.scrollEl = card.querySelector('.cruin');
+    this.crewEl = card.querySelector('.cruin-crew');   // p2-43
     this.renderer = null; this.open = false;
     this.clock = new THREE.Clock();
     Object.assign(this, cardStage(4));
@@ -777,6 +819,7 @@ export class RuinInspector {
     this.nameEl.textContent = text.name;
     this.latinEl.textContent = text.sub;
     this.rowsEl.innerHTML = text.rows.map(ruinRowHtml).join('');
+    if (this.crewEl) this.crewEl.innerHTML = ruinCrewHtml(world.ruin.log);
     if (this.scrollEl) this.scrollEl.scrollTop = 0;
     this.card.hidden = false;
     requestAnimationFrame(() => this.card.classList.add('show'));

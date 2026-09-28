@@ -26,9 +26,10 @@ import { Lore } from '../../lore.js';
 import { Species } from '../../species.js';
 import { FloraLore, FLORA_LORE } from '../../flora-lore.js';
 import { SourceLore } from '../../source-lore.js';
+import { RuinLore } from '../../ruin-lore.js';
 import * as generate from '../../generate.js';
 import { dirCell, cellSite, tangentFrame } from '../../cell-grid.js';
-import { compass8 } from '../../ruin-types.js';
+import { compass8, RUIN_PROTOS, MAKER_PARTS } from '../../ruin-types.js';
 import {
   TEMP_BY_TYPE as TYPE_TEMP, LAND_BY_TYPE as LAND, FLORA_BY_TYPE as TYPE_FLORA, FLORA_DENSITY_BY_TYPE as FLORA_DENSITY,
 } from '../../world-types.js';
@@ -756,8 +757,29 @@ const WORST = {
   few: 1, many: 1, days: 1, since: 1, moon: 1, moons: 1, plant: 1, plants: 1,
   due: 1, years: 1, far: 1, who: 1, whojob: 2,
   freq: 2, from: 1, beacon: 1,                 // "29.999 MHz", "north-west", "6"
+  // the second log of p2-43
+  site: 3, Site: 3,                            // "the floating stones"
+  makerbody: 5,                                // "two legs and two wings"
+  makerheight: 2,                              // "1.5 metres"
+  how: 6,                                      // "on the back of a hopper"
+  height: 1, across: 1, back: 1, trip: 1, km: 1, left: 1, shipkeeper: 1, stayer: 1,
 };
 const expandWorst = (text) => String(text).replace(/\{(\w+)\}/g, (m, k) => 'x '.repeat(WORST[k] == null ? 1 : WORST[k]).trim());
+// A token whose fill starts with a small letter may not open a sentence. The writer capitalises the
+// first letter of an entry and of each part it joins, and no other sentence start, so "{one} put a
+// lamp on the mast. {count} {kinds} came" printed "five flitters came" after a full stop. `capped`
+// says that the writer capitalises the first letter of this text; an aside, a coda, and the plan of
+// the landing join an entry with no capital, so their first sentence counts too.
+const LOWER_START = new Set(['other', 'others', 'kind', 'kinds', 'count', 'n', 'crew', 'moons', 'years',
+  'plant', 'plants', 'diet', 'onejob', 'twojob', 'keeperjob', 'whojob', 'lat', 'tilt', 'from',
+  'site', 'makerbody', 'how', 'back']);
+function lowerStartCheck(text, capped) {
+  for (const m of String(text).matchAll(/(^|[.!?]\s+)\{(\w+)\}/g)) {
+    if (m.index === 0 && m[1] === '' && capped) continue;
+    if (LOWER_START.has(m[2])) return `a sentence opens on {${m[2]}}, which prints a small letter`;
+  }
+  return null;
+}
 function styleCheck(text, maxSentences = ENTRY_SENTENCES) {
   const bad = [];
   for (const [re, what] of STYLE_BAD) if (re.test(text)) bad.push(`${what}: /${re.source}/`);
@@ -971,6 +993,10 @@ for (const x of SOURCE_TEXTS) {
     }
   }
   for (const bad of styleCheck(x.t)) sourceIssues.push(`SOURCE ${x.label}: ${bad}\n    ${x.t}`);
+  // The writer capitalises an arrival line, a beat, and an ending. An aside, a coda, and the plan
+  // of the landing join an entry as they stand.
+  const low = lowerStartCheck(x.t, !(x.kind === 'trait' || /\.(coda|landing)$/.test(x.label) || x.label === 'SOUND_LANDING'));
+  if (low) sourceIssues.push(`SOURCE ${x.label}: ${low}\n    ${x.t}`);
   // Every entry stands on its own subject. A fauna wording, and an ending that names a way of
   // moving, has to name the animal before any word stands in for it. Every other wording only has
   // to open on a subject the reader can see.
@@ -1137,6 +1163,247 @@ for (const x of SOURCE_TEXTS) {
   else allSaid.set(x.t, x.label);
 }
 
+// ---------------------------------------------------------------- pass 8: the second log, p2-43
+// The goers of the log of the wreck write a second log at the ruin, or one person leaves a note. See
+// ruin-lore.js and "The second log" in docs/ruin.md. The checks of the log of the wreck run over its
+// pools, with these changes:
+//
+//  1. Coverage. Every sky, every proto the type of the sky allows, every kind of maker, and every
+//     story the writer can make: who went, who keeps the log, how they came, the kind of the last
+//     entry of the wreck, and whether that log counted its food down. Each pool the writer needs for
+//     that story holds a wording: the intro of a new keeper, the trip, the food on the trip, the
+//     first sight, the sight, the carvings, the door or the steps when they fit, a wording of every
+//     trait for a person, the reply, the four kinds of the end, and the note.
+//  2. Reachability. Every wording is reached by one of those stories.
+//  3. The lexicon, on every wording against every story that reaches it.
+//  4. The motion lexicon, on every wording that names the animal.
+//  5. The tokens. Only the tokens ruin-lore.js fills; a wording that names the animal sits under a
+//     gate on `beasts`; {two} stands only under `crewgroup`, {shipkeeper} only where the keeper
+//     changed, and {stayer}, a person at the ship, only in an end under `shipcrew`.
+//  6. The style, and the small letter at the start of a sentence.
+//  7. The subject: no wording opens on a pronoun, and a wording that names the animal names it
+//     before any word stands for it.
+//  8. The state: no wording claims a span longer than the stay at the ruin.
+//  9. The call. Every reply and every note states that the beacon comes back slower. No wording
+//     prints a band, and no wording says what the ruin is. Every note names the case it lies in,
+//     which the cairn carries, and the food on the trip takes one sentence.
+// 10. Variety. Three wordings or more in every bucket a story takes one from, and no sentence in two
+//     pools of the two logs.
+const RP = RuinLore.POOLS;
+const RUIN_TOKENS = RuinLore.TOKENS;
+const ruinIssues = [];
+// The words a wording may not use: each one states what the ruin is, and the log never does.
+const RUIN_WHAT = /\b(?:ruins?|temples?|tombs?|shrines?|city|cities|portals?|gateways?|aliens?|machines?|built|builders?|makers?)\b/i;
+// The reply of the ruin: the beacon of the crew comes back slower. p2-44 plays it at half the speed.
+const REPLY_SAYS = /\bslower\b|\bhalf the speed\b|\btwice the time\b/;
+// A span the stay at the ruin cannot hold: it runs STAY_MIN to STAY_MAX turns.
+const RUIN_SPAN = /\b(?:a|two|three) hundred (?:days|nights|turns)\b|\b(?:a|two|three) years?\b(?! older)|\bfor (?:months|weeks)\b/i;
+
+// Every wording, with the pool it stands in. A PEOPLE wording carries the key of its trait.
+const RUIN_TEXTS = [];
+for (const [name, list] of Object.entries(RP)) {
+  for (const e of list) RUIN_TEXTS.push({ label: `RUIN.${name}${e.kind ? '.' + e.kind : ''}${e.trait ? '.' + e.trait : ''}`, pool: name, e, t: e.t });
+}
+
+// The world tags a gate of the second log names, plus the tags of the lexicon. Two skies that agree
+// on these are one sky to the second log, as SOURCE_SKY_TAGS collapses the skies of the first.
+const STORY = new Set(RuinLore.STORY_TAGS);
+const RUIN_SKY_TAGS = new Set();
+for (const x of RUIN_TEXTS) {
+  const gt = Lore.parseGate(x.e.tags);
+  for (const any of gt.need) for (const t of any) if (!STORY.has(t)) RUIN_SKY_TAGS.add(t);
+  for (const t of gt.ban) if (!STORY.has(t)) RUIN_SKY_TAGS.add(t);
+}
+for (const t of LEX_TAGS) RUIN_SKY_TAGS.add(t);
+RUIN_SKY_TAGS.add('beasts');
+RUIN_SKY_TAGS.add('mwalk');
+
+// The stories the writer can make on one sky. A story is the set of story tags of storyTags() in
+// ruin-lore.js: who went, who keeps the log, how many went, the kind of the last entry of the wreck,
+// and how they came. The ways follow the call endings of source-lore.js: the walk goes in the rover,
+// on foot, or on the raft; the joke on foot or on the raft; the ride on the back of a big walker;
+// the catch on foot or on the raft; the follow in the rover, on foot, or on the raft; the split in
+// the rover, on foot, or on the raft; and the second hand on foot or on the raft. The raft needs an
+// island with a liquid sea, and so does every way that falls back to it.
+function* ruinStories(skyTags) {
+  // Every story also runs hungry: the log of the wreck counted its food down.
+  for (const s of ruinStoriesFed(skyTags)) { yield s; yield [...s, 'hungry']; }
+}
+function* ruinStoriesFed(skyTags) {
+  const beasts = skyTags.has('beasts'), walker = skyTags.has('mwalk');
+  const island = skyTags.has('mostlysea') && skyTags.has('waterliquid');
+  // A wording that states no way takes the raft on an island, and goes on foot elsewhere.
+  const plain = island ? 'raft' : 'foot';
+  const ways = (list) => [...new Set(list.map((b) => (b === 'plain' ? plain : b)))].filter((b) => b !== 'raft' || island);
+  const out = [];
+  for (const by of ways(['rover', 'foot', 'raft'])) out.push(['wentall', 'samekeeper', 'crewgroup', 'afterwalk', 'by' + by]);
+  for (const by of ways(['plain', 'foot', 'raft'])) out.push(['wentall', 'samekeeper', 'crewgroup', 'afterjoke', 'by' + by]);
+  if (beasts) {
+    if (walker) out.push(['wentsome', 'samekeeper', 'crewpair', 'shipcrew', 'afterride', 'byride']);
+    for (const by of ways(['plain'])) out.push(['wentsome', 'samekeeper', 'crewpair', 'shipcrew', 'aftercatch', 'by' + by]);
+    for (const by of ways(['rover', 'plain'])) out.push(['wentsome', 'samekeeper', 'crewpair', 'shipcrew', 'afterfollow', 'by' + by]);
+  }
+  for (const by of ways(['rover', 'foot', 'raft'])) out.push(['wentsome', 'newkeeper', 'crewpair', 'shipcrew', 'aftersplit', 'by' + by]);
+  for (const by of ways(['rover', 'foot'])) out.push(['wentone', 'newkeeper', 'crewsolo', 'shipcrew', 'aftersplit', 'by' + by]);
+  for (const by of ways(['plain'])) out.push(['wentone', 'deadkeeper', 'crewsolo', 'shipcrew', 'aftersecond', 'by' + by]);
+  yield* out;
+}
+// The makers a sky can hold: a rolled body, a species the crew never watched, with legs or with
+// none, and the species the log of the wreck names, with legs now or with none.
+function ruinMakers(skyTags) {
+  const out = [['makerrolled'], ['makerspecies'], ['makerspecies', 'makerlimbless']];
+  if (skyTags.has('beasts')) out.push(['makerspecies', 'makerknown'], ['makerspecies', 'makerknown', 'makerlegless']);
+  return out;
+}
+const TRAIT_KEYS = SourceLore.TRAITS.map((t) => t.key);
+const ruinReach = new Set();
+const ruinLexSeen = new Map();
+let ruinChecked = 0;
+const ruinSkies = new Map();
+for (const [, sky] of sourceSkies) {
+  const { f, tags: skyTags, beasts } = sky;
+  // The animal matters to the second log in two ways only: whether the world carries one, and
+  // whether it walks. So one walker and one flyer stand for every way of moving.
+  for (const motion of beasts ? ['mwalk', 'mfly'] : [null]) {
+    const tags = new Set(skyTags);
+    if (motion) tags.add(motion);
+    const key = f.type + '|' + [...tags].filter((t) => RUIN_SKY_TAGS.has(t)).sort().join(',');
+    if (!ruinSkies.has(key)) ruinSkies.set(key, { f, tags, env: sky.env });
+  }
+}
+// Two kinds of pool. A pool of the story reads the sky and the story: who went, who keeps the log,
+// and how they came. A pool of the ruin reads the sky, the proto, and the maker. The sweep asks each
+// kind with the tags it reads, so it does not walk the product of the two. A wording of a pool of
+// the story that gates on a proto or a maker is then unreachable, and the report names it: move it
+// to a pool of the ruin, or widen the sweep.
+const RUIN_POOLS = new Set(['FIRST_SIGHT', 'SIGHT', 'CARVING', 'FIT', 'LIGHT', 'SKY']);
+// Every wording of a kind of pool that `tags` reaches, against the lexicon of the sky, once per key
+// of the lexicon and the way of moving. The motion rules bind the trip alone: the trip is the one
+// wording where the animal acts; a carving shows a body and claims no movement.
+function ruinSweep(tags, ofRuin, f) {
+  let lexKey = '';
+  for (const t of LEX_TAGS) if (tags.has(t)) lexKey += t + ',';
+  lexKey += '|' + (tags.has('mwalk') ? 'mwalk' : tags.has('mfly') ? 'mfly' : '');
+  for (const x of RUIN_TEXTS) {
+    if (RUIN_POOLS.has(x.pool) !== ofRuin) continue;
+    if (x.e.tags && !Lore.matchTags(Lore.gateOf(x.e), tags)) continue;
+    ruinReach.add(x.e);
+    let seen = ruinLexSeen.get(x.e);
+    if (!seen) { seen = new Set(); ruinLexSeen.set(x.e, seen); }
+    if (seen.has(lexKey)) continue;
+    seen.add(lexKey);
+    for (const bad of lexCheck(x.t, tags)) lexHits.push(`${x.label}: /${bad.word}/ needs "${bad.gate}" — ${f.type} [${[...tags].join(' ')}]\n    ${x.t}`);
+    if (x.pool === 'TRIP') for (const bad of motionCheck(x.t, tags)) lexHits.push(`${x.label} MOTION: /${bad.word}/ needs "${bad.gate}"\n    ${x.t}`);
+  }
+}
+for (const [, { f, tags: skyTags, env }] of ruinSkies) {
+  const world = fakeWorld(f);
+  const ask = (tags, where) => (list, what) => {
+    ruinChecked++;
+    const c = Lore.candidates(list, { env, tags, world, G: null });
+    if (!c.length) holes.push(`RUIN ${what} — ${f.type} ${where}`);
+    return c;
+  };
+  // The pools of the story, once per story.
+  for (const story of ruinStories(skyTags)) {
+    const tags = new Set(skyTags);
+    for (const t of story) tags.add(t);
+    const need = ask(tags, `[${story.join(' ')}]`);
+    if (tags.has('wentone')) need(RP.NOTE, 'NOTE');
+    else {
+      if (tags.has('newkeeper')) need(RP.INTRO, 'INTRO');
+      if (tags.has('hungry')) need(RP.HUNGER, 'HUNGER');
+      need(RP.TRIP, 'TRIP'); need(RP.REPLY, 'REPLY'); need(RP.WORK, 'WORK');
+      for (const k of TRAIT_KEYS) need(RP.PEOPLE.filter((e) => e.trait === k), 'PEOPLE.' + k);
+      const kinds = new Set(need(RP.END, 'END').map((e) => e.kind));
+      for (const k of RuinLore.END_KINDS) if (!kinds.has(k)) holes.push(`RUIN END: no wording of "${k}" — ${f.type} [${story.join(' ')}]`);
+    }
+    ruinSweep(tags, false, f);
+  }
+  // The pools of the ruin, once per proto the type allows, maker, and fit of the door or the steps.
+  for (const maker of ruinMakers(skyTags)) {
+    for (const proto of RUIN_PROTOS.filter((p) => p.fits.includes(f.type)).map((p) => p.id)) {
+      for (const fits of MAKER_PARTS[proto] ? [false, true] : [false]) {
+        const tags = new Set(skyTags);
+        for (const t of [...maker, 'at' + proto]) tags.add(t);
+        if (fits) tags.add('makerfits');
+        const need = ask(tags, `${proto} [${maker.join(' ')}${fits ? ' makerfits' : ''}]`);
+        need(RP.FIRST_SIGHT, 'FIRST_SIGHT'); need(RP.SIGHT, 'SIGHT'); need(RP.CARVING, 'CARVING'); need(RP.LIGHT, 'LIGHT');
+        if (fits) need(RP.FIT, 'FIT');
+        ruinSweep(tags, true, f);
+      }
+    }
+  }
+}
+for (const x of RUIN_TEXTS) {
+  if (!ruinReach.has(x.e)) ruinIssues.push(`${x.label}: no story in the sweep reaches this wording [${x.e.tags || ''}]\n    ${x.t}`);
+  const toks = Lore.tokensIn(x.t);
+  for (const tok of toks) if (!RUIN_TOKENS.includes(tok)) tokenHits.push(`${x.label}: uses {${tok}}, which the second log does not fill\n    ${x.t}`);
+  const need = Lore.parseGate(x.e.tags).need;
+  const needs = (tag) => need.some((any) => any.length === 1 && any[0] === tag);
+  const names = toks.some((t) => RuinLore.BEAST_TOKENS.includes(t));
+  if (names && !needs('beasts')) ruinIssues.push(`${x.label}: names the animal but is not gated on "beasts"\n    ${x.t}`);
+  if ((toks.includes('two') || toks.includes('twojob')) && !needs('crewgroup')) ruinIssues.push(`${x.label}: holds {two}, and a crew of two has no {two}\n    ${x.t}`);
+  if (toks.includes('shipkeeper') && !(needs('newkeeper') || needs('deadkeeper'))) ruinIssues.push(`${x.label}: names the keeper of the wreck where that person may be the keeper of this log\n    ${x.t}`);
+  if (toks.includes('stayer') && !(needs('shipcrew') && x.pool === 'END')) ruinIssues.push(`${x.label}: {stayer} stands in an end gated on "shipcrew" and nowhere else\n    ${x.t}`);
+  if (toks.includes('who') !== (x.pool === 'PEOPLE')) ruinIssues.push(`${x.label}: {who} stands in the beats of the people and nowhere else\n    ${x.t}`);
+  for (const bad of styleCheck(x.t)) ruinIssues.push(`${x.label}: ${bad}\n    ${x.t}`);
+  const low = lowerStartCheck(x.t, true);
+  if (low) ruinIssues.push(`${x.label}: ${low}\n    ${x.t}`);
+  const bad = names ? subjectCheck(x.t) : openCheck(x.t);
+  if (bad) ruinIssues.push(`${x.label}: ${bad}\n    ${x.t}`);
+  const span = x.t.match(RUIN_SPAN);
+  if (span) ruinIssues.push(`${x.label}: claims "${span[0]}", which the stay at the ruin does not hold\n    ${x.t}`);
+  const what = x.t.match(RUIN_WHAT);
+  if (what) ruinIssues.push(`${x.label}: "${what[0]}" says what the ruin is, and the log never does\n    ${x.t}`);
+  if (/\bMHz\b|\d\.\d{3}\b|\{freq\}/.test(x.t)) ruinIssues.push(`${x.label}: prints a band\n    ${x.t}`);
+  if ((x.pool === 'REPLY' || x.pool === 'NOTE') && !REPLY_SAYS.test(x.t)) ruinIssues.push(`${x.label}: does not say that the beacon comes back slower\n    ${x.t}`);
+  if (x.pool === 'TRIP' && !toks.includes('trip') && !toks.includes('days')) ruinIssues.push(`${x.label}: states neither the trip nor the day of the arrival\n    ${x.t}`);
+  if (x.pool === 'INTRO' && !(toks.includes('keeper') && toks.includes('shipkeeper'))) ruinIssues.push(`${x.label}: does not name both keepers\n    ${x.t}`);
+  const cut = x.pool === 'END' && x.e.kind === 'cut';
+  if (cut === /[.!?]$/.test(x.t)) ruinIssues.push(`${x.label}: ${cut ? 'a cut end closes its sentence' : 'the wording does not close its sentence'}\n    ${x.t}`);
+  if (x.pool === 'NOTE' && !/\bcase\b/.test(x.t)) ruinIssues.push(`${x.label}: the note does not name the case it lies in on the cairn\n    ${x.t}`);
+  if (x.pool === 'HUNGER' && sentencesOf(x.t).length !== 1) ruinIssues.push(`${x.label}: the food on the trip takes one sentence, so the arrival stays inside nine\n    ${x.t}`);
+  if (x.pool === 'NOTE') {
+    const n = sentencesOf(x.t).length;
+    const { NOTE_MIN, NOTE_MAX } = RuinLore.LIMITS;
+    if (n < NOTE_MIN || n > NOTE_MAX) ruinIssues.push(`${x.label}: a note of ${n} sentences, outside ${NOTE_MIN} to ${NOTE_MAX}\n    ${x.t}`);
+  }
+  if (x.pool === 'END' && !RuinLore.END_KINDS.includes(x.e.kind)) ruinIssues.push(`${x.label}: the end kind "${x.e.kind}" is not one of ${RuinLore.END_KINDS.join(', ')}`);
+  if (x.pool === 'PEOPLE' && !TRAIT_KEYS.includes(x.e.trait)) ruinIssues.push(`${x.label}: the trait "${x.e.trait}" is not a trait of source-lore.js`);
+}
+// Variety: three wordings or more in every bucket a story takes one wording from.
+const bucket = (name, key, list) => {
+  if (list.length < WORDING_MIN) ruinIssues.push(`RUIN.${name} ${key}: only ${list.length} wordings, and ${WORDING_MIN} is the floor`);
+  const said = list.map((e) => e.t);
+  if (new Set(said).size !== said.length) ruinIssues.push(`RUIN.${name} ${key}: two wordings are the same sentence`);
+};
+const gatedOn = (tag) => (e) => Lore.parseGate(e.tags).need.some((any) => any.includes(tag));
+bucket('INTRO', '', RP.INTRO);
+bucket('HUNGER', '', RP.HUNGER);
+for (const by of SourceLore.BY) bucket('TRIP', by, RP.TRIP.filter(gatedOn('by' + by)));
+for (const p of RUIN_PROTOS) {
+  bucket('FIRST_SIGHT', p.id, RP.FIRST_SIGHT.filter(gatedOn('at' + p.id)));
+  bucket('SIGHT', p.id, RP.SIGHT.filter(gatedOn('at' + p.id)));
+  bucket('LIGHT', p.id, RP.LIGHT.filter(gatedOn('at' + p.id)));
+  if (MAKER_PARTS[p.id]) bucket('FIT', p.id, RP.FIT.filter(gatedOn('at' + p.id)));
+}
+bucket('CARVING', 'known', RP.CARVING.filter(gatedOn('makerknown')));
+bucket('CARVING', 'legless', RP.CARVING.filter(gatedOn('makerlegless')));
+bucket('CARVING', 'rolled', RP.CARVING.filter(gatedOn('makerrolled')));
+bucket('CARVING', 'unknown', RP.CARVING.filter((e) => /!makerknown/.test(e.tags || '')));
+bucket('WORK', '', RP.WORK);
+bucket('REPLY', '', RP.REPLY);
+for (const k of TRAIT_KEYS) bucket('PEOPLE', k, RP.PEOPLE.filter((e) => e.trait === k));
+for (const k of RuinLore.END_KINDS) bucket('END', k, RP.END.filter((e) => e.kind === k));
+bucket('NOTE', 'newkeeper', RP.NOTE.filter(gatedOn('newkeeper')));
+bucket('NOTE', 'deadkeeper', RP.NOTE.filter(gatedOn('deadkeeper')));
+// No sentence stands in two pools, of this log or of the log of the wreck.
+for (const x of RUIN_TEXTS) {
+  if (allSaid.has(x.t)) ruinIssues.push(`${x.label}: the same wording stands in ${allSaid.get(x.t)}\n    ${x.t}`);
+  else allSaid.set(x.t, x.label);
+}
+
 // ---------------------------------------------------------------- pass 4: real worlds through the worker
 // The compass word from the wreck to the ruin, the way bearingFrom() in generate.js computes it:
 // the tangent frame of cell-grid.js at the middle of the cell of the wreck, north the part of +y
@@ -1151,6 +1418,94 @@ function fromWord(world) {
   return compass8(e === 0 && n === 0 ? 0 : (Math.atan2(e, n) * 180 / Math.PI + 360) % 360);
 }
 const BAND_ANY = /\bMHz\b/;
+
+// ---- the second log on a real world, p2-43
+// Kilometres a turn by the way the goers came: the rover 40 and on foot 15, from the text of p2-43,
+// and the raft 30 and the back of a big walker 25, from docs/ruin.md. A copy, so a slip in
+// ruin-lore.js cannot pass its own check.
+const TRAVEL_KM = { rover: 40, foot: 15, raft: 30, ride: 25 };
+let ruinNone = 0, ruinNotes = 0, ruinSecond = 0;
+const secondEntryCounts = [], secondEndSpread = new Map(), byWay = new Map(), secondSentenceCount = new Map();
+function checkRuinLog(seed, world, first, env) {
+  const r = world.ruin, log = r.log;
+  byWay.set(String(first.by), (byWay.get(String(first.by)) || 0) + 1);
+  if (first.went === 'none') {
+    ruinNone++;
+    if (log !== null) holes.push(`seed ${seed}: nobody went, and world.ruin.log is not null`);
+    return;
+  }
+  if (!log) { holes.push(`seed ${seed}: went "${first.went}", and world.ruin.log is null`); return; }
+  const E = log.entries || [];
+  if (!E.length) { holes.push(`seed ${seed}: the second log holds no entry`); return; }
+  // The people are the goers of the log of the wreck, in its order, with its jobs.
+  const names = (log.crew || []).map((c) => c.name);
+  if (names.join('|') !== first.goers.join('|')) holes.push(`seed ${seed}: the crew of the second log is ${names.join(', ')}, and the goers are ${first.goers.join(', ')}`);
+  if (log.keeper !== first.goers[0]) holes.push(`seed ${seed}: the second log is kept by ${log.keeper}, and the first goer is ${first.goers[0]}`);
+  const jobs = new Map(first.crew.map((c) => [c.name, c.role]));
+  for (const c of log.crew || []) if (jobs.get(c.name) !== c.role) holes.push(`seed ${seed}: ${c.name} is a ${c.role} at the ruin and a ${jobs.get(c.name)} at the ship`);
+  if (log.went !== first.went || log.by !== first.by) holes.push(`seed ${seed}: the second log went "${log.went}" by "${log.by}", and the first "${first.went}" by "${first.by}"`);
+  // The days go on from the last day of the log of the wreck, and the trip takes its time.
+  const a = world.source.dir, b = r.dir;
+  const km = Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * world.env.radiusKm;
+  const trip = Math.max(1, Math.ceil(km / TRAVEL_KM[first.by]));
+  if (log.arrived !== first.days + trip) holes.push(`seed ${seed}: the goers arrive on day ${log.arrived}, and ${Math.round(km)} km ${first.by} from day ${first.days} gives day ${first.days + trip}`);
+  if (E[0].day !== log.arrived) holes.push(`seed ${seed}: the first entry at the ruin stands on day ${E[0].day}, and the arrival is day ${log.arrived}`);
+  if (!(E[0].day > first.days)) holes.push(`seed ${seed}: the second log starts on day ${E[0].day}, not after day ${first.days}`);
+  for (let j = 1; j < E.length; j++) if (E[j].day <= E[j - 1].day) holes.push(`seed ${seed} ruin: day ${E[j].day} does not follow day ${E[j - 1].day}`);
+  if (log.days !== E[E.length - 1].day) holes.push(`seed ${seed}: the second log states ${log.days} days and its last entry is day ${E[E.length - 1].day}`);
+  // The shape: one note, or the arrival, the beats, and the end.
+  const { ENTRY_MIN, ENTRY_MAX, NOTE_MIN, NOTE_MAX } = RuinLore.LIMITS;
+  if (first.went === 'one') {
+    ruinNotes++;
+    const n = sentencesOf(E[0].text).length;
+    if (E.length !== 1 || E[0].slot !== 'note') holes.push(`seed ${seed}: one person went, and the second log holds ${E.map((e) => e.slot).join(', ')}`);
+    if (n < NOTE_MIN || n > NOTE_MAX) holes.push(`seed ${seed}: a note of ${n} sentences\n    ${E[0].text}`);
+    if (!REPLY_SAYS.test(E[0].text)) holes.push(`seed ${seed}: the note does not say that the beacon comes back slower\n    ${E[0].text}`);
+  } else {
+    ruinSecond++;
+    secondEntryCounts.push(E.length);
+    if (E.length < ENTRY_MIN || E.length > ENTRY_MAX) holes.push(`seed ${seed}: the second log holds ${E.length} entries, outside ${ENTRY_MIN} to ${ENTRY_MAX}`);
+    if (E[0].slot !== 'arrival') holes.push(`seed ${seed}: the second log opens on "${E[0].slot}"`);
+    const last = E[E.length - 1], kind = last.slot.slice(4);
+    if (!/^end\./.test(last.slot) || !RuinLore.END_KINDS.includes(kind)) holes.push(`seed ${seed}: the second log closes on "${last.slot}"`);
+    else secondEndSpread.set(kind, (secondEndSpread.get(kind) || 0) + 1);
+    const mid = E.slice(1, -1).map((e) => e.slot);
+    for (const s of mid) if (!RuinLore.ORDER.includes(s.slice(5)) || !s.startsWith('ruin.')) holes.push(`seed ${seed}: the beat "${s}" is not a beat of the second log`);
+    for (const k of ['sight', 'carving', 'people', 'reply']) if (!mid.includes('ruin.' + k)) holes.push(`seed ${seed}: the second log runs no "${k}" beat`);
+    const replies = E.filter((e) => e.slot === 'ruin.reply');
+    if (replies.length !== 1) holes.push(`seed ${seed}: ${replies.length} reply beats, and the rule is one`);
+    else if (!REPLY_SAYS.test(replies[0].text)) holes.push(`seed ${seed}: the reply does not say that the beacon comes back slower\n    ${replies[0].text}`);
+  }
+  // The text: the tokens, the lexicon of the sky of the ruin, the style, and the names.
+  const live = (world.species || []).filter((G) => G.lore);
+  const G = live.find((x) => x.lore.name === first.species) || null;
+  const tags = RuinLore.storyTags(world, first, SourceLore.sourceTags(env, world.env.obliquityDeg, live.length > 0,
+    SourceLore.sourceLatDeg(r.dir), SourceLore.motionOf(G)));
+  const strip = [first.probe, first.species || '', ...(world.env.moonNames || []), ...SourceLore.PET_NAME];
+  const lostName = first.lost && first.lost.name;
+  const mine = new Set();
+  E.forEach((e, j) => {
+    for (const tok of Lore.tokensIn(e.text)) tokenHits.push(`seed ${seed} ruin ${e.slot}: unfilled {${tok}}`);
+    for (const bad of lexCheck(e.text, tags)) lexHits.push(`seed ${seed} ruin ${e.slot}: /${bad.word}/ needs "${bad.gate}" [${[...tags].join(' ')}]\n    ${e.text}`);
+    for (const bad of styleCheck(e.text, PRINTED_SENTENCES)) holes.push(`seed ${seed} ruin ${e.slot}: ${bad}\n    ${e.text}`);
+    if (BAND_ANY.test(e.text)) holes.push(`seed ${seed} ruin ${e.slot}: prints a band\n    ${e.text}`);
+    const what = e.text.match(RUIN_WHAT);
+    if (what) holes.push(`seed ${seed} ruin ${e.slot}: "${what[0]}" says what the ruin is\n    ${e.text}`);
+    let bare = e.text;
+    for (const s of strip) if (s) bare = bare.split(s).join(' ');
+    for (const name of SourceLore.NAMES) {
+      if (!new RegExp(`\\b${name}\\b`).test(bare)) continue;
+      // The keeper of the wreck may stand in the first entry when this log has a new keeper, and a
+      // person who stayed at the ship may stand in the end.
+      const shipKeeper = name === first.keeper && j === 0 && log.keeper !== first.keeper;
+      const stayer = j === E.length - 1 && /^end\./.test(e.slot) && first.crew.some((c) => c.name === name) && !first.goers.includes(name);
+      if (name === lostName) holes.push(`seed ${seed} ruin ${e.slot}: names ${name}, who was ${first.lost.how} on day ${first.lost.day}\n    ${e.text}`);
+      else if (!names.includes(name) && !shipKeeper && !stayer) holes.push(`seed ${seed} ruin ${e.slot}: names ${name}, who did not go\n    ${e.text}`);
+    }
+    for (const sent of sentencesOf(e.text)) mine.add(sent);
+  });
+  for (const sent of mine) secondSentenceCount.set(sent, (secondSentenceCount.get(sent) || 0) + 1);
+}
 let storyStats = null;
 // What the consistency check counts over the real worlds, for the report at the end.
 let logsSeen = 0, ruinLogs = 0, noRuinLogs = 0;
@@ -1329,6 +1684,13 @@ if (SEEDS > 0) {
             holes.push(`seed ${seed}: the last beat of the call does not name the ${ruin.from}\n    ${callEntries[callEntries.length - 1].text}`);
           }
           for (const e of callEntries.slice(0, -1)) if (fromRe.test(e.text)) holes.push(`seed ${seed} log ${e.slot}: names the ${ruin.from} before the last beat of the call\n    ${e.text}`);
+          // How the goers travel, p2-43: a way on every log that sends somebody, and a call wording
+          // of this kind and this outcome that travels that way on this world.
+          if (log.went === 'none' ? log.by !== null : !SourceLore.BY.includes(log.by)) holes.push(`seed ${seed}: went "${log.went}" and by "${log.by}"`);
+          else if (log.went !== 'none' && !fits.some((x) => x.went === log.went && SourceLore.travelOf(x, endTags) === log.by)) {
+            holes.push(`seed ${seed}: no call wording of "${endKind}" sends "${log.went}" by "${log.by}"`);
+          }
+          checkRuinLog(seed, world, log, env);
         } else {
           noRuinLogs++;
           if (callSlots.length) holes.push(`seed ${seed}: the log runs a call thread on a world with no ruin`);
@@ -1420,6 +1782,8 @@ console.log(`flora relation issues: ${floraRelIssues.length}`);
 for (const x of floraRelIssues) console.log('  - ' + x);
 console.log(`source log issues: ${sourceIssues.length}`);
 for (const x of sourceIssues) console.log('  - ' + x);
+console.log(`second log issues: ${ruinIssues.length} (${RUIN_TEXTS.length} wordings, ${ruinChecked} lookups over ${ruinSkies.size} skies)`);
+for (const x of ruinIssues) console.log('  - ' + x);
 if (storyStats) console.log(`\nstory length (characters): min ${storyStats.min}, median ${storyStats.median}, max ${storyStats.max}, over ${storyStats.n} species`);
 // The spread of the log over the real worlds. A reader who finds ten wrecks has to meet at least
 // six kinds of ending and at least six threads, so these two lists are the acceptance of issue 34
@@ -1460,6 +1824,16 @@ if (logsSeen) {
   if (callTop) console.log(`  commonest sentence of the call  ${(callTop[1] / Math.max(ruinLogs, 1) * 100).toFixed(1)}% of logs with a ruin (${callTop[1]}/${ruinLogs})\n    ${callTop[0]}`);
   console.log(`  neighbour pairs that share a sentence  ${neighbourShared} of ${neighbourPairs}`);
   if (sharedExample) console.log(`    ${sharedExample}`);
+  // The second log, p2-43: what the reader finds at the ruin, by who went.
+  console.log(`\nat the ruin          ${ruinSecond} second logs, ${ruinNotes} notes, ${ruinNone} with no trace, over ${ruinLogs} worlds with a ruin`);
+  if (secondEntryCounts.length) console.log(`entries per second log  ${stat(secondEntryCounts)}`);
+  console.log(`the way the goers came`);
+  for (const [k, c] of byN(byWay)) console.log(`  ${String(c).padStart(4)}  ${k === 'null' ? 'nobody went' : k}`);
+  console.log(`end kinds of the second log  ${secondEndSpread.size} of ${RuinLore.END_KINDS.length}`);
+  for (const [k, c] of byN(secondEndSpread)) console.log(`  ${String(c).padStart(4)}  ${k}`);
+  const secondTop = [...secondSentenceCount].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const traces = ruinSecond + ruinNotes;
+  for (const [s, c] of secondTop) console.log(`  commonest sentence at the ruin  ${(c / Math.max(traces, 1) * 100).toFixed(1)}% of the traces (${c}/${traces})\n    ${s}`);
 }
 
 for (const { seed, world, G } of sampleStories) {
@@ -1470,5 +1844,5 @@ for (const { seed, world, G } of sampleStories) {
   console.log(l.story);
 }
 const fail = holeMap.size + lexMap.size + tokenMap.size + relIssues.length + dead.length
-  + floraRelIssues.length + floraDead.length + sourceIssues.length;
+  + floraRelIssues.length + floraDead.length + sourceIssues.length + ruinIssues.length;
 process.exit(fail ? 1 : 0);
