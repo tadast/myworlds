@@ -1,6 +1,6 @@
 # p2-38 The carrier can follow only the wreck
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit f47cf83.
 
 Type: AFK. Phase 2. Blocked by: p2-35. Read `docs/issues/34-the-carrier.md`, "The carrier" and
 "The store" in `docs/issues/README.md`, and `docs/issues/p2-00-the-second-signal.md`.
@@ -212,3 +212,17 @@ ruin. `RUIN_NEAR` and `RUIN_FAR` do not change here; the walk by hand of the man
   `p238-alpha`, the wedges and the next landing take two near colours. The eye check of the owner
   decides if the drawings need another colour for the next landing.
 - The walk by hand, and the frame time on HIGH at the reveal camera.
+
+### The review of the manager, 2026-09-28
+
+- **The length of the search.** The manager played five worlds on main with real landings through
+  `__mw.landAt()`, twice each: a reader who lands to one side of the first wedge, and a reader who
+  lands along it. The count is the landings after the wreck, up to and including the landing on the
+  cell of the ruin: 3, 3, 3, 3, 3 and 2, 3, 2, 3, 3. The median is 3 for both, inside the planned
+  three or four, so `RUIN_NEAR` and `RUIN_FAR` keep 12 and 35. A person reads the cross less
+  exactly than a script, so the count of a person sits at 3 to 4. After p2-42 the manager played six
+  more worlds through the tuner of the card to the card of the ruin: 3, 2, 3, 3, 3, 3.
+- **The colour of chapter 2.** The drawings of the brief mark the next landing in `#ffb86b`, and a
+  world whose second colour was `#ff7b1c` painted its wedges in almost the same orange. Commit
+  62358bf keeps the colour of chapter 2 at `MARK_APART` from the mark, which drops the orange and
+  the yellow candidates.

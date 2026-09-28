@@ -1,6 +1,6 @@
 # p2-35 No second source stands on the world, so the log has nothing to point at
 
-Status: open.
+Status: CLOSED, 2026-09-27. Merge commit 668001c.
 
 Type: AFK. Phase 2. Blocked by: none. Read `docs/issues/README.md` and
 `docs/issues/p2-00-the-second-signal.md` first.

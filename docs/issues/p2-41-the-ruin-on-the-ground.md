@@ -1,6 +1,6 @@
 # p2-41 A landing on the cell of the ruin shows empty ground
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit 291cdc5.
 
 Type: AFK. Phase 2. Blocked by: p2-35, p2-36. Read "The patch protocol" and "The carrier" in
 `docs/issues/README.md`, and slice 3 of `docs/issues/34-the-carrier.md`.

@@ -1,6 +1,6 @@
 # p2-42 The ruin can be seen but not read, and a find leaves no mark
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit d965fd2.
 
 Type: AFK. Phase 2. Blocked by: p2-38, p2-41. Read `docs/issues/p2-00-the-second-signal.md`,
 decisions 4, 6, and 12, and "The card" in `docs/source.md`.
@@ -192,3 +192,11 @@ deviations from the plan and the reasons:
   its cell. The plan asks for this; the owner may want the wedges of chapter 1 back in that case.
 - **The mini models are small from the home zoom.** The lamp reads there, and the models read when
   the reader zooms in, as the mini wreck of issue 34 does.
+
+### The review of the manager, 2026-09-28
+
+The open point "After a find by chance the world is tuned, so the wedges of chapter 1 stop painting"
+is closed. Commit 472bfa2 makes `activeSource()` give the wreck while the ruin is found and the wreck
+is not: the overlay prints `406.025 MHz`, the wedges of chapter 1 paint, and the Carrier row reads
+"Found 1 of 2" until the next fix. After the find of the wreck the row reads "Found 2 of 2". Commit
+4578eab keeps the voice of the ruin in orbit after its find, whatever chapter runs.

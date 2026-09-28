@@ -1,6 +1,6 @@
 # p2-36 The ruin has no body to draw
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit aa53ecf.
 
 Type: AFK. Phase 2. Blocked by: p2-35, for `ruin-types.js` only. An agent may start from the
 table in p2-00 and rebase when p2-35 lands. Read `docs/issues/p2-00-the-second-signal.md` first.
@@ -120,3 +120,12 @@ Built 2026-09-28. Every deviation from the plan above, and the reason:
   is one leg on the up side and one crushed under the body on the far side.
 - **The check is a Node script,** `tools/ruin-geometry-check.mjs`, through `tools/three-hook.mjs`,
   so the budget runs with no browser. The lab states the counts too.
+
+### The look of the manager, 2026-09-28
+
+The HITL look of p2-00 went to the manager in place of the owner. The manager looked at the lab
+through the shot-sink: the grid of all 20 pairs of a proto and a type it fits, the colossus on 0 and
+6 limbs, the hive colony up close, and the mini hive. Every body stands on its disc, the hive reads as
+built, and the stone reads as a made thing on every type. The look changed nothing. The terran hive
+takes a green cap on its cells: that is the fixed moss accent of the terran row of `RUIN_PAL`, not
+the colour of the biome.

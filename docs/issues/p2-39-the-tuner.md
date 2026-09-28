@@ -1,6 +1,6 @@
 # p2-39 The reader has nowhere to type the frequency
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit 149d202.
 
 Type: AFK. Phase 2. Blocked by: p2-38. Read `docs/issues/p2-00-the-second-signal.md`, decisions 7
 and 8.

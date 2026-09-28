@@ -1,6 +1,6 @@
 # p2-40 The log ends without a way forward
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit 5a95868.
 
 Type: AFK, then a HITL read. Phase 2. Blocked by: p2-35, and p2-37 for the note under a cut. Read
 `docs/source.md` whole before a line of this issue, then `docs/issues/p2-00-the-second-signal.md`,

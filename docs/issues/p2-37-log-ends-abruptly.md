@@ -1,6 +1,6 @@
 # p2-37 A log that stops mid-sentence reads as a defect of the card
 
-Status: open.
+Status: CLOSED, 2026-09-27. Merge commit 6e5ba0d.
 
 Type: AFK. Phase 2. Blocked by: none. Small. Read `docs/source.md`, "The ending" and "The card".
 

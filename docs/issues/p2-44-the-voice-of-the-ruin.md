@@ -1,6 +1,6 @@
 # p2-44 The ruin is silent
 
-Status: open.
+Status: CLOSED, 2026-09-28. Merge commit ee666f5.
 
 Type: AFK, then a HITL listen. Phase 2. Blocked by: p2-38, p2-41. Read slice 5 of
 `docs/issues/34-the-carrier.md`, and `docs/issues/p2-00-the-second-signal.md`, decision 11.
@@ -156,3 +156,16 @@ Built on 2026-09-28. Every deviation from the plan above, and the reason:
   `p244-j` serve): the motif of the ruin must stand in tune with the song, it must read as the
   motif of the wreck played back, and after both finds the two must stay apart. The listen may move
   `RUIN_LEVEL`, `RUIN_VERB`, the bend and the release of `Synth.bell()`, and `RUIN_AT`.
+
+### The check of the manager, 2026-09-28
+
+The manager ran the music check on main against `music.js` of 291cdc5, the build before this issue.
+On all eight worlds of `tools/music-lab/worlds.js` the song and the note events of the wreck motif
+are byte-equal. Every note of the ruin motif is the note of the wreck motif on the same step, one
+octave down, so its pitch class is a member of the mode and it stands on the root of the song. The
+manager checked the pitch classes against the mode of each world by hand as well: major, mixolydian,
+minor, Ukrainian Dorian, Lydian, and Dorian.
+
+**The listen test is still open.** Nobody listened. A person must listen with the sound on, on a
+terran, a desert, and an ice world (`p244-c`, `p244-k`, and `p244-j` work), and confirm that the
+motif of the ruin stands in tune with the song and reads as the motif of the wreck played back.

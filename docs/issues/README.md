@@ -524,13 +524,13 @@ p2-44; then p2-43.
 
 | # | Issue | Type | Blocked by | Status |
 |---|---|---|---|---|
-| p2-35 | No second source stands on the world, so the log has nothing to point at | AFK | none | open |
-| p2-36 | The ruin has no body to draw | AFK | p2-35 | open |
-| p2-37 | A log that stops mid-sentence reads as a defect of the card | AFK | none | open |
-| p2-38 | The carrier can follow only the wreck | AFK | p2-35 | open |
-| p2-39 | The reader has nowhere to type the frequency | AFK | p2-38 | open |
-| p2-40 | The log ends without a way forward | AFK, HITL read | p2-35, p2-37 | open |
-| p2-41 | A landing on the cell of the ruin shows empty ground | AFK | p2-35, p2-36 | open |
-| p2-42 | The ruin can be seen but not read, and a find leaves no mark | AFK | p2-38, p2-41 | open |
+| p2-35 | No second source stands on the world, so the log has nothing to point at | AFK | none | CLOSED 668001c |
+| p2-36 | The ruin has no body to draw | AFK | p2-35 | CLOSED aa53ecf |
+| p2-37 | A log that stops mid-sentence reads as a defect of the card | AFK | none | CLOSED 6e5ba0d |
+| p2-38 | The carrier can follow only the wreck | AFK | p2-35 | CLOSED f47cf83 |
+| p2-39 | The reader has nowhere to type the frequency | AFK | p2-38 | CLOSED 149d202 |
+| p2-40 | The log ends without a way forward | AFK, HITL read | p2-35, p2-37 | CLOSED 5a95868 |
+| p2-41 | A landing on the cell of the ruin shows empty ground | AFK | p2-35, p2-36 | CLOSED 291cdc5 |
+| p2-42 | The ruin can be seen but not read, and a find leaves no mark | AFK | p2-38, p2-41 | CLOSED d965fd2 |
 | p2-43 | The crew went to the call, and the ruin holds no trace of them | AFK, HITL read | p2-40, p2-42 | open |
-| p2-44 | The ruin is silent | AFK, HITL listen | p2-38, p2-41 | open |
+| p2-44 | The ruin is silent | AFK, HITL listen | p2-38, p2-41 | CLOSED ee666f5; the listen test is open |
