@@ -18,7 +18,7 @@
 //
 // A THREAD is an ordered list of 3 to 5 beats that intensify. A BEAT is a list of 3 wordings or
 // more, and a log takes one of them, so two logs that run the same thread rarely read the same.
-// There are four kinds of thread.
+// There are five kinds of thread.
 //
 //   strand  why the crew cannot leave. Every log takes exactly one, whole. The landing states the
 //           plan: an orbiter with no crew waits overhead until day {due}, and the lander climbs
@@ -30,6 +30,10 @@
 //   crew    the people. A crew thread fits any world, and it carries a CODA, one sentence the
 //           ending may pick up, so the last entry is about these people and not only the world.
 //   fauna   the one species the log names. Gated on `beasts` AND on how the animal moves.
+//   call    the click the radio hears, on a world with a ruin. Phase 2, p2-40. Exactly one per
+//           such log, and none on a world with no ruin. It rises from a click under the static
+//           to the day it began, which is the day the beacon went on the mast, to the direction
+//           it comes from. The ending then names the band, and says who goes toward it.
 //
 // ---------------------------------------------------------------- how the animal moves
 //
@@ -122,7 +126,14 @@ import { Species } from './species.js';
     // the animal
     'other', 'Other', 'others', 'Others', 'kind', 'Kind', 'kinds', 'Kinds',
     'size', 'n', 'diet', 'pet',
+    // the call of the ruin, p2-40. The writer fills them on a world with a ruin only, so a line
+    // that uses one has to stand where only such a world reaches it: a call thread or a call
+    // ending. {freq} prints in the last entry and nowhere else, {from} in the last beat of the
+    // call thread and in the ending, and {beacon} in the reply beat of the call thread.
+    'freq', 'from', 'beacon',
   ];
+  // The tokens of the call, and where each may stand. The audit reads this too.
+  const CALL_TOKENS = ['freq', 'from', 'beacon'];
   // The tokens that name the animal. A line that uses one of them must sit under a gate on
   // `beasts`, and one of them has to open any reference to the animal inside an entry. See
   // "Every entry stands on its own subject" below.
@@ -197,8 +208,9 @@ import { Species } from './species.js';
     return false;
   };
   // Every lead a thread may set. The audit adds them to its sweep, or an ending gated on one of
-  // them looks unreachable.
-  const LEADS = ['doom', 'split', 'walk', 'message', 'second', 'stay', 'ride', 'catch', 'follow', 'launch'];
+  // them looks unreachable. `call` is the lead of the call thread, and every call ending is gated
+  // on it, so no log without the thread can reach one.
+  const LEADS = ['doom', 'split', 'walk', 'message', 'second', 'stay', 'ride', 'catch', 'follow', 'launch', 'call'];
   function motionOf(G) {
     if (!G) return null;
     if (G.cls === 'air') {
@@ -1677,6 +1689,130 @@ import { Species } from './species.js';
     },
   ]);
 
+  // ---------------------------------------------------------------- the call threads
+  //
+  // Phase 2, p2-40. The ruin of a world sends on a band that is not on the band plan, and the
+  // radio of the crew hears it as a click. A call thread carries that click from the first night
+  // to the direction it comes from, and the ending then names the band. Every log of a world with
+  // a ruin takes exactly one, and a log of a world with no ruin takes none.
+  //
+  // Every call thread holds five beats in one order, because the trim keeps the first beats and
+  // the last one and drops the middle:
+  //
+  //   0  the click is heard, and logged as a fault
+  //   1  the reply, decision 6 of p2-00: the click began on day {beacon}, the day the crew put the
+  //      beacon on the mast. Every wording of this beat states both days, and they are one day
+  //   2  the click is not a fault of this ship
+  //   3  the click is on a band the plan leaves empty
+  //   4  the direction. Every wording of this beat names {from}, the compass word of the ruin
+  //
+  // So a thread trimmed to three beats reads: heard, the reply, the direction. **The number of the
+  // band never prints in a thread.** A beat says "the band", "a band the plan leaves empty", or
+  // "the click", and the last entry is the one place the number stands. {from} stands in the last
+  // beat and nowhere else in the thread. The lead is `call`, and the thread earns it always.
+  //
+  // The job of the radio is the natural subject, and a crew may hold no radio role, so a wording
+  // names the job only as "our {onejob}", as every thread does.
+  const CALL_THREADS = pool([
+    {
+      key: 'click', lead: 'call',
+      beats: [
+        ['{one} heard a click under the static at night, every eleven seconds. Our {onejob} logged it as a fault in the radio.',
+          'Our {onejob} heard a click after dark, every eleven seconds, and wrote it in the fault book. {two} heard nothing and said so.',
+          '{one} turned the receiver up at supper so all of us could hear it: a click, a gap, a click. {two} timed the gap at eleven seconds.',
+          '{two} heard a click under the static tonight, every eleven seconds by the clock. {one} says it is a loose contact and will find it tomorrow.',
+          'Our {onejob} came in from the mast with the headset on and asked us to be quiet. {two} heard it then too: a click in the static, every eleven seconds. We listened to it for an hour.',
+          'There is a click on the radio tonight that {one} cannot explain. It comes every eleven seconds, under the static, and it does not miss. {two} wrote the hour in the log and went to bed.'],
+        ['The click started on day {beacon}, and that is the day we put the beacon on the mast. {one} found both dates in the record and set them side by side.',
+          '{one} went back through the record of the receiver tonight. The first click is on day {beacon}. We raised the beacon on the mast on day {beacon}, and the record holds nothing before it.',
+          'Our {onejob} has the answer to one question. The click began on day {beacon}. We put the beacon on the mast that day. {two} has the entry in the work log to prove it.',
+          '{two} asked when the click began. {one} read the date off the record: day {beacon}. Day {beacon} is the day the beacon went on the mast, and nobody said anything for a while.',
+          '{one} put two dates on the wall tonight. Day {beacon}, the beacon on the mast. Day {beacon}, the first click on the record. {two} read both out loud and sat down.',
+          'The record of the receiver goes back to the landing, and {one} read all of it tonight. The click is on day {beacon} and on every day after it. Day {beacon} is the day the beacon went up the mast.'],
+        ['The click is back, on the same eleven seconds. {one} swapped the radio for the spare. The spare hears it too.',
+          '{one} took the receiver apart on the bench and found nothing loose. {one} put it back together and turned it on, and the click was there before the static was.',
+          'We turned the beacon off for an hour tonight. The click stopped. {one} turned the beacon on, and the click came back inside a minute.',
+          '{two} carried the hand radio out to the far marker to listen. The click is there too, on the same count. It is not a fault inside this ship.'],
+        ['{one} checked the click against the band plan. Nothing we brought sends on that band.',
+          'The click sits on a band the plan leaves empty. Our {onejob} went through the plan line by line at supper. Nothing of ours sends there.',
+          '{one} wrote the band of the click on the wall under the band plan. It is not on the plan. {two} read the plan through twice and found no line for it.',
+          'The click is not one of ours. {one} shut every transmitter on the ship for an hour except the beacon, and the click went on.'],
+        ['{one} walked the aerial round the mast all night. The click is loudest from the {from}.',
+          'Our {onejob} turned the loop aerial through the whole circle tonight, a hand at a time. The click is strongest with the loop on the {from}.',
+          '{one} and {two} strung a loop aerial and turned it by hand. The click rises with the loop toward the {from} and falls on every other side. It comes from the {from}.',
+          '{one} walked out from the mast with the hand radio on eight lines tonight. The click is loudest on the line to the {from}, and {two} has the eight readings on the wall.',
+          'The click comes from the {from}. {one} proved it with the loop aerial, three nights running, and wrote the bearing on the wall.',
+          '{two} held the loop aerial and {one} read the meter, a point at a time, round the whole circle. The click peaks on the {from} and on no other point.'],
+      ],
+    },
+    {
+      key: 'tape', lead: 'call',
+      beats: [
+        ['{one} played the tape of the night radio at supper. Under the static there is a click every eleven seconds, and {two} heard it before the rest of us.',
+          '{one} ran the tape of the night receiver at high speed this morning and heard a tick in it. At normal speed the tick is a click every eleven seconds, and {two} timed it.',
+          'Our {onejob} found a click on one night tape and then on the tape before it. {one} logged it as noise from the water pump.',
+          '{two} was on the night watch and heard a click in the headset. {two} woke {one}. {one} and {two} sat with the tape running until dawn, and the click did not miss once.',
+          'Our {onejob} keeps the receiver on tape through the night. Tonight the tape has a click on it, eleven seconds apart, from end to end. {one} played it to us twice.',
+          '{two} took the night tape to the bench to check its clock and found a click in the static. It comes every eleven seconds for the whole tape. {one} heard it and said nothing for a minute.'],
+        ['{one} went through every night tape back to the landing. The click is on every one from day {beacon} and on none before it. Day {beacon} is the day the beacon went up the mast.',
+          'The tapes settle it, {one} says: the first click is on the tape of day {beacon}. {two} looked up the work log: day {beacon}, beacon raised on the mast, tested, left on.',
+          'Our {onejob} found the first click on the tape of day {beacon}. We put the beacon on the mast that evening, and {two} has it in the work log. {one} played that tape for all of us, and the click starts an hour after the beacon does.',
+          'The click began on day {beacon}. {one} is sure, because the tape of the night before is clean. Day {beacon} is in the work log too: the beacon went on the mast that morning.',
+          '{two} laid the tapes out on the bench in order. Clean, clean, clean, and then a click on the tape of day {beacon}. The beacon went up the mast on day {beacon}. {two} put a finger on that tape and left it there.',
+          'The tape of the landing holds no click, and {one} checked it twice. The click starts on the tape of day {beacon}, the day the beacon went up the mast. It is on every tape after that.'],
+        ['We took the beacon off the air for an hour at midnight. The tape of that hour holds static and nothing else. The click came back with the beacon.',
+          '{one} counted the clicks on one tape and the clicks the beacon sent in the same hours. The two counts are the same. Every click of ours has a click after it.',
+          '{two} ran the tape through the spare receiver. The click is on it there too, at the same count. It is in the air and not in the machine.',
+          '{one} put the tape through a filter and took the static off it. What is left is a click and eleven seconds of nothing, over and over. Our {onejob} played that for an hour and did not speak.'],
+        ['{one} found the band of the click and looked for it on the band plan. There is no line for it. Nothing we carry sends on that band.',
+          'Our {onejob} read the band of the click off the receiver. {one} checked every transmitter on the ship against it. None of them can reach that band.',
+          'The click is on a band the plan leaves empty. {one} went through the plan for the lander, the beacon, the suits, and the rover. None of them is on it.',
+          '{two} asked if the click could be our own beacon, coming back off the ground. {one} showed the band plan. The beacon sends on its own band, and the click is on another one, far from it.'],
+        ['{one} took the receiver up the mast and turned the aerial through eight points. The click is loudest from the {from}. {one} taped the aerial there.',
+          'The tape from the loop aerial pointing {from} is the loud one. Our {onejob} made eight tapes tonight, one for each point, and that one is louder than the rest.',
+          '{one} has the direction. The loop aerial turned through the whole circle gives one peak, on the {from}. {two} checked it with the hand radio from the ridge and got the same answer.',
+          '{one} and {two} spent the night turning the aerial and marking the meter. The click comes from the {from}. {one} drew the bearing on the map, and the line runs off the edge of the map.',
+          'The click is loudest with the aerial toward the {from}. {one} turned it away and the click fell to nothing. {one} turned it back and the click came up. We did that ten times, and the answer was the {from} every time.',
+          '{two} made a tape on each point of the compass tonight, with the aerial fixed for an hour on each. The click is on the tape for the {from} and on no other. {one} played the eight tapes to us in a row.'],
+      ],
+    },
+    {
+      key: 'answer', lead: 'call',
+      beats: [
+        ['Tonight {one} heard a second click after each click of the beacon, fainter, in the gap. The beacon sends one every eleven seconds, and the small click comes back every time.',
+          'A second click comes back after every click the beacon sends, small and late. {one} thought the beacon was hearing itself, and {two} did not.',
+          'Our {onejob} put the beacon on the speaker at supper: a click, then a smaller click, then the gap. {two} said the small one is an echo off the ridge. {one} did not agree.',
+          '{one} found a second click on the beacon monitor tonight, after each of our own. {one} turned the speaker up so the rest of us could hear it. It is faint, and {two} says it is there every time.',
+          '{two} came in from the mast and said the beacon sounds wrong. {one} put the headset on. There is a click after every click of ours, fainter and later, and {one} heard it at once.',
+          'The beacon monitor has a second trace on it tonight, a small mark after every click of ours. {one} saw it on the screen before anybody heard it. {two} put the speaker on, and there it was, a click in the gap.'],
+        ['{one} read back the log of the beacon monitor tonight. The second click begins on day {beacon}, in the first hour the beacon was on the mast. There is no click before it.',
+          'The monitor counts every click that comes in, and {one} found the day the count starts: day {beacon}. Day {beacon} is the day we put the beacon on the mast. The count starts one hour after we switched it on.',
+          'Our {onejob} has the two dates on one page. The beacon went up the mast on day {beacon}. The first click that came back is logged on day {beacon}. {two} read the page and put it on the wall.',
+          'The second click has come back since day {beacon}. {one} found that in the record of the monitor tonight. Day {beacon} is the day of the mast and the beacon, and we sent nothing from here before that day.',
+          '{two} asked if the second click was always there. {one} checked. It began on day {beacon}. We raised the beacon on the mast on day {beacon}, and the record has the first answer that night.',
+          'The record of the monitor runs from the landing, and {one} went through all of it tonight. No click came back before day {beacon}. On day {beacon} we put the beacon on the mast, and the first click came back that evening.'],
+        ['We took the beacon off the air for an hour tonight. The second click stopped with it. {one} put the beacon back on, and the second click came back on the first count.',
+          '{one} slowed the beacon to one click a minute for the test. The second click slowed with it, one a minute, and late by the same gap. {one} put the beacon back to normal and sat down.',
+          'Our {onejob} changed the count of the beacon from eleven seconds to seven. The second click changed to seven. Whatever sends it hears us.',
+          '{two} sent three clicks by hand from the beacon key tonight. Three clicks came back, fainter, in the same pattern. {two} sent five. Five came back. Nobody went to bed.'],
+        ['The second click is not on the band of the beacon. {one} found it a long way up the dial, on a band the plan leaves empty. Nothing we carry sends there.',
+          '{one} took the band of the second click off the meter and looked it up on the band plan. There is no entry for it. It is not a band of ours.',
+          'Our {onejob} went through the band plan for the second click and found it on no line. The lander, the suits, the rover, and the beacon all send elsewhere. The second click is not ours.',
+          '{two} wanted the band of the second click on the wall, so we would stop asking. {one} wrote it under the band plan. There is no line on the plan above it.'],
+        ['{one} turned the loop aerial while the beacon sent. The second click is loudest with the loop toward the {from}. Our beacon is answered from the {from}.',
+          '{one} and {two} walked the hand radio out from the mast on eight lines tonight. On the line to the {from} the second click is loud enough to hear over the beacon. It comes from the {from}.',
+          '{one} has the bearing of the second click. The aerial turned through the whole circle gives one peak, toward the {from}. {one} left the aerial there, and the second click fills the speaker.',
+          'The second click comes from the {from}. {one} and {two} proved it with the loop aerial, one turning and one reading the meter, all night.',
+          'Our {onejob} strung the loop aerial from the mast and turned it a point at a time. The second click rises toward the {from} and falls away on every other point. {two} wrote {from} on the wall in large letters.',
+          '{two} turned the loop aerial and {one} called the meter out, round the whole circle twice. Both times the second click peaked on the {from}. The bearing is on the wall now, under the band plan.'],
+      ],
+    },
+  ]);
+  // The beat of the call thread that states the reply, and the count of its beats. The trim keeps
+  // the beats before the reply beat, the reply beat, and the last beat; see callBeats().
+  const CALL_REPLY_BEAT = 1;
+  const CALL_BEATS = 5;
+
   // ---------------------------------------------------------------- the endings
   //
   // The last entry. Twelve kinds, and every kind holds three wordings or more. Two things steer
@@ -1777,6 +1913,115 @@ import { Species } from './species.js';
     { kind: 'joke', w: 1.6, t: 'We voted tonight on a name for this place. {one} won with one vote, which was {one}’s own. The name is on the hull.' },
     { kind: 'joke', w: 1.6, t: 'Our {onejob} asks that the next crew bring a better cook. Our {twojob} asks that the next crew bring a better {onejob}. Both requests are logged.' },
   ]);
+
+  // ---------------------------------------------------------------- the call endings
+  //
+  // Phase 2, p2-40. On a world with a ruin the last entry comes from this pool and from no other:
+  // the same twelve kinds, and every wording prints {freq}, the band of the click, exactly once.
+  // The number stands here and nowhere else in the log. Every wording is gated on `leadcall`, the
+  // lead of the call thread, so no log without the thread can reach one.
+  //
+  // A wording carries the outcome of decision 2 of p2-00, and the people who go:
+  //
+  //   went    'all'   every person still here goes toward the call. `goers` is not listed
+  //           'some'  two or more go and the rest stay. `goers` names the roles
+  //           'one'   one person goes alone
+  //           'none'  nobody can go, and the log hands the band to the reader
+  //   goers   the roles of the wording: 'keeper', 'one', or 'two'
+  //
+  // The kinds keep the outcomes of the plan: the walk and the joke take everybody, the split takes
+  // some or one, the reckless plans take the two people of the fauna thread, the second hand goes
+  // alone or cannot, and the doom, the message, the cut, the stay, and the launch send nobody. The
+  // leads of the threads pick the kind as they pick it on a world with no ruin, so the spread of
+  // the outcomes follows the spread of the kinds.
+  //
+  // Two people are always here besides the keeper, so `some` is never `all`: a crew holds three
+  // people or more and a thread retires one only when the crew holds four or more.
+  //
+  // A wording that walks or drives is shut to an island (`!mostlysea`), where the click comes from
+  // over the water, and the island takes the raft the coast thread built.
+  const CALL_ENDINGS = pool([
+    // --- the known doom, faced calmly. Nobody goes, and the band goes to the reader.
+    { kind: 'doom', went: 'none', w: 1.5, tags: 'leadcall', t: 'We cannot reach it. The click is on {freq} and it comes from the {from}. We listened to it for the last nine nights. Whoever reads this can go and see what sends it. We could not.' },
+    { kind: 'doom', went: 'none', w: 1.5, tags: 'leadcall', t: 'The cells are down to the receiver and the clock. {one} has the receiver on {freq}, and the click is on it, from the {from}. We will listen until the cells stop. Take the log, and then go the way the click comes from.' },
+    { kind: 'doom', went: 'none', w: 2.5, tags: 'leadcall leaddoom', t: 'The last date on the wall is today. Under it {one} wrote the band of the click, {freq}, and the word {from}. That is what we leave: the record, and the one thing on this world we could not go and see.' },
+    { kind: 'doom', went: 'none', w: 2.5, tags: 'leadcall harsh leaddoom', t: 'The outer bay is shut for good tonight. The receiver stays on {freq}, on the speaker, so the click is the last sound in this ship. It comes from the {from}. Nobody here could cross this world on foot, and nobody will. Go in our place.' },
+    { kind: 'doom', went: 'none', tags: 'leadcall frozen|subzero|cold', t: 'The cells are empty, so the heaters go off tonight. {one} pointed the aerial at the {from} and left the receiver on {freq}. The click comes in with the cold. At {temp} the log will keep. Whoever finds it, go and see what sends the click.' },
+    { kind: 'doom', went: 'none', tags: 'leadcall hot|molten', t: 'The radiators are finished, and at {temp} we have until noon. The log goes in the hardened store with one line on top: {freq}, {from}. The click is on that band and it comes from that side. We could not go. You can.' },
+    { kind: 'doom', went: 'none', tags: 'leadcall longday|slowspin', t: 'Dawn is {night} off, and the cells will not last to it. We are in the dark with the receiver on {freq}. The click comes in from the {from} every eleven seconds. {one} counts them out loud. The heaters stop when the cells do, and we stop with them.' },
+    { kind: 'doom', went: 'none', tags: 'leadcall polarnight', t: 'The sun goes round the horizon one more time. Then it will stop rising. We cannot cross this ground in the dark, and the click comes from the {from}, on {freq}, across it. We close the log now, while there is light to write by. Go when the sun is up.' },
+    // --- the reckless plan: ride it toward the call. The two people of the fauna thread go.
+    { kind: 'ride', went: 'some', goers: ['keeper', 'one'], w: 4.5, tags: '!leadsecond beasts mwalk leadcall leadride', if: g(bigBody), t: 'The {kinds} walk toward the {from} every dawn, and the click comes from the {from}, on {freq}. Tomorrow {one} and I get on the back of one and go with them. {two} says it is a bad plan. {two} is right.' },
+    { kind: 'ride', went: 'some', goers: ['keeper', 'one'], w: 4.5, tags: '!leadsecond beasts mwalk leadcall leadride', if: g(bigBody), t: 'The {kinds} take their road toward the {from} at first light. {one} and I go on the back of one of them. The click is on {freq}, and it comes from the {from}. {two} has the harness ready and the hand radio tied to it.' },
+    { kind: 'ride', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mwalk leadcall', if: g(bigBody), t: 'We ride a {kind} toward the click in the morning, {one} and I. {size}. It walks toward the {from}, where the click comes from. The click is on {freq}, and we have watched the {kinds} for {days} days and never got on one. Tomorrow we do.' },
+    { kind: 'ride', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mwalk leadcall', if: g(bigBody), t: 'Tomorrow we ride. {one} has the harness on the big {kind} and the hand radio on {freq}. The {kinds} go toward the {from} at dawn, and the click comes from the {from}. {two} stays with the beacon and will not watch us go.' },
+    // --- the reckless plan: take hold of one, on the way the click comes from
+    { kind: 'catch', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mwalk leadcall', if: g(handBody), t: 'The {kinds} run toward the {from} when the click comes, every time, and the click is on {freq}. Tomorrow {one} and I take one in the net and hold it. {size}. We want to see what they run to.' },
+    { kind: 'catch', went: 'some', goers: ['keeper', 'one'], w: 4.5, tags: '!leadsecond beasts mdig leadcall leadcatch', t: 'The line the {kind} leaves runs toward the {from}, and the click comes from the {from}, on {freq}. Tomorrow {one} and I dig down beside the line and wait for it. I said no for {days} days. I have stopped saying no.' },
+    { kind: 'catch', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mdig leadcall', t: 'The {kind} runs toward the {from} under the ground, and the click comes from the {from} on {freq}. We start the trench at first light, across its run. {one} has the hand radio. We sit in the trench until the {kind} comes through, and then we follow the line.' },
+    { kind: 'catch', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts manchor leadcall', t: '{pet} goes down when the click comes and comes up in the gap. Tomorrow {one} and I sit beside {pet} at dawn with the radio on {freq}. We want to see which way it faces. The click comes from the {from}.' },
+    { kind: 'catch', went: 'some', goers: ['keeper', 'one'], w: 4.5, tags: '!leadsecond beasts mcrawl|mroll|mflow leadcall leadcatch', t: 'Every {kind} on this ground goes toward the {from} at dusk. The click comes from the {from}, on {freq}. Tomorrow {one} and I put hands on one and hold on. {size}. {two} says we will not hold it, and {two} may be right.' },
+    { kind: 'catch', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts msling flora leadcall', t: 'The {kinds} swing toward the {from} every dusk, and the click comes from the {from} on {freq}. Tomorrow {one} and I go into the {plants} with the net. We want one in the hand for an hour, and then we follow where it goes.' },
+    // --- the reckless plan: follow it, because it goes the way the click comes from
+    { kind: 'follow', went: 'some', goers: ['keeper', 'one'], w: 4.5, tags: '!leadsecond beasts mfly leadcall leadfollow', t: 'The {kinds} fly toward the {from} every evening, and the click comes from the {from}, on {freq}. Tomorrow {one} and I follow them to the place they go at dusk. The rover cannot make the trip back, and we know it.' },
+    { kind: 'follow', went: 'some', goers: ['keeper', 'one'], w: 4.5, tags: '!leadsecond beasts mfly leadcall leadfollow', t: 'Every evening the {kinds} go over the mast toward the {from}. The click comes from there too, on {freq}. {one} and I go after them in the rover at dusk. {two} keeps a lamp on the mast for us.' },
+    { kind: 'follow', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mfly leadcall', t: 'A {kind} will carry a line and a small lamp for us in the morning. Then {one} and I go after the lamp in the rover, toward the {from}. The click is on {freq} and it comes from the {from} too. {one} has tied the knot four times.' },
+    { kind: 'follow', went: 'some', goers: ['keeper', 'one'], w: 4.5, tags: '!leadsecond beasts mcruise leadcall leadfollow', t: 'The {kinds} cross toward the {from} every day, and the click comes from the {from}, on {freq}. Tomorrow {one} and I take the rover under them and keep going while they are up. {one} has the tape running.' },
+    { kind: 'follow', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mcruise leadcall', t: 'The {kinds} cross toward the {from} at the same hour every day, and the click comes from the {from}. Tomorrow {one} and I stand under them on the open ground, with the radio on {freq}. We walk the way they go until dark.' },
+    { kind: 'follow', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mswarm|mdrift leadcall', t: 'The {kind} goes over toward the {from} every evening, and the click comes from the {from}, on {freq}. Tomorrow {one} and I go out on the open flat and let it come over us. Then we walk under it until it stops.' },
+    { kind: 'follow', went: 'some', goers: ['keeper', 'one'], w: 2, tags: '!leadsecond beasts mroll|mflow|msling|mcrawl leadcall', t: '{pet} goes toward the {from} at dusk and comes back at dawn. The click is on {freq}, from the {from}. Tomorrow {one} and I follow {pet} until it stops. We want to see where {pet} goes at night.' },
+    // --- the walk out, all of us, toward the call
+    { kind: 'walk', went: 'all', w: 1.2, tags: 'leadcall !mostlysea', t: 'We leave at first light, all of us, with the rover and the spare radio. The click is on {freq}, and it comes from the {from}. If you hear it too, come after us.' },
+    { kind: 'walk', went: 'all', w: 1.2, tags: 'leadcall !mostlysea', t: 'We are walking toward the click in the morning, every one of us. It is on {freq} and it comes from the {from}. {one} has the hand radio and {two} has the water. The beacon stays on behind us.' },
+    { kind: 'walk', went: 'all', w: 3.5, tags: 'leadcall leadwalk !mostlysea !harsh', t: 'We are going out toward the click, all of us, on foot, at first light. It is on {freq}, from the {from}. Nobody stays. The click is the one new thing on this world, and we are going to it.' },
+    { kind: 'walk', went: 'all', w: 3.5, tags: 'leadcall leadwalk !mostlysea', t: 'The rover is packed with air and water for all of us, and we leave at first light. {one} drives. The click is on {freq}, from the {from}, and it is farther than one battery. When the battery is flat, we walk.' },
+    { kind: 'walk', went: 'all', w: 3.5, tags: 'leadcall leadwalk !mostlysea', t: '{one} has drawn a route on the wall map, to the {from}. The click is at the end of it, on {freq}. All of us walk it in the morning. The beacon stays on behind us, so the click has something to answer.' },
+    { kind: 'walk', went: 'all', w: 1.2, tags: 'leadcall !mostlysea', t: 'The rover has one charge left and we are spending it on the click. All of us go at dawn, toward the {from}. The click is on {freq}. This log is a copy. The first copy goes with us.' },
+    { kind: 'walk', went: 'all', tags: 'leadcall mostlysea waterliquid', t: 'We leave on the raft we built at first light, all of us. The click is on {freq} and it comes from the {from}, over the water. {one} says the raft will carry us and the food. To stay is certain.' },
+    // --- the launch. Nobody goes to the call, and the band stays for the reader.
+    { kind: 'launch', went: 'none', tags: 'leadcall leadlaunch', t: 'We climb at first light, because the orbiter leaves on day {due}. {one} still gives the patched feed line one chance in three. A copy of this log stays in the ground store, with one line on top: {freq}, from the {from}. There is a click on that band and it is not ours.' },
+    { kind: 'launch', went: 'none', tags: 'leadcall leadlaunch', t: 'Every loose item is out on the ground tonight, to save weight. The receiver stays behind, on {freq}, with a note taped to it: the click comes from the {from}. We climb at dawn on the patched feed line. If this log is still at the landing site, the line did not hold.' },
+    { kind: 'launch', went: 'none', tags: 'leadcall leadlaunch', t: 'The engine held nine seconds in the test. The climb needs six minutes. All of us go up in the morning, because the orbiter leaves on day {due}. We never went to the click. It is on {freq}, from the {from}, and {two} has said goodbye to it out loud.' },
+    { kind: 'launch', went: 'none', tags: 'leadcall leadlaunch', t: 'Our {onejob} says the climb is tomorrow or never, so it is tomorrow. The log is copied to the ground store. One line in it is new: a click on {freq}, from the {from}, that answers our beacon. If the feed line bursts, the click will still be here, and we will not.' },
+    // --- the split: some go toward the call, or one goes alone
+    { kind: 'split', went: 'some', goers: ['one', 'two'], tags: 'leadcall !mostlysea', t: '{one} and {two} go after the click in the morning, with the rover. It is on {freq}, and it comes from the {from}. I stay with the beacon and the log.' },
+    { kind: 'split', went: 'some', goers: ['one', 'two'], w: 6, tags: 'leadcall leadsplit !mostlysea', t: 'We settled it tonight, and nobody raised a voice. {one} and {two} walk toward the click at first light, to the {from}. It is on {freq}. I keep the beacon on the mast and a place set at the table.' },
+    { kind: 'split', went: 'one', goers: ['one'], w: 6, tags: 'leadcall leadsplit !mostlysea', t: '{one} goes toward the click alone in the morning. It is on {freq}, from the {from}. {one} says one person can make the walk and the rest of us cannot spare the food. I said no once and did not say it twice.' },
+    { kind: 'split', went: 'one', goers: ['one'], tags: 'leadcall !mostlysea', t: '{one} takes the rover toward the {from} in the morning, alone. The click is on {freq}, and the hand radio is set to it. We drew straws, and {one} drew the short one and smiled. The rest of us hold the beacon.' },
+    { kind: 'split', went: 'one', goers: ['two'], tags: 'leadcall !mostlysea', t: 'The rover takes one person and the air for one. {two} goes, toward the {from}, at first light. The click is on {freq}. {one} checked the seals on the rover twice tonight and said nothing.' },
+    { kind: 'split', went: 'one', goers: ['two'], tags: 'leadcall !mostlysea !harsh', t: '{two} leaves at dawn for the {from}, alone, on foot, with the hand radio set to {freq}. The rest of us hold the beacon and the ship. {two} will call at dusk each night while the hand radio reaches us.' },
+    { kind: 'split', went: 'some', goers: ['one', 'two'], tags: 'leadcall mostlysea waterliquid', t: '{one} and {two} take the raft toward the {from} at dawn, to find what sends the click. It is on {freq}. The rest of us stay with the ship and the beacon.' },
+    // --- the entry that stops, after the number
+    { kind: 'cut', went: 'none', w: 1.2, tags: 'leadcall', t: '{one} has the click on the speaker. {freq}. It answers our beacon, click for click. I am going up to the mast to' },
+    { kind: 'cut', went: 'none', w: 1.2, tags: 'leadcall', t: 'The click on {freq} stopped tonight, for the first time. {one} is at the mast with the headset. Now it is back, from the {from}, and louder. I am going out to' },
+    { kind: 'cut', went: 'none', w: 1.2, tags: 'leadcall', t: 'Whoever finds this, the band is {freq} and the click comes from the {from}. The hatch alarm is going and {two} is calling me. I will finish this when I' },
+    { kind: 'cut', went: 'none', w: 1.2, tags: 'leadcall', t: 'We settled it tonight. The click is on {freq}, it comes from the {from}, and in the morning we decide who goes. {one} wants it written down before we sleep. I am writing it down, and the deck has just moved under' },
+    // --- the second hand: the band the keeper wrote on the hatch, and whether anybody goes
+    { kind: 'second', went: 'one', goers: ['one'], w: 3.5, tags: 'leadcall leadsecond', t: 'This is {one}. {keeper} kept this log and died three days ago, of the fever from the wound. Before that {keeper} wrote the band of the click on the hatch: {freq}, from the {from}. I am going toward it in the morning, alone. Somebody should.' },
+    { kind: 'second', went: 'none', w: 3.5, tags: 'leadcall leadsecond', t: 'This is {one}, the {onejob}. {keeper} wrote every line above this one and asked me for the last. The click is on {freq}, from the {from}, tonight as every night. {keeper} wanted to go to it and could not. Neither can we.' },
+    { kind: 'second', went: 'none', tags: 'leadcall', t: 'This is {two}. {keeper} died in the night, in the bunk, with the receiver on {freq} beside it. The click comes from the {from}. {keeper} said to write the band here in case the hatch is lost. It is written.' },
+    { kind: 'second', went: 'one', goers: ['two'], tags: 'leadcall', t: 'This is {two}. {keeper} is dead, and the log is {keeper}’s to the line above. One thing was left for me to add: the click is on {freq}, from the {from}. I am taking the hand radio and going that way. {one} stays with the beacon.' },
+    // --- the quiet one: they stay, and the call waits for whoever comes
+    { kind: 'stay', went: 'none', tags: 'leadcall temperate waterliquid', t: 'Nobody is coming for us, and nobody here is walking to the {from}. {one} said we could live on this ground, and no one had a better plan. The click stays on {freq} for whoever comes after us. Tomorrow we start on a roof that is not a hull.' },
+    { kind: 'stay', went: 'none', tags: 'leadcall temperate waterliquid', t: 'The lander is a house now. We took the seats out today, and the receiver sits in the window on {freq}. The click from the {from} comes in with the evening. We are staying, and {one} is cutting a second window.' },
+    { kind: 'stay', went: 'none', w: 3.5, tags: 'leadcall leadstay temperate waterliquid', t: 'The vote tonight was for staying, and it was not close. We make a life here. The click is on {freq}, from the {from}, and it is not ours to answer. We leave it to whoever comes after us. In the morning we mark out a field beyond the mast.' },
+    { kind: 'stay', went: 'none', w: 3.5, tags: 'leadcall leadstay flora temperate waterliquid', t: 'The seed store is in the ground beyond the mast, and some of it has come up. {one} says a crew can live here for years, and we mean to. The click on {freq} comes from the {from} every night. We listen to it at supper, and nobody goes.' },
+    // --- the message to whoever finds the log
+    { kind: 'message', went: 'none', tags: 'leadcall', t: 'Whoever finds this: there is a click on {freq}. It comes from the {from}, and it began the day our beacon went up. We were {crew}, and we were here {days} days. Go and see what answers.' },
+    { kind: 'message', went: 'none', w: 3.5, tags: 'leadcall leadmessage', t: 'To whoever comes: take the record, and read the names off the board by the hatch to somebody at home. Then set the receiver to {freq}. The click on it comes from the {from} and it answers our beacon. We never reached it. You will.' },
+    { kind: 'message', went: 'none', tags: 'leadcall', t: 'If you can read this, you are at the hatch we came in by. Set your receiver to {freq} and listen. The click comes from the {from}, one every eleven seconds, and nothing we brought makes it. We ran out of days before we could go and look.' },
+    { kind: 'message', went: 'none', tags: 'leadcall beasts', t: 'Whoever finds this: {others} live here, and they will not hurt you. Set the receiver to {freq} while you wait for them. The click on it comes from the {from}. We were here {days} days and could not go to it.' },
+    // --- the last joke, and then everybody goes to look
+    { kind: 'joke', went: 'all', w: 1.2, tags: 'leadcall', t: '{one} says whoever is sending the click owes us a ride home. We laughed until {two} had to sit down. In the morning all of us go and ask, toward the {from}. The click is on {freq}.' },
+    { kind: 'joke', went: 'all', w: 1.2, tags: 'leadcall', t: '{one} made a sign for the hatch tonight. It says: gone {from}, back late. All of us go at first light, after the click on {freq}. We have left the sign up.' },
+    { kind: 'joke', went: 'all', w: 1.2, tags: 'leadcall', t: '{two} wants it on the record that {two} never liked this planet. Our {twojob} likes it less now that it clicks. It is on the record. All of us leave toward the {from} in the morning, with the receiver on {freq}.' },
+    { kind: 'joke', went: 'all', w: 1.2, tags: 'leadcall mostlysea waterliquid', t: '{one} named the raft after the click tonight and painted the name on the side. {two} asked if the raft will click too. All of us push off at first light, toward the {from}, with the receiver on {freq}.' },
+    { kind: 'joke', went: 'all', w: 1.2, tags: 'leadcall !mostlysea', t: 'We voted tonight on a name for whatever sends the click. {one} won by one vote, and it was {one}’s own. The name is painted on the hull. In the morning all of us walk toward the {from} to tell it, with the receiver on {freq}.' },
+    { kind: 'joke', went: 'all', w: 1.2, tags: 'leadcall', t: '{one} asked the click to speak up. It did not. In the morning all of us go over to the {from} to ask it what it wants. The click is on {freq}, and it has not missed a night.' },
+  ]);
+  // The four outcomes of the last entry, decision 2 of p2-00. The audit reports the spread over
+  // 200 worlds against it, and no value may pass half of the logs.
+  const WENT = ['all', 'some', 'one', 'none'];
   // Every kind an ending may carry. The audit reports the spread over 200 worlds against it.
   const ENDING_KINDS = [...new Set(ENDINGS.map((e) => e.kind))];
 
@@ -1786,6 +2031,7 @@ import { Species } from './species.js';
   for (const t of CREW_THREADS) t.kind = 'crew';
   for (const t of FAUNA_THREADS) t.kind = 'fauna';
   for (const t of STRAND_THREADS) t.kind = 'strand';
+  for (const t of CALL_THREADS) t.kind = 'call';
 
   // ---------------------------------------------------------------- the people
   // Given names from many languages, short ones and long ones. A log never gives a surname. No
@@ -2083,14 +2329,18 @@ import { Species } from './species.js';
   //
   // A thread may run a prefix of its beats, never fewer than THREAD_MIN_BEATS, so a short log is a
   // shorter subplot and not a truncated one. A retiring thread is never shortened, because the
-  // beat that takes the person out is its last.
-  function chooseThreads(rng, ctx, spare, want, strand) {
+  // beat that takes the person out is its last. The call thread is shortened like the rest, to
+  // three beats at the least, and callBeats() says which of its beats then run.
+  function chooseThreads(rng, ctx, spare, want, strand, call) {
     const used = new Set();
     const out = [];
     const beats = () => out.reduce((s, x) => s + x.take, 0);
     const add = (t) => { if (t) out.push({ t, take: t.beats.length }); };
     // The strand thread is never optional and never shortened: it is why the wreck is here.
     add(strand);
+    // The call thread stands second, so the pop below, which takes the last thread added when the
+    // log is still too long, never takes it. It is null on a world with no ruin.
+    add(call);
     add(pickWorldThread(rng, ctx, used));
     if (ctx.G) add(L.line(rng, FAUNA_THREADS, ctx, used, true));
     const crewPool = spare >= 3 ? CREW_THREADS : CREW_THREADS.filter((t) => !t.retires);
@@ -2128,10 +2378,21 @@ import { Species } from './species.js';
   function leadTags(threads, tags) {
     for (const { t, take } of threads) {
       // The last beat of a thread is where the pressure is, so a thread that lost more than one
-      // beat to the trim never earns its lead. One beat short still counts.
-      if (t.lead && take >= t.beats.length - 1) tags.add('lead' + t.lead);
+      // beat to the trim never earns its lead. One beat short still counts. The call thread keeps
+      // its last beat under the trim, so it earns its lead always.
+      if (t.lead && (t.kind === 'call' || take >= t.beats.length - 1)) tags.add('lead' + t.lead);
     }
     return tags;
+  }
+
+  // The beats a thread runs when it takes `take` of them. Every thread runs a prefix. The call
+  // thread is the one exception: the trim drops its middle beats and keeps the beats up to the
+  // reply beat and the last beat, so a call thread of three beats still states the day the click
+  // began and the direction it comes from, and the ending pays off a direction the reader has met.
+  function callBeats(t, take) {
+    if (t.kind !== 'call' || take >= t.beats.length) return t.beats.slice(0, take);
+    const keep = Math.max(take - 1, CALL_REPLY_BEAT + 1);
+    return [...t.beats.slice(0, keep), t.beats[t.beats.length - 1]].slice(0, take);
   }
 
   // ---------------------------------------------------------------- the public entry point
@@ -2173,6 +2434,11 @@ import { Species } from './species.js';
     const far = 180 + 10 * Math.floor(rng() * 25);
     // Why this crew cannot leave. One strand thread per log, by weight.
     const strand = L.line(rng, STRAND_THREADS, ctx, new Set());
+    // The call, p2-40: one thread on a world with a ruin, and none on a world without one. Every
+    // draw of the call stands behind this test, so a world with no ruin draws nothing more and its
+    // log does not move.
+    const ruin = world.ruin || null;
+    const call = ruin ? L.line(rng, CALL_THREADS, ctx, new Set()) : null;
     // One trait for every person but the keeper, and no trait twice in one crew.
     const traitDeck = TRAITS.slice();
     for (let i = traitDeck.length - 1; i > 0; i--) {
@@ -2184,7 +2450,7 @@ import { Species } from './species.js';
     // How long this log runs. The count varies from world to world, because a short log and a long
     // one read as two different missions.
     const wantBeats = BEAT_MIN + Math.floor(rng() * (BEAT_MAX - BEAT_MIN + 1));
-    const threads = chooseThreads(rng, ctx, others.length, wantBeats, strand);
+    const threads = chooseThreads(rng, ctx, others.length, wantBeats, strand, call);
     leadTags(threads, tags);
 
     // Who each thread may name. A retiring thread takes a person of its own, and nobody else may
@@ -2209,11 +2475,17 @@ import { Species } from './species.js';
     // out of order.
     const items = [];
     for (const { t, take } of threads) {
-      for (let i = 0; i < take; i++) {
-        items.push({ t, beat: t.beats[i], force: (i + 1) / take + (rng() - 0.5) * 0.12, i });
-      }
+      callBeats(t, take).forEach((beat, i) => {
+        items.push({ t, beat, force: (i + 1) / take + (rng() - 0.5) * 0.12, i });
+      });
     }
     items.sort((a, b) => a.force - b.force);
+    // The day the beacon went up, 2 to 6, falls before the first beat of the call thread, and the
+    // entry after the landing can be day 2. So the first beat of the call thread never stands
+    // first. When the sort puts it there, it changes places with the beat after it, which is the
+    // first beat of another thread, because the jitter is smaller than the step between two beats
+    // of one thread. No thread runs out of order.
+    if (call && items[0].t === call) [items[0], items[1]] = [items[1], items[0]];
 
     const total = MISSION_MIN + Math.floor(rng() * (MISSION_MAX - MISSION_MIN));
     const days = layDays(rng, items.length + 2, total);
@@ -2228,10 +2500,20 @@ import { Species } from './species.js';
     let due = endDay + 6 + Math.floor(rng() * 30);
     if (strand.due === 'next') due = endDay + 1;
     if (strand.due === 'last') items.forEach((it, j) => { if (it.t === strand) due = days[j + 1]; });
+    // The day the crew put the beacon on the mast, decision 6 of p2-00: 2 to 6, and before the
+    // first beat of the call thread, whose reply beat states that the click began that day. One
+    // draw, on a world with a ruin only.
+    let beacon = null;
+    if (call) {
+      const firstCall = days[items.findIndex((it) => it.t === call) + 1];
+      beacon = 2 + Math.floor(rng() * Math.min(5, firstCall - 2));
+    }
 
     const base = worldTokens(world, env, probe, (world.env || {}).obliquityDeg);
     base.due = String(due); base.years = L.num(years); base.far = String(far);
     if (G) Object.assign(base, beastTokens(G, pet));
+    // The tokens of the call. {freq} carries its unit, so a line writes "on {freq}".
+    if (ruin) { base.freq = ruin.freq + ' MHz'; base.from = ruin.from; base.beacon = String(beacon); }
     base.keeper = keeper;
     base.keeperjob = jobOf.get(keeper);
     base.crew = L.num(crew.length);
@@ -2286,7 +2568,10 @@ import { Species } from './species.js';
     // the crew list. A gated ending outranks one that fits any world, by the weight of its gate,
     // and the lead tags above are what make it follow the threads.
     // A strand thread may force the kind: the crew that climbs on a patched line ends on the climb.
-    const endPool = strand.end ? ENDINGS.filter((e) => e.kind === strand.end) : ENDINGS;
+    // On a world with a ruin the ending comes from the call wordings and from no other pool, so the
+    // last entry names the band. A world with no ruin keeps the endings it had before the ruin.
+    const endings = ruin ? CALL_ENDINGS : ENDINGS;
+    const endPool = strand.end ? endings.filter((e) => e.kind === strand.end) : endings;
     const end = L.line(rng, endPool, ctx, new Set());
     const day = endDay;
     // An ending that reads the genome is the last beat of the fauna thread in all but name, so it
@@ -2317,20 +2602,33 @@ import { Species } from './species.js';
       slot: 'end.' + (end ? end.kind : 'doom'), title: 'Last entry', day, text: endText,
     });
 
+    // Who goes toward the call, decision 2 of p2-00. `went` is the outcome of the wording and
+    // `goers` the names of the people it sends: everybody still here for 'all', the roles of the
+    // wording otherwise. The keeper and the people of the ending are always still here.
+    let went = null, goers = null;
+    if (end && end.went) {
+      const role = { keeper, one: eOne, two: eTwo };
+      went = end.went;
+      goers = went === 'all' ? [keeper, ...alive] : (end.goers || []).map((r) => role[r]);
+    }
+
     return {
       probe, days: day, species: G ? G.lore.name : null,
       crew, keeper, lost, entries,
       // Why the crew could not leave, and the leads the threads set. The card reads neither; the
       // audit reads both, to prove that the ending fits the story.
       cause: strand.key, leads: LEADS.filter((x) => tags.has('lead' + x)),
+      // The call, on a world with a ruin only: who goes toward it, and the day the beacon went on
+      // the mast. A world with no ruin carries none of the three keys, so its log does not move.
+      ...(ruin ? { went, goers, beacon } : {}),
     };
   }
 
   export const SourceLore = {
-    writeLog, sourceTags, sourceLatDeg, motionOf, salienceOf,
-    TOKENS, BEAST_TOKENS, NAMING_TOKENS, ENDING_KINDS, MOTION, LEADS, shortNoun,
+    writeLog, sourceTags, sourceLatDeg, motionOf, salienceOf, callBeats,
+    TOKENS, BEAST_TOKENS, NAMING_TOKENS, CALL_TOKENS, ENDING_KINDS, WENT, MOTION, LEADS, shortNoun,
     NAMES, ROLES, PET_NAME,
-    ARRIVAL, ENDINGS, SOUND_LANDING, TRAITS,
-    THREADS: { world: WORLD_THREADS, crew: CREW_THREADS, fauna: FAUNA_THREADS, strand: STRAND_THREADS },
-    LIMITS: { CREW_MIN, CREW_MAX, ENTRY_MIN, ENTRY_MAX, THREAD_MIN_BEATS },
+    ARRIVAL, ENDINGS, CALL_ENDINGS, SOUND_LANDING, TRAITS,
+    THREADS: { world: WORLD_THREADS, crew: CREW_THREADS, fauna: FAUNA_THREADS, strand: STRAND_THREADS, call: CALL_THREADS },
+    LIMITS: { CREW_MIN, CREW_MAX, ENTRY_MIN, ENTRY_MAX, THREAD_MIN_BEATS, CALL_REPLY_BEAT, CALL_BEATS },
   };

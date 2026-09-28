@@ -27,6 +27,8 @@ import { Species } from '../../species.js';
 import { FloraLore, FLORA_LORE } from '../../flora-lore.js';
 import { SourceLore } from '../../source-lore.js';
 import * as generate from '../../generate.js';
+import { dirCell, cellSite, tangentFrame } from '../../cell-grid.js';
+import { compass8 } from '../../ruin-types.js';
 import {
   TEMP_BY_TYPE as TYPE_TEMP, LAND_BY_TYPE as LAND, FLORA_BY_TYPE as TYPE_FLORA, FLORA_DENSITY_BY_TYPE as FLORA_DENSITY,
 } from '../../world-types.js';
@@ -442,6 +444,7 @@ function sourceSkyTags() {
   };
   eat(SourceLore.ARRIVAL);
   eat(SourceLore.ENDINGS);
+  eat(SourceLore.CALL_ENDINGS);
   for (const list of Object.values(SourceLore.THREADS)) eat(list);
   for (const [, gate] of LEXICON) {
     const g = Lore.parseGate(gate);
@@ -611,6 +614,14 @@ const floraRelIssues = auditFloraRelations();
 //     first beat may never look back at a day the reader has not read.
 //  8. Salience. Every world thread must say how loud its fact is, from the numbers of the planet.
 //  9. Variety. Three wordings per beat or more, ten ending kinds, six threads of each kind.
+// 10. The call, p2-40. {freq} stands in a call ending only, once per wording; {beacon} in the reply
+//     beat of a call thread only, in every wording of it; {from} in the last beat of a call thread,
+//     in every wording of it, and in a call ending. Every call ending is gated on `leadcall`,
+//     carries one of the four outcomes with goers to match, and every kind holds three or more.
+// 11. The call on a real world, with --seeds: one call thread of three beats or more on every
+//     world with a ruin, a call ending that prints the band once and no other entry with a band,
+//     a beacon day of 2 to 6 before the first call beat and stated once, goers who are still here,
+//     and the compass word of the bearing from the wreck. A world with no ruin holds none of it.
 const SOURCE_TILT_ANCHOR = 0;   // (the sweep constants stand above, with the flora)
 
 // Every genome shape a test of the log can tell apart: the locomotion, the head, the one part the
@@ -654,9 +665,11 @@ for (const m of MOTION) {
 
 const SOURCE_TOKENS = SourceLore.TOKENS;
 const BEAST_TOKENS = SourceLore.BEAST_TOKENS;
-const THREAD_LISTS = [['world', ST.world], ['crew', ST.crew], ['fauna', ST.fauna], ['strand', ST.strand]];
+const THREAD_LISTS = [['world', ST.world], ['crew', ST.crew], ['fauna', ST.fauna], ['strand', ST.strand], ['call', ST.call]];
 const THREAD_MIN = 3;        // world threads every world must reach
 const END_MIN = 4;           // endings every world must reach
+const CALL_THREAD_MIN = 3;   // call threads in the pool. One runs per log, so three keep ten wrecks apart
+const CALL_END_MIN = 3;      // call wordings per ending kind
 const WORDING_MIN = 3;       // wordings every beat must hold
 const SENTENCE_MAX = 20;     // words
 const ENTRY_SENTENCES = 5;   // one wording of a pool
@@ -688,6 +701,8 @@ function sourceTexts() {
   for (const t of SourceLore.SOUND_LANDING) out.push({ label: 'SOUND_LANDING', e: PLAIN, t, kind: 'strand' });
   for (const tr of SourceLore.TRAITS) for (const t of tr.say) out.push({ label: 'TRAIT.' + tr.key, e: PLAIN, t, kind: 'trait' });
   for (const e of SourceLore.ENDINGS) out.push({ label: 'END.' + e.kind, e, t: e.t, kind: 'end' });
+  // The call endings of p2-40 are endings too: the same style, subject, and motion rules bind them.
+  for (const e of SourceLore.CALL_ENDINGS) out.push({ label: 'CALL.' + e.kind, e, t: e.t, kind: 'end' });
   return out;
 }
 const SOURCE_TEXTS = sourceTexts();
@@ -696,6 +711,7 @@ const SOURCE_ENTRIES = [];
 for (const e of SourceLore.ARRIVAL) SOURCE_ENTRIES.push(['ARRIVAL', e]);
 for (const [kind, list] of THREAD_LISTS) for (const th of list) SOURCE_ENTRIES.push([kind.toUpperCase() + '.' + th.key, th]);
 for (const e of SourceLore.ENDINGS) SOURCE_ENTRIES.push(['END.' + e.kind, e]);
+for (const e of SourceLore.CALL_ENDINGS) SOURCE_ENTRIES.push(['CALL.' + e.kind, e]);
 
 // ---- the style lint
 // The voice of the log is short, plain, and literal. These five patterns are the ones a writer
@@ -739,6 +755,7 @@ const WORST = {
   one: 1, two: 1, keeper: 1, crew: 1, n: 1, count: 1,
   few: 1, many: 1, days: 1, since: 1, moon: 1, moons: 1, plant: 1, plants: 1,
   due: 1, years: 1, far: 1, who: 1, whojob: 2,
+  freq: 2, from: 1, beacon: 1,                 // "29.999 MHz", "north-west", "6"
 };
 const expandWorst = (text) => String(text).replace(/\{(\w+)\}/g, (m, k) => 'x '.repeat(WORST[k] == null ? 1 : WORST[k]).trim());
 function styleCheck(text, maxSentences = ENTRY_SENTENCES) {
@@ -908,6 +925,14 @@ for (const [, sky] of sourceSkies) {
       if (!beasts && fa) holes.push(`SOURCE fauna thread reaches a world with no beasts — ${f.type}`);
       const en = Lore.candidates(SourceLore.ENDINGS, ctx).length;
       if (en < END_MIN) holes.push(`SOURCE endings: only ${en} — ${f.type} [${[...tags].join(' ')}]`);
+      // A world with a ruin runs a call thread and ends on a call wording, so under `leadcall`
+      // both pools must answer for every sky, every way of moving, and every set of leads.
+      if (tags.has('leadcall')) {
+        sourceChecked += 2;
+        if (!Lore.candidates(ST.call, ctx).length) holes.push(`SOURCE call threads — ${f.type} [${[...tags].join(' ')}]`);
+        const ce = Lore.candidates(SourceLore.CALL_ENDINGS, ctx).length;
+        if (ce < END_MIN) holes.push(`SOURCE call endings: only ${ce} — ${f.type} [${[...tags].join(' ')}]`);
+      }
     }
     for (const [, e] of SOURCE_ENTRIES) {
       if (e.tags && !Lore.matchTags(Lore.gateOf(e), tags)) continue;
@@ -1027,11 +1052,76 @@ for (const [kind, list] of THREAD_LISTS) {
   }
 }
 
+// ---- the call, p2-40
+// The tokens of the call stand in fixed places. {freq} is the band, and it prints in the last entry
+// and nowhere else, so only a call ending may hold it, once. {beacon} is the day the click began,
+// and every wording of the reply beat of a call thread states it, and no other wording may. {from}
+// is the compass word of the ruin: every wording of the last beat of a call thread names it, a call
+// ending may, and nothing else may.
+const CALL_TOKENS = SourceLore.CALL_TOKENS;
+const { CALL_REPLY_BEAT, CALL_BEATS } = SourceLore.LIMITS;
+for (const x of SOURCE_TEXTS) {
+  const toks = Lore.tokensIn(x.t);
+  // The call threads carry the label CALL.<key> too, so the kind tells the two apart.
+  const callEnd = x.kind === 'end' && x.label.startsWith('CALL.');
+  const callThread = x.kind === 'call';
+  const freqs = toks.filter((t) => t === 'freq').length;
+  if (freqs && !callEnd) sourceIssues.push(`SOURCE ${x.label}: holds {freq}, and only a call ending may\n    ${x.t}`);
+  if (callEnd && freqs !== 1) sourceIssues.push(`SOURCE ${x.label}: prints {freq} ${freqs} times, and once is the rule\n    ${x.t}`);
+  if (toks.includes('beacon') && !callThread) sourceIssues.push(`SOURCE ${x.label}: holds {beacon}, and only the reply beat of a call thread may\n    ${x.t}`);
+  if (toks.includes('from') && !callThread && !callEnd) sourceIssues.push(`SOURCE ${x.label}: holds {from}, and only the call may\n    ${x.t}`);
+  for (const t of CALL_TOKENS) if (toks.includes(t) && !SOURCE_TOKENS.includes(t)) sourceIssues.push(`SOURCE ${x.label}: {${t}} is not in TOKENS`);
+}
+for (const th of ST.call) {
+  if (th.beats.length !== CALL_BEATS) sourceIssues.push(`SOURCE call.${th.key}: ${th.beats.length} beats, and a call thread holds ${CALL_BEATS}, because the trim keeps its first beats and its last`);
+  if (th.lead !== 'call') sourceIssues.push(`SOURCE call.${th.key}: its lead is "${th.lead}", not "call"`);
+  th.beats.forEach((b, i) => {
+    for (const t of sayOf(b)) {
+      const toks = Lore.tokensIn(t);
+      const reply = i === CALL_REPLY_BEAT, last = i === th.beats.length - 1;
+      if (reply && !toks.includes('beacon')) sourceIssues.push(`SOURCE call.${th.key}[${i}]: the reply beat does not state {beacon}\n    ${t}`);
+      if (!reply && toks.includes('beacon')) sourceIssues.push(`SOURCE call.${th.key}[${i}]: states {beacon} outside the reply beat\n    ${t}`);
+      if (last && !toks.includes('from')) sourceIssues.push(`SOURCE call.${th.key}[${i}]: the last beat does not name {from}\n    ${t}`);
+      if (!last && toks.includes('from')) sourceIssues.push(`SOURCE call.${th.key}[${i}]: names {from} before the last beat\n    ${t}`);
+      // The number of the band never prints in a thread, and no thread may say it another way.
+      if (/\bMHz\b|\d\.\d{3}\b/.test(t)) sourceIssues.push(`SOURCE call.${th.key}[${i}]: states a number of MHz, and only the last entry may\n    ${t}`);
+    }
+  });
+}
+// Every call ending carries an outcome and the goers to match, and sits behind `leadcall`.
+const GOER_ROLES = ['keeper', 'one', 'two'];
+const callKinds = new Map();
+for (const e of SourceLore.CALL_ENDINGS) {
+  const label = `CALL.${e.kind}`;
+  callKinds.set(e.kind, (callKinds.get(e.kind) || 0) + 1);
+  if (!SourceLore.ENDING_KINDS.includes(e.kind)) sourceIssues.push(`SOURCE ${label}: "${e.kind}" is not a kind of ENDINGS`);
+  if (!SourceLore.WENT.includes(e.went)) sourceIssues.push(`SOURCE ${label}: went is "${e.went}"\n    ${e.t}`);
+  const need = Lore.parseGate(e.tags).need;
+  if (!need.some((any) => any.length === 1 && any[0] === 'leadcall')) sourceIssues.push(`SOURCE ${label}: not gated on "leadcall"\n    ${e.t}`);
+  const goers = e.goers || [];
+  for (const r of goers) if (!GOER_ROLES.includes(r)) sourceIssues.push(`SOURCE ${label}: the goer "${r}" is not a role\n    ${e.t}`);
+  if (new Set(goers).size !== goers.length) sourceIssues.push(`SOURCE ${label}: a goer is listed twice\n    ${e.t}`);
+  const bad = e.went === 'all' ? goers.length > 0 : e.went === 'none' ? goers.length > 0
+    : e.went === 'one' ? goers.length !== 1 : goers.length < 2;
+  if (bad) sourceIssues.push(`SOURCE ${label}: went "${e.went}" with ${goers.length} goers\n    ${e.t}`);
+  // The keeper is dead in a second-hand ending, and everybody goes in no second-hand ending.
+  if (e.kind === 'second' && (goers.includes('keeper') || e.went === 'all')) sourceIssues.push(`SOURCE ${label}: the keeper goes, and the keeper is dead\n    ${e.t}`);
+}
+for (const k of SourceLore.ENDING_KINDS) {
+  if ((callKinds.get(k) || 0) < CALL_END_MIN) sourceIssues.push(`SOURCE call endings: the kind "${k}" carries only ${callKinds.get(k) || 0} call wordings`);
+}
+for (const w of SourceLore.WENT) {
+  if (!SourceLore.CALL_ENDINGS.some((e) => e.went === w)) sourceIssues.push(`SOURCE call endings: no wording sends "${w}"`);
+}
+
 // ---- variety
 // A reader who finds ten wrecks must meet at least six kinds of ending and at least six threads.
+// One call thread runs per log, and the reader meets its wordings and not its key, so the call
+// keeps a floor of its own.
 if (SourceLore.ENDING_KINDS.length < 10) sourceIssues.push(`SOURCE endings: only ${SourceLore.ENDING_KINDS.length} kinds, and the plan asks for ten`);
 for (const [kind, list] of THREAD_LISTS) {
-  if (list.length < 6) sourceIssues.push(`SOURCE ${kind} threads: only ${list.length}, and ten wrecks will repeat one`);
+  const floor = kind === 'call' ? CALL_THREAD_MIN : 6;
+  if (list.length < floor) sourceIssues.push(`SOURCE ${kind} threads: only ${list.length}, and ten wrecks will repeat one`);
 }
 const endByKind = new Map();
 for (const e of SourceLore.ENDINGS) endByKind.set(e.kind, (endByKind.get(e.kind) || 0) + 1);
@@ -1048,16 +1138,32 @@ for (const x of SOURCE_TEXTS) {
 }
 
 // ---------------------------------------------------------------- pass 4: real worlds through the worker
+// The compass word from the wreck to the ruin, the way bearingFrom() in generate.js computes it:
+// the tangent frame of cell-grid.js at the middle of the cell of the wreck, north the part of +y
+// in that plane and east the direction of falling lon. tools/ruin-check.mjs holds the same word to
+// bearingTo() of site.js; this copy lets the log be checked with no three.js.
+function fromWord(world) {
+  const w = world.source.dir, d = world.ruin.dir;
+  const site = cellSite(dirCell(w[0], w[1], w[2]));
+  const f = tangentFrame(site.lat, site.lon);
+  const e = d[0] * f.east[0] + d[1] * f.east[1] + d[2] * f.east[2];
+  const n = -(d[0] * f.south[0] + d[1] * f.south[1] + d[2] * f.south[2]);
+  return compass8(e === 0 && n === 0 ? 0 : (Math.atan2(e, n) * 180 / Math.PI + 360) % 360);
+}
+const BAND_ANY = /\bMHz\b/;
 let storyStats = null;
 // What the consistency check counts over the real worlds, for the report at the end.
-let logsSeen = 0;
+let logsSeen = 0, ruinLogs = 0, noRuinLogs = 0;
 const entryCounts = [], crewSizes = [];
-const endSpread = new Map(), threadSpread = new Map(), motionSpread = new Map();
+const endSpread = new Map(), threadSpread = new Map(), motionSpread = new Map(), wentSpread = new Map();
 // One sample line per way of moving, so the report shows what a reader really gets.
 const motionSample = new Map();
 // The repetition report. Every sentence of every log, and the sentences of the log before it in
 // seed order, so the sweep can say how often two wrecks in a row read alike.
 const sentenceCount = new Map();
+// The same count over the call alone: the entries of the call thread and the ending of a world
+// with a ruin. p2-40 asks that the commonest sentence of the call stays under 8 per cent of logs.
+const callSentenceCount = new Map();
 let prevSentences = null, neighbourPairs = 0, neighbourShared = 0, sharedExample = '';
 if (SEEDS > 0) {
   const lens = [];
@@ -1089,7 +1195,7 @@ if (SEEDS > 0) {
         if (!/^end\./.test(last.slot) || !SourceLore.ENDING_KINDS.includes(last.slot.slice(4))) {
           holes.push(`seed ${seed}: the log closes on "${last.slot}", which is not an ending kind`);
         } else endSpread.set(last.slot.slice(4), (endSpread.get(last.slot.slice(4)) || 0) + 1);
-        for (const e of E) if (/^(world|crew|fauna|strand)\./.test(e.slot)) threadSpread.set(e.slot, (threadSpread.get(e.slot) || 0) + 1);
+        for (const e of E) if (/^(world|crew|fauna|strand|call)\./.test(e.slot)) threadSpread.set(e.slot, (threadSpread.get(e.slot) || 0) + 1);
         // Every log states why the crew could not leave: one strand thread, run to its last beat,
         // and a landing that names the orbiter and the day it leaves.
         const strand = ST.strand.find((x) => x.key === log.cause);
@@ -1174,14 +1280,74 @@ if (SEEDS > 0) {
         for (const lead of log.leads || []) endTags.add('lead' + lead);
         const endCtx = { env, tags: endTags, world, G: named };
         const endKind = last.slot.slice(4);
-        if (!Lore.candidates(SourceLore.ENDINGS, endCtx).some((x) => x.kind === endKind)) {
-          holes.push(`seed ${seed}: the ending "${endKind}" does not fit this world`);
+        // The call of the ruin, p2-40. A world with a ruin runs exactly one call thread, to three
+        // beats or more, and ends on a call wording; a world with no ruin runs none, ends as it did
+        // before the ruin, and holds no band anywhere.
+        const callEntries = E.filter((e) => /^call\./.test(e.slot));
+        const callSlots = [...new Set(callEntries.map((e) => e.slot))];
+        if (world.ruin) {
+          ruinLogs++;
+          const ruin = world.ruin, band = ruin.freq + ' MHz';
+          if (callSlots.length !== 1) holes.push(`seed ${seed}: ${callSlots.length} call threads (${callSlots.join(', ')}), and a world with a ruin runs exactly one`);
+          else if (!ST.call.some((x) => 'call.' + x.key === callSlots[0])) holes.push(`seed ${seed}: the log runs the unknown call thread "${callSlots[0]}"`);
+          if (callEntries.length < SourceLore.LIMITS.THREAD_MIN_BEATS) holes.push(`seed ${seed}: the call thread ran ${callEntries.length} beats, under three`);
+          // The band prints in the last entry, once, and in no other entry.
+          const times = last.text.split(band).length - 1, any = (last.text.match(/\bMHz\b/g) || []).length;
+          if (times !== 1 || any !== 1) holes.push(`seed ${seed}: the last entry prints ${band} ${times} times and a band ${any} times\n    ${last.text}`);
+          for (const e of E.slice(0, -1)) if (BAND_ANY.test(e.text)) holes.push(`seed ${seed} log ${e.slot}: prints a band, and only the last entry may\n    ${e.text}`);
+          // The ending is a call wording of this kind, this world, and this outcome.
+          if (!SourceLore.WENT.includes(log.went)) holes.push(`seed ${seed}: went is "${log.went}"`);
+          else wentSpread.set(log.went, (wentSpread.get(log.went) || 0) + 1);
+          const fits = Lore.candidates(SourceLore.CALL_ENDINGS, endCtx).filter((x) => x.kind === endKind);
+          if (!fits.length) holes.push(`seed ${seed}: the call ending "${endKind}" does not fit this world`);
+          else if (!fits.some((x) => x.went === log.went)) holes.push(`seed ${seed}: no call wording of "${endKind}" sends "${log.went}"`);
+          // The goers are people of the crew who are still here on the last day, and their count
+          // is what `went` says. The keeper is dead in a second-hand ending.
+          const here = crew.map((c) => c.name).filter((n) => !(lost && n === lost.name));
+          const goers = Array.isArray(log.goers) ? log.goers : [];
+          if (!Array.isArray(log.goers)) holes.push(`seed ${seed}: goers is not a list`);
+          for (const g of goers) if (!here.includes(g)) holes.push(`seed ${seed}: the goer "${g}" is not of the crew still here`);
+          if (new Set(goers).size !== goers.length) holes.push(`seed ${seed}: a goer is named twice`);
+          if (endKind === 'second' && goers.includes(log.keeper)) holes.push(`seed ${seed}: the keeper goes in a second-hand ending, and the keeper is dead`);
+          const okCount = log.went === 'some' ? goers.length >= 2 && goers.length < here.length
+            : goers.length === { all: here.length, one: 1, none: 0 }[log.went];
+          if (!okCount) holes.push(`seed ${seed}: went "${log.went}" with ${goers.length} goers of ${here.length} people still here`);
+          // The reply: the beacon went up on day 2 to 6, before the first beat of the call thread,
+          // and exactly one call entry states that day, on a later day.
+          const b = log.beacon;
+          if (!(Number.isInteger(b) && b >= 2 && b <= 6)) holes.push(`seed ${seed}: the beacon day is ${b}, outside 2 to 6`);
+          if (callEntries.length && !(b < callEntries[0].day)) holes.push(`seed ${seed}: the beacon day ${b} is not before the first call beat, day ${callEntries[0].day}`);
+          const replies = callEntries.filter((e) => new RegExp(`\\bday ${b}\\b`, 'i').test(e.text));
+          if (replies.length !== 1) holes.push(`seed ${seed}: ${replies.length} call entries state day ${b}, and the reply beat is one`);
+          else if (!(replies[0].day > b)) holes.push(`seed ${seed}: the reply beat on day ${replies[0].day} does not fall after day ${b}`);
+          // The direction is the compass word of the bearing from the wreck, and the last beat of
+          // the call names it. The pool check above confines the token to that beat and the ending.
+          const want = fromWord(world);
+          if (ruin.from !== want) holes.push(`seed ${seed}: the ruin says "${ruin.from}" and the bearing from the wreck gives "${want}"`);
+          const fromRe = new RegExp(`\\b${ruin.from}\\b`);
+          if (callEntries.length && !fromRe.test(callEntries[callEntries.length - 1].text)) {
+            holes.push(`seed ${seed}: the last beat of the call does not name the ${ruin.from}\n    ${callEntries[callEntries.length - 1].text}`);
+          }
+          for (const e of callEntries.slice(0, -1)) if (fromRe.test(e.text)) holes.push(`seed ${seed} log ${e.slot}: names the ${ruin.from} before the last beat of the call\n    ${e.text}`);
+        } else {
+          noRuinLogs++;
+          if (callSlots.length) holes.push(`seed ${seed}: the log runs a call thread on a world with no ruin`);
+          for (const k of ['went', 'goers', 'beacon']) if (k in log) holes.push(`seed ${seed}: the log carries "${k}" on a world with no ruin`);
+          for (const e of E) if (BAND_ANY.test(e.text)) holes.push(`seed ${seed} log ${e.slot}: prints a band on a world with no ruin\n    ${e.text}`);
+          if (!Lore.candidates(SourceLore.ENDINGS, endCtx).some((x) => x.kind === endKind)) {
+            holes.push(`seed ${seed}: the ending "${endKind}" does not fit this world`);
+          }
         }
         // The repetition report. A sentence is counted once per log, and a neighbour pair is two
         // wrecks the reader could find one after the other.
         const mine = new Set();
         for (const e of E) for (const sent of sentencesOf(e.text)) mine.add(sent);
         for (const sent of mine) sentenceCount.set(sent, (sentenceCount.get(sent) || 0) + 1);
+        if (world.ruin) {
+          const call = new Set();
+          for (const e of E) if (/^call\./.test(e.slot) || e === last) for (const sent of sentencesOf(e.text)) call.add(sent);
+          for (const sent of call) callSentenceCount.set(sent, (callSentenceCount.get(sent) || 0) + 1);
+        }
         if (prevSentences) {
           neighbourPairs++;
           let hit = '';
@@ -1219,6 +1385,9 @@ if (SEEDS > 0) {
   }
   lens.sort((a, b) => a - b);
   storyStats = lens.length ? { n: lens.length, min: lens[0], median: lens[lens.length >> 1], max: lens[lens.length - 1] } : null;
+  // No outcome of the call may pass half of the logs with a ruin, or the search of chapter 2 finds
+  // the same thing at the ruin every time.
+  for (const [k, c] of wentSpread) if (c * 2 > ruinLogs) holes.push(`went "${k}" holds ${c} of ${ruinLogs} logs with a ruin, past half`);
 }
 
 // ---------------------------------------------------------------- report
@@ -1273,12 +1442,22 @@ if (logsSeen) {
     if (motionSample.has(k)) console.log(`        ${motionSample.get(k)}`);
   }
   for (const m of SourceLore.MOTION) if (!motionSpread.has(m)) console.log(`     0  ${m}  (no world in this sweep rolled one)`);
+  // Who goes toward the call, p2-40. The outcome follows the kind of the ending, and no value may
+  // pass half of the logs with a ruin, or the search of chapter 2 finds the same thing every time.
+  console.log(`went                 ${wentSpread.size} of ${SourceLore.WENT.length} values, over ${ruinLogs} logs with a ruin and ${noRuinLogs} without`);
+  for (const [k, c] of byN(wentSpread)) console.log(`  ${String(c).padStart(4)}  ${k}  (${(c / Math.max(ruinLogs, 1) * 100).toFixed(0)}%)`);
+  for (const w of SourceLore.WENT) if (!wentSpread.has(w)) console.log(`     0  ${w}  (no world in this sweep rolled one)`);
   // Repetition. Two wrecks in a row must not share a sentence, and no sentence should stand in
-  // many logs. Both numbers are reported, because neither can be driven to zero by a gate.
-  const top = [...sentenceCount].sort((a, b) => b[1] - a[1])[0];
+  // many logs. Both numbers are reported, because neither can be driven to zero by a gate. The
+  // three commonest sentences print, so a writer sees which pool to widen.
+  const tops = [...sentenceCount].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const top = tops[0];
   console.log(`\nrepetition`);
   console.log(`  distinct sentences  ${sentenceCount.size}`);
   if (top) console.log(`  commonest sentence  ${(top[1] / logsSeen * 100).toFixed(1)}% of logs (${top[1]}/${logsSeen})\n    ${top[0]}`);
+  for (const [s, c] of tops.slice(1)) console.log(`  next                ${(c / logsSeen * 100).toFixed(1)}% of logs (${c}/${logsSeen})\n    ${s}`);
+  const callTop = [...callSentenceCount].sort((a, b) => b[1] - a[1])[0];
+  if (callTop) console.log(`  commonest sentence of the call  ${(callTop[1] / Math.max(ruinLogs, 1) * 100).toFixed(1)}% of logs with a ruin (${callTop[1]}/${ruinLogs})\n    ${callTop[0]}`);
   console.log(`  neighbour pairs that share a sentence  ${neighbourShared} of ${neighbourPairs}`);
   if (sharedExample) console.log(`    ${sharedExample}`);
 }
