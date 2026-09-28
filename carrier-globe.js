@@ -615,10 +615,17 @@ function dropWreck(u) {
 // first colour and adds one: of the candidates that stand far from the surface, the one that also
 // stands farthest from the first colour. A candidate stands far from the surface when its score
 // reaches CARRIER_FAR of the best score. p2-38.
+//
+// The drawings of the brief mark the next landing in BRIEF_MARK, the second accent of the page, and
+// in chapter 2 they paint the wedges in the colour of chapter 2. So chapter 2 takes no candidate
+// nearer to BRIEF_MARK than MARK_APART: an orange wedge beside the orange mark of the next landing
+// did not read as two things. That drops the orange and the yellow. The manager, after p2-39.
 const CARRIER_COLOURS = ['#ff2fa0', '#19e3ff', '#ffe433', '#ff7b1c', '#8dff2e', '#a066ff', '#ff3b30', '#1f4bff', '#c4007a', '#7a1fd6'];
 const CARRIER_SAMPLES = 3000;   // the most vertices one pick reads
 const CARRIER_PCT = 0.1;        // a candidate is as good as its distance to the nearest tenth of the surface
 const CARRIER_FAR = 0.7;        // the share of the best score a candidate for chapter 2 must reach
+const BRIEF_MARK = '#ffb86b';    // the mark of the next landing in the drawings of the brief
+const MARK_APART = 0.35;         // the least distance of a colour of chapter 2 from BRIEF_MARK, in toYCC()
 const carrierColours = new WeakMap();   // world to [the colour of chapter 1, the colour of chapter 2]
 
 // A colour as luma and two chroma parts, from linear RGB, with a square root for the gamma.
@@ -660,7 +667,9 @@ export function pickCarrierColour(world, col, pos = null) {
   let best = rows[0];
   for (const r of rows) if (r.score > best.score) best = r;
   // chapter 2: far from the surface first, then as far as it can stand from the first colour
-  const others = rows.filter((r) => r !== best);
+  const mark = toYCC(..._c.set(BRIEF_MARK).toArray(), [0, 0, 0]);
+  const clear = (r) => Math.hypot(r.at[0] - mark[0], r.at[1] - mark[1], r.at[2] - mark[2]) >= MARK_APART;
+  const others = rows.filter((r) => r !== best && clear(r));
   const far = others.filter((r) => r.score >= best.score * CARRIER_FAR);
   const apart = (r) => Math.hypot(r.at[0] - best.at[0], r.at[1] - best.at[1], r.at[2] - best.at[2]);
   let second = null;

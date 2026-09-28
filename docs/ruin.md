@@ -341,7 +341,9 @@ the frequency there, and the landing that tunes takes the first fix of chapter 2
 - **Two colours.** The wedges of chapter 2 take a second colour: of the candidates of
   `pickCarrierColour()` that stand far from the surface, the one that stands farthest from the
   colour of chapter 1. `carrierColour(world, 2)` gives it. The pin and the mini wreck of the find
-  of the wreck keep the colour of chapter 1.
+  of the wreck keep the colour of chapter 1. Chapter 2 takes no orange and no yellow: the drawings
+  of the brief mark the next landing in `#ffb86b`, and an orange wedge beside that mark read as one
+  thing. `MARK_APART` in `carrier-globe.js` holds the rule.
 - **The overlay prints the band.** The carrier block prints the frequency the receiver holds under
   the bearing: `406.025 MHz` for the whole of chapter 1, and the frequency of the ruin in chapter 2.
   So the reader learns the look of a frequency on the first landing. The page prints the frequency
