@@ -146,7 +146,9 @@ The music check is a local tool: `tools/music-lab/` is in `.gitignore`. The exte
   in a row stayed sane. No reader has a viewport of 0×0, but a test tool that lands twice in a hidden
   pane must set a viewport size first.
 - **A texture leaks after a recall from a low camera.** p2-41 found it on plain cells too, and on main
-  before phase 2. A task chip in this session describes it.
+  before phase 2. Fixed after the phase: two textures stayed. The stack of the fine pattern stayed
+  after the first landing, and on HIGH the shadow map of the sun stayed after every landing where
+  the sun cast. `Ground.dispose()` now frees both.
 - **Long trips in the first log.** A ride can last 42 turns at 700 °C, and a strand thread can promise
   food for many days while the trip takes more. The read fixed the worst cases (the lone walks, the
   hungry notes), and the rest stays.
