@@ -15,7 +15,7 @@ import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
 import { SourceWreck, SourceRuin } from './ground-source.js';
-import { applyDetail } from './ground-detail.js';
+import { applyDetail, disposeDetail } from './ground-detail.js';
 import { perf } from './perf.js';
 import { TIERS } from './tiers.js';
 
@@ -1957,6 +1957,9 @@ export class Ground {
     this.glide = null;
     this.controls.dispose();
     this._clear();
+    // The terrain and the cover read the stack of the fine pattern. _clear() disposed both, so
+    // nothing reads it now. The app keeps the renderer, so the stack must go here.
+    disposeDetail(this.renderer);
     this.scene.clear();
     this.result = null;
     this.heights = null;
@@ -1977,6 +1980,9 @@ export class Ground {
       if (o === this.content) return;
       if (o.geometry) o.geometry.dispose();
       if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+      // The renderer makes the shadow map of the sun on the first frame the sun casts, and only
+      // the light frees it. A removed light keeps its map on the graphics card.
+      if (o.isLight) o.dispose();
     });
     this.content.clear();
   }

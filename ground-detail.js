@@ -304,7 +304,7 @@ void main() {
 
 const bakes = new WeakMap();   // one stack per renderer and size
 
-// The stack, baked on first use and kept for the life of the renderer. A bake takes a few
+// The stack, baked on first use and kept until disposeDetail() frees it. A bake takes a few
 // milliseconds of the graphics card.
 export function bakeDetail(renderer, size) {
   let per = bakes.get(renderer);
@@ -347,6 +347,18 @@ export function bakeDetail(renderer, size) {
   quad.geometry.dispose();
   per[size] = rt;
   return rt;
+}
+
+// Free every stack of `renderer`. Ground.dispose() calls it, so a recall gives the memory of the
+// stack back to the graphics card: 6 layers of 512 by 512 texels with their mip levels, about 8 MB
+// on the high tier. Before this call, the stack stayed after the first landing, and
+// renderer.info.memory held one texture more in orbit than before that landing. The next landing
+// bakes a new stack.
+export function disposeDetail(renderer) {
+  const per = bakes.get(renderer);
+  if (!per) return;
+  for (const rt of Object.values(per)) rt.dispose();
+  bakes.delete(renderer);
 }
 
 // What the 3D ground cover of ground-cover.js shares with the pattern: the stack, the macro layer,
