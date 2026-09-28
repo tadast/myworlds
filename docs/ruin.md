@@ -367,11 +367,9 @@ stands there.
 - **The glow** is one mesh with one material in the colour of chapter 2, `carrierColour(world, 2)`,
   so the ruin, its wedges, and its card read in one colour. It draws with the fog off, as the lamp
   of the wreck does, so the reader walks to it out of the mist. It blinks with the rules of
-  `lampLevel()`: a floor that never goes out, a tail, and a breath. Until p2-44 gives the ruin a
-  motif of its own, the rhythm is `ruinRhythm(world)`: the motif of the wreck at half the speed.
-  The clock is `music.barClock()`, which runs over one period of the motif of the wreck, so each
-  wrap of it moves the glow to the other half of its own period. With no sound the glow takes the
-  clock of the landing.
+  `lampLevel()`: a floor that never goes out, a tail, and a breath. The rhythm is
+  `ruinMotifOf(world)` of `music.js`, the motif the ear hears, on `music.ruinClock()`. With no
+  sound the glow takes the clock of the landing over the same period. See "The voice" below.
 - **The light.** HIGH adds one point light at the lamp, in the colour of the glow, which blinks
   with it. LOW keeps the glow alone.
 - **The floaters** turn their orbit about the core, once in about 105 seconds, and each slab and
@@ -401,9 +399,9 @@ ruin, measured from the camera, as they do for the wreck. The needle points at t
 ruin. The range measures to the edge of the ruin: `rangeFrom(x, z)` gives the distance to the
 convex outline of its parts on the ground, and 0 inside it. The hive is 110 units across, so a
 range to its middle would state 50 units to a reader who stands at its doors. The level of the
-motif in `carrierLevel()` reads the same range. Until p2-44 gives the ruin a bus of its own, that
-level opens the bus of the motif of the wreck. In chapter 1 the ruin stands on its cell and the
-needle keeps the bearing of the wreck.
+motif of the ruin in `carrierLevel('ruin')` reads the same range, on the ruin bus; see "The voice"
+below. In chapter 1 the ruin stands on its cell, the needle keeps the bearing of the wreck, and
+the ruin is silent.
 
 ### The frame and the memory
 
@@ -626,8 +624,8 @@ column: the ruin as a band, the name, and the rows, each label over its text.
   mouth open, and a fragment of the body under the ground shows only when the ray from the eye to it
   crosses the ground inside the mouth. `mouthTest()` patches the fragment shader of the stone and of
   the glow with that rule, so the shaft shows through the mouth and never hangs under the disc.
-- **The glow** takes the colour of chapter 2, as on the ground, and blinks `ruinRhythm()` on the clock
-  of the card. The text takes the same colour, made lighter until it reads on the dark card, as the
+- **The glow** takes the colour of chapter 2, as on the ground, and blinks `ruinMotifOf()` on the
+  clock of the card (p2-44). The text takes the same colour, made lighter until it reads on the dark card, as the
   drawings of the brief take it.
 - **The height.** The card takes the height of its text, and never less than the preview. The rows
   scroll inside the card only on a short screen.
@@ -700,6 +698,8 @@ The later issue that opens the way reads the same script. Do not change a glyph.
 - The group of the carrier is built again from the record, because a find by chance moves the
   search to chapter 2. After both finds the Carrier row reads "Found 2 of 2" and offers "Wreck" and
   "Ruin", and the thumb of the saved world carries two marks.
+- `setCarrierLevel()` sets the buses of the motifs again, so after the recall the motif of the ruin
+  plays in the song of the world at 0.6. See "The voice". p2-44.
 
 ### The mini ruin on the globe
 
@@ -716,12 +716,110 @@ The find stands a second pin at the cell of the ruin, on the pattern of the pin 
 - **The lamp.** A small point in the colour of chapter 2 stands at the lamp of the body: the tip of
   the spires, the palm of the colossus, the mouth of the well. It holds a least radius of 0.0035 of
   the distance from the camera, a few pixels at the home zoom, and it blinks with the rules of the
-  lamp of the wreck: a floor, a tail, and a breath. Its rhythm is `ruinLampRhythm(world)`, the motif
-  of the wreck at half the speed, which is the rhythm of `ruinRhythm()` on the ground. p2-44 swaps
-  both functions for the motif of the ruin.
+  lamp of the wreck: a floor, a tail, and a breath. Its rhythm is `ruinMotifOf(world)`, the motif
+  of the ruin, on `music.ruinClock()` when the sound runs and on the clock of the group when it does
+  not, as the glow on the ground takes it. `app.js` passes `music` to `updateCarrierGroup()` for
+  that clock. p2-44; see "The voice".
 - `setFound(group, world, heightMap, { chapter: 2 })` stands it on a group that exists, and
   `makeCarrierGroup()` stands it for a record with `ruin.found`. A world with no ruin never stands it.
   `disposeCarrierGroup()` gives its three geometries and its three materials back.
+
+## The voice
+
+p2-44. The wreck has a voice in `music.js`, the motif of issue 34. The ruin has a voice too: it
+sends the beacon of the crew back, slower. Decision 11 of p2-00.
+
+### The motif played back
+
+- `ruinMotifOf(world)` gives the rhythm with the fields of `motifOf()`: `seed`, `steps`,
+  `stepsPerBar`, `bars`, `stepDur`, `barSeconds`, and `period`. The steps are the steps of
+  `motifOf()`, and `stepDur` is twice the step of the wreck. So one call fills two bars of the song,
+  and the period, four bars of the ruin motif, is eight bars of the song.
+- `compose()` writes the notes of the ruin after the notes of the wreck, from the same pitches, an
+  octave lower. The notes of the wreck stand in the mode and inside the octave over the root, so the
+  notes of the ruin stand in the mode and inside the octave under the root. The ruin is always in
+  tune.
+- **Why no stream.** The ruin reads the notes of the wreck and draws no number. So no song, no
+  motif of the wreck, and no stream of `generate.js` moves. A reader who knows the call of the wreck
+  hears the same call come back, and this is the fact the voice states: the ruin replies to the
+  beacon. "The streams" in p2-00 lists it.
+- **The place in the period.** The call of the ruin starts on bar 3 of each eight, `RUIN_AT` = 2
+  from 0, and it ends with bar 4. The wreck calls on bars 1 and 5. So after both finds the ruin
+  answers one bar after the call of the wreck, and no call of the ruin starts on a bar of a call of
+  the wreck. The ruin keeps the straight time of the motif of the wreck, and its period of eight bars
+  divides the loop of 32.
+- **The timbre.** A soft bell: a sine, and a second sine at three times the pitch that bends its
+  frequency (FM). The bend is strong at the strike and falls to 0.12 of it in 0.35 s, and the bell
+  rings out over a release of 1.4 s. The ratio is a whole number, so every partial stands on the
+  harmonic series of the note. The wreck is a short plain sine an octave higher, so a listener tells
+  the two apart when both play.
+- **The bus.** `_start()` adds `song.ruinBus`, a gain at 0 that feeds `out` and the hall. It passes
+  the lowpass of the world by, as the source bus does, and it sends 2.5 times as much into the hall,
+  `RUIN_VERB`, so the bell sounds far off. `setRuin(k)` ramps it to `k * 0.5` over 0.4 s, on the
+  pattern of `setCarrier()`. The level waits while no song plays.
+- **The loudness.** At the level of the wreck the bell measured 8 dB louder in windows of 85 ms and
+  11 dB louder in windows of 0.34 s, A-weighted, because it rings on where the sine of the wreck
+  stops. `RUIN_LEVEL`, 0.35, takes 9 dB off. Over five worlds a call of the ruin then measures 1 dB
+  under a call of the wreck in the short windows and 1 to 4 dB over it in the long ones. The listen
+  test can move it.
+
+### The levels
+
+`setCarrierLevel()` in `app.js` sets both buses twice a second on the ground, and on each landing,
+recall, tune, and find. `carrierLevel(kind)` gives each bus the rule of its own source. The
+smoothstep goes from 0.15 at the edge of the reach to 1 at 40 units, as issue 34 set it for the
+wreck.
+
+| Where | Wreck bus | Ruin bus |
+|---|---|---|
+| Ground, chapter 1, the cell of the wreck | the smoothstep of the range | 0 |
+| Ground, chapter 2, the cell of the ruin | 0 | the smoothstep of the range |
+| Ground, any other cell | 0 | 0 |
+| Orbit | 0.6 after the find of the wreck, else 0 | 0.6 after the find of the ruin in chapter 2, else 0 |
+
+The range on the cell of the ruin is the range the overlay states, to the edge of its stones. The
+receiver holds one band, so on the cell of the wreck in chapter 2 both buses stay at 0, and a
+landing on the cell of the ruin in chapter 1 is silent. The motif of the ruin stops on the recall
+until the find. After both finds both motifs play in orbit, and the song stays whole.
+
+### The lamp
+
+The glow of `SourceRuin` blinks `ruinMotifOf()` with the rules of `lampLevel()`. When the sound
+runs its clock is `music.ruinClock()`: the seconds since the start of the last call of the ruin,
+inside its period. The call does not start on bar 1, so the ruin needs this clock and not
+`barClock()`. With no sound the glow takes the clock of the landing over the same period. So the
+eye and the ear agree, and a reader with the sound off loses no fact.
+
+The lamp of the mini ruin on the globe takes the same pair: `updateCarrierGroup(group, dt, music)`
+in `carrier-globe.js` reads `music.ruinClock()`, and with no sound the clock of the group. It keeps
+a copy of the rules of `lampLevel()`, because `ground-source.js` imports `carrier-globe.js` and an
+import the other way would close a cycle. The glow of the card of the ruin blinks `ruinMotifOf()` on
+the clock of the card, as the lamp of the card of the wreck blinks `motifOf()`.
+
+### The music check
+
+`tools/music-lab/` is a local tool, and git ignores it. Its `check-motif.mjs` tests the motifs of
+the two sources against the song, with no audio rendered. Run it from the directory of the lab,
+where `node_modules` holds `node-web-audio-api`:
+
+```sh
+cd tools/music-lab
+MUSIC=/path/to/music.js node check-motif.mjs /path/to/baseline/music.js
+```
+
+`MUSIC` chooses the `music.js` under test, and the default is `../../music.js`. The argument is a
+baseline and it is optional. The check proves:
+
+- The motif of the wreck: it is deterministic, it holds four to seven notes in the mode inside the
+  octave over the root, and `motifOf()` and the scheduler agree with `compose()`.
+- The motif of the ruin: `ruinMotifOf()` is deterministic and holds the steps of `motifOf()` at
+  twice the step length, its period is eight bars of the song, and `compose()` agrees with it. Every
+  note is a member of the mode and stands an octave under the note of the wreck on the same step.
+  The scheduler plays each note on the ruin bus on the clock of `ruinMotifOf()`, `ruinClock()` stands
+  on the step of each note, and no call of the ruin starts on a bar of a call of the wreck.
+- `setCarrier()` and `setRuin()` wait with no audio, open their bus from 0, and clamp to 0 to 1.
+- With a baseline: the song data and the note events of the motif of the wreck of every world of
+  `worlds.js` are byte-equal to the baseline.
 
 ## The checks
 
@@ -744,6 +842,8 @@ The find stands a second pin at the cell of the ruin, on the pattern of the pin 
 - `node tools/world-checksum.mjs --check` must match its baseline: the ruin moves no other stream,
   and every patch off the cell of the ruin hashes as it did before p2-41.
 - `node tools/world-checksum.mjs --source` prints the ruin of each seed on both tiers.
+- `tools/music-lab/check-motif.mjs` tests the voice of the ruin against the song and the motif of
+  the wreck. It is a local tool; see "The music check" above. p2-44.
 - `node tools/carrier-check.mjs` runs every check of the carrier with the wreck and with the ruin
   as the source, and `node tools/carrier-fix-check.mjs` tests the two chapters of the store and of
   the group. p2-38.
