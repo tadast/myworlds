@@ -5,9 +5,9 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, carrierAt, carrierBox, sourceSite, siteCell, CELL, activeSource, activeChapter, sourceFreq } from './site.js';
-import { loadFixes, addFix, markFound, markBriefed, clearFixes, markTuned, foundSeeds } from './carrier-store.js';
-import { makeCarrierGroup, addWedge, setFound, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, carrierColour, showMarker, wedgePlanes, inWedge, goalCell } from './carrier-globe.js';
+import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, sourceSite } from './site.js';
+import { progressOf, marksOf, briefWords, CLOSED_LINE } from './chapters.js';
+import { makeCarrierGroup, addWedge, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, carrierColour, showMarker } from './carrier-globe.js';
 import { sameCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector, RuinInspector } from './ground-source.js';
@@ -219,68 +219,32 @@ const atmoInnerMat = (color, strength) => new THREE.ShaderMaterial({
 // ---------------------------------------------------------------- world building
 let current = null; // { group, spin, oceanMat, cloudGroup, moons, ringMesh, data }
 
-// The carrier of issue 34. The record is the search of this world, as carrier-store.js keeps it,
-// and the group is the wedges of that search under current.planet. A world with no source, which
-// is every gas giant, holds null in both.
-let carrierRecord = null;
+// The chapters of the world on the screen, and the group of wedges under current.planet. The
+// progress holds every rule of the story; see chapters.js. A world with no source, which is every
+// gas giant, holds a progress with no chapter and no group.
+let progress = null;
 let carrierGroup = null;
 let pendingFix = null;    // the fix of the last landing, waiting for the ascent to end
-let carrierStage = null;  // the stage of the search on this landing, for the brief. See stageAt().
+let carrierStage = null;  // the stage of the search on this landing, for the brief. See land() in chapters.js.
 
-// A record of the store with the bearing and the error of every fix computed again.
-//
-// carrierAt() is a pure function of the seed and the cell, so a stored fix needs no number of its
-// own: the store keeps `{ lat, lon, brg, err }` as the record of a landing, and the globe takes the
-// numbers the instrument states today. A reader who holds fixes from an older build therefore sees
-// them narrow with no clear of the search, and a later tune of CARRIER_ERR in site.js needs no
-// migration of the store. carrier-store.js holds no three.js and no site.js, so the refresh stands
-// here. Issue 34.
-//
-// A fix the carrier no longer reaches is dropped. `CARRIER_REACH` bounds the carrier, and a store
-// written before that bound holds fixes from cells that hear nothing today. Such a fix would paint
-// a wedge the instrument would not state, so the filter runs on every load and the store keeps the
-// record until the next write of that seed.
-//
-// Each chapter reads its own source: the fixes of chapter 1 the wreck, and the fixes of chapter 2
-// under `ruin` the ruin. A world with no ruin keeps no fix of chapter 2. p2-38.
-function freshFixes(world, record) {
-  if (!record || !Array.isArray(record.fixes)) return record;
-  const fresh = (list, src) => {
-    const out = [];
-    if (src && Array.isArray(list)) {
-      for (const f of list) {
-        const c = carrierAt(world, f, src);
-        if (c) out.push({ ...f, brg: c.brg, err: c.err });
-      }
-    }
-    return out;
-  };
-  const ruin = record.ruin || { fixes: [], found: false, briefed: 0 };
-  return {
-    ...record,
-    fixes: fresh(record.fixes, world.source),
-    ruin: { ...ruin, fixes: fresh(ruin.fixes, world.ruin) },
-  };
+// The view of the progress of the world on the screen, or null. See view() in chapters.js.
+function carrierView() {
+  return progress ? progress.view() : null;
 }
 
-// The chapter the search of the world on the screen runs: 1 follows the wreck and 2 the ruin. See
-// activeSource() in site.js. p2-38.
+// The colour of the search the receiver follows: 1 for the wreck, 2 for the ruin. carrierColour()
+// of carrier-globe.js keeps one colour for each.
 function carrierChapter() {
-  return current ? activeChapter(current.world, carrierRecord) : 1;
+  const v = carrierView();
+  return v && v.follow ? v.follow.index + 1 : 1;
 }
 
-// The part of a record one chapter keeps: the record itself for chapter 1, and `ruin` for chapter 2.
-function chapterPart(record, chapter) {
-  if (!record) return { fixes: [], found: false, briefed: 0 };
-  return chapter === 2 ? record.ruin || { fixes: [], found: false, briefed: 0 } : record;
-}
-
-// Build the group of the carrier again from the record, for the world on the screen: after a clear
+// Build the group of the carrier again from the progress, for the world on the screen: after a clear
 // of the fixes, and after a tune, which moves the search to the other chapter.
 function rebuildCarrierGroup() {
-  if (!current || current.world.type === 'gas') return;
+  if (!current || current.world.type === 'gas' || !progress) return;
   disposeCarrierGroup(carrierGroup);
-  carrierGroup = makeCarrierGroup(current.world, freshFixes(current.world, carrierRecord), current.heightMap);
+  carrierGroup = makeCarrierGroup(current.world, progress.view(), current.heightMap);
   if (carrierGroup) current.planet.add(carrierGroup);
 }
 
@@ -292,7 +256,7 @@ function disposeWorld() {
   // only reach the geometry. The same call takes the wedges out of the uniforms of the shaders, so
   // the next world starts with none. See disposeCarrierGroup() in carrier-globe.js.
   disposeCarrierGroup(carrierGroup);
-  carrierGroup = null; carrierRecord = null; pendingFix = null; carrierStage = null;
+  carrierGroup = null; progress = null; pendingFix = null; carrierStage = null;
   current.group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
@@ -606,8 +570,8 @@ const SLOPE_STEP = 0.02;
   // down this function.
   // The colour of the carrier comes off the colours of this terrain, so a wedge stands out on it.
   if (world.type !== 'gas') pickCarrierColour(world, terrain.col, terrain.pos);
-  carrierRecord = loadFixes(world.seed);
-  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, freshFixes(world, carrierRecord), heightMap);
+  progress = progressOf(world);
+  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, progress.view(), heightMap);
   if (carrierGroup) planet.add(carrierGroup);
 
   // The wedges themselves are paint and not geometry: the terrain shader and the ocean shader test
@@ -1275,54 +1239,22 @@ function stepDive(now) {
   updateProbeBtn();
 }
 
-// The carrier of the landing on lockedSite, for the source the receiver holds, and the fix that
-// landing takes. enterGround() calls it, and a tune calls it again while the probe stands on the
-// ground, so the landing that tunes takes the first fix of chapter 2. See tune().
+// The carrier of the landing on lockedSite, for the search the receiver follows, and the fix that
+// landing takes. enterGround() calls it, and a tune and a find call it again while the probe stands
+// on the ground, so the landing that tunes takes the first fix of the new search. See afterTune().
 //
-// The bearing runs from this cell to the source of the chapter that runs, with its error. The
-// three digits keep the bearing of the globe, because the wedge of a fix is drawn on the globe. The
-// needle takes the frame of the box instead, which carrierBox() reads off the axes of the cell:
-// the map of the box holds no angle, and the reader walks the terrain, so the needle has to agree
-// with the terrain and with the wreck slice 3 puts on it. The vector holds the error of the wedge,
-// so the needle and the three digits say one thing. The reading also carries the kind of the source
-// and the frequency the receiver holds, which the overlay prints. p2-38.
+// land() of chapters.js holds the rules: the bearing, the needle in the frame of the box, the kind
+// and the band of the source, the fix, and the stage of the brief. Decision 9 of issue 34: a
+// landing takes the fix on its own, and no button asks for it. A landing that comes from a URL with
+// a site takes one too, because the probe stood on that cell and heard the carrier there.
 //
-// Decision 9 of issue 34: a landing takes the fix on its own, and no button asks for it. A landing
-// that comes from a URL with a site takes one too, because the probe stood on that cell and heard
-// the carrier there. A shared URL carries no fix of its own; see carrier-store.js.
-//
-// The fix keeps the bearing the instrument STATES and not the true one, so the wedge and the three
-// digits say one thing. The wedge waits for the ascent: the reader is on the ground now and the
-// globe is not drawn. See stepDive(). The fix goes into the chapter that runs, so no landing before
-// the tune stores a fix of chapter 2.
-//
-// A chapter whose source is found takes no fix. That search is over and the globe carries the
-// model at the source, so a new wedge would only ask a question the reader has answered. addFix()
-// holds the same rule.
-//
-// The stage of the search reads the fixes before this landing, so the wedge of this cell does not
-// count toward the cross it stands in.
+// The wedge waits for the ascent: the reader is on the ground now and the globe is not drawn. See
+// stepDive().
 function hearCarrier() {
-  const world = current.world;
-  const src = activeSource(world, carrierRecord);
-  const chapter = activeChapter(world, carrierRecord);
-  const carrier = carrierAt(world, lockedSite, src);
-  if (carrier) {
-    const v = carrierBox(world, lockedSite, carrier, undefined, src);
-    carrier.dir = v ? [v.x, v.z] : null;
-    carrier.kind = src.kind;
-    carrier.freq = sourceFreq(src);
-  }
-  const part = chapterPart(freshFixes(world, carrierRecord), chapter);
-  const before = part.fixes;
-  pendingFix = null;
-  if (carrier && carrierGroup && !part.found) {
-    const at = snapSite(lockedSite);
-    pendingFix = { lat: at.lat, lon: at.lon, brg: carrier.brg, err: carrier.err };
-    carrierRecord = addFix(world.seed, pendingFix, { chapter });
-  }
-  carrierStage = carrier ? stageAt(world, lockedSite, carrier, before) : null;
-  return carrier;
+  const heard = progress && lockedSite ? progress.land(lockedSite) : null;
+  pendingFix = heard && carrierGroup ? heard.fix : null;
+  carrierStage = heard ? heard.stage : null;
+  return heard ? heard.carrier : null;
 }
 
 // The switch into the ground scene, under an opaque overlay.
@@ -1504,7 +1436,10 @@ function updateCreatureFloat() {
     } else if (markedSource) {
       // The wreck is not a subject to study. The probe pulls the log off its recorder, so the button says that.
       // The ruin is a subject, and the button takes the form the animal and the plant take. p2-41.
-      label = ground && ground.source && ground.source.kind === 'ruin' ? 'Study the ruin' : 'Download the log';
+      // The source of a closed chapter has no card, and the button says so. ADR-0001.
+      const kind = ground && ground.source && ground.source.kind;
+      label = progress && progress.state(kind) === 'closed' ? CLOSED_LINE
+        : kind === 'ruin' ? 'Study the ruin' : 'Download the log';
     }
   }
   if (label === creatureLabel) return;
@@ -1737,7 +1672,7 @@ function deleteWorld(seed) {
 
 function renderWorlds() {
   const list = loadWorlds().slice().reverse();
-  const found = foundSeeds();   // one read of the carrier store answers the whole list
+  const marks = marksOf();      // one read of the carrier store answers the whole list
   worldsEl.innerHTML = '';
   if (!list.length) {
     worldsEl.innerHTML = '<p class="empty">No worlds yet. Type a name above.</p>';
@@ -1749,10 +1684,9 @@ function renderWorlds() {
     el.className = 'world' + (current && current.world.seed === w.seed ? ' active' : '');
     el.title = `${w.seed} · ${w.typeLabel}`;
     // A world whose source the reader has found carries a mark on its thumb, one for each find: the
-    // wreck, and then the ruin of phase 2. Issue 34, slice 2, and p2-38.
-    const finds = found.get(w.seed) || 0;
-    const mark = finds >= 2 ? '<i class="found" title="Both sources of this world are found">✦✦</i>'
-      : finds === 1 ? '<i class="found" title="The source of this world is found">✦</i>' : '';
+    // wreck, and then the ruin of phase 2. Issue 34, slice 2, and p2-38. See marksOf() in chapters.js.
+    const m = marks.get(w.seed);
+    const mark = m ? `<i class="found" title="${m.title}">${m.text}</i>` : '';
     el.innerHTML = `<img alt="" src="${w.thumb || ''}"><span class="wname">${escapeHtml(w.seed)}</span><span class="wtype">${escapeHtml(w.typeLabel || w.type)}</span>${mark}<i class="del" title="Forget this world">×</i>`;
     el.querySelector('img').addEventListener('error', (e) => { e.target.style.visibility = 'hidden'; });
     el.addEventListener('click', (e) => {
@@ -1770,26 +1704,12 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&a
 // hide the row. The button drops the wedges and keeps the find, because a reader who has found the
 // wreck has earned the mark and no button takes it back.
 //
-// The row follows the chapter that runs, so the search of one world reads, in order: "Not heard",
-// "1 fix", "3 fixes", "Found", then after the tune "Tuned", "1 fix", "3 fixes", and "Found 2 of 2".
-// The count and the Clear chip take the fixes of that chapter only. p2-38.
+// The row follows the search the receiver follows. rowOf() in chapters.js writes its words; see
+// view() there. The view of the world on the screen, or null where the world takes no row.
 function carrierState(w) {
-  if (!w || !w.source || w.type === 'gas') return null;
-  const rec = carrierRecord && current && current.world.seed === w.seed ? carrierRecord : loadFixes(w.seed);
-  const chapter = activeChapter(w, rec);
-  // a fix the carrier no longer reaches is not counted
-  const part = chapterPart(freshFixes(w, rec), chapter);
-  const n = part.fixes.length;
-  const wreck = !!rec.found;
-  const ruin = !!(rec.ruin && rec.ruin.found);
-  const finds = (wreck ? 1 : 0) + (ruin ? 1 : 0);
-  let text;
-  if (chapter === 2) text = part.found ? `Found ${finds} of 2` : n === 0 ? 'Tuned' : n === 1 ? '1 fix' : `${n} fixes`;
-  // After a find of the ruin by chance the search follows the wreck again; see activeSource().
-  else text = part.found ? 'Found' : n === 0 ? (ruin ? 'Found 1 of 2' : 'Not heard') : n === 1 ? '1 fix' : `${n} fixes`;
-  // The Tune chip of p2-39: a world with a ruin, after the find of the wreck, before the tune.
-  const tune = !!(w.ruin && wreck && !rec.tuned);
-  return { n, chapter, found: part.found, wreck, ruin, text, tune, rec };
+  if (!w || !w.source || w.type === 'gas' || !progress || progress.seed !== w.seed) return null;
+  const v = progress.view();
+  return v.row ? v : null;
 }
 
 // ---------------------------------------------------------------- the brief of the carrier
@@ -1809,44 +1729,11 @@ function carrierState(w) {
 // The ground takes no pointer lock, so nothing has to be released here. The overlay itself takes no
 // pointer event except on that one block, so the press never starts a look drag and never picks.
 //
-// Chapter 2 takes three stages of its own, for the ruin. Stage 1 names an unknown signal on the
-// band of the log, and stages 2 and 3 read as they do for the wreck. The drawings stay; the wedges
-// in them take the colour of chapter 2. The store keeps a brief mark for each chapter, so the
-// block pulses again on the first landing after the tune. p2-38.
+// Every search after the first reads an unknown signal, and takes the second sheet of the drawings,
+// with the wedges in the colour of that search. The progress keeps a brief mark for each search, so
+// the block pulses again on the first landing after the tune. The words live in briefWords() of
+// chapters.js, and the stage of a landing comes from land() there. p2-38.
 const briefDlg = $('#carrier-brief');
-const BRIEF_TITLE = [
-  ['', 'Distress signal', 'Stronger signal', 'Carrier in reach'],
-  ['', 'Unknown signal', 'Stronger signal', 'Carrier in reach'],
-];
-const BRIEF_HINT = [
-  ['', 'New signal · tap', 'Stronger signal · tap', 'Carrier in reach · tap'],
-  ['', 'Unknown signal · tap', 'Stronger signal · tap', 'Carrier in reach · tap'],
-];
-
-// The stage of the search on one landing, and the next step of stage 2. `before` holds the fixes
-// of the earlier landings of the chapter that runs, so the wedge of this cell is not part of the
-// cross.
-//
-// The next step of stage 2 comes from the record after this landing, which is what the globe draws
-// at the end of the ascent: the filled cell of the carrier when the wedges close on it, else the
-// count of cells along the bearing when the range shows, else one more wedge. Every test reads the
-// source of the chapter that runs.
-function stageAt(world, site, carrier, before) {
-  const source = activeSource(world, carrierRecord);
-  const chapter = activeChapter(world, carrierRecord);
-  const at = snapSite(site);
-  const src = sourceSite(world, source);
-  if (src && sameCell(siteCell(at), siteCell(src))) return { n: 3 };
-  const dir = siteDir(at.lat, at.lon);
-  const here = siteCell(at);
-  const crossed = before.filter((f) => !sameCell(siteCell(f), here) && inWedge(wedgePlanes(f), dir)).length;
-  const near = carrier.rangeKm != null;
-  if (crossed < 2 && !near) return { n: 1 };
-  const part = chapterPart(freshFixes(world, carrierRecord), chapter);
-  const goal = !part.found && carrierRecord && goalCell(world, part.fixes, source);
-  const next = goal ? 'goal' : near ? 'near' : 'far';
-  return { n: 2, next, cells: Math.max(1, Math.round(carrier.arc / CELL)), brg: carrier.brg };
-}
 
 // The pulse of the fifth block, from the stage of this landing and the stage the reader has read
 // in the chapter that runs. The block also takes the colour of the chapter: the blue of the
@@ -1856,10 +1743,8 @@ function stageAt(world, site, carrier, before) {
 function setBriefPulse() {
   const st = carrierStage;
   const chapter = carrierChapter();
-  const part = chapterPart(carrierRecord, chapter);
-  const on = !!st && !!carrierRecord && !part.found && part.briefed < st.n;
-  probeHud.setTint(chapter === 2 && current ? briefColour(current.world) : null);
-  probeHud.setPulse(on, st ? BRIEF_HINT[chapter - 1][st.n] : null);
+  probeHud.setTint(chapter > 1 && current ? briefColour(current.world, chapter) : null);
+  probeHud.setPulse(!!(st && st.pulse), st ? st.hint : null);
 }
 
 // The colour the wedges of the drawings take in chapter 2: the colour of chapter 2 on this world.
@@ -1870,8 +1755,8 @@ function setBriefPulse() {
 const BRIEF_LUMA = 0.3;
 const _briefCol = new THREE.Color();
 const luma = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;   // THREE.Color holds linear RGB
-function briefColour(world) {
-  _briefCol.set(carrierColour(world, 2));
+function briefColour(world, chapter = 2) {
+  _briefCol.set(carrierColour(world, chapter));
   const hsl = { h: 0, s: 0, l: 0 };
   _briefCol.getHSL(hsl);
   for (let l = hsl.l; luma(_briefCol) < BRIEF_LUMA && l < 0.9; l += 0.02) _briefCol.setHSL(hsl.h, hsl.s, l);
@@ -1883,10 +1768,11 @@ function briefColour(world) {
 function fillBrief(st) {
   const n = st ? st.n : 1;
   const chapter = carrierChapter();
-  briefDlg.dataset.chapter = String(chapter);
-  if (chapter === 2 && current) briefDlg.style.setProperty('--brief-wedge', briefColour(current.world));
-  briefDlg.querySelector('#carrier-brief-title').textContent = BRIEF_TITLE[chapter - 1][n];
-  briefDlg.querySelectorAll('[data-chapter]').forEach((el) => { el.hidden = +el.dataset.chapter !== chapter; });
+  const words = st || briefWords(chapter - 1, n);
+  briefDlg.dataset.chapter = String(words.sheet);
+  if (words.sheet === 2 && current) briefDlg.style.setProperty('--brief-wedge', briefColour(current.world, chapter));
+  briefDlg.querySelector('#carrier-brief-title').textContent = words.title;
+  briefDlg.querySelectorAll('[data-chapter]').forEach((el) => { el.hidden = +el.dataset.chapter !== words.sheet; });
   briefDlg.querySelectorAll('[data-stage]').forEach((el) => { el.hidden = +el.dataset.stage !== n; });
   briefDlg.querySelectorAll('[data-next]').forEach((el) => { el.hidden = !st || el.dataset.next !== st.next; });
   if (st && st.next === 'near') {
@@ -1904,9 +1790,7 @@ function openBrief() {
   if (ground) ground.controls.enabled = false;
   briefDlg.showModal();
   probeHud.setPulse(false);
-  if (current && current.world.source) {
-    carrierRecord = markBriefed(current.world.seed, carrierStage ? carrierStage.n : 1, { chapter: carrierChapter() });
-  }
+  if (progress) progress.briefed(carrierStage ? carrierStage.n : 1);
 }
 
 briefDlg.addEventListener('click', (e) => { if (e.target === briefDlg) briefDlg.close(); });
@@ -1943,8 +1827,9 @@ briefDlg.addEventListener('close', () => {
 //
 // `src` is the source to aim at. The chips of the Carrier row give the wreck or the ruin, and each
 // shows only after the find of its source, so no chip gives a search away. With no argument the
-// debug handle aims at the source of the chapter that runs, which the tests of a search use. p2-38.
-function aimAtSource(src = current && activeSource(current.world, carrierRecord)) {
+// debug handle aims at the source of the search the receiver follows, which the tests of a search
+// use. p2-38.
+function aimAtSource(src = carrierView() && carrierView().follow && carrierView().follow.source) {
   if (!current || !canDescend()) return;
   const at = sourceSite(current.world, src || null);
   if (!at) return;
@@ -1953,31 +1838,40 @@ function aimAtSource(src = current && activeSource(current.world, carrierRecord)
   startAim();
 }
 
-// Drop the fixes of the chapter that runs on the world on the screen. The globe loses its wedges in
-// the same breath. The finds, the briefs, and the tune stay.
-function clearCarrier(seed) {
-  const own = current && current.world.seed === seed;
-  const chapter = own ? carrierChapter() : 1;   // the row stands only for the world on the screen
-  carrierRecord = clearFixes(seed, { chapter });
+// Drop the fixes of the search the receiver follows on the world on the screen. The globe loses its
+// wedges in the same breath. The finds, the briefs, and the bands stay.
+function clearCarrier() {
+  if (!progress || !current) return;
+  progress.clear();
   pendingFix = null;
-  if (own) {
-    rebuildCarrierGroup();
-    renderInfo(current.world);
-  }
+  rebuildCarrierGroup();
+  renderInfo(current.world);
 }
 
-// The tune. It tunes the receiver of the world on the screen to the ruin and builds the group of
-// the carrier again, so the globe paints the fixes of chapter 2 in the colour of chapter 2. The
-// reader tunes through the field of the tuner, which calls this on a lock (p2-39). The debug hook
-// __mw.tune() of p2-38 calls it too, for the tests: the hook tunes even when the wreck is not found.
-//
-// A tune while the probe stands on the ground reads the carrier of that landing again, for the ruin:
-// the overlay turns to the ruin at once, and the landing takes the first fix of chapter 2. So a
-// reader who tunes at the wreck starts the search there, as decision 9 of p2-00 plans. A world with
-// no ruin keeps the wreck, and the tune changes nothing the reader sees.
+// One text the reader typed into a tuner. tune() of chapters.js gives the answer, and a lock makes
+// the receiver hold the band of the next search. p2-39.
+function tuneText(text) {
+  if (!progress) return { kind: 'static', text: '' };
+  const a = progress.tune(text);
+  if (a.kind === 'lock') afterTune();
+  return a;
+}
+
+// The debug hook __mw.tune() of p2-38: it locks the tuner on its band, as a reader who types it.
+// The tuner stands only after the find of the search before it, so the hook does nothing before
+// that. docs/adr/0001-chapters-open-in-strict-order.md.
 function tune() {
-  if (!current || !current.world.source || current.world.type === 'gas') return null;
-  carrierRecord = markTuned(current.world.seed);
+  const t = carrierView() && carrierView().tuner;
+  if (!t || t.held) return null;
+  tuneText(t.freq);
+  return carrierView();
+}
+
+// After a lock the globe paints the fixes of the new search in its colour. A tune while the probe
+// stands on the ground reads the carrier of that landing again, for the new band: the overlay turns
+// at once, and the landing takes the first fix of the new search. So a reader who tunes at the
+// wreck starts the search for the ruin there, as decision 9 of p2-00 plans.
+function afterTune() {
   pendingFix = null;
   rebuildCarrierGroup();
   if (mode === 'ground' && ground && lockedSite) {
@@ -1986,58 +1880,36 @@ function tune() {
   }
   renderInfo(current.world);
   setCarrierLevel();
-  return carrierRecord;
 }
 
-// The reader has found the source. inspectSource() calls this the first time the log card opens,
-// and the page shows no word of the log before that. The find stands in the store, the store drops
-// the fixes with it, the wedges give way to the mini wreck at the source, and the sidebar states it
-// in two places: the Carrier row of this world and the thumb of the saved one.
-// window.__mw.onSourceFound is the other way in.
+// The reader opens the card of the source of chapter `id`: 'wreck' or 'ruin'. read() of
+// chapters.js says whether the card opens, and whether this read is the find. A closed chapter
+// cannot end, so its card does not open. docs/adr/0001-chapters-open-in-strict-order.md.
 //
-// The reader is on the ground when this runs, so the model arrives while the globe is not drawn and
-// it stands there at the end of the ascent. A reload of a found world builds it in buildWorld().
-function onSourceFound() {
-  if (!current || !current.world.source) return;
-  carrierRecord = markFound(current.world.seed);
-  setFound(carrierGroup, current.world, current.heightMap);
-  // The fix of this landing waits for the ascent. In chapter 1 the find drops it with the rest; in
-  // chapter 2, after a tune before the find, it is a fix of the ruin and it stays. p2-38.
-  if (carrierChapter() === 1) pendingFix = null;
-  probeHud.setPulse(false);   // a reader who has read the log knows what the fifth block is
-  renderInfo(current.world);
-  renderWorlds();
-  setCarrierLevel();     // the motif joins the song of this world for good. Issue 34, slice 5.
-}
-
-// The reader has found the ruin, p2-42. inspectRuin() calls this the first time the card of the ruin
-// opens, and window.__mw.onRuinFound is the other way in. The find stands in the store under
-// chapter 2, and the store drops the fixes of chapter 2 with it. The globe then stands the mini
-// ruin at the ruin beside the mini wreck, the Carrier row reads "Found 2 of 2" when both are found,
-// and the thumb of the saved world carries two marks.
+// A find stands in the store, and the store drops the fixes of that search with it. The globe is
+// built again from the progress: the wedges give way to the pin and the mini model at the source.
+// The sidebar states the find in two places, the Carrier row of this world and the thumb of the
+// saved one. The reader is on the ground when this runs, so the model arrives while the globe is not
+// drawn, and it stands there at the end of the ascent.
 //
-// A reader can reach the ruin before the tune, by chance. That find is a find all the same, and the
-// card states the band, so the find tunes the world too: markTuned(). The receiver then holds the
-// band of the ruin. The fix the landing took for the wreck stays a fix of chapter 1. While the wreck
-// is not found, activeSource() gives the wreck again, so the search of chapter 1 can still end.
-//
-// The group is built again from the record, because the find changes the chapter the record runs.
-// The reader is on the ground, so the new group stands there at the end of the ascent.
-function onRuinFound() {
-  if (!current || !current.world.ruin || !current.world.source) return;
-  const seed = current.world.seed;
-  carrierRecord = markFound(seed, { chapter: 2 });
-  if (!carrierRecord.tuned) carrierRecord = markTuned(seed);
-  pendingFix = null;     // the find drops the fix of this landing, or it stands in chapter 1
+// The landing reads the carrier again: after the find the next chapter is open, and the fix of
+// this landing is gone with the rest of the search. window.__mw.onSourceFound and
+// window.__mw.onRuinFound are the other ways in.
+function readSource(id) {
+  if (!progress || !current) return { open: false, found: false };
+  const r = progress.read(id);
+  if (!r.found) return r;
+  pendingFix = null;
   rebuildCarrierGroup();
   if (mode === 'ground' && ground && lockedSite) {
     ground.setCarrier(hearCarrier());
     setBriefPulse();
   }
-  probeHud.setPulse(false);
+  probeHud.setPulse(false);   // a reader who has read the card knows what the fifth block is
   renderInfo(current.world);
   renderWorlds();
-  setCarrierLevel();     // the motif of the ruin joins the song of this world, at 0.6 in orbit. p2-44.
+  setCarrierLevel();          // the motif of the source joins the song of this world for good
+  return r;
 }
 
 // ---------------------------------------------------------------- the motif in the song, slice 5
@@ -2074,7 +1946,8 @@ const CARRIER_ORBIT = 0.6;    // the level in orbit after the find
 
 // The level of the motif of one kind of source, 'wreck' or 'ruin', 0 to 1.
 function carrierLevel(kind) {
-  const src = current && activeSource(current.world, carrierRecord);
+  const v = carrierView();
+  const src = v && v.follow && v.follow.source;
   if (!src) return 0;
   if (mode === 'ground' && ground) {
     const w = ground.source;
@@ -2088,11 +1961,9 @@ function carrierLevel(kind) {
     const k = 1 - THREE.MathUtils.smoothstep(r, CARRIER_NEAR, far);
     return CARRIER_EDGE + (1 - CARRIER_EDGE) * k;
   }
-  // In orbit a find is a find, whatever chapter runs: after a find of the ruin by chance the
-  // receiver follows the wreck again (activeSource()), and the ruin keeps its voice all the same.
-  const found = kind === 'ruin'
-    ? !!(carrierRecord && carrierRecord.ruin && carrierRecord.ruin.found)
-    : !!(carrierRecord && carrierRecord.found);
+  // In orbit a find is a find, whatever search the receiver follows: each found source keeps its
+  // voice.
+  const found = v.chapters.some((c) => c.id === kind && c.state === 'done');
   return found ? CARRIER_ORBIT : 0;
 }
 
@@ -2102,24 +1973,19 @@ function setCarrierLevel() {
   music.setRuin(carrierLevel('ruin'));
 }
 
-// The value of the Carrier row: the words of carrierState(), the Clear chip while the chapter that
-// runs holds a fix, the Tune chip, and the Aim chips in orbit. "Not heard" is a link to the record
-// of the missing carrier, in chapter 1 only. An Aim chip stands for each found source: one found
-// source takes the chip "Aim", and after both finds the row offers both, "Wreck" and "Ruin". p2-38.
-// The Tune chip opens the tuner under the row, in orbit and on the ground. p2-39.
-function carrierRow(c) {
-  const words = c.chapter === 1 && c.n === 0 && !c.found
-    ? `<button type="button" class="carrier-lost" title="Read the record of the incident">${c.text}</button>` : c.text;
-  const clear = c.n ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this search">Clear</button>' : '';
-  const tune = c.tune
+// The value of the Carrier row: the words of the row, the Clear chip while the search holds a fix,
+// the Tune chip, and the Aim chips in orbit. "Not heard" is a link to the record of the missing
+// carrier, on the first search only. An Aim chip stands for each found source: one found source
+// takes the chip "Aim", and more finds take one chip each, named for the source. p2-38. The Tune
+// chip opens the tuner under the row, in orbit and on the ground. p2-39.
+function carrierRow(row) {
+  const words = row.lost
+    ? `<button type="button" class="carrier-lost" title="Read the record of the incident">${row.text}</button>` : row.text;
+  const clear = row.clear ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this search">Clear</button>' : '';
+  const tune = row.tune
     ? `<button type="button" class="chip carrier-tune" aria-expanded="${sideTunerOpen}" title="Type a frequency into the receiver">Tune</button>` : '';
-  const aim = (kind, label) => `<button type="button" class="chip carrier-aim" data-aim="${kind}" title="Aim the probe at the ${kind}">${label}</button>`;
-  let aims = '';
-  if (mode !== 'ground') {
-    if (c.wreck && c.ruin) aims = aim('wreck', 'Wreck') + aim('ruin', 'Ruin');
-    else if (c.wreck) aims = aim('wreck', 'Aim');
-    else if (c.ruin) aims = aim('ruin', 'Aim');
-  }
+  const aims = mode === 'ground' ? '' : row.aims.map((a) =>
+    `<button type="button" class="chip carrier-aim" data-aim="${a.id}" title="Aim the probe at the ${a.id}">${a.label}</button>`).join('');
   return words + clear + tune + aims;
 }
 
@@ -2141,9 +2007,9 @@ function carrierRow(c) {
 // takes the colour of chapter 2. In orbit the next landing takes the first fix.
 let sideTunerOpen = false;      // the reader pressed the Tune chip of the sidebar
 let sideTunerSeed = null;       // the world the sidebar tuner last showed
-const cardTuner = makeTuner({ onLock: lockTuner });
+const cardTuner = makeTuner({ onTune: tuneText });
 const sideTuner = makeTuner({
-  onLock: lockTuner,
+  onTune: tuneText,
   // Escape closes the form of the sidebar and gives the focus back to the chip.
   onEscape: () => {
     sideTunerOpen = false;
@@ -2154,16 +2020,11 @@ const sideTuner = makeTuner({
 });
 
 // The state of the tuner on a world, `{ seed, freq, tuned }`, or null where the world takes none.
-// The frequency goes to the closure of the tuner and not to the page; see tuner.js.
-function tunerState(w, rec) {
-  if (!w || !w.ruin || !w.source || w.type === 'gas' || !rec) return null;
-  if (!rec.found && !rec.tuned) return null;
-  return { seed: w.seed, freq: w.ruin.freq, tuned: !!rec.tuned };
-}
-
-function lockTuner(seed) {
-  if (!current || current.world.seed !== seed) return;
-  tune();
+// The band goes to the tuner only after the lock, because the tuner prints it then; tune() of
+// chapters.js compares the text. See tuner.js.
+function tunerState(v) {
+  const t = v && v.tuner;
+  return t ? { seed: t.seed, freq: t.held ? t.freq : null, tuned: t.held } : null;
 }
 
 function syncTuners(st) {
@@ -2196,7 +2057,7 @@ function renderInfo(w) {
   const s = w.stats;
   const carrier = carrierState(w);
   if (sideTunerSeed !== w.seed) { sideTunerOpen = false; sideTunerSeed = w.seed; }
-  const tuner = carrier ? tunerState(w, carrier.rec) : null;
+  const tuner = tunerState(carrier);
   if (!tuner || tuner.tuned) sideTunerOpen = false;
   // The form stands under the row while the chip holds it open, and the locked band stands there
   // for good after the tune. It takes a whole line of the grid, because on a phone the grid holds
@@ -2216,7 +2077,7 @@ function renderInfo(w) {
       <dt>Temp</dt><dd>${s.temp}</dd>
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
-      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrierRow(carrier)}</dd>${slot}` : ''}
+      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrierRow(carrier.row)}</dd>${slot}` : ''}
       ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
@@ -2225,7 +2086,7 @@ function renderInfo(w) {
   const lostBtn = infoBody.querySelector('.carrier-lost');
   if (lostBtn) lostBtn.addEventListener('click', openLost);
   const clearBtn = infoBody.querySelector('.carrier-clear');
-  if (clearBtn) clearBtn.addEventListener('click', () => clearCarrier(w.seed));
+  if (clearBtn) clearBtn.addEventListener('click', clearCarrier);
   const tuneBtn = infoBody.querySelector('.carrier-tune');
   if (tuneBtn) tuneBtn.addEventListener('click', toggleSideTuner);
   // The card holds the other tuner, and it follows the same record. See syncTuners().
@@ -2236,7 +2097,8 @@ function renderInfo(w) {
     if (typing) sideTuner.focus();
   }
   infoBody.querySelectorAll('.carrier-aim').forEach((b) => b.addEventListener('click', () => {
-    aimAtSource(b.dataset.aim === 'ruin' ? w.ruin : w.source);
+    const c = carrier && carrier.chapters.find((ch) => ch.id === b.dataset.aim);
+    if (c) aimAtSource(c.source);
   }));
   // The flora row only exists while the probe is down, because the plants belong to the patch.
   infoBody.querySelectorAll('.chip[data-kind]').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
@@ -2305,7 +2167,7 @@ function inspectPlant(kind) {
 
 // The log of the wreck. It opens from the floating button, and it is the only place the page ever
 // shows the log: the reader must stand on the cell and tap the thing itself. The first open is the
-// find, so onSourceFound() runs here and the Carrier row of the sidebar then reads "Found".
+// find, so readSource() runs here and the Carrier row of the sidebar then reads "Found".
 //
 // The card holds no arrows: a world has one source, so there is nothing to step to. See
 // SourceInspector in ground-source.js for the preview, which turns the wreck on its own axis.
@@ -2313,6 +2175,7 @@ function inspectSource() {
   const src = current && current.world.source;
   // The log belongs to the wreck. On the cell of the ruin the page must not show it. p2-41.
   if (!src || !ground || !ground.source || ground.source.kind !== 'wreck') return;
+  if (!readSource('wreck').open) return;
   markedKind = null; markedPlant = null;
   if (ground.fauna) ground.fauna.unmark();
   if (ground.flora) ground.flora.unmark();
@@ -2326,22 +2189,22 @@ function inspectSource() {
   sourceInspector.show(src.log, (pal.fauna && pal.fauna.accent) || '#ffd27f', discColor(),
     music.motif(current.world), hullOf(current.world), cardTuner.el);
   creatureCard.dataset.subject = 'source';
-  if (!(carrierRecord && carrierRecord.found)) onSourceFound();
-  syncTuners(tunerState(current.world, carrierRecord));
+  syncTuners(tunerState(carrierView()));
   setCarrierLevel();
 }
 
 // The card of the ruin, p2-42. The button reads "Study the ruin" on a marked ruin, and this is where
 // it leads. The reader must stand on the cell and tap the thing itself, as for the wreck, and the
-// first open is the find of chapter 2, so onRuinFound() runs here.
+// first open is the find of the ruin, so readSource() runs here.
 //
 // The card states the frequency, the day of the beacon, and the maker, so it opens only on the
-// cell of the ruin. RuinInspector in ground-source.js draws it, and ruinCard() of ruin-types.js
-// writes its text. The glow and the text take the colour of chapter 2, as the wedges of the ruin
+// cell of the ruin, and only after the find of the wreck: a closed chapter has no card (ADR-0001).
+// RuinInspector in ground-source.js draws it, and ruinCard() of ruin-types.js writes its text. The glow and the text take the colour of chapter 2, as the wedges of the ruin
 // do; the text takes it lightened, as the drawings of the brief do, because the card is dark.
 function inspectRuin() {
   const ruin = current && current.world.ruin;
   if (!ruin || !ground || !ground.source || ground.source.kind !== 'ruin') return;
+  if (!readSource('ruin').open) return;
   markedKind = null; markedPlant = null;
   if (ground.fauna) ground.fauna.unmark();
   if (ground.flora) ground.flora.unmark();
@@ -2353,7 +2216,6 @@ function inspectRuin() {
   ruinInspector.show(current.world, {
     glow: carrierColour(current.world, 2), accent: briefColour(current.world), groundColor: discColor(),
   });
-  if (!(carrierRecord && carrierRecord.ruin && carrierRecord.ruin.found)) onRuinFound();
 }
 creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
 creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) closeCard(); });
@@ -2618,12 +2480,12 @@ async function landAt(lat, lon) {
   return { site: target, chapter: carrierChapter(), carrier: ground ? ground.telemetry().carrier : null, stage: carrierStage };
 }
 
-// The probe comes back to orbit. The promise gives the chapter and the record of the store.
+// The probe comes back to orbit. The promise gives the chapter and the view of the progress.
 async function recall() {
   if (mode !== 'ground') throw new Error('the probe is not on the ground');
   ascend();
   await untilMode('orbit');
-  return { chapter: carrierChapter(), record: carrierRecord };
+  return { chapter: carrierChapter(), view: carrierView() };
 }
 
 // debug handle (harmless in production)
@@ -2636,13 +2498,14 @@ window.__mw = {
   get ground() { return ground; },
   get plants() { return groundPlants; },
   get marked() { return { animal: markedKind, plant: markedPlant, source: markedSource }; },
-  // the search of this world: the record of the store and the group of wedges under the planet
-  get carrier() { return { record: carrierRecord, group: carrierGroup, pending: pendingFix, stage: carrierStage, chapter: carrierChapter() }; },
-  onSourceFound,
-  onRuinFound,                   // p2-42: the find of the ruin, as the first open of its card makes it
+  // the search of this world: the view of the progress and the group of wedges under the planet
+  get carrier() { return { view: carrierView(), group: carrierGroup, pending: pendingFix, stage: carrierStage, chapter: carrierChapter() }; },
+  get progress() { return progress; },   // the progress of chapters.js for the world on the screen
+  onSourceFound: () => readSource('wreck'),
+  onRuinFound: () => readSource('ruin'),   // p2-42: the find of the ruin, as the first open of its card makes it
   briefCarrier: openBrief,       // opens the brief of the distress signal, as the block does
   aimAtSource,
-  tune,                          // p2-38: tunes the receiver to the ruin, for the tests. The reader tunes in the field, p2-39
+  tune,                          // p2-38: locks the tuner on its band, for the tests. The reader tunes in the field, p2-39
   get tuners() { return { card: cardTuner, side: sideTuner }; },   // p2-39: the two tuners
   landAt,                        // p2-38: a scripted landing, as a promise
   recall,                        // p2-38: a scripted recall, as a promise

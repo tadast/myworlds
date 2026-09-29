@@ -1,16 +1,16 @@
 // myworlds — the tuner of the receiver. Phase 2, p2-39. See "The tuner" in docs/ruin.md.
 //
 // The last entry of the log of the wreck states a frequency, and the reader types it here. That act
-// starts chapter 2 of the search, so the tuner is a field and not a button: only a reader who read
-// the number can start the second search.
+// makes the receiver hold the band of the next search, so the tuner is a field and not a button:
+// only a reader who read the number can start that search.
 //
 // One function builds the form, and the page stands it in two places: under the last entry of the
 // card of the wreck, and in the Carrier row of the sidebar. So the two places cannot drift.
 //
-// The form compares the typed number with the frequency of the ruin, and it gives back one of five
-// answers. Before the lock the frequency stays in the closure of makeTuner(): no attribute, no
-// list, no title, and no hint of the field holds it. The form writes the band into the page only
-// after the lock, and then it shows the band and no field.
+// The form gives the typed text to the page, and tune() of chapters.js compares it with the band
+// and gives back one of five answers, from tuneAnswer() here. The form never holds the band before
+// the lock: no attribute, no list, no title, and no hint of the field holds it. The page gives the
+// band to the form only after the lock, and the form then shows the band and no field.
 //
 // tuneAnswer() holds no DOM, so tools/carrier-fix-check.mjs tests every answer in Node.
 import { parseFreq } from './ruin-types.js';
@@ -56,14 +56,15 @@ let uid = 0;
 // after the tune. The page calls this once for each place and keeps the result, so the text in the
 // field and the last answer outlive a render of the sidebar.
 //
-//   onLock(seed)   the reader typed the frequency. The page tunes the world and calls set() again.
+//   onTune(text)   the reader sent a text. The page gives back the answer, `{ kind, text }`; on a
+//                  lock it tunes the world and calls set() again before it returns.
 //   onEscape()     Escape in the field. Only the sidebar gives it: there it closes the form. The
 //                  card gives none, so Escape goes on to the page and closes the card.
 //
 // set({ seed, freq, tuned }) shows the state of a world. A new seed clears the field and the answer,
 // so a second world never shows the answer of the first. The page hides the root element on a world
 // that takes no tuner.
-export function makeTuner({ onLock, onEscape } = {}) {
+export function makeTuner({ onTune, onEscape } = {}) {
   const id = `tuner-${++uid}`;
   const el = document.createElement('div');
   el.className = 'tuner';
@@ -93,11 +94,10 @@ export function makeTuner({ onLock, onEscape } = {}) {
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (tuned || !freq) return;
-    const a = tuneAnswer(field.value, freq);
+    if (tuned || !seed || !onTune) return;
+    const a = onTune(field.value);
     answer.textContent = a.text;
     answer.dataset.kind = a.kind;
-    if (a.kind === 'lock' && onLock) onLock(seed);
   });
   if (onEscape) {
     field.addEventListener('keydown', (e) => {

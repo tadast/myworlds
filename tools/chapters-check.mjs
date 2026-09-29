@@ -33,7 +33,7 @@ globalThis.localStorage = {
 
 const { progressOf, chaptersOf, marksOf, briefWords, CLOSED_LINE } = await import(root + 'chapters.js');
 const { carrierAt, carrierBox, sourceSite, WRECK_FREQ } = await import(root + 'carrier.js');
-const { CARRIER_KEY, MAX_FIXES } = await import(root + 'carrier-store.js');
+const { CARRIER_KEY, MAX_FIXES, MAX_SEEDS } = await import(root + 'carrier-store.js');
 const W = await import(root + 'cell-grid.js');
 const { TIERS, worldOpts } = await import(root + 'tiers.js');
 
@@ -227,13 +227,23 @@ ok('hand', v.chapters[0].fixes.length === 0 && v.chapters[0].briefed === 3 && st
 store.set(CARRIER_KEY, 'not json');
 ok('hand', states(progressOf(w).view()) === 'open closed', 'a store that is not JSON did not read as empty');
 
-// A full store: every write throws, and the page keeps running.
+// A full store: every write throws, the page keeps running, and the saved worlds keep their key.
 store.clear();
+const WORLDS = '[{"seed":"Auralis"}]';
+store.set('myworlds.v1', WORLDS);
 quota = true;
 let threw = false;
 try { p = progressOf(w); p.land(far[0]); p.read('wreck'); p.tune(ruinFreq); p.briefed(1); p.clear(); } catch { threw = true; }
 quota = false;
 ok('quota', !threw, 'a full store made a call throw');
+ok('quota', store.get('myworlds.v1') === WORLDS, 'a full store touched the key of the saved worlds');
+
+// The bound on the seeds: the seed with the oldest write goes first.
+store.clear();
+const one = { ...w, source: w.source, ruin: null };
+for (let i = 0; i < MAX_SEEDS + 40; i++) progressOf({ ...one, seed: 'Seed' + i }).land(far[0]);
+const all = JSON.parse(store.get(CARRIER_KEY));
+ok('seeds', Object.keys(all).length <= MAX_SEEDS && all['Seed' + (MAX_SEEDS + 39)], `${Object.keys(all).length} seeds stand, over the bound of ${MAX_SEEDS}, or the newest went`);
 
 // A world with no ruin: one search, no tuner, and the find reads "Found".
 store.clear();
@@ -249,7 +259,7 @@ ok('lone', p.tune(ruinFreq).kind === 'static' && p.view().follow.id === 'wreck',
 const gas = { seed: 'gas', type: 'gas', source: null, ruin: null };
 p = progressOf(gas);
 ok('gas', chaptersOf(gas).length === 0 && p.view().row === null && p.land({ lat: 0, lon: 0 }) === null && !p.read('wreck').open, 'a gas giant takes a search');
-rows.push('  records   the records of older builds, a bad hand, a full store, a world with no ruin, and a gas giant');
+rows.push(`  records   the records of older builds, a bad hand, a full store, the bound of ${MAX_SEEDS} seeds, a world with no ruin, and a gas giant`);
 
 for (const row of rows) console.log(row);
 console.log('');

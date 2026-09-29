@@ -39,11 +39,6 @@ export const CARRIER_REACH = 2 * Math.PI / 3;
 // one. Decision 7 of p2-00. Every later source sends on the band of its own `freq`.
 export const WRECK_FREQ = '406.025';
 
-// The band a source sends on, with no unit: its own `freq`, or the distress band of the wreck.
-export function sourceFreq(src) {
-  return src && src.kind !== 'wreck' && src.freq ? src.freq : WRECK_FREQ;
-}
-
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));

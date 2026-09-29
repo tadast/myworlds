@@ -269,6 +269,13 @@ class Progress {
     return { ...words(2), next, cells: Math.max(1, Math.round(carrier.arc / CELL)), brg: carrier.brg };
   }
 
+  // The state of chapter `id`: 'closed', 'open', 'done', or null for a chapter the world does not
+  // hold. It reads no fix, so the page may ask it on every frame.
+  state(id) {
+    const i = this.ids.indexOf(id);
+    return i < 0 ? null : this._states()[i];
+  }
+
   // The card of the source of chapter `id` asks to open. Gives `{ open, found }`: the card opens
   // only on a chapter that is not closed, and `found` says that this read is the find. The find
   // ends the chapter, drops its fixes, and holds its band, because the card states the band. The

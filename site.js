@@ -269,36 +269,8 @@ export function carrierDir(world, site, carrier, out = new THREE.Vector3(), src 
   return C.carrierDir(world, site, carrier, _aim, src) ? out.fromArray(_aim) : null;
 }
 
-// ---------------------------------------------------------------- the two chapters, p2-38
-// The receiver hears one source at a time. Chapter 1 of the search follows the wreck of issue 34.
-// After the reader tunes the receiver to the frequency of the log, chapter 2 follows the ruin of
-// p2-35. `record` is the record of carrier-store.js for this world, and `record.tuned` says that
-// the reader has tuned. A world with no ruin stays on the wreck, tuned or not, so the search never
-// points at nothing.
-//
-// Every caller of the carrier reads the source here and gives it to carrierAt() and the rest. The
-// source carries its kind, so `src.kind === 'ruin'` tells the two chapters apart.
-//
-// A find of the ruin by chance tunes the world (p2-42), and the wreck can still stand unfound. The
-// receiver then follows the wreck again until its find, so the search of chapter 1 can still end.
-// After the find of the wreck it follows the ruin, which is found too, so the search is over.
-export function activeSource(world, record) {
-  if (!world) return null;
-  const ruin = world.ruin && world.ruin.dir ? world.ruin : null;
-  const chance = !!(record && record.ruin && record.ruin.found && !record.found);
-  if (record && record.tuned && ruin && !chance) return ruin;
-  return world.source || null;
-}
-
-// The chapter a record runs on this world: 2 while the receiver hears the ruin, else 1.
-export function activeChapter(world, record) {
-  const src = activeSource(world, record);
-  return src && src.kind === 'ruin' ? 2 : 1;
-}
-
-// The frequency the receiver holds in each chapter, as the overlay prints it with no unit. See
-// sourceFreq() in carrier.js.
-export { WRECK_FREQ, sourceFreq } from './carrier.js';
+// The distress band of the wreck. See carrier.js; the progress of the chapters lives in chapters.js.
+export { WRECK_FREQ } from './carrier.js';
 
 // The pull to life. A creature home inside the cell under the pick takes the site. The nearest
 // home wins. The site keeps the species id it was pulled to, or -1. The pull runs before the

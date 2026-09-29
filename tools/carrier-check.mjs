@@ -31,10 +31,10 @@
 //    read toward (0, 1), and the needle must stand where the sky frame holds the source. The map
 //    of the box is boxTanX() and boxTanZ() of cell-grid.js, the one copy generate.js builds with.
 //
-// The two chapters add three checks of their own. A call with the wreck given as the source reads
-// what a call with no source reads, so every fix of chapter 1 keeps its bearing. The ruin reads
-// offsets of its own, because the hash takes its kind. activeSource() gives the ruin only on a
-// tuned record of a world that holds one.
+// The two searches add two checks of their own. A call with the wreck given as the source reads
+// what a call with no source reads, so every fix of the wreck keeps its bearing. The ruin reads
+// offsets of its own, because the hash takes its kind. Which search the receiver follows is a rule
+// of chapters.js, and tools/chapters-check.mjs tests it.
 //
 // site.js and ground-sky.js take three.js by a bare name; three-hook.mjs resolves it in Node.
 import { root } from './three-hook.mjs';
@@ -368,10 +368,6 @@ const ruinRows = checkKind('ruin');
 // b. The ruin reads offsets of its own. The hash of the ruin takes the kind, so on the same seed,
 //    the same cell, and the same direction, the two kinds state two bearings. They agree only by
 //    chance, about as often as two offsets of the hash land within a thousandth of a degree.
-// c. activeSource() gives the ruin only on a tuned record of a world that holds one, and the wreck
-//    in every other case: no record, a record of issue 34, a record that is not tuned, a tuned
-//    record of a world whose ruin is null, and a find of the ruin by chance while the wreck is not
-//    found. After both finds it gives the ruin again.
 let chapterRow = '';
 {
   let same = 0, apart = 0, pairs = 0;
@@ -395,27 +391,8 @@ let chapterRow = '';
   }
   if (apart < pairs * 0.98) fail('chapter', `the ruin read the offset of the wreck on ${same} of ${pairs} cells`);
 
-  const dir = [1, 0, 0];
-  const wreck = { kind: 'wreck', dir };
-  const ruin = { kind: 'ruin', dir: [0, 1, 0], freq: '7.316' };
-  const world = { seed: 'Tune', source: wreck, ruin, env: { radiusKm: 6000 } };
-  const bare = { ...world, ruin: null };
-  const cases = [
-    [world, null, wreck, 'no record'],
-    [world, { fixes: [], found: true, briefed: 3, ts: 1 }, wreck, 'a record of issue 34'],
-    [world, { tuned: false, ruin: { fixes: [] } }, wreck, 'a record that is not tuned'],
-    [world, { tuned: true }, ruin, 'a tuned record'],
-    [bare, { tuned: true }, wreck, 'a tuned record of a world with no ruin'],
-    [world, { tuned: true, found: false, ruin: { found: true } }, wreck, 'a find of the ruin by chance, with the wreck not found'],
-    [world, { tuned: true, found: true, ruin: { found: true } }, ruin, 'both finds'],
-  ];
-  for (const [w, rec, want, name] of cases) {
-    if (S.activeSource(w, rec) !== want) fail('chapter', `activeSource() on ${name} gave the ${S.activeSource(w, rec)?.kind}`);
-    if (S.activeChapter(w, rec) !== (want === ruin ? 2 : 1)) fail('chapter', `activeChapter() on ${name} gave ${S.activeChapter(w, rec)}`);
-  }
-  if (S.sourceFreq(wreck) !== S.WRECK_FREQ || S.sourceFreq(ruin) !== '7.316') fail('chapter', 'sourceFreq() gave the wrong band');
   chapterRow = `  chapters  the wreck given as the source read the call of issue 34 on all 400 pairs;`
-    + ` the ruin read an offset of its own on ${apart} of ${pairs} cells; activeSource() held on ${cases.length} records`;
+    + ` the ruin read an offset of its own on ${apart} of ${pairs} cells`;
 }
 
 // ---------------------------------------------------------------- the report

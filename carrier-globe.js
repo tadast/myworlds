@@ -28,21 +28,21 @@
 // planet and the fixes stand in that same frame.
 //
 // **East is easy to mirror**, and the sky of this app had that defect once; see decision 10 of
-// docs/probe.md. The planes below walk the same east bearingTo() measures against in site.js,
-// (sin lon, 0, -cos lon), the direction of falling lon. The copy is not trusted: tools/
+// docs/probe.md. The planes of wedge.js walk the same east bearingTo() of carrier.js measures
+// against, (sin lon, 0, -cos lon), the direction of falling lon. The copy is not trusted: tools/
 // carrier-fix-check.mjs builds the planes with wedgePlanes(), the one function the uniforms come
-// from, and reads them back through bearingTo() and carrierAt() of site.js.
+// from, and reads them back through bearingTo() and carrierAt().
 //
-// **Two chapters.** The receiver hears one source at a time: the wreck in chapter 1, and the ruin
-// of phase 2 in chapter 2, after the reader tunes. activeSource() in site.js reads the record. The
-// group paints the fixes of the chapter that runs, in the colour of that chapter: the second colour
+// **Two searches.** The receiver follows one search at a time: the wreck, and the ruin of phase 2
+// after the reader tunes. The view of the progress of chapters.js says which. The group paints the
+// fixes of the search the receiver follows, in the colour of that search: the second colour
 // of pickCarrierColour() stands far from the surface and far from the first colour, so the reader
 // never takes a wedge of chapter 2 for a wedge of chapter 1. The pin and the mini wreck of the find
 // of chapter 1 stand on their cell in both chapters, in the colour of chapter 1. p2-38. The find of
 // chapter 2 stands a second pin at the ruin, with the mini ruin and a lamp that blinks, in the
 // colour of chapter 2, and the pin of the wreck stays. p2-42.
 import * as THREE from 'three';
-import { groundRadius, siteDir, sourceSite, activeSource, activeChapter } from './site.js';
+import { groundRadius, siteDir, sourceSite } from './site.js';
 import { WEDGE_STEP, WEDGE_SOFT, wedgePlanes, cellPlanes, goalCell } from './wedge.js';
 // The mini wreck of a find is the wreck of the ground, at the scale of the globe. wreck-geometry.js
 // builds that body in wreckGeometry(hullOf(world)), which takes no DOM and does nothing at import, so the two
@@ -645,33 +645,33 @@ export function carrierColour(world, chapter = 1) {
   return chapter === 2 ? pair[1] : pair[0];
 }
 
-// The group of one world, or null for a world with no source. `record` is the record of
-// carrier-store.js: the fixes of each chapter, the finds, and the tune. The group runs the chapter
-// activeChapter() in site.js reads off the record, and it paints the fixes of that chapter only. A
-// record of issue 34 holds no tune, so it runs chapter 1 as it did.
+// The group of one world, or null for a world with no source. `view` is view() of the progress of
+// chapters.js: the group paints the fixes of the search the receiver follows, `view.follow`, and
+// stands a pin at the source of every search that is done. The group takes the fixes of the view as
+// they are: the view computes their bearings again. A find, a tune, and a clear build the group
+// again from the new view.
 //
 // `heightMap` is the height map the worker sent with the world, which buildWorld() in app.js reads
 // off the same reply. The mini wreck and the mini ruin stand on the terrain and need it.
 //
 // The group holds no mesh during the search: the wedges, the visited cells, and the goal cell all
 // ride in the uniforms of the terrain and of the sea. A chapter whose source is found paints none
-// of them. The find of the wreck stands the mini wreck at the wreck, in both chapters, and the find
-// of the ruin stands the mini ruin at the ruin. p2-42.
-export function makeCarrierGroup(world, record, heightMap = null) {
-  if (!world || !world.source || !world.source.dir) return null;
-  const chapter = activeChapter(world, record);
-  const part = chapter === 2 ? (record && record.ruin) || {} : record || {};
+// of them. The find of the wreck stands the mini wreck at the wreck, whatever search runs, and the
+// find of the ruin stands the mini ruin at the ruin. p2-42.
+export function makeCarrierGroup(world, view, heightMap = null) {
+  if (!world || !world.source || !world.source.dir || !view || !view.follow) return null;
+  const part = view.chapters[view.follow.index];
+  const done = (id) => view.chapters.some((c) => c.id === id && c.state === 'done');
   const group = new THREE.Group();
   group.name = 'carrier';
   group.userData = {
     world, hm: heightMap,
-    chapter,                                  // 1 follows the wreck, 2 follows the ruin
-    src: activeSource(world, record),         // the source of this chapter
-    fixes: (Array.isArray(part.fixes) ? part.fixes : []).slice(),
-    found: !!part.found,                      // the source of this chapter is found
-    wreckFound: !!(record && record.found),   // the wreck is found, in either chapter
-    // the ruin is found. A world with no ruin has nothing to find, whatever the record holds.
-    ruinFound: !!(world.ruin && record && record.ruin && record.ruin.found),
+    chapter: view.follow.index + 1,           // the colour of the search: 1 the wreck, 2 the ruin
+    src: view.follow.source,                  // the source of the search the receiver follows
+    fixes: part.fixes.slice(),
+    found: part.state === 'done',             // the source of this search is found
+    wreckFound: done('wreck'),                // the wreck is found, whatever search runs
+    ruinFound: !!world.ruin && done('ruin'),  // the ruin is found
     fade: null,       // { fix, t, k } while one wedge fades in
     wreck: null,      // the mini wreck of a find. makeWreckModel() builds it.
     ruin: null,       // the mini ruin of the find of chapter 2. makeRuinModel() builds it. p2-42
@@ -727,27 +727,6 @@ export function addWedge(group, fix, { fade = false } = {}) {
   u.fixes = u.fixes.filter((f) => f.lat !== fix.lat || f.lon !== fix.lon);
   if (!fade) { u.fixes.push(fix); rebuild(group); return; }
   u.fade = { fix, t: 0, k: 0 };
-  rebuild(group);
-}
-
-// The reader has found the source of one chapter, 1 by default. Slice 3 calls onSourceFound() in
-// app.js, which calls this for the wreck. The mini wreck the rebuild stands at the source sits on
-// the terrain, so a caller that gives a new world gives its height map with it.
-//
-// A find of the chapter that runs takes its wedges away. A find of the wreck while chapter 2 runs
-// stands the mini wreck and leaves the wedges of the ruin as they are. p2-38. A find of the ruin
-// stands the mini ruin at the ruin, beside the mini wreck. p2-42.
-export function setFound(group, world, heightMap, { chapter = 1 } = {}) {
-  if (!group) return;
-  const u = group.userData;
-  if (world) u.world = world;
-  if (heightMap) u.hm = heightMap;
-  if (chapter !== 2) u.wreckFound = true;
-  else if (u.world && u.world.ruin) u.ruinFound = true;
-  if ((chapter === 2 ? 2 : 1) === u.chapter) {
-    u.fade = null;
-    u.found = true;
-  }
   rebuild(group);
 }
 
