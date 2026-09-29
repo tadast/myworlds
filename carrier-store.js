@@ -116,7 +116,21 @@ function writeAll(all) {
 // parts, so no caller tests for null.
 export function readProgress(seed, ids) {
   const all = seed ? readAll() : {};
-  const r = all[seed] && typeof all[seed] === 'object' ? all[seed] : null;
+  return partsOf(all[seed], ids);
+}
+
+// The progress of every seed in the store, for the chapter ids `ids`, as a Map of seed to parts.
+// One read of the store answers the whole list of saved worlds.
+export function readAllProgress(ids) {
+  const all = readAll();
+  const out = new Map();
+  for (const seed of Object.keys(all)) out.set(seed, partsOf(all[seed], ids));
+  return out;
+}
+
+// The parts of one record on disk.
+function partsOf(rec, ids) {
+  const r = rec && typeof rec === 'object' ? rec : null;
   const out = {};
   ids.forEach((id, i) => {
     const o = (i === 0 ? r : r && r[id]) || {};
@@ -154,19 +168,3 @@ export function writeProgress(seed, ids, parts) {
   return writeAll(all);
 }
 
-// The count of finds per seed, as a Map of seed to a count, for the seeds with a find. The chapters
-// open in order (docs/adr/0001-chapters-open-in-strict-order.md), so a seed counts no find while
-// its first chapter is not found. A record of an older build can hold a find of the ruin before
-// the find of the wreck, and that find counts only after the wreck.
-export function findCounts() {
-  const all = readAll();
-  const out = new Map();
-  for (const seed of Object.keys(all)) {
-    const r = all[seed];
-    if (!r || typeof r !== 'object' || !r.found) continue;
-    let n = 1;
-    for (const v of Object.values(r)) if (v && typeof v === 'object' && !Array.isArray(v) && v.found === true) n++;
-    out.set(seed, n);
-  }
-  return out;
-}

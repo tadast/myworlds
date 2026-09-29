@@ -53,15 +53,17 @@ import { wreckGeometry, hullOf, WRECK_HULL } from './wreck-geometry.js';
 // the page but ruin-types.js, so this import makes no cycle. p2-42.
 import { ruinGeometry, ruinPalette, MINI_UNIT } from './ruin-geometry.js';
 import { ruinMotifOf } from './music.js';
+import { siteCell, sameCell } from './cell-grid.js';
+import { MAX_FIXES } from './carrier-store.js';
 
 // The number of wedges the shader holds. Four uniform slots of three vec3 and two floats cost 44
 // floats, which every driver carries with room to spare. The first build held eight, and after
 // eight landings the globe stood in wide wedges of the accent with lines everywhere: the reader
 // could read no cross out of it. Four fixes give a cross and one check of that cross, which is the
-// three to five landings the plan asks for. A world that holds more fixes draws the 4 newest;
-// carrier-store.js keeps up to MAX_FIXES of them, and MAX_FIXES is 4 as well, so the store and the
-// shader hold one set and a fifth landing drops the oldest.
-export const MAX_WEDGES = 4;
+// three to five landings the plan asks for. The store keeps MAX_FIXES fixes of a search, so the
+// shader takes that number: the store and the shader hold one set, and a fifth landing drops the
+// oldest.
+export const MAX_WEDGES = MAX_FIXES;
 
 // The tint of one wedge is WEDGE_STEP of wedge.js; see wedgeWash() there.
 //
@@ -661,17 +663,16 @@ export function carrierColour(world, chapter = 1) {
 export function makeCarrierGroup(world, view, heightMap = null) {
   if (!world || !world.source || !world.source.dir || !view || !view.follow) return null;
   const part = view.chapters[view.follow.index];
-  const done = (id) => view.chapters.some((c) => c.id === id && c.state === 'done');
   const group = new THREE.Group();
   group.name = 'carrier';
   group.userData = {
     world, hm: heightMap,
-    chapter: view.follow.index + 1,           // the colour of the search: 1 the wreck, 2 the ruin
+    chapter: view.follow.n,                   // the colour of the search: 1 the wreck, 2 the ruin
     src: view.follow.source,                  // the source of the search the receiver follows
     fixes: part.fixes.slice(),
     found: part.state === 'done',             // the source of this search is found
-    wreckFound: done('wreck'),                // the wreck is found, whatever search runs
-    ruinFound: !!world.ruin && done('ruin'),  // the ruin is found
+    wreckFound: !!view.found.wreck,           // the wreck is found, whatever search runs
+    ruinFound: !!view.found.ruin,             // the ruin is found
     fade: null,       // { fix, t, k } while one wedge fades in
     wreck: null,      // the mini wreck of a find. makeWreckModel() builds it.
     ruin: null,       // the mini ruin of the find of chapter 2. makeRuinModel() builds it. p2-42
@@ -724,7 +725,8 @@ export function addWedge(group, fix, { fade = false } = {}) {
   const u = group.userData;
   if (u.found) return;                 // the wedges of a found world are gone for good
   if (u.fade) settle(group);
-  u.fixes = u.fixes.filter((f) => f.lat !== fix.lat || f.lon !== fix.lon);
+  const here = siteCell(fix.lat, fix.lon);
+  u.fixes = u.fixes.filter((f) => !sameCell(siteCell(f.lat, f.lon), here));
   if (!fade) { u.fixes.push(fix); rebuild(group); return; }
   u.fade = { fix, t: 0, k: 0 };
   rebuild(group);

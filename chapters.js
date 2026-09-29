@@ -18,9 +18,15 @@
 // three.js and no DOM, so tools/chapters-check.mjs walks a whole story in Node. carrier-store.js
 // keeps the progress by seed in localStorage.
 //
+// The page asks the view of the progress every question of the story: the search the receiver
+// follows, the sources that are found, what the tuner shows, what the Carrier row says, and how loud
+// each motif plays. After each change of the progress the page shows one new view, so no rule of the
+// story stands in the page.
+//
 //   chaptersOf(world)   the chapters of a world, in order
 //   progressOf(world)   the progress of the reader on a world: view(), land(), read(), tune(),
 //                       briefed(), and clear()
+//   motifLevel()        the level of the motif of one kind of source, from a view
 //   marksOf()           the marks of the finds on the thumbs of the saved worlds
 //   briefWords()        the title and the hint of a brief
 //   CLOSED_LINE         the line of the floating button over the source of a closed search
@@ -28,7 +34,7 @@ import { carrierAt, carrierBox, sourceSite, snapSite, WRECK_FREQ } from './carri
 import { CELL, siteCell, siteDir, sameCell } from './cell-grid.js';
 import { wedgePlanes, inWedge, goalCell } from './wedge.js';
 import { tuneAnswer } from './tuner.js';
-import { readProgress, writeProgress, findCounts, MAX_FIXES, BRIEF_STAGES } from './carrier-store.js';
+import { readProgress, readAllProgress, writeProgress, MAX_FIXES, BRIEF_STAGES } from './carrier-store.js';
 
 // The floating button over the source of a closed search. The card of the way on already says "The
 // probe cannot read this yet", so this line takes other words.
@@ -40,7 +46,11 @@ export const CLOSED_LINE = 'Silent · nothing to read yet';
 //
 // Each chapter is `{ id, kind, name, source, freq }`. `id` names the chapter in the store and in
 // the page, `kind` is 'search', `source` is the source the search looks for, and `freq` is the band
-// it sends on, with no unit.
+// it sends on, with no unit. The id of a search is the kind of its source.
+//
+// ORDER holds the id of every chapter a world can hold, in the order of the story.
+const ORDER = ['wreck', 'ruin'];
+
 export function chaptersOf(world) {
   if (!world || !world.source || !world.source.dir) return [];
   const list = [{ id: 'wreck', kind: 'search', name: 'Wreck', source: world.source, freq: WRECK_FREQ }];
@@ -76,11 +86,29 @@ export function briefWords(index, n) {
   return { sheet, title: BRIEF_TITLE[sheet][k], hint: BRIEF_HINT[sheet][k] };
 }
 
+// ---------------------------------------------------------------- the state of the chapters
+// 'closed', 'open', or 'done' for each chapter, from the find of each chapter, in order. A chapter
+// opens when the chapter before it ends. A record of an older build can hold a find on a closed
+// chapter. The store keeps that find, and the chapter shows as done when it opens.
+function statesOf(found) {
+  const out = [];
+  let open = true;
+  for (const f of found) {
+    const s = !open ? 'closed' : f ? 'done' : 'open';
+    out.push(s);
+    open = s === 'done';
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- the marks of the saved worlds
-// One mark for each find, from one read of the store for the whole list of saved worlds.
+// One mark for each chapter that is done, from one read of the store for the whole list of saved
+// worlds. The order holds here too: a find on a closed chapter makes no mark.
 export function marksOf() {
   const out = new Map();
-  for (const [seed, finds] of findCounts()) {
+  for (const [seed, parts] of readAllProgress(ORDER)) {
+    const finds = statesOf(ORDER.map((id) => parts[id].found)).filter((s) => s === 'done').length;
+    if (!finds) continue;
     out.set(seed, {
       finds,
       text: '✦'.repeat(finds),
@@ -115,18 +143,9 @@ class Progress {
     writeProgress(this.seed, this.ids, this.parts);
   }
 
-  // 'closed', 'open', or 'done' for each chapter, in order. A chapter opens when the chapter before
-  // it ends. A find a record of an older build holds on a closed chapter stays in the store, and the
-  // chapter shows as done when it opens.
+  // 'closed', 'open', or 'done' for each chapter, in order. See statesOf().
   _states() {
-    const out = [];
-    let open = true;
-    for (const id of this.ids) {
-      const s = !open ? 'closed' : this.parts[id].found ? 'done' : 'open';
-      out.push(s);
-      open = s === 'done';
-    }
-    return out;
+    return statesOf(this.ids.map((id) => this.parts[id].found));
   }
 
   // The index of the search the receiver follows, or null for a world with no chapter: the newest
@@ -168,8 +187,12 @@ class Progress {
   // What the page shows of the progress, as one value.
   //
   //   chapters  every chapter: `{ id, kind, name, index, state, held, fixes, briefed, source }`
-  //   follow    the search the receiver follows: `{ id, index, name, source, freq }`, or null
-  //   tuner     `{ seed, id, freq, held }` for the tuner, or null where the world takes none
+  //   follow    the search the receiver follows: `{ id, index, n, name, source, freq }`, or null.
+  //             `n` counts the chapter from 1. The search takes the colour of chapter `n`.
+  //   found     `{ [id]: true }` for each chapter that is done
+  //   tuner     `{ seed, id, held, band }` for the tuner, or null where the world takes none.
+  //             `band` is the band of the tuner after the lock, and null before it. So the page
+  //             never holds the band before the reader types it. See tuner.js.
   //   finds     the count of searches that are done, of `of` searches
   //   row       the Carrier row of the sidebar, or null; see rowOf()
   view() {
@@ -183,16 +206,19 @@ class Progress {
     });
     const f = this._follow(states);
     const follow = f == null ? null : {
-      id: this.chapters[f].id, index: f, name: this.chapters[f].name,
+      id: this.chapters[f].id, index: f, n: f + 1, name: this.chapters[f].name,
       source: this.chapters[f].source, freq: this.chapters[f].freq,
     };
+    const found = {};
+    for (const c of chapters) if (c.state === 'done') found[c.id] = true;
     const t = this._tuner(states);
+    const held = t >= 0 && this.parts[this.ids[t]].held;
     const tuner = t < 0 ? null : {
-      seed: this.seed, id: this.chapters[t].id, freq: this.chapters[t].freq, held: this.parts[this.ids[t]].held,
+      seed: this.seed, id: this.chapters[t].id, held, band: held ? this.chapters[t].freq : null,
     };
     const searches = chapters.filter((c) => c.kind === 'search');
     const v = {
-      seed: this.seed, chapters, follow, tuner,
+      seed: this.seed, chapters, follow, found, tuner,
       finds: searches.filter((c) => c.state === 'done').length, of: searches.length,
     };
     v.row = rowOf(v);
@@ -333,6 +359,39 @@ class Progress {
     this.parts[this.ids[i]].fixes = [];
     this._save();
   }
+}
+
+// ---------------------------------------------------------------- the motif in the song
+// The source has a voice of its own, and its level tells how near the probe stands. The song itself
+// never changes, so a reader who does not search loses nothing. Decision 11 of issue 34. The ruin
+// has a voice of its own too, on the ruin bus of music.js, p2-44. Each bus follows one rule for its
+// own kind of source:
+//
+//   on the ground   the source on this cell sounds only when it is the source of the search the
+//                   receiver follows: CARRIER_EDGE at the edge of the reach, and 1 at CARRIER_NEAR
+//                   units. The receiver holds one band, so after the tune the wreck is silent.
+//   in orbit        CARRIER_ORBIT after the find of that source, whatever search runs, and 0 before.
+//
+// So after both finds both motifs play in orbit, over a song that stays whole. p2-38 and p2-41.
+const CARRIER_NEAR = 40;      // units from the source where the motif stands full
+const CARRIER_EDGE = 0.15;    // the level at the edge of the reach
+const CARRIER_ORBIT = 0.6;    // the level in orbit after the find
+
+// The level of the motif of one kind of source, 'wreck' or 'ruin', 0 to 1. `v` is a view of the
+// progress, or null. `here` is null in orbit. On the ground it is `{ kind, range, reach }`: the kind
+// of the source on this cell or null, the units from the probe to that source as the overlay states
+// them, and the reach of the ground.
+export function motifLevel(v, kind, here = null) {
+  const src = v && v.follow && v.follow.source;
+  if (!src) return 0;
+  if (here) {
+    if (src.kind !== kind || here.kind !== kind) return 0;
+    const far = Math.max(CARRIER_NEAR + 1, here.reach);
+    const x = Math.min(1, Math.max(0, (here.range - CARRIER_NEAR) / (far - CARRIER_NEAR)));
+    const k = 1 - x * x * (3 - 2 * x);   // the smoothstep of three.js
+    return CARRIER_EDGE + (1 - CARRIER_EDGE) * k;
+  }
+  return v.found[kind] ? CARRIER_ORBIT : 0;
 }
 
 // ---------------------------------------------------------------- the Carrier row
