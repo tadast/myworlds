@@ -31,7 +31,7 @@ on. `CONTEXT.md` holds the words to avoid.
 | 5. Follow the ruin | `site.js`, `carrier-store.js`, `carrier-globe.js`, `app.js` | Main thread | chapter 2 of the search, after the tune (p2-38) |
 | 6. Tune the receiver | `tuner.js`, `app.js`, `ground-source.js` | Main thread | the field the reader types the frequency into (p2-39) |
 | 7. Stand the ruin on its cell | `generate.js`, `patchRuin()`; `ground-source.js`, `SourceRuin` | Web Worker; main thread | the disc and `patch.source`; the body, the glow, the light, the well (p2-41). See "The ruin on its patch" |
-| 8. Read the ruin | `ruin-types.js`, `ruinCard()` and `glyphsOf()`; `ground-source.js`, `RuinInspector`; `app.js`, `inspectRuin()` and `onRuinFound()`; `carrier-globe.js` | Main thread, tools | the card, the find of chapter 2, and the mini ruin on the globe (p2-42). See "The card of the ruin" |
+| 8. Read the ruin | `ruin-types.js`, `ruinCard()` and `glyphsOf()`; `ground-source.js`, `RuinInspector`; `app.js`, `inspectRuin()` and `readSource()`; `chapters.js`, `read()`; `carrier-globe.js` | Main thread, tools | the card, the find of chapter 2, and the mini ruin on the globe (p2-42). See "The card of the ruin" |
 | 9. Find the crew | `ruin-lore.js`, `writeRuinLog()`; `generate.js`, `ruinCamp()`; `wreck-geometry.js`, `crewCampGeometry()`; `ground-source.js`, `SourceRuin` and `RuinInspector` | Web Worker; main thread | `world.ruin.log`, `patch.source.camp`, the camp or the cairn on the ground, and the crew on the card (p2-43). See "The crew at the ruin" |
 
 `world.ruin` rides back with the world as plain data, so `worker.js` clones it with the rest:
@@ -88,10 +88,10 @@ the tries.
 
 The draw works in the tangent frame of `cell-grid.js` at the wreck: north is the part of `+y` in
 the tangent plane, and east is the direction of falling lon. That is the frame `bearingTo()` in
-`site.js` reads. `from` is `compass8()` of the bearing from the site of the wreck, which
-`sourceSite()` gives, to the middle of the cell of the ruin. `bearingFrom()` in `generate.js` is
-`bearingTo()` step for step, so the compass word of the log and the bearing of the page never part,
-even on the line between two words.
+`carrier.js` reads. `from` is `compass8()` of the bearing from the site of the wreck, which
+`sourceSite()` gives, to the middle of the cell of the ruin. `generate.js` calls the same
+`bearingTo()`, so the compass word of the log and the bearing of the page never part, even on the
+line between two words.
 
 ### The bands
 
@@ -307,7 +307,8 @@ type it fits, with the counts, a person of 1.8 units, and the wreck of chapter 1
 ## The ruin on its patch
 
 p2-41. A landing on the cell of the ruin shows the ruin, whether the reader has tuned or not,
-because a patch depends only on its arguments. A reader who lands on it by chance finds it.
+because a patch depends only on its arguments. A reader who lands on it by chance sees it, but the
+card opens only after the find of the wreck. See "The find of chapter 2".
 
 ### The disc
 
@@ -448,19 +449,18 @@ frequency of the ruin, the same search follows the ruin: the same bearing, the s
 reach, the same wedges, and the same brief. The reader tunes at the wreck, because the log states
 the frequency there, and the landing that tunes takes the first fix of chapter 2.
 
-- **The receiver hears one source.** `activeSource(world, record)` in `site.js` gives the ruin when
-  the record of the store is tuned and the world holds a ruin, else the wreck. `sourceSite()`,
-  `carrierAt()`, `carrierDir()`, `carrierBox()`, and `goalCell()` take the source as an argument,
-  and every caller in `app.js` reads it from `activeSource()`. A world with no ruin stays on the
-  wreck, tuned or not.
+- **The receiver hears one source.** It follows the newest search whose band it holds: the ruin
+  after the tune, else the wreck. `progressOf(world)` of `chapters.js` holds the rule, and its
+  `view().follow` names the search. `sourceSite()`, `carrierAt()`, `carrierDir()`, `carrierBox()`,
+  and `goalCell()` take the source as an argument. A world with no ruin stays on the wreck.
 - **The ruin reads offsets of its own.** The hash of the offset of a wedge takes the kind of the
   source for the ruin, `` `${seed}|carrier|ruin|${face}|${i}|${j}` ``, and keeps the key of issue 34
   for the wreck. So no fix of chapter 1 moves, and a cell does not state the same offset for the
   two sources. `tools/carrier-check.mjs` runs every check of the carrier for the ruin as well.
 - **The store keeps two chapters.** `myworlds.carrier.v1` keeps chapter 1 at the top of the record
   of a seed and chapter 2 under `ruin`, with `tuned` beside them. A record of issue 34 reads as
-  chapter 1 with nothing in chapter 2. Each call that writes a chapter takes `{ chapter }`, and
-  `markTuned()` sets the tune. See "The store" in `docs/issues/README.md`.
+  chapter 1 with nothing in chapter 2. `carrier-store.js` maps the record to the progress of
+  `chapters.js` and back. See "The store" and "The chapters" in `docs/issues/README.md`.
 - **Two colours.** The wedges of chapter 2 take a second colour: of the candidates of
   `pickCarrierColour()` that stand far from the surface, the one that stands farthest from the
   colour of chapter 1. `carrierColour(world, 2)` gives it. The pin and the mini wreck of the find
@@ -541,9 +541,9 @@ the two places cannot drift:
 Both places show only on a world with a ruin, and only after the find of the wreck. The card of the
 wreck opens only on its cell, and that first open is the find. After the tune both places show the
 locked band and no field: the card under the last entry, and the sidebar under the row, for good.
-The Tune chip then goes away. A world with no ruin shows neither place. The store does not test the
-find, because a find of the ruin by chance tunes the world too (p2-42), so a tuned world shows the
-locked band even when the wreck is not found.
+The Tune chip then goes away. A world with no ruin shows neither place. `view().tuner` of
+`chapters.js` says where the tuner stands: it stands for the ruin once the chapter of the ruin is
+open, which is after the find of the wreck (ADR-0001).
 
 Each place keeps its own tuner, so the text in the field and the last answer survive a render of
 the sidebar, and the focus comes back to the field after the render. A new world clears both.
@@ -573,7 +573,7 @@ now holds.
 |---|---|---|
 | not a number | "The receiver takes a number in MHz, for example 406.025." | nothing |
 | 406.025 | "The receiver holds the distress band." | nothing |
-| within 0.0005 of the frequency | "Locked on 7.316 MHz. The probe hears a second source." | `markTuned()`, then chapter 2 starts |
+| within 0.0005 of the frequency | "Locked on 7.316 MHz. The probe hears a second source." | the receiver holds the band, then chapter 2 starts |
 | within 0.050 of it | "A pattern under the static on 7.313 MHz." | nothing |
 | anything else | "Static on 7.313 MHz." | nothing |
 
@@ -581,15 +581,16 @@ now holds.
   `NEAR_BAND` is 0.050, each with a slack of 1e-9 for the error of a float. The distress band takes
   the band of the lock.
 - The answer line has `aria-live="polite"`, so a screen reader reads each answer.
-- **Nothing else gives the frequency away.** Before the lock the frequency stays in the closure of
-  `makeTuner()`: no attribute, no list, no title, no pattern, and no address holds it, and no
-  answer but the lock prints it. The near miss prints the typed number and not the frequency, so it
+- **Nothing else gives the frequency away.** Before the lock the frequency never enters the tuner:
+  the form sends the typed text to `tune()` of `chapters.js`, which compares it. No attribute, no
+  list, no title, no pattern, and no address holds it, and no answer but the lock prints it. The near miss prints the typed number and not the frequency, so it
   says only that the number is within 0.050.
 
 ### The moment of the tune
 
-The lock calls `tune()` in `app.js`, the path of the debug hook of p2-38. `markTuned()` sets the
-tune in the store, and the globe builds the group of the carrier again for chapter 2.
+A lock of `tune()` of `chapters.js` makes the receiver hold the band of the ruin in the store, and
+`afterTune()` in `app.js` builds the group of the carrier again for chapter 2. The debug hook
+`__mw.tune()` of p2-38 takes the same path.
 
 - **On the ground** the landing reads the carrier again, for the ruin. The carrier block turns to
   the bearing of the ruin, prints its frequency, takes the colour of chapter 2, and pulses for the
@@ -686,22 +687,19 @@ The later issue that opens the way reads the same script. Do not change a glyph.
 
 ### The find of chapter 2
 
-`inspectRuin()` in `app.js` opens the card and calls `onRuinFound()` the first time:
+`inspectRuin()` in `app.js` calls `readSource('ruin')`, and `read()` of `chapters.js` decides:
 
-- `markFound(seed, { chapter: 2 })` in the store. The store drops the fixes of chapter 2 with it, and
-  a clear of the fixes keeps the find.
-- **A find by chance.** A reader can land on the cell of the ruin before the tune, and a patch shows
-  the ruin whether or not the reader tuned. That find is a find all the same, and the card states the
-  band, so `onRuinFound()` calls `markTuned()` too. The fix that landing took for the wreck stays a
-  fix of chapter 1, and the locked band takes the place of the Tune chip.
-- **The wreck is still to find.** After a find of the ruin by chance, `activeSource()` gives the
-  wreck again until the wreck is found: the overlay prints `406.025 MHz`, the wedges of chapter 1
-  paint, and the Carrier row reads "Found 1 of 2" until the next fix. Without that rule the tune
-  moved the receiver to a source that was found already, and the search for the wreck could not
-  end. The manager added the rule at the merge of p2-42.
-- The group of the carrier is built again from the record, because a find of the ruin changes the
-  chapter the record runs. After both finds the Carrier row reads "Found 2 of 2" and offers "Wreck" and
-  "Ruin", and the thumb of the saved world carries two marks.
+- **The chapter must be open.** The chapters open in strict order, so the chapter of the ruin opens
+  when the wreck is found. A reader can land on the cell of the ruin before that, and the patch
+  shows the ruin, but a tap gives the line "Silent · nothing to read yet" on the floating button,
+  no card opens, and no find is recorded. See `docs/adr/0001-chapters-open-in-strict-order.md`.
+  Until 2026-09-29 a find by chance counted and tuned the world; a record of that build keeps its
+  find, and the chapter of the ruin shows as done when the wreck is found.
+- **The first open is the find.** The store marks the ruin found and drops the fixes of chapter 2,
+  and a clear of the fixes keeps the find. The find holds the band of the ruin, because the card
+  states it, so a reader who reached the ruin with no tune does not see the Tune chip again.
+- The group of the carrier is built again from the view. After both finds the Carrier row reads
+  "Found 2 of 2" and offers "Wreck" and "Ruin", and the thumb of the saved world carries two marks.
 - `setCarrierLevel()` sets the buses of the motifs again, so after the recall the motif of the ruin
   plays in the song of the world at 0.6. See "The voice". p2-44.
 
@@ -724,8 +722,8 @@ The find stands a second pin at the cell of the ruin, on the pattern of the pin 
   of the ruin, on `music.ruinClock()` when the sound runs and on the clock of the group when it does
   not, as the glow on the ground takes it. `app.js` passes `music` to `updateCarrierGroup()` for
   that clock. p2-44; see "The voice".
-- `setFound(group, world, heightMap, { chapter: 2 })` stands it on a group that exists, and
-  `makeCarrierGroup()` stands it for a record with `ruin.found`. A world with no ruin never stands it.
+- `makeCarrierGroup()` stands it when the chapter of the ruin is done in the view of
+  `chapters.js`, and a find builds the group again. A world with no ruin never stands it.
   `disposeCarrierGroup()` gives its three geometries and its three materials back.
 
 ## The voice
@@ -1035,7 +1033,8 @@ before the find.
   sentence over 20 words.
 - `node tools/carrier-fix-check.mjs` part G tests the pin of the ruin: both pins after both finds,
   in the colour of each chapter, the mini ruin on its pin at `MINI_UNIT`, the lamp at the lamp of the
-  body and its blink, a find by chance, and a world with no ruin. p2-42.
+  body and its blink, an older find by chance that waits for the wreck, and a world with no ruin.
+  p2-42. `node tools/chapters-check.mjs` tests the strict order and the find.
 - `node tools/world-checksum.mjs --check` must match its baseline: the ruin moves no other stream,
   and every patch off the cell of the ruin hashes as it did before p2-41.
 - `node tools/world-checksum.mjs --source` prints the ruin of each seed on both tiers.

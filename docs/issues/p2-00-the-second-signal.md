@@ -87,6 +87,8 @@ issue 34 stay: carrier, source, bearing, fix, wedge, wreck, motif, log.
     ends on a row of glyphs that names another world, "The probe cannot read this yet", and a chip
     "Coming soon". The glyphs spell a seed that `portalSeed()` rolls now, so the later issue that
     opens the way reads the same glyphs. p2-42.
+    The find of the ruin by chance that the build read into this decision is superseded; see
+    `docs/adr/0001-chapters-open-in-strict-order.md`.
 13. **A log that stops mid-sentence says so.** The owner's note. The card prints
     "[log ends abruptly]" under an entry of the `cut` kind, in the style of a note and not of the
     log. This holds for the logs of today and for the new ones. p2-37.
@@ -302,6 +304,9 @@ changed". These are the ones a reader of this plan must know.
   `RUIN_NEAR` and `RUIN_FAR` keep 12 and 35.
 - **The colour of chapter 2 takes no orange and no yellow**, because the drawings of the brief mark
   the next landing in orange (`MARK_APART` in `carrier-globe.js`).
+- **Superseded on 2026-09-29 by `docs/adr/0001-chapters-open-in-strict-order.md`:** the chapters open in
+  strict order, and the card of the ruin opens only after the find of the wreck. The next bullet is the
+  rule of the build.
 - **A find of the ruin by chance** tunes the world, as decision 12 says, and the receiver then follows
   the wreck again until its find, so the search of chapter 1 can still end. The ruin keeps its voice
   in orbit after its find, whatever chapter runs.
