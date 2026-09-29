@@ -39,6 +39,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `chapters.js` | The chapters of a world and the progress of the reader: every rule of the story, and the words the page shows for them. `chaptersOf(world)`, `progressOf(world)` with `view()`, `land()`, `read()`, `tune()`, `briefed()`, `clear()`, and `state()`, and `motifLevel()`, `marksOf()`, `briefWords()`, and `CLOSED_LINE`. No three.js and no DOM. `tools/chapters-check.mjs` walks whole stories through it. See **The chapters** below. |
 | `carrier-store.js` | The progress of the reader in `localStorage`, under `myworlds.carrier.v1`: `readProgress()`, `readAllProgress()`, and `writeProgress()` map the progress of `chapters.js` to the shape on disk and back. It holds no rule of the story. No three.js. Issue 34, p2-38. |
 | `carrier-globe.js` | The fixes on the globe: a wedge per fix, which the terrain shader and the ocean shader paint, a dot per fix, the mini wreck a find stands at the source, and the mini ruin the find of chapter 2 stands at the ruin (p2-42). One group under `current.planet` for the marks, and one set of uniforms for the paint. The group paints the search the receiver follows, from the view of `chapters.js`, in the colour of that search; `carrierColour()` gives the colour of each search. Issue 34, p2-38. |
+| `probe.js` | The lifecycle of one landing: the mode, `'orbit'`, `'descending'`, `'ground'`, or `'ascending'`, the site, the dive, the patch, and the fix, the stage, and the key of what the landing heard. `Probe` changes them only through `descend()`, `patchDone()`, `ascend()`, `hear()`, `step()`, and `abort()`. `step()` gives the page the cover and one event: `'enter'`, `'landed'`, `'leave'`, or `'surfaced'`. No three.js and no DOM. `tools/probe-check.mjs` walks every transition. |
 | `probe-hud.js` | The instrument of the probe over the ground: the air, the height, the hour of the star, the uplink, and the noise at the edge of the reach. Reads `Ground.telemetry()`. |
 | `index.html`, `style.css` | The page and the sidebar. |
 
@@ -180,7 +181,11 @@ distance hold. Both stop at `FOG_NEAR`, and the walk tapers into that limit over
 
 ### App mode
 
-`app.js` holds one state: `mode` in `'orbit' | 'descending' | 'ground' | 'ascending'`. Orbit is today's behaviour. Issue 20 adds one flag inside orbit, `aiming`: the reader has pressed the button and the next tap on the planet sends the probe. The globe scene and `current` stay in memory in every mode. In `ground` mode the globe is not rendered and its `frame()` work is skipped.
+`probe.js` holds the state of a landing, and `app.js` keeps one `Probe` as `probe`. `probe.mode` is `'orbit' | 'descending' | 'ground' | 'ascending'`. Orbit is today's behaviour. Issue 20 adds one flag inside orbit, `aiming`: the reader has pressed the button and the next tap on the planet sends the probe. The globe scene and `current` stay in memory in every mode. In `ground` mode the globe is not rendered and its `frame()` work is skipped.
+
+- `descend(site, now, { view, path })` fixes the site and starts the dive. `view` is the ground camera of a shared link, so a link carries its camera with the descent and no camera waits in the page. `step(now)` runs the dive once a frame and gives the page one event at each switch: `'enter'` with the patch and the view, `'landed'`, `'leave'`, and `'surfaced'` with the fix of the landing.
+- The fix of a landing waits for the end of the ascent, where the globe fades its wedge in. The switch back to the globe drops the stage of the brief and keeps the fix. `abort()` drops all of it, because the ascent the fix waited for never comes. The fields of a landing return to orbit in one place in `probe.js`.
+- In `app.js`, `enterGround()` builds the ground scene on `'enter'`, `dropGround()` drops it on `'leave'` and on an abort, and `surface()` fades the wedge in on `'surfaced'`.
 
 ### The ground module
 
