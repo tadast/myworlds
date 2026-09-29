@@ -401,7 +401,7 @@ ruin, measured from the camera, as they do for the wreck. The needle points at t
 ruin. The range measures to the edge of the ruin: `rangeFrom(x, z)` gives the distance to the
 convex outline of its parts on the ground, and 0 inside it. The hive is 110 units across, so a
 range to its middle would state 50 units to a reader who stands at its doors. The level of the
-motif of the ruin in `carrierLevel('ruin')` reads the same range, on the ruin bus; see "The voice"
+motif of the ruin in `motifLevel()` of `chapters.js` reads the same range, on the ruin bus; see "The voice"
 below. In chapter 1 the ruin stands on its cell, the needle keeps the bearing of the wreck, and
 the ruin is silent.
 
@@ -589,7 +589,7 @@ now holds.
 ### The moment of the tune
 
 A lock of `tune()` of `chapters.js` makes the receiver hold the band of the ruin in the store, and
-`afterTune()` in `app.js` builds the group of the carrier again for chapter 2. The debug hook
+`showProgress()` in `app.js` builds the group of the carrier again for chapter 2. The debug hook
 `__mw.tune()` of p2-38 takes the same path.
 
 - **On the ground** the landing reads the carrier again, for the ruin. The carrier block turns to
@@ -768,7 +768,7 @@ sends the beacon of the crew back, slower. Decision 11 of p2-00.
 ### The levels
 
 `setCarrierLevel()` in `app.js` sets both buses twice a second on the ground, and on each landing,
-recall, tune, and find. `carrierLevel(kind)` gives each bus the rule of its own source. The
+recall, tune, and find. `motifLevel()` of `chapters.js` gives each bus the rule of its own source. The
 smoothstep goes from 0.15 at the edge of the reach to 1 at 40 units, as issue 34 set it for the
 wreck.
 

@@ -1065,7 +1065,7 @@ export class Ground {
     if (heard) {
       const wx = heard.at.x - p.x, wz = heard.at.z - p.z;
       const r = Math.hypot(wx, wz);
-      range = heard.rangeFrom ? heard.rangeFrom(p.x, p.z) : r;
+      range = heard.rangeFrom(p.x, p.z);
       if (r > 1e-6) d = [wx / r, wz / r];
     }
     let rel = 0;

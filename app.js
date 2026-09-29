@@ -6,12 +6,13 @@ import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
 import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, sourceSite } from './site.js';
-import { progressOf, marksOf, briefWords, CLOSED_LINE } from './chapters.js';
+import { progressOf, marksOf, briefWords, motifLevel, CLOSED_LINE } from './chapters.js';
 import { makeCarrierGroup, addWedge, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, carrierColour, showMarker } from './carrier-globe.js';
-import { sameCell } from './cell-grid.js';
+import { sameCell, siteCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector, RuinInspector } from './ground-source.js';
 import { makeTuner } from './tuner.js';
+import { Probe } from './probe.js';
 import { hullOf } from './wreck-geometry.js';
 import { Ground } from './ground.js';
 import { TIERS, worldOpts, patchOpts } from './tiers.js';
@@ -45,9 +46,6 @@ const SOURCE_DOT = new URLSearchParams(location.search).has('source');
 // nearly every world. It stays out of the UI.
 const RUIN_DOT = new URLSearchParams(location.search).has('ruin');
 const HUD_MS = 500;       // ms, the overlay reads twice a second
-const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
-const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
-const FADE_MS = 600;      // ms, the fade out of the overlay after the switch
 
 // ---------------------------------------------------------------- dom
 const $ = (s) => document.querySelector(s);
@@ -224,27 +222,25 @@ let current = null; // { group, spin, oceanMat, cloudGroup, moons, ringMesh, dat
 // gas giant, holds a progress with no chapter and no group.
 let progress = null;
 let carrierGroup = null;
-let pendingFix = null;    // the fix of the last landing, waiting for the ascent to end
-let carrierStage = null;  // the stage of the search on this landing, for the brief. See land() in chapters.js.
 
 // The view of the progress of the world on the screen, or null. See view() in chapters.js.
 function carrierView() {
   return progress ? progress.view() : null;
 }
 
-// The colour of the search the receiver follows: 1 for the wreck, 2 for the ruin. carrierColour()
+// The number of the search the receiver follows: 1 for the wreck, 2 for the ruin. carrierColour()
 // of carrier-globe.js keeps one colour for each.
 function carrierChapter() {
   const v = carrierView();
-  return v && v.follow ? v.follow.index + 1 : 1;
+  return v && v.follow ? v.follow.n : 1;
 }
 
-// Build the group of the carrier again from the progress, for the world on the screen: after a clear
-// of the fixes, and after a tune, which moves the search to the other chapter.
-function rebuildCarrierGroup() {
-  if (!current || current.world.type === 'gas' || !progress) return;
+// Build the group of the carrier again from a view of the progress, for the world on the screen. A
+// world with no search gets no group. See showProgress().
+function rebuildCarrierGroup(v = carrierView()) {
+  if (!current) return;
   disposeCarrierGroup(carrierGroup);
-  carrierGroup = makeCarrierGroup(current.world, progress.view(), current.heightMap);
+  carrierGroup = makeCarrierGroup(current.world, v, current.heightMap);
   if (carrierGroup) current.planet.add(carrierGroup);
 }
 
@@ -256,7 +252,7 @@ function disposeWorld() {
   // only reach the geometry. The same call takes the wedges out of the uniforms of the shaders, so
   // the next world starts with none. See disposeCarrierGroup() in carrier-globe.js.
   disposeCarrierGroup(carrierGroup);
-  carrierGroup = null; progress = null; pendingFix = null; carrierStage = null;
+  carrierGroup = null; progress = null;   // generate() aborted the probe first, so no landing waits
   current.group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
@@ -571,7 +567,7 @@ const SLOPE_STEP = 0.02;
   // The colour of the carrier comes off the colours of this terrain, so a wedge stands out on it.
   if (world.type !== 'gas') pickCarrierColour(world, terrain.col, terrain.pos);
   progress = progressOf(world);
-  carrierGroup = world.type === 'gas' ? null : makeCarrierGroup(world, progress.view(), heightMap);
+  carrierGroup = makeCarrierGroup(world, progress.view(), heightMap);
   if (carrierGroup) planet.add(carrierGroup);
 
   // The wedges themselves are paint and not geometry: the terrain shader and the ocean shader test
@@ -854,7 +850,7 @@ const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
   const now = performance.now();
-  perf.frame(now, !!dive || busy);
+  perf.frame(now, !!probe.dive || busy);
   if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
   step(now);
   updateCreatureFloat();
@@ -865,8 +861,8 @@ function frame() {
 function step(now) {
   const dt = Math.min(clock.getDelta(), 0.1);
   const t = clock.elapsedTime;
-  if (dive) stepDive(now);
-  if (mode === 'ground') {          // the globe stays in memory, but none of its work runs
+  if (probe.dive) stepDive(now);
+  if (probe.mode === 'ground') {          // the globe stays in memory, but none of its work runs
     ground.update(t, dt);
     ground.render();
     probeHud.update(ground.telemetry(), now);
@@ -882,7 +878,7 @@ function step(now) {
     const hold = THREE.MathUtils.smoothstep(dist, PICK_RANGE, PICK_RANGE + 0.4);   // in the pick range it stops, so the site stays put
     // the planet holds still through a transition, so the fixed site cannot drift under the probe
     // the planet also holds still while the reader aims, so the square cannot drift off the ground
-    const spin = mode === 'orbit' && !aiming ? current.spin * zoomFactor * hold * (userActive ? 0.15 : 1) : 0;
+    const spin = probe.mode === 'orbit' && !aiming ? current.spin * zoomFactor * hold * (userActive ? 0.15 : 1) : 0;
     current.planet.rotation.y += spin * dt;
     current.cloudGroup.rotation.y += spin * 1.25 * dt;
     if (current.oceanMat?.userData.shader) current.oceanMat.userData.shader.uniforms.uTime.value = t;
@@ -908,7 +904,7 @@ function step(now) {
       m.mesh.rotation.y += dt * 0.3;
     }
   }
-  if (mode === 'orbit') {
+  if (probe.mode === 'orbit') {
     // near the surface, drags and wheel steps must move the camera much less
     const near = THREE.MathUtils.clamp((camera.position.length() - 1) / 2.3, 0.08, 1);
     controls.rotateSpeed = 0.7 * near;
@@ -920,7 +916,7 @@ function step(now) {
     if (pitch > 0) camera.rotateX(pitch);
     updateSite(t);                  // the square follows the pointer while the reader aims
   } else {
-    showMarker(lockedSite, current); // the square stays on the fixed site through the transition
+    showMarker(probe.site, current); // the square stays on the fixed site through the transition
   }
   if (!warming) renderer.render(scene, camera);   // see warmShaders()
 }
@@ -967,12 +963,12 @@ function perfRows() {
   const r = renderer.info.render;
   const fps = perf.avg > 0 ? 1000 / perf.avg : 0;
   const rows = [
-    ['mode', mode],
+    ['mode', probe.mode],
     ['frame', `${perf.avg.toFixed(2)} ms   ${fps.toFixed(0)} fps`],
     ['work', `${perf.avgWork.toFixed(2)} ms`],
     ['target', `${perf.target.toFixed(2)} ms   ${perf.hz} Hz${perf.hzDone ? '' : ' (estimating)'}`],
   ];
-  if (mode === 'ground' && ground) {
+  if (probe.mode === 'ground' && ground) {
     const f = ground.flora, a = ground.fauna, c = ground.cover;
     rows.push(['lod', `${ground.lod.distance.toFixed(0)} m   [${ground.lod.min}, ${ground.lod.max}]`]);
     rows.push(['flora', f ? `${f.nearCount} near / ${f.cardCount} cards` : 'none']);
@@ -996,7 +992,7 @@ function perfRows() {
 // and the square marker shows the reader the exact ground the probe would bring back.
 let site = null;          // { lat, lon, kind } or null while the aim is off
 let pendingSite = null;   // a site read from the URL, used once the world is built
-let pendingView = null;   // a camera read from the URL: the orbit one on build, the ground one on landing
+let pendingView = null;   // a camera read from the URL, used once the world is built: the orbit one on build, the ground one for the landing
 let hashAt = 0;
 
 function updateSite(t) {
@@ -1010,9 +1006,9 @@ function updateSite(t) {
 // goes in only while the probe is down, because a site in the URL means the ground.
 function viewHash() {
   if (!current) return '';
-  const onGround = mode === 'ground' || mode === 'descending';
-  const view = onGround ? (mode === 'ground' && ground ? ground.view : null) : orbitView();
-  return viewToUrl(current.world.seed, onGround ? lockedSite : null, view);
+  const onGround = probe.mode === 'ground' || probe.mode === 'descending';
+  const view = onGround ? (probe.mode === 'ground' && ground ? ground.view : null) : orbitView();
+  return viewToUrl(current.world.seed, onGround ? probe.site : null, view);
 }
 
 // The address bar follows the view, so the reader can copy it as well as press the share button.
@@ -1130,31 +1126,31 @@ function aimAt(x, y) {
 }
 
 // ---------------------------------------------------------------- the probe: descent and ascent
-// The app holds one mode: orbit, descending, ground, or ascending. The globe scene stays in memory
+// probe.js holds the state of a landing: the mode (orbit, descending, ground, or ascending), the
+// site, the dive, the patch, and the fix, the stage, and the key of what the landing heard. It
+// changes them only through its own calls. This section builds and drops the ground scene, moves
+// the camera, and draws the cover, on the events of probe.step(). The globe scene stays in memory
 // in every mode. In ground mode the globe is not drawn and none of its per-frame work runs.
-let mode = 'orbit';
+const probe = new Probe();
 let ground = null;        // the Ground instance while the probe is down
-let lockedSite = null;    // the site the probe dives to, fixed at the start of the descent
-let dive = null;          // { kind, phase, t0, dur, from, to, look }
-let patchState = { done: true, result: null };   // the patch the worker builds during the dive
 
-// The patch for the site the probe dives to. The dive holds the screen until the reply lands,
-// so the reader never sees the ground build.
-function requestPatch(target) {
+// The patch for the site the probe dives to. The dive holds the screen until the reply lands, so the
+// reader never sees the ground build. The reply goes to the descent that asked for it.
+function requestPatch() {
   const t0 = performance.now();
-  patchState = { done: false, result: null };
+  const job = probe.job, target = probe.site;
   if (diveLabel) diveLabel.textContent = 'Sending the probe';
   patchJob = {
     progress: (msg) => { if (diveLabel) diveLabel.textContent = msg.label; },
     done: (result) => {
       patchJob = null;
-      patchState = { done: true, result };
+      probe.patchDone(job, result);
       const p = result.patch;
       console.info(`[myworlds] patch "${p.patchSeed}" ${p.biome} at ${p.elevation.toFixed(0)} m, cell ${(p.span / 1000).toFixed(1)} km, ${p.metresAcross.toFixed(0)} m/unit across and ${p.metresUp.toFixed(1)} up, ${p.n}x${p.n}, worker ${Math.round(performance.now() - t0)} ms`);
     },
     fail: (message) => {
       patchJob = null;
-      patchState = { done: true, result: null };
+      probe.patchDone(job, null);
       console.error('[myworlds] patch failed:', message);
     },
   };
@@ -1174,74 +1170,54 @@ function siteWorldPoint(target, extra, out = new THREE.Vector3()) {
 }
 
 function canDescend() {
-  return mode === 'orbit' && !dive && !busy && !!current && current.world.type !== 'gas';
+  return probe.mode === 'orbit' && !busy && !!current && current.world.type !== 'gas';
 }
 
-// Send the probe down. The site is fixed here, so nothing moves under the probe on the way.
-function descend(target = site) {
+// Send the probe down. The site is fixed here, so nothing moves under the probe on the way. `view`
+// is the ground camera of a shared link, for this landing.
+function descend(target = site, view = null) {
   if (!canDescend() || !target) return;
   stopAim();
-  lockedSite = { ...target };
-  mode = 'descending';
+  const path = {
+    from: camera.position.clone(),
+    to: siteWorldPoint(target, 0.004),
+    look: siteWorldPoint(target, -0.4),   // a point under the site holds the aim steady
+  };
+  probe.descend(target, performance.now(), { view, path });
   controls.enabled = false;
   writeHash();
   updateProbeBtn();
   diveEl.style.background = current.world.palette.atmo || '#8fb7ff';
-  requestPatch(lockedSite);
-  dive = {
-    kind: 'descend', phase: 'in', t0: performance.now(), dur: DIVE_MS,
-    from: camera.position.clone(),
-    to: siteWorldPoint(lockedSite, 0.004),
-    look: siteWorldPoint(lockedSite, -0.4),   // a point under the site holds the aim steady
-  };
+  requestPatch();
 }
 
-// Recall the probe. The mirror of the descent: fade out, switch, place the camera over the site.
+// Recall the probe. The mirror of the descent: close the cover, switch, and open it over the site.
 function ascend() {
-  if (mode !== 'ground' || dive) return;
+  if (!probe.ascend(performance.now())) return;
   ground.controls.enabled = false;
   updateProbeBtn();
-  dive = { kind: 'ascend', phase: 'in', t0: performance.now(), dur: FADE_MS };
 }
 
+// One frame of the dive: the camera of the descent, the cover, and the event of the probe.
 function stepDive(now) {
-  const k = THREE.MathUtils.clamp((now - dive.t0) / dive.dur, 0, 1);
-  const e = THREE.MathUtils.smoothstep(k, 0, 1);
-  if (dive.phase === 'in') {
-    if (dive.kind === 'descend') {
-      camera.position.lerpVectors(dive.from, dive.to, e);
-      camera.lookAt(dive.look);
-    }
-    diveEl.style.opacity = String(e);
-    if (k < 1) return;
-    // the switch waits for the patch, or for the guard, whichever comes first after the floor
-    if (dive.kind === 'descend' && !patchState.done && now - dive.t0 < PATCH_WAIT) return;
-    if (dive.kind === 'descend') enterGround(); else leaveGround();
-    if (diveLabel) diveLabel.textContent = '';
-    dive.phase = 'out'; dive.t0 = now; dive.dur = FADE_MS;
-    return;
+  const s = probe.step(now);
+  if (!s) return;
+  if (s.path && s.phase === 'in') {
+    camera.position.lerpVectors(s.path.from, s.path.to, s.k);
+    camera.lookAt(s.path.look);
   }
-  diveEl.style.opacity = String(1 - e);
-  if (k < 1) return;
-  diveEl.style.opacity = '0';
-  if (dive.kind === 'ascend') {
-    mode = 'orbit'; controls.enabled = true;
-    // The ascent ends over the site, so the new wedge arrives where the reader is already looking.
-    // It fades in over 1.2 s. Risk 4 of issue 34: a reader who never reads the fifth block still
-    // sees the globe answer the landing.
-    if (pendingFix && carrierGroup) addWedge(carrierGroup, pendingFix, { fade: true });
-    pendingFix = null;
-    // The sidebar is back in orbit, so the Carrier row may show its Aim chip again. leaveGround()
-    // wrote the row while the mode was still 'ground', where the aim means nothing.
-    if (current) renderInfo(current.world);
-  } else if (ground) ground.controls.enabled = true;
-  dive = null;
-  updateProbeBtn();
+  diveEl.style.opacity = String(s.cover);
+  if (s.event === 'enter') enterGround(s.patch, s.view);
+  else if (s.event === 'leave') leaveGround();
+  else if (s.event === 'landed') { if (ground) ground.controls.enabled = true; updateProbeBtn(); }
+  else if (s.event === 'surfaced') surface(s.fix);
+  if ((s.event === 'enter' || s.event === 'leave') && diveLabel) diveLabel.textContent = '';
 }
 
-// The carrier of the landing on lockedSite, for the search the receiver follows, and the fix that
-// landing takes. enterGround() calls it, and a tune and a find call it again while the probe stands
-// on the ground, so the landing that tunes takes the first fix of the new search. See afterTune().
+// The carrier of the landing on the site of the probe, for the search the receiver follows, and the
+// fix that landing takes. enterGround() calls it, and showProgress() calls it again after a tune or
+// a find while the probe stands on the ground, so the landing that tunes takes the first fix of the
+// new search.
 //
 // land() of chapters.js holds the rules: the bearing, the needle in the frame of the box, the kind
 // and the band of the source, the fix, and the stage of the brief. Decision 9 of issue 34: a
@@ -1249,19 +1225,38 @@ function stepDive(now) {
 // a site takes one too, because the probe stood on that cell and heard the carrier there.
 //
 // The wedge waits for the ascent: the reader is on the ground now and the globe is not drawn. See
-// stepDive().
+// surface().
 function hearCarrier() {
-  const heard = progress && lockedSite ? progress.land(lockedSite) : null;
-  pendingFix = heard && carrierGroup ? heard.fix : null;
-  carrierStage = heard ? heard.stage : null;
+  const heard = progress && probe.site ? progress.land(probe.site) : null;
+  probe.hear({
+    fix: heard && carrierGroup ? heard.fix : null,
+    stage: heard ? heard.stage : null,
+    heard: heard ? heardOf(progress.view()) : null,
+  });
   return heard ? heard.carrier : null;
 }
 
-// The switch into the ground scene, under an opaque overlay.
-function enterGround() {
-  mode = 'ground';
+// The search the receiver follows and its state, as one key. A landing keeps the key of the search
+// it heard, and showProgress() reads the carrier again when the key changes.
+function heardOf(v) {
+  return v && v.follow ? `${v.follow.id}:${v.chapters[v.follow.index].state}` : null;
+}
+
+// The search the receiver follows holds `fix`: a clear, a find, and a tune drop the fix of a landing.
+function followHolds(fix) {
+  const v = carrierView();
+  const c = v && v.follow && v.chapters[v.follow.index];
+  if (!c) return false;
+  const cell = siteCell(fix.lat, fix.lon);
+  return c.fixes.some((f) => sameCell(siteCell(f.lat, f.lon), cell));
+}
+
+// The switch into the ground scene, under the closed cover. `result` is the patch, or null when it
+// failed, and `view` is the ground camera of a shared link, or null.
+function enterGround(result, view) {
+  const at = probe.site;
   ground = new Ground({
-    renderer, canvas, world: current.world, site: lockedSite, tier: Q.ground,
+    renderer, canvas, world: current.world, site: at, tier: Q.ground,
     // The lamp of the wreck blinks the rhythm of the motif on the bar clock of the song, so the
     // eye and the ear agree. Issue 34, slice 3.
     music,
@@ -1272,66 +1267,71 @@ function enterGround() {
   });
   // The plant lore of this patch. It arrives with the patch, because it reads the biome of the
   // site, and it goes away with the patch. See describePatchFlora() in generate.js.
-  groundPlants = (patchState.result && patchState.result.patch.plants) || [];
-  groundVariant = (patchState.result && patchState.result.patch.floraVariant) || 0;
+  groundPlants = (result && result.patch.plants) || [];
+  groundVariant = (result && result.patch.floraVariant) || 0;
   // the sun, the moons, and the ring of the globe, read in the frame of the site: only the app
   // knows planet.rotation.y, so the app turns them and the ground draws them
-  const view = skyView(current, lockedSite, sunDir, cellTwist(lockedSite));
-  view.starLight = stars.lightColor();   // the ground sun takes the colour of the star
+  const sky = skyView(current, at, sunDir, cellTwist(at));
+  sky.starLight = stars.lightColor();   // the ground sun takes the colour of the star
   const carrier = hearCarrier();
-  renderInfo(current.world);   // the sidebar gains its flora row, and the Carrier row counts the fix
   const t0 = performance.now();
-  ground.load(patchState.result, { sunDir: view.sunDir, view, carrier });
-  if (patchState.result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
-  if (pendingView) ground.setView(pendingView);   // a shared link brings its own camera
-  pendingView = null;
+  ground.load(result, { sunDir: sky.sunDir, view: sky, carrier });
+  if (result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
+  if (view) ground.setView(view);   // a shared link brings its own camera
   ground.resize(innerWidth, innerHeight);
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
   probeHud.show();
-  // Risk 4 of issue 34: a reader may never look at the fifth block. The block pulses on every
-  // landing that hears the carrier until the reader opens the brief of this stage of the search,
-  // and it stands quiet after the find as well, because a reader who has read the log knows what
-  // the block is.
-  setBriefPulse();
+  // The landing took a fix, so the progress changed. The sidebar gains its flora row, the Carrier
+  // row counts the fix, and the fifth block pulses. Risk 4 of issue 34: a reader may never look at
+  // the fifth block. The block pulses on every landing that hears the carrier until the reader
+  // opens the brief of this stage of the search, and it stands quiet after the find as well,
+  // because a reader who has read the log knows what the block is.
+  showProgress();
   perf.reset();       // the orbit frames say nothing about the ground
   showMarker(null, current);
   writeHash();
 }
 
-// The switch back to the globe, under an opaque overlay. Also the straight cut for a new world.
-function leaveGround() {
+// The ground scene and everything that belongs to the patch: the plant card, the overlay, the
+// marks, and the plant lore. The switch back to the globe and an abort both drop it.
+function dropGround() {
   if (plantInspector.open) closeCard();   // the plant of a patch cannot be studied from orbit
-  probeHud.hide();
-  if (ground) { ground.dispose(); ground = null; }
-  carrierStage = null;
-  markedKind = null; markedPlant = null; markedSource = false;  // the marks belong to the patch, and the patch is gone
-  setCarrierLevel();  // the probe has left the cell, so the motif takes its orbit level
-  perf.reset();       // the ground frames say nothing about the globe
-  groundPlants = []; groundVariant = 0;   // the plant lore belongs to the patch too
-  if (current) renderInfo(current.world);  // the sidebar loses its flora row
-  if (mode === 'ground') mode = 'ascending';
-  if (lockedSite) placeCameraOverSite(lockedSite);
-  writeHash();
-}
-
-// A new world always returns to orbit, whatever the probe was doing.
-function abortProbe() {
-  stopAim();
-  if (mode === 'orbit' && !dive) return;
-  if (plantInspector.open) closeCard();
   probeHud.hide();
   if (ground) { ground.dispose(); ground = null; }
   markedKind = null; markedPlant = null; markedSource = false;
   groundPlants = []; groundVariant = 0;
-  perf.reset();
-  dive = null;
-  pendingFix = null;        // the wedge of that landing waited for an ascent that will not come
-  carrierStage = null;
-  lockedSite = null;
-  pendingView = null;
-  patchJob = null;
-  patchState = { done: true, result: null };
-  mode = 'orbit';
+  perf.reset();       // the ground frames say nothing about the globe
+}
+
+// The switch back to the globe, under the closed cover. The probe has dropped the stage of the
+// landing, and it keeps the fix for the end of the ascent.
+function leaveGround() {
+  dropGround();
+  setCarrierLevel();  // the probe has left the cell, so the motif takes its orbit level
+  if (current) renderInfo(current.world);  // the sidebar loses its flora row
+  if (probe.site) placeCameraOverSite(probe.site);
+  writeHash();
+}
+
+// The cover is open over the globe, and the probe is in orbit. The ascent ends over the site, so the
+// new wedge arrives where the reader is already looking. It fades in over 1.2 s. Risk 4 of issue
+// 34: a reader who never reads the fifth block still sees the globe answer the landing. A clear, a
+// find, or a tune on the ground can drop the fix first, so the wedge fades in only while the search
+// still holds it.
+function surface(fix) {
+  controls.enabled = true;
+  if (fix && carrierGroup && followHolds(fix)) addWedge(carrierGroup, fix, { fade: true });
+  // The sidebar is back in orbit, so the Carrier row shows its Aim chips again.
+  if (current) renderInfo(current.world);
+  updateProbeBtn();
+}
+
+// A new world always returns to orbit, whatever the probe was doing. The fix of a landing goes with
+// it, because the ascent it waited for will not come.
+function abortProbe() {
+  stopAim();
+  if (!probe.abort()) return;
+  dropGround();
   controls.enabled = true;
   setCarrierLevel();       // the probe is off the ground, so the motif takes its orbit level
   diveEl.style.opacity = '0';
@@ -1344,15 +1344,15 @@ let probeLabel = '';
 // that still said "drag to spin" would send the reader looking for a control that is not there.
 function updateHelp() {
   if (!helpEl) return;
-  const text = mode === 'ground' ? HELP_GROUND : HELP_ORBIT;
+  const text = probe.mode === 'ground' ? HELP_GROUND : HELP_ORBIT;
   if (helpEl.textContent !== text) helpEl.textContent = text;
 }
 
 function updateProbeBtn() {
   if (!probeBtn) return;
   updateHelp();
-  const down = mode === 'ground';
-  const show = !dive && !busy && (down || canDescend());
+  const down = probe.mode === 'ground';
+  const show = !probe.dive && !busy && (down || canDescend());
   const label = down ? 'Recall the probe' : aiming ? 'Cancel the probe' : 'Send a probe to the surface';
   const changed = probeBtn.hidden === show || probeLabel !== label;
   probeBtn.hidden = !show;
@@ -1385,11 +1385,11 @@ let floatLabel = '';
 function updateProbeFloat() {
   if (!probeFloat) return;
   let label = '';
-  if (!dive && !busy && !aiming) {
+  if (!probe.dive && !busy && !aiming) {
     // The two floating buttons share one place on the screen. At the ceiling the recall takes it,
     // because the reader who pulls back to the limit asks to travel; the mark stays on the ground.
-    if (mode === 'ground' && ground && ground.atCeiling) label = 'Recall the probe';
-    else if (mode === 'orbit' && canDescend() && camera.position.length() <= FLOAT_NEAR) label = 'Send a probe to the surface';
+    if (probe.mode === 'ground' && ground && ground.atCeiling) label = 'Recall the probe';
+    else if (canDescend() && camera.position.length() <= FLOAT_NEAR) label = 'Send a probe to the surface';
   }
   if (label === floatLabel) return;
   floatLabel = label;
@@ -1426,7 +1426,7 @@ function updateCreatureFloat() {
   if (!creatureFloat) return;
   let label = '';
   // At the ceiling the recall of the probe takes the spot. See updateProbeFloat().
-  if (mode === 'ground' && !dive && !busy && creatureCard.hidden && !(ground && ground.atCeiling)) {
+  if (probe.mode === 'ground' && !probe.dive && !busy && creatureCard.hidden && !(ground && ground.atCeiling)) {
     if (markedKind !== null) {
       const G = current && current.world.species[markedKind];
       if (G) label = `Study the ${G.lore.name}`;
@@ -1580,9 +1580,9 @@ function generate(seed, { save = true } = {}) {
       const t0 = performance.now();
       buildWorld(msg.result);
       const wanted = pendingSite;
-      pendingSite = null;
-      const orbit = pendingView && pendingView.kind === 'orbit' ? pendingView : null;
-      if (orbit) pendingView = null;
+      const view = pendingView;
+      pendingSite = null; pendingView = null;
+      const orbit = view && view.kind === 'orbit' ? view : null;
       if (!(wanted && placeCameraOverSite(wanted)) && !placeCameraAtView(orbit)) resetCamera();
       console.info(`[myworlds] "${seed}" ${msg.result.world.type} built in ${Math.round(performance.now() - t0)} ms, worker ${Math.round(t0 - genStart)} ms, flora ${msg.result.world.floraCount}, fauna ${msg.result.world.faunaCount}`);
       // The programs of the new materials build here, under the overlay, and not in the first draw
@@ -1596,15 +1596,15 @@ function generate(seed, { save = true } = {}) {
       // and under the song on a world the reader has already solved. Issue 34, slice 5.
       setCarrierLevel();
       if (save) saveWorld(msg.result.world);
+      // A shared link with a site lands the reader on the ground, with the ground camera of the link.
       const landing = wanted && current.world.type !== 'gas' ? wanted : null;
-      if (!landing) pendingView = null;   // no landing, so a ground camera in the URL has no ground
+      const landView = view && view.kind === 'ground' ? view : null;
       writeHash();
       input.value = seed;
       if (COMPACT) setCollapsed(true);
       setTimeout(() => {
         overlay.classList.remove("show"); busy = false;
-        // a shared link with a site lands the reader on the ground
-        if (landing) descend(landing); else updateProbeBtn();
+        if (landing) descend(landing, landView); else updateProbeBtn();
       }, 250);
     },
     fail: (message) => {
@@ -1707,7 +1707,7 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&a
 // The row follows the search the receiver follows. rowOf() in chapters.js writes its words; see
 // view() there. The view of the world on the screen, or null where the world takes no row.
 function carrierState(w) {
-  if (!w || !w.source || w.type === 'gas' || !progress || progress.seed !== w.seed) return null;
+  if (!w || !progress || progress.seed !== w.seed) return null;
   const v = progress.view();
   return v.row ? v : null;
 }
@@ -1741,7 +1741,7 @@ const briefDlg = $('#carrier-brief');
 // drawings of the brief take it. A landing and a tune on the ground both call this, so the block
 // changes colour at the moment of the tune. p2-39.
 function setBriefPulse() {
-  const st = carrierStage;
+  const st = probe.stage;
   const chapter = carrierChapter();
   probeHud.setTint(chapter > 1 && current ? briefColour(current.world, chapter) : null);
   probeHud.setPulse(!!(st && st.pulse), st ? st.hint : null);
@@ -1783,14 +1783,14 @@ function fillBrief(st) {
 
 function openBrief() {
   if (!briefDlg || briefDlg.open) return;
-  fillBrief(carrierStage);
+  fillBrief(probe.stage);
   // The ground listens for the flight keys on the window, and the keys of a modal dialog still
   // reach it. So the controls of the ground stop while the brief stands open, and the close gives
   // them back. A drag stops with them, which is what a modal asks for.
   if (ground) ground.controls.enabled = false;
   briefDlg.showModal();
   probeHud.setPulse(false);
-  if (progress) progress.briefed(carrierStage ? carrierStage.n : 1);
+  if (progress) progress.briefed(probe.stage ? probe.stage.n : 1);
 }
 
 briefDlg.addEventListener('click', (e) => { if (e.target === briefDlg) briefDlg.close(); });
@@ -1810,10 +1810,10 @@ function openLost() {
 
 lostDlg.addEventListener('click', (e) => { if (e.target === lostDlg) lostDlg.close(); });
 lostDlg.addEventListener('close', () => {
-  if (mode === 'ground' && ground && !dive) ground.controls.enabled = true;
+  if (probe.mode === 'ground' && ground && !probe.dive) ground.controls.enabled = true;
 });
 briefDlg.addEventListener('close', () => {
-  if (mode === 'ground' && ground && !dive) ground.controls.enabled = true;
+  if (probe.mode === 'ground' && ground && !probe.dive) ground.controls.enabled = true;
 });
 
 // The return path to the wreck. A reader who found the source a week ago has to find its cell
@@ -1838,14 +1838,36 @@ function aimAtSource(src = carrierView() && carrierView().follow && carrierView(
   startAim();
 }
 
+// ---------------------------------------------------------------- a change of the progress
+// A landing, a find, a tune, and a clear each change the progress, and each then calls this. It
+// shows the new view everywhere the page shows the story: the wedges and the pins on the globe, the
+// carrier block of the overlay, the Carrier row and the two tuners, the marks on the thumbs, and the
+// levels of the motifs. chapters.js holds every rule, and this function only shows its view.
+//
+// A find or a tune changes the search the receiver follows, or its state. A probe on the ground then
+// reads the carrier of its landing again. The overlay turns to the new band at once, and after a
+// tune the landing takes the first fix of the new search. So a reader who tunes at the wreck starts
+// the search for the ruin there, as decision 9 of p2-00 plans. A clear changes neither, so the
+// landing keeps its carrier and takes no fix back.
+function showProgress() {
+  if (!progress || !current) return;
+  if (probe.mode === 'ground' && ground && heardOf(progress.view()) !== probe.heard) {
+    ground.setCarrier(hearCarrier());
+  }
+  const v = progress.view();
+  rebuildCarrierGroup(v);
+  setBriefPulse();
+  renderInfo(current.world);
+  renderWorlds();
+  setCarrierLevel(v);
+}
+
 // Drop the fixes of the search the receiver follows on the world on the screen. The globe loses its
 // wedges in the same breath. The finds, the briefs, and the bands stay.
 function clearCarrier() {
   if (!progress || !current) return;
   progress.clear();
-  pendingFix = null;
-  rebuildCarrierGroup();
-  renderInfo(current.world);
+  showProgress();
 }
 
 // One text the reader typed into a tuner. tune() of chapters.js gives the answer, and a lock makes
@@ -1853,7 +1875,7 @@ function clearCarrier() {
 function tuneText(text) {
   if (!progress) return { kind: 'static', text: '' };
   const a = progress.tune(text);
-  if (a.kind === 'lock') afterTune();
+  if (a.kind === 'lock') showProgress();
   return a;
 }
 
@@ -1863,23 +1885,8 @@ function tuneText(text) {
 function tune() {
   const t = carrierView() && carrierView().tuner;
   if (!t || t.held) return null;
-  tuneText(t.freq);
+  tuneText(progress.chapters.find((c) => c.id === t.id).freq);
   return carrierView();
-}
-
-// After a lock the globe paints the fixes of the new search in its colour. A tune while the probe
-// stands on the ground reads the carrier of that landing again, for the new band: the overlay turns
-// at once, and the landing takes the first fix of the new search. So a reader who tunes at the
-// wreck starts the search for the ruin there, as decision 9 of p2-00 plans.
-function afterTune() {
-  pendingFix = null;
-  rebuildCarrierGroup();
-  if (mode === 'ground' && ground && lockedSite) {
-    ground.setCarrier(hearCarrier());
-    setBriefPulse();
-  }
-  renderInfo(current.world);
-  setCarrierLevel();
 }
 
 // The reader opens the card of the source of chapter `id`: 'wreck' or 'ruin'. read() of
@@ -1889,88 +1896,33 @@ function afterTune() {
 // A find stands in the store, and the store drops the fixes of that search with it. The globe is
 // built again from the progress: the wedges give way to the pin and the mini model at the source.
 // The sidebar states the find in two places, the Carrier row of this world and the thumb of the
-// saved one. The reader is on the ground when this runs, so the model arrives while the globe is not
-// drawn, and it stands there at the end of the ascent.
-//
-// The landing reads the carrier again: after the find the next chapter is open, and the fix of
-// this landing is gone with the rest of the search. window.__mw.onSourceFound and
-// window.__mw.onRuinFound are the other ways in.
+// saved one, and the motif of the source joins the song of this world for good. The reader is on
+// the ground when this runs, so the model arrives while the globe is not drawn, and it stands there
+// at the end of the ascent. The landing reads the carrier again: the found search pulses no more.
+// window.__mw.onSourceFound and window.__mw.onRuinFound are the other ways in.
 function readSource(id) {
   if (!progress || !current) return { open: false, found: false };
   const r = progress.read(id);
-  if (!r.found) return r;
-  pendingFix = null;
-  rebuildCarrierGroup();
-  if (mode === 'ground' && ground && lockedSite) {
-    ground.setCarrier(hearCarrier());
-    setBriefPulse();
-  }
-  probeHud.setPulse(false);   // a reader who has read the card knows what the fifth block is
-  renderInfo(current.world);
-  renderWorlds();
-  setCarrierLevel();          // the motif of the source joins the song of this world for good
+  if (r.found) showProgress();
   return r;
 }
 
 // ---------------------------------------------------------------- the motif in the song, slice 5
-// The source has a voice of its own, and its level says how near the probe stands. The song itself
-// never changes, so a reader who does not search loses nothing. Decision 11 of issue 34.
-//
-//   off the cell of the source   0
-//   on it                        CARRIER_EDGE at the edge of the reach, 1 at CARRIER_NEAR units
-//   in orbit                     0 before the find, CARRIER_ORBIT after it
-//
-// The reach is the walk limit of the ground, which is the same reach the worker placed the wreck
-// inside. See patchSource() in generate.js and reachOf() in ground.js.
-//
-// On the ground the level reads the source of the chapter that runs. After the tune the receiver
-// holds the band of the ruin, so the cell of the wreck no longer raises the motif of the wreck. In
-// orbit the motif of the wreck stays in the song after its find, in both chapters. p2-38.
-//
-// The ruin has a voice of its own, p2-44: the motif of the wreck played back, slower and an octave
-// lower, on the ruin bus of music.js. Each bus follows the rule above for its own source, and the
-// ruin speaks in chapter 2 only:
-//
-//                                  wreck bus                  ruin bus
-//   ground, chapter 1, the wreck   the level of its range     0
-//   ground, chapter 2, the ruin    0                          the level of its range
-//   ground, any other cell         0                          0
-//   orbit                          CARRIER_ORBIT after the    CARRIER_ORBIT after the find of
-//                                  find of the wreck          the ruin
-//
-// So after both finds both motifs play in orbit, over a song that stays whole. The range of the
-// ruin is the range the overlay states, to the edge of its stones. p2-41.
-const CARRIER_NEAR = 40;      // units from the source where the motif stands full
-const CARRIER_EDGE = 0.15;    // the level at the edge of the reach
-const CARRIER_ORBIT = 0.6;    // the level in orbit after the find
+// The source has a voice of its own, and the wreck and the ruin each play on a bus of music.js.
+// motifLevel() of chapters.js holds the rule for each bus. The page gives it the source on the cell
+// of the probe: its kind, the range the overlay states, and the reach of the ground. The range runs
+// to the edge of a ruin and to the middle of the wreck, p2-41. The reach is the walk limit of the
+// ground, the same reach the worker placed the source inside. See reachOf() in ground.js.
 
-// The level of the motif of one kind of source, 'wreck' or 'ruin', 0 to 1.
-function carrierLevel(kind) {
-  const v = carrierView();
-  const src = v && v.follow && v.follow.source;
-  if (!src) return 0;
-  if (mode === 'ground' && ground) {
-    const w = ground.source;
-    // The receiver holds one band: the body on this cell sounds only when it is the source that runs.
-    if (src.kind !== kind || !w || w.kind !== kind) return 0;
-    const p = ground.camera.position;
-    // The distance the range of the overlay states: to the edge of a ruin, to the middle of the
-    // wreck. p2-41.
-    const r = w.rangeFrom ? w.rangeFrom(p.x, p.z) : Math.hypot(w.at.x - p.x, w.at.z - p.z);
-    const far = Math.max(CARRIER_NEAR + 1, ground.reach);
-    const k = 1 - THREE.MathUtils.smoothstep(r, CARRIER_NEAR, far);
-    return CARRIER_EDGE + (1 - CARRIER_EDGE) * k;
+// Both levels, twice a second and after every change of the mode and of the progress.
+function setCarrierLevel(v = carrierView()) {
+  let here = null;
+  if (probe.mode === 'ground' && ground) {
+    const s = ground.source, p = ground.camera.position;
+    here = { kind: s ? s.kind : null, range: s ? s.rangeFrom(p.x, p.z) : Infinity, reach: ground.reach };
   }
-  // In orbit a find is a find, whatever search the receiver follows: each found source keeps its
-  // voice.
-  const found = v.chapters.some((c) => c.id === kind && c.state === 'done');
-  return found ? CARRIER_ORBIT : 0;
-}
-
-// Both levels, twice a second and on every change of the mode, the tune, and a find.
-function setCarrierLevel() {
-  music.setCarrier(carrierLevel('wreck'));
-  music.setRuin(carrierLevel('ruin'));
+  music.setCarrier(motifLevel(v, 'wreck', here));
+  music.setRuin(motifLevel(v, 'ruin', here));
 }
 
 // The value of the Carrier row: the words of the row, the Clear chip while the search holds a fix,
@@ -1984,7 +1936,7 @@ function carrierRow(row) {
   const clear = row.clear ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this search">Clear</button>' : '';
   const tune = row.tune
     ? `<button type="button" class="chip carrier-tune" aria-expanded="${sideTunerOpen}" title="Type a frequency into the receiver">Tune</button>` : '';
-  const aims = mode === 'ground' ? '' : row.aims.map((a) =>
+  const aims = probe.mode !== 'orbit' ? '' : row.aims.map((a) =>
     `<button type="button" class="chip carrier-aim" data-aim="${a.id}" title="Aim the probe at the ${a.id}">${a.label}</button>`).join('');
   return words + clear + tune + aims;
 }
@@ -1998,13 +1950,12 @@ function carrierRow(row) {
 // Both places show only on a world with a ruin, and only after the find of the wreck: the card of
 // the wreck opens only on its cell, and that first open is the find. After the tune both places
 // show the locked band and no field. The sidebar then shows the band under the row for good, and
-// the Tune chip goes away. The store does not test the find, because a find of the ruin by chance
-// tunes the world too (p2-42), so a tuned world shows the locked band whether or not the wreck is
-// found.
+// the Tune chip goes away. The view of chapters.js gives the tuner, and it gives the band only
+// after the lock. docs/adr/0001-chapters-open-in-strict-order.md.
 //
-// The lock calls tune(), the path of the debug hook of p2-38. On the ground the landing reads the
-// carrier again and takes the first fix of chapter 2, and the carrier block turns to the ruin and
-// takes the colour of chapter 2. In orbit the next landing takes the first fix.
+// A lock calls showProgress(). On the ground the landing reads the carrier again and takes the
+// first fix of chapter 2, and the carrier block turns to the ruin and takes the colour of chapter
+// 2. In orbit the next landing takes the first fix.
 let sideTunerOpen = false;      // the reader pressed the Tune chip of the sidebar
 let sideTunerSeed = null;       // the world the sidebar tuner last showed
 const cardTuner = makeTuner({ onTune: tuneText });
@@ -2019,14 +1970,7 @@ const sideTuner = makeTuner({
   },
 });
 
-// The state of the tuner on a world, `{ seed, freq, tuned }`, or null where the world takes none.
-// The band goes to the tuner only after the lock, because the tuner prints it then; tune() of
-// chapters.js compares the text. See tuner.js.
-function tunerState(v) {
-  const t = v && v.tuner;
-  return t ? { seed: t.seed, freq: t.held ? t.freq : null, tuned: t.held } : null;
-}
-
+// Both tuners show the tuner of a view of chapters.js, or hide where the world takes none.
 function syncTuners(st) {
   for (const t of [cardTuner, sideTuner]) {
     t.el.hidden = !st;
@@ -2057,12 +2001,12 @@ function renderInfo(w) {
   const s = w.stats;
   const carrier = carrierState(w);
   if (sideTunerSeed !== w.seed) { sideTunerOpen = false; sideTunerSeed = w.seed; }
-  const tuner = tunerState(carrier);
-  if (!tuner || tuner.tuned) sideTunerOpen = false;
+  const tuner = carrier && carrier.tuner;
+  if (!tuner || tuner.held) sideTunerOpen = false;
   // The form stands under the row while the chip holds it open, and the locked band stands there
   // for good after the tune. It takes a whole line of the grid, because on a phone the grid holds
   // two rows side by side and a quarter of the sheet is too narrow for a field.
-  const slot = tuner && (tuner.tuned || sideTunerOpen) ? '<dd class="tuner-slot"></dd>' : '';
+  const slot = tuner && (tuner.held || sideTunerOpen) ? '<dd class="tuner-slot"></dd>' : '';
   // A render builds the rows again, and the field loses the focus when its old row goes. So the
   // focus comes back to the field after the render.
   const typing = sideTuner.el.contains(document.activeElement);
@@ -2105,7 +2049,7 @@ function renderInfo(w) {
   infoBody.querySelectorAll('.chip[data-plant]').forEach((b) => b.addEventListener('click', () => {
     const kind = +b.dataset.plant;
     inspectPlant(kind);
-    if (mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
+    if (probe.mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
   }));
   infoEl.hidden = false;
   hworld.textContent = `${w.seed} · ${w.typeLabel}`;
@@ -2189,8 +2133,8 @@ function inspectSource() {
   sourceInspector.show(src.log, (pal.fauna && pal.fauna.accent) || '#ffd27f', discColor(),
     music.motif(current.world), hullOf(current.world), cardTuner.el);
   creatureCard.dataset.subject = 'source';
-  syncTuners(tunerState(carrierView()));
-  setCarrierLevel();
+  const v = carrierView();
+  syncTuners(v && v.tuner);
 }
 
 // The card of the ruin, p2-42. The button reads "Study the ruin" on a marked ruin, and this is where
@@ -2228,7 +2172,7 @@ function cycleInspect(dir) {
   // On the ground the list also carries the species of the patch: the pull and the niches can
   // put an animal on the ground that the globe sample never drew, and the arrows must reach it.
   const kinds = (current?.world.faunaKinds || []).slice();
-  if (mode === 'ground' && ground && ground.fauna) {
+  if (probe.mode === 'ground' && ground && ground.fauna) {
     for (const e of ground.fauna.kinds) if (!kinds.includes(e.kind)) kinds.push(e.kind);
   }
   if (!kinds.length) return;
@@ -2237,7 +2181,7 @@ function cycleInspect(dir) {
   inspect(kind);
   // The arrows also point the camera at the nearest animal of the species, behind the card. A
   // species the patch does not host leaves the camera where it is, and takes the mark off.
-  if (mode === 'ground' && ground) markedKind = ground.focusKind(kind) ? kind : null;
+  if (probe.mode === 'ground' && ground) markedKind = ground.focusKind(kind) ? kind : null;
 }
 // The arrows walk the plants of this patch, in the order the worker wrote them: tallest first.
 function cyclePlant(dir) {
@@ -2245,7 +2189,7 @@ function cyclePlant(dir) {
   const i = groundPlants.findIndex((p) => p.kind === +creatureCard.dataset.kind);
   const kind = groundPlants[(i + dir + groundPlants.length) % groundPlants.length].kind;
   inspectPlant(kind);
-  if (mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
+  if (probe.mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
 }
 // True while a modal dialog stands open: the about card, the brief, or the lost record. A modal
 // dialog owns the keyboard. On Escape the browser closes the dialog, and the card and the mark
@@ -2312,7 +2256,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (!downAt) return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
-  if (moved > 6 || busy || mode !== 'orbit') return;   // the globe creatures are not on the screen on the ground
+  if (moved > 6 || busy || probe.mode !== 'orbit') return;   // the globe creatures are not on the screen on the ground
   if (aiming) { aimAt(e.clientX, e.clientY); return; }  // the tap sends the probe, it does not open a card
   const kind = creatureAt(e.clientX, e.clientY, e.pointerType === 'touch' ? 52 : 34);
   if (kind !== null) inspect(kind);
@@ -2320,7 +2264,7 @@ canvas.addEventListener('pointerup', (e) => {
 let hoverTick = 0;
 canvas.addEventListener('pointermove', (e) => {
   if (aiming) { setAimNdc(e.clientX, e.clientY); return; }
-  if (e.pointerType === 'touch' || downAt || mode !== 'orbit' || (++hoverTick & 3)) return;
+  if (e.pointerType === 'touch' || downAt || probe.mode !== 'orbit' || (++hoverTick & 3)) return;
   canvas.style.cursor = creatureAt(e.clientX, e.clientY) !== null ? 'pointer' : '';
 });
 
@@ -2379,7 +2323,7 @@ shareBtn.addEventListener('click', async () => {
   setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
 });
 function onProbeClick() {
-  if (mode === 'ground') ascend();
+  if (probe.mode === 'ground') ascend();
   else if (aiming) stopAim();
   else startAim();
 }
@@ -2404,8 +2348,8 @@ addEventListener('hashchange', () => {
   const { seed, site: fromHash, view } = parseUrl(location.hash);
   if (!seed) return;
   if (!current || current.world.seed !== seed) { pendingSite = fromHash; pendingView = view; generate(seed); }
-  else if (mode !== 'orbit') return;
-  else if (fromHash) { pendingSite = null; pendingView = view; placeCameraOverSite(fromHash); descend(fromHash); }
+  else if (probe.mode !== 'orbit') return;
+  else if (fromHash) { pendingSite = null; pendingView = null; placeCameraOverSite(fromHash); descend(fromHash, view); }
   else { pendingSite = null; pendingView = null; placeCameraAtView(view); }
 });
 // The about dialog. It is modal, so the page keys wait while it is open.
@@ -2459,7 +2403,7 @@ function untilMode(want) {
   return new Promise((resolve, reject) => {
     const t0 = performance.now();
     const tick = () => {
-      if (mode === want && !dive) { resolve(); return; }
+      if (probe.mode === want && !probe.dive) { resolve(); return; }
       if (performance.now() - t0 > HOOK_LIMIT) { reject(new Error(`the probe did not reach ${want}`)); return; }
       if (document.visibilityState !== 'visible') step(performance.now());
       setTimeout(tick, HOOK_TICK);
@@ -2477,12 +2421,12 @@ async function landAt(lat, lon) {
   placeCameraOverSite(target);
   descend(target);
   await untilMode('ground');
-  return { site: target, chapter: carrierChapter(), carrier: ground ? ground.telemetry().carrier : null, stage: carrierStage };
+  return { site: target, chapter: carrierChapter(), carrier: ground ? ground.telemetry().carrier : null, stage: probe.stage };
 }
 
 // The probe comes back to orbit. The promise gives the chapter and the view of the progress.
 async function recall() {
-  if (mode !== 'ground') throw new Error('the probe is not on the ground');
+  if (probe.mode !== 'ground') throw new Error('the probe is not on the ground');
   ascend();
   await untilMode('orbit');
   return { chapter: carrierChapter(), view: carrierView() };
@@ -2494,12 +2438,13 @@ window.__mw = {
   inspectPlant, plantInspector, inspectSource, sourceInspector, inspectRuin, ruinInspector,
   get current() { return current; },
   get site() { return site; },
-  get mode() { return mode; },
+  get mode() { return probe.mode; },
+  probe,                         // the state of the landing; see probe.js
   get ground() { return ground; },
   get plants() { return groundPlants; },
   get marked() { return { animal: markedKind, plant: markedPlant, source: markedSource }; },
   // the search of this world: the view of the progress and the group of wedges under the planet
-  get carrier() { return { view: carrierView(), group: carrierGroup, pending: pendingFix, stage: carrierStage, chapter: carrierChapter() }; },
+  get carrier() { return { view: carrierView(), group: carrierGroup, pending: probe.fix, stage: probe.stage, chapter: carrierChapter() }; },
   get progress() { return progress; },   // the progress of chapters.js for the world on the screen
   onSourceFound: () => readSource('wreck'),
   onRuinFound: () => readSource('ruin'),   // p2-42: the find of the ruin, as the first open of its card makes it

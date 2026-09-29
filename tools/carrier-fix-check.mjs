@@ -159,7 +159,10 @@ function siteHearing(world, what) {
 // found. Parts B to D test the paint, and the group takes the fixes of the view as they are.
 function paint(world, fixes, { found = false } = {}) {
   const wreck = { id: 'wreck', kind: 'search', name: 'Wreck', index: 0, state: found ? 'done' : 'open', held: true, fixes, briefed: 0, source: world.source };
-  return { seed: world.seed, chapters: [wreck], follow: { id: 'wreck', index: 0, name: 'Wreck', source: world.source, freq: '406.025' } };
+  return {
+    seed: world.seed, chapters: [wreck], found: found ? { wreck: true } : {},
+    follow: { id: 'wreck', index: 0, n: 1, name: 'Wreck', source: world.source, freq: '406.025' },
+  };
 }
 
 // The view of a record of the store, as the page reads it: the record goes into the fake store, and

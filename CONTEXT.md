@@ -62,6 +62,10 @@ _Avoid_: tile, square (the square is the marker that shows a cell on the globe)
 A lat and a lon in degrees, to two decimals, in the local frame of the planet. The URL keeps one, a fix keeps one, and the patch call takes one. The site of record is the middle of its cell, and two decimals cannot move it into the cell next door. Many sites fall in one cell, so a site never names a cell by its numbers.
 _Avoid_: location, position
 
+**Landing**:
+One visit of the probe to a cell: the descent, the time on the ground, and the ascent. The probe stands in orbit, descending, on the ground, or ascending, and it lands on one cell at a time. A landing hears the carrier and takes a fix, and the fix waits for the end of the ascent. `probe.js` holds the state of a landing.
+_Avoid_: dive (the dive is the motion of the camera and the cover at one switch), trip, visit
+
 **Patch**:
 The ground of one landing at true scale: the terrain, the plants, the animals, the sea, and the rim of one cell.
 _Avoid_: tile, chunk, ground patch

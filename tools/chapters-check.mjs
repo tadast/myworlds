@@ -4,12 +4,13 @@
 //
 // chapters.js holds every rule of the story, so this check walks whole stories through its
 // interface and nothing else: progressOf(world) and the view, land(), read(), tune(), briefed(),
-// and clear() of the progress. The worlds come from worker.js, as the page receives them.
+// and clear() of the progress, and motifLevel(). The worlds come from worker.js, as the page
+// receives them.
 //
 // 1. The story. A scripted reader walks a world from the first landing to the find of the ruin:
 //    fixes, the bound of a search, the brief, the find of the wreck, the tuner, the tune, the
 //    search for the ruin, and its find. The words of the Carrier row, the marks of the saved
-//    worlds, and the shape on disk are tested at each step.
+//    worlds, the levels of the two motifs, and the shape on disk are tested at each step.
 // 2. The strict order. A closed chapter cannot end: the card of the ruin does not open before the
 //    find of the wreck, and nothing is written. docs/adr/0001-chapters-open-in-strict-order.md.
 // 3. The follow rule. Over every record of the two searches, the receiver follows the newest search
@@ -31,7 +32,7 @@ globalThis.localStorage = {
   clear: () => store.clear(),
 };
 
-const { progressOf, chaptersOf, marksOf, briefWords, CLOSED_LINE } = await import(root + 'chapters.js');
+const { progressOf, chaptersOf, marksOf, briefWords, motifLevel, CLOSED_LINE } = await import(root + 'chapters.js');
 const { carrierAt, carrierBox, sourceSite, WRECK_FREQ } = await import(root + 'carrier.js');
 const { CARRIER_KEY, MAX_FIXES, MAX_SEEDS } = await import(root + 'carrier-store.js');
 const W = await import(root + 'cell-grid.js');
@@ -70,6 +71,14 @@ function siteFrom(src, k, brg) {
 }
 const sourceCell = (src) => sourceSite({ source: src }, src);
 
+// The levels of the two motifs, Decision 11 of issue 34 and p2-44: in orbit, and on the cell of each
+// source at 0 units, at the edge of a reach of 300 units, and past it.
+const REACH = 300;
+const at = (kind, range) => ({ kind, range, reach: REACH });
+const levels = (v) => ['wreck', 'ruin'].map((k) => [
+  motifLevel(v, k), motifLevel(v, k, at(k, 0)), motifLevel(v, k, at(k, REACH)), motifLevel(v, k, at(k, 2 * REACH)),
+].map((x) => x.toFixed(2)).join(' ')).join(' | ');
+
 // ---------------------------------------------------------------- 1 and 2. the story
 let w = null;
 for (let i = 0; i < 20 && !w; i++) { const t = world(`chapters-${i}`); if (t.source && t.ruin) w = t; }
@@ -86,6 +95,11 @@ ok('start', states(v) === 'open closed', `the chapters start ${states(v)}`);
 ok('start', v.follow.id === 'wreck' && v.row.text === 'Not heard' && v.row.lost && !v.row.clear && !v.row.tune && !v.row.aims.length,
   `the row of a new world reads ${JSON.stringify(v.row)}`);
 ok('start', v.tuner === null, 'a world with no find takes a tuner');
+ok('start', v.follow.n === 1 && JSON.stringify(v.found) === '{}', `a new world follows chapter ${v.follow.n} and finds ${JSON.stringify(v.found)}`);
+// Before the find only the cell of the wreck sounds, from 1 at the source to 0.15 at the reach.
+ok('motif', levels(v) === '0.00 1.00 0.15 0.15 | 0.00 0.00 0.00 0.00', `a new world plays the motifs at ${levels(v)}`);
+ok('motif', motifLevel(v, 'wreck', at(null, 0)) === 0 && motifLevel(v, 'wreck', at('ruin', 0)) === 0, 'a cell with no wreck plays the motif of the wreck');
+ok('motif', motifLevel(null, 'wreck') === 0, 'a world with no progress plays a motif');
 
 // The strict order: the card of the ruin does not open before the find of the wreck.
 let r = p.read('ruin');
@@ -134,7 +148,12 @@ v = p.view();
 ok('find', r.open && r.found, 'the first read of the wreck is not its find');
 ok('find', states(v) === 'done open' && v.follow.id === 'wreck' && v.row.text === 'Found', `after the find the chapters are ${states(v)} and the row reads ${v.row.text}`);
 ok('find', v.chapters[0].fixes.length === 0 && disk(seed).fixes.length === 0 && disk(seed).found === true, 'the find did not drop the fixes');
-ok('find', v.tuner && v.tuner.freq === ruinFreq && !v.tuner.held && v.row.tune, 'the tuner does not stand for the ruin after the find');
+ok('find', v.tuner && v.tuner.id === 'ruin' && !v.tuner.held && v.row.tune, 'the tuner does not stand for the ruin after the find');
+ok('find', v.tuner.band === null, `the tuner gives the band ${v.tuner.band} before the lock`);
+ok('find', v.found.wreck === true && !v.found.ruin, `after the find the view finds ${JSON.stringify(v.found)}`);
+// After the find the wreck plays under the song in orbit, and its cell still sounds: the receiver
+// holds the distress band until the tune.
+ok('motif', levels(v) === '0.60 1.00 0.15 0.15 | 0.00 0.00 0.00 0.00', `after the find of the wreck the motifs play at ${levels(v)}`);
 ok('find', JSON.stringify(v.row.aims) === JSON.stringify([{ id: 'wreck', label: 'Aim' }]), `the aims read ${JSON.stringify(v.row.aims)}`);
 ok('find', marksOf().get(seed).text === '✦', 'the thumb does not carry one mark');
 ok('find', !p.read('wreck').found && p.read('wreck').open, 'a second read of the wreck is a second find');
@@ -150,6 +169,10 @@ const lock = p.tune(ruinFreq);
 v = p.view();
 ok('tune', lock.kind === 'lock' && /second source/.test(lock.text), `the lock reads ${lock.text}`);
 ok('tune', v.follow.id === 'ruin' && v.row.text === 'Tuned' && v.tuner.held && !v.row.tune, `after the lock the row reads ${v.row.text}`);
+ok('tune', v.tuner.band === ruinFreq && v.follow.n === 2, `after the lock the tuner shows ${v.tuner.band} and the search is chapter ${v.follow.n}`);
+// After the tune the receiver holds the band of the ruin: the cell of the wreck is silent, the wreck
+// keeps its voice in orbit, and the cell of the ruin sounds.
+ok('motif', levels(v) === '0.60 0.00 0.00 0.00 | 0.00 1.00 0.15 0.15', `after the tune the motifs play at ${levels(v)}`);
 ok('tune', disk(seed).tuned === true && disk(seed).ruin === undefined, `the tune stands on disk as ${JSON.stringify(disk(seed))}`);
 
 // The search for the ruin: the landing that tunes takes its first fix.
@@ -164,6 +187,7 @@ r = p.read('ruin');
 v = p.view();
 ok('ruin', r.open && r.found && states(v) === 'done done', 'the read of the ruin is not its find');
 ok('ruin', v.row.text === 'Found 2 of 2' && v.finds === 2 && v.of === 2, `the row reads ${v.row.text}`);
+ok('motif', levels(v) === '0.60 0.00 0.00 0.00 | 0.60 1.00 0.15 0.15', `after both finds the motifs play at ${levels(v)}`);
 ok('ruin', JSON.stringify(v.row.aims) === JSON.stringify([{ id: 'wreck', label: 'Wreck' }, { id: 'ruin', label: 'Ruin' }]), `the aims read ${JSON.stringify(v.row.aims)}`);
 ok('ruin', marksOf().get(seed).text === '✦✦', 'the thumb does not carry two marks');
 ok('ruin', JSON.stringify(progressOf(w).view()) === JSON.stringify(v), 'a second progress of the world reads another view');

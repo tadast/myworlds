@@ -9,8 +9,8 @@
 //
 // The form gives the typed text to the page, and tune() of chapters.js compares it with the band
 // and gives back one of five answers, from tuneAnswer() here. The form never holds the band before
-// the lock: no attribute, no list, no title, and no hint of the field holds it. The page gives the
-// band to the form only after the lock, and the form then shows the band and no field.
+// the lock: no attribute, no list, no title, and no hint of the field holds it. The view of
+// chapters.js gives the band only after the lock, and the form then shows the band and no field.
 //
 // tuneAnswer() holds no DOM, so tools/carrier-fix-check.mjs tests every answer in Node.
 import { parseFreq } from './ruin-types.js';
@@ -61,9 +61,9 @@ let uid = 0;
 //   onEscape()     Escape in the field. Only the sidebar gives it: there it closes the form. The
 //                  card gives none, so Escape goes on to the page and closes the card.
 //
-// set({ seed, freq, tuned }) shows the state of a world. A new seed clears the field and the answer,
-// so a second world never shows the answer of the first. The page hides the root element on a world
-// that takes no tuner.
+// set(tuner) shows the tuner of the view of chapters.js, `{ seed, held, band }`, or null. A new seed
+// clears the field and the answer, so a second world never shows the answer of the first. The page
+// hides the root element on a world that takes no tuner.
 export function makeTuner({ onTune, onEscape } = {}) {
   const id = `tuner-${++uid}`;
   const el = document.createElement('div');
@@ -90,7 +90,7 @@ export function makeTuner({ onTune, onEscape } = {}) {
   const lock = el.querySelector('.tuner-lock');
   const band = el.querySelector('.tuner-band');
   const answer = el.querySelector('.tuner-answer');
-  let seed = null, freq = null, tuned = false;
+  let seed = null, tuned = false;
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -114,12 +114,10 @@ export function makeTuner({ onTune, onEscape } = {}) {
       delete answer.dataset.kind;
     }
     seed = next ? next.seed : null;
-    freq = next ? next.freq : null;
-    tuned = !!(next && next.tuned);
+    tuned = !!(next && next.held);
     form.hidden = tuned;
     lock.hidden = !tuned;
-    // the band enters the page here, after the lock, and never before it
-    band.textContent = tuned && freq ? `${freq} MHz` : '';
+    band.textContent = tuned && next.band ? `${next.band} MHz` : '';
   }
 
   return {

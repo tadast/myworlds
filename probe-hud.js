@@ -14,6 +14,8 @@
 // only runs over the last NOISE_BAND units of the reach (see ground.js), because static that
 // arrives early reads as a fault of the app and not as a fact of the world. Under that band the
 // canvas is cleared and hidden, and it costs nothing.
+import { WRECK_FREQ } from './carrier.js';
+
 const BARS = 5;                 // the bars of the signal block
 const GRAIN_DIV = 2;            // the grain is drawn at this fraction of the frame and scaled up
 const GRAIN_MS = 45;            // ms between two grain fields: a slower flicker reads as static
@@ -224,7 +226,7 @@ export class ProbeHud {
     }
     if (this.elBrg) this.elBrg.textContent = `${String(Math.round(c.brg) % 360).padStart(3, '0')}°`;
     if (this.elErr) this.elErr.textContent = `±${Math.round(c.err)}°`;
-    if (this.elFreq) this.elFreq.textContent = `${c.freq || '406.025'} MHz`;
+    if (this.elFreq) this.elFreq.textContent = `${c.freq || WRECK_FREQ} MHz`;
     if (this.elStrength) {
       this.elStrength.textContent = c.arc < CARRIER_HERE ? 'Here'
         : c.arc < CARRIER_STRONG ? 'Strong' : c.arc < CARRIER_CLEAR ? 'Clear' : 'Faint';

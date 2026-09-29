@@ -149,6 +149,12 @@ export class SourceWreck {
     if (this.light) this.light.intensity = LIGHT_CD * k;
   }
 
+  // Units over the ground from a point to the wreck. The wreck is small, so the range runs to its
+  // middle. SourceRuin measures to the edge of its stones.
+  rangeFrom(x, z) {
+    return Math.hypot(this.at.x - x, this.at.z - z);
+  }
+
   // The wreck under a point of the screen, or null. The body holds a few hundred triangles, so one
   // ray against it is exact and costs less than the projected measure the plants need. The box of
   // the geometry takes a pad, because a tap that lands beside the mast still means the wreck.
