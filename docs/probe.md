@@ -654,8 +654,8 @@ and it turns once in 14 s. The pin and the model keep a least size as a part of 
 the camera, so both stay a few pixels wide from the home zoom.
 
 Neither mesh answers a ray. `pickDirs()` in `site.js` takes the sphere and not the scene, so nothing
-here can catch a tap today; the empty raycast states the rule all the same. `markFound()` drops the
-fixes with the find, so a found world stores no new fix and paints no wedge, and the Carrier row of
+here can catch a tap today; the empty raycast states the rule all the same. The find drops the
+fixes with it (`read()` of `chapters.js`), so a found world stores no new fix and paints no wedge, and the Carrier row of
 the sidebar gains an **Aim** chip in orbit: it turns the camera onto the cell of the source with
 `placeCameraOverSite()` and starts the aim, so the reader stands in the state a tap on that cell
 gives and the next tap sends the probe.
