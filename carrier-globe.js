@@ -42,8 +42,8 @@
 // chapter 2 stands a second pin at the ruin, with the mini ruin and a lamp that blinks, in the
 // colour of chapter 2, and the pin of the wreck stays. p2-42.
 import * as THREE from 'three';
-import { CELL, cellDir, groundRadius, siteCell, siteDir, sourceSite, activeSource, activeChapter } from './site.js';
-import { tangentFrame } from './cell-grid.js';
+import { groundRadius, siteDir, sourceSite, activeSource, activeChapter } from './site.js';
+import { WEDGE_STEP, WEDGE_SOFT, wedgePlanes, cellPlanes, goalCell } from './wedge.js';
 // The mini wreck of a find is the wreck of the ground, at the scale of the globe. wreck-geometry.js
 // builds that body in wreckGeometry(hullOf(world)), which takes no DOM and does nothing at import, so the two
 // models come from one builder and they cannot drift apart.
@@ -63,14 +63,8 @@ import { ruinMotifOf } from './music.js';
 // shader hold one set and a fifth landing drops the oldest.
 export const MAX_WEDGES = 4;
 
-// The tint of one wedge, as a part of the way from the lit colour to the accent of the palette.
-// n wedges give 1 - pow(1 - WEDGE_STEP, n * n), so one wedge reads 0.06, two read 0.22, three read
-// 0.43, and four read 0.63. The square of the count is the point: the wash grows faster than the
-// count, so one wedge alone is almost only its two lines, and the ground two or more wedges cover
-// stands out as the answer. The first build stepped by 1 - pow(1 - 0.08, n), and one wedge then
-// washed as much ground as a crossing did. The line on each edge of a wedge carries the shape of
-// one wedge; see WEDGE_EDGE.
-const WEDGE_STEP = 0.06;
+// The tint of one wedge is WEDGE_STEP of wedge.js; see wedgeWash() there.
+//
 // The line on each edge of a wedge, as a part of the way to the accent, and its width in degrees.
 // The eye finds the cross as the region the lines close, so the lines must read and the wash must
 // not hide the ground. 0.45 degrees is about 2 px at the home zoom. The second build drew the line at
@@ -87,15 +81,7 @@ export const WEDGE_AGE = [1, 0.75, 0.55, 0.4];
 // and a mix alone would leave a wedge there at 0.18 of the accent, which the eye loses against the
 // terminator. This adds a small emissive share, so a wedge on the dark side still reads.
 const WEDGE_EMIS = 0.06;
-// degrees: the soft band on each edge of a wedge. The facets of the globe are 0.0105 units across,
-// which is 0.6 degrees of arc, so a hard edge crawled from facet to facet as the world turned. The
-// band is measured on the angle to the edge plane and not on the plane distance, so it holds the
-// same width from the site to the antipode. sin of 0.15 degrees is the number the shader tests.
-const WEDGE_SOFT = Math.sin(THREE.MathUtils.degToRad(0.15));
-// degrees: the widest error a wedge may carry. The two half plane tests give the lune between the
-// two edge great circles, and that lune is the wedge only while the wedge is narrower than a half
-// plane. carrierAt() tops the error at 10 degrees today, so the clamp never bites.
-const MAX_ERR = 89.5;
+// The soft band on each edge of a wedge is WEDGE_SOFT of wedge.js.
 
 // The outline of a visited cell: its width as the sine of the angle in from the edge, and its
 // share of the way to the accent. A cell is about 0.01 of arc across, so the line takes a fifth of
@@ -110,15 +96,9 @@ const HOVER_FILL = 0.12;
 // The goal: the cell of the source, filled when GOAL_WEDGES or more wedges overlap in a region under
 // GOAL_CELLS cells. The fill is white, because the ground under the cross already carries most of the
 // accent, and it pulses over GOAL_PERIOD seconds between GOAL_LO and GOAL_HI.
-export const GOAL_WEDGES = 3;
-export const GOAL_CELLS = 4;
 const GOAL_LO = 0.35;
 const GOAL_HI = 0.7;
 const GOAL_PERIOD = 1.6;
-// The step of the grid goalCell() fills the overlap on, as a part of a cell, and how far out it
-// looks, in cells. An overlap that reaches the edge of the grid is far wider than GOAL_CELLS.
-const GOAL_STEP = 1 / 4;
-const GOAL_REACH = 12;
 // globe units: the lift of the mini wreck over the terrain. It must clear the
 // flora of the globe, which stands 0.011 units tall: a lift of 0.0012 put a mark under the trees of
 // a forest, and the reader saw nothing. The height map is also smoother than the facets of the
@@ -151,115 +131,12 @@ const FOUND_K = 0.45;
 const FADE_S = 1.2;             // seconds: a new wedge fades in over the end of the ascent
 const RENDER_ORDER = 2;         // after the terrain and before the atmosphere shells of app.js
 
-const _east = new THREE.Vector3();
-const _north = new THREE.Vector3();
-const _up = new THREE.Vector3();
-const _tan = new THREE.Vector3();
 const _yUp = new THREE.Vector3(0, 1, 0);   // the up axis of wreckGeometry(), in its own frame
 
-// The three axes of a bearing at a site: east, north, and up.
-//
-// This is the frame of bearingTo() in site.js and not the frame of the box of a landing. The wedge
-// is drawn on the globe, so it keeps the bearing of the globe. The needle of the overlay keeps the
-// frame of the box instead, because the reader walks the terrain. See "the carrier" in site.js.
-function frameAt(site) {
-  const f = tangentFrame(site.lat, site.lon);
-  _east.fromArray(f.east);                        // the east of groundBasis(): falling lon
-  _north.fromArray(f.south).negate();             // the part of +y in the tangent plane
-  _up.fromArray(f.up);                            // siteDir(lat, lon)
-}
-
-// The unit tangent at the site along a bearing in degrees. North is 0 and east is 90.
-function tangentAt(brg, out = _tan) {
-  const b = THREE.MathUtils.degToRad(brg);
-  return out.copy(_north).multiplyScalar(Math.cos(b)).addScaledVector(_east, Math.sin(b));
-}
-
-// ---------------------------------------------------------------- the wedge, as numbers
-// A wedge is three unit vectors: the direction of the site `s`, and the inward normals `nL` and
-// `nR` of the two edge great circle planes. Each plane runs through the centre, through the site,
-// and along the tangent at one edge bearing, so both planes hold the axis through s and -s. The two
-// planes cut the sphere into four lunes, and the pair of tests `dot(d, nL) > 0` and
-// `dot(d, nR) > 0` selects one of them: the lune that leaves the site along the bearing and closes
-// at the antipode of the site. That is decision 5 of issue 34 with no further rule, because a lune
-// runs from one pole of its axis to the other and it cannot reach round the back.
-//
-// The rule holds while the wedge is narrower than a half plane. At an error of exactly 90 degrees
-// the two planes fall together and the lune is a hemisphere, which is still right. Past 90 degrees
-// the intersection flips to the narrow lune on the far side, so the error takes the clamp of
-// MAX_ERR. carrierAt() states at most 10 degrees, so the clamp never bites.
-//
-// The shader runs this same arithmetic per fragment, and the uniforms come from this function, so
-// tools/carrier-fix-check.mjs tests the numbers the shader gets.
-export function wedgePlanes(fix) {
-  frameAt(fix);
-  const err = THREE.MathUtils.clamp(Math.abs(fix.err), 0, MAX_ERR);
-  const s = _up.clone();
-  const tL = tangentAt(fix.brg - err, new THREE.Vector3());
-  const tR = tangentAt(fix.brg + err, new THREE.Vector3());
-  return {
-    s,
-    nL: tL.cross(s).normalize(),
-    nR: s.clone().cross(tR).normalize(),
-  };
-}
-
-// How far a direction stands inside each edge of a wedge, as the sine of the angle to that plane.
-//
-// The raw dot product with a plane normal falls to nothing at the site and at the antipode, because
-// the direction lies along the axis of the two planes there. The divide by sin of the arc takes
-// that out, so the two numbers read the true angle to the edge at every arc and one soft band of
-// 0.15 degrees holds the same width along the whole wedge. Both numbers are positive inside the
-// wedge. This is the arithmetic of the shader, line for line.
-export function wedgeEdges(planes, dir, out = { l: 0, r: 0 }) {
-  const c = dir.dot(planes.s);
-  const inv = 1 / Math.max(Math.sqrt(Math.max(1 - c * c, 0)), 1e-4);
-  out.l = dir.dot(planes.nL) * inv;
-  out.r = dir.dot(planes.nR) * inv;
-  return out;
-}
-
-// The hard test: does a direction lie in the wedge?
-export function inWedge(planes, dir) {
-  const e = wedgeEdges(planes, dir);
-  return e.l > 0 && e.r > 0;
-}
-
-// The soft test the shader paints with: 0 outside the wedge, 1 inside it, and a band of 0.15
-// degrees on each edge.
-export function wedgeCoverage(planes, dir) {
-  const e = wedgeEdges(planes, dir);
-  return THREE.MathUtils.smoothstep(e.l, 0, WEDGE_SOFT) * THREE.MathUtils.smoothstep(e.r, 0, WEDGE_SOFT);
-}
-
-// The wash n wedges lay on one fragment, as a part of the way from the lit colour to the accent.
-// This is the formula of the GLSL below, and both read WEDGE_STEP, so the two cannot drift apart
-// and tools/carrier-fix-check.mjs tests the numbers the shader paints.
-export function wedgeWash(n) { return 1 - Math.pow(1 - WEDGE_STEP, n * n); }
-
-// ---------------------------------------------------------------- the cell, as numbers
-// A cell of the cube grid is bounded by four great circles: a line of one gnomonic coordinate on a
-// face is a plane through the centre. So a cell is four inward plane normals, and a direction lies
-// in the cell when all four dots are positive. The dot is the sine of the angle to that edge, so
-// the shader draws one line width along all four edges.
-const _ca = new THREE.Vector3(), _cb = new THREE.Vector3(), _cm = new THREE.Vector3();
-const CELL_EDGES = [[0, 0, 1, 0], [1, 0, 1, 1], [1, 1, 0, 1], [0, 1, 0, 0]];
-export function cellPlanes(site, out = [0, 1, 2, 3].map(() => new THREE.Vector3())) {
-  const cell = siteCell(site);
-  cellDir(cell, 0.5, 0.5, _cm);
-  CELL_EDGES.forEach(([u0, v0, u1, v1], k) => {
-    cellDir(cell, u0, v0, _ca);
-    cellDir(cell, u1, v1, _cb);
-    out[k].crossVectors(_ca, _cb).normalize();
-    if (out[k].dot(_cm) < 0) out[k].negate();
-  });
-  return out;
-}
-
-// The dot of a direction with the four planes of a cell: the least of them, positive inside.
-export function inCell(planes, dir) {
-  return Math.min(...planes.map((n) => n.dot(dir)));
-}
+// ---------------------------------------------------------------- the wedge and the cell, as numbers
+// wedge.js holds the arithmetic with no three.js: the planes of a wedge, the planes of a cell, and
+// the goal. This file builds the uniforms from it, and gives the calls on to the page and the checks.
+export { wedgePlanes, wedgeEdges, inWedge, wedgeCoverage, wedgeWash, cellPlanes, inCell, goalCell, GOAL_WEDGES, GOAL_CELLS } from './wedge.js';
 
 // ---------------------------------------------------------------- the aim square
 // The square of the cell the probe would land on, painted on the terrain and the sea like the
@@ -272,57 +149,6 @@ export function showMarker(site, current) {
   uniforms.uHoverK.value = 0.9;
 }
 
-// ---------------------------------------------------------------- the goal
-// The cell of the source, or null. It takes the wedges of the globe and fills their overlap on a
-// grid of GOAL_STEP of a cell around the source, from the source out. The source always stands
-// inside every wedge, because carrierAt() states a bearing inside its error, so the fill starts
-// there. When the overlap holds less than GOAL_CELLS cells of area, the reader cannot miss the
-// cell any more, and the globe fills it.
-//
-// The grid is the tangent plane at the source, and a direction on it takes a normalize. The
-// overlap stands at most GOAL_REACH cells out, where the plane and the sphere part by under 0.1%.
-//
-// `source` is the source of the fixes: the wreck when the caller gives none, and the ruin for the
-// fixes of chapter 2. p2-38.
-const _gE = new THREE.Vector3(), _gN = new THREE.Vector3(), _gD = new THREE.Vector3();
-export function goalCell(world, fixes, source = world && world.source) {
-  if (!fixes || fixes.length < GOAL_WEDGES) return null;
-  const at = sourceSite(world, source);
-  if (!at) return null;
-  const src = source.dir;
-  const s = new THREE.Vector3(src[0], src[1], src[2]).normalize();
-  const planes = fixes.map(wedgePlanes);
-  _gE.set(0, 1, 0).cross(s);
-  if (_gE.lengthSq() < 1e-8) _gE.set(1, 0, 0).cross(s);
-  _gE.normalize();
-  _gN.crossVectors(s, _gE);
-  const h = GOAL_STEP * CELL;
-  const R = Math.round(GOAL_REACH / GOAL_STEP);
-  const dirAt = (i, j) => _gD.copy(s).addScaledVector(_gE, i * h).addScaledVector(_gN, j * h).normalize();
-  const inAll = (d) => planes.every((p) => inWedge(p, d));
-  if (!inAll(dirAt(0, 0))) return null;
-  // the true area of a cell of the source, off its corners, in the units of the grid
-  const cell = siteCell(at);
-  const c00 = cellDir(cell, 0, 0), c10 = cellDir(cell, 1, 0), c01 = cellDir(cell, 0, 1);
-  const cellArea = c10.sub(c00).cross(c01.sub(c00)).length();
-  const most = GOAL_CELLS * cellArea / (h * h);
-  const seen = new Set(['0,0']);
-  const open = [[0, 0]];
-  let count = 0;
-  while (open.length) {
-    const [i, j] = open.pop();
-    if (++count >= most) return null;
-    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const a = i + di, b = j + dj, key = a + ',' + b;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (!inAll(dirAt(a, b))) continue;
-      if (Math.abs(a) >= R || Math.abs(b) >= R) return null;   // the overlap runs off the grid
-      open.push([a, b]);
-    }
-  }
-  return at;
-}
 
 // ---------------------------------------------------------------- the wedge, as a shader
 // One set of uniforms for the page. The terrain material and the ocean material of the world on the

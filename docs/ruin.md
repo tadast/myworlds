@@ -88,10 +88,10 @@ the tries.
 
 The draw works in the tangent frame of `cell-grid.js` at the wreck: north is the part of `+y` in
 the tangent plane, and east is the direction of falling lon. That is the frame `bearingTo()` in
-`site.js` reads. `from` is `compass8()` of the bearing from the site of the wreck, which
-`sourceSite()` gives, to the middle of the cell of the ruin. `bearingFrom()` in `generate.js` is
-`bearingTo()` step for step, so the compass word of the log and the bearing of the page never part,
-even on the line between two words.
+`carrier.js` reads. `from` is `compass8()` of the bearing from the site of the wreck, which
+`sourceSite()` gives, to the middle of the cell of the ruin. `generate.js` calls the same
+`bearingTo()`, so the compass word of the log and the bearing of the page never part, even on the
+line between two words.
 
 ### The bands
 

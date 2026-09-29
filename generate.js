@@ -29,6 +29,7 @@ import { Lore } from './lore.js';                 // the lore engine, shared wit
 import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, boxHeading, siteCell, cellSite, sameCell, cellArc, tangentFrame } from './cell-grid.js';
 import { TYPES, TYPE_LABEL, TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE } from './world-types.js';
 import { protoOf, protoRow, freqOf, compass8, RUIN_CAMP, campLayout, campCircles } from './ruin-types.js';   // the protos, the hashes, and the camp of the ruin
+import { bearingTo } from './carrier.js';         // the bearing the page reads, for the compass word of the log
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -1662,24 +1663,11 @@ function makeRuin(rng, ctx, world, beachW) {
     dir: place,
     freq: freqOf(world.seed),
     maker,
-    from: compass8(bearingFrom(wCell, place)),
+    from: compass8(bearingTo(cellSite(wCell), place)),   // the bearing the page reads, from carrier.js
     band,
     log: null,
   };
   return world.ruin;
-}
-
-// The bearing in degrees from the middle of a cell to a direction, north 0 and east 90. It is
-// bearingTo() of site.js step for step, on the site sourceSite() gives, so the compass word of the
-// log and the bearing of the page never part, even on the line between two words.
-// tools/ruin-check.mjs holds the two to that.
-function bearingFrom(cell, d) {
-  const site = cellSite(cell);
-  const f = tangentFrame(site.lat, site.lon);
-  const e = d[0] * f.east[0] + d[1] * f.east[1] + d[2] * f.east[2];
-  const n = -(d[0] * f.south[0] + d[1] * f.south[1] + d[2] * f.south[2]);
-  if (e === 0 && n === 0) return 0;
-  return (Math.atan2(e, n) * (180 / Math.PI) + 360) % 360;
 }
 
 // The maker of the ruin: the species of this world whose way of moving can build, as an ancestor

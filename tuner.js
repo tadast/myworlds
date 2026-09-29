@@ -14,7 +14,7 @@
 //
 // tuneAnswer() holds no DOM, so tools/carrier-fix-check.mjs tests every answer in Node.
 import { parseFreq } from './ruin-types.js';
-import { WRECK_FREQ } from './site.js';
+import { WRECK_FREQ } from './carrier.js';
 
 export const LOCK_BAND = 0.0005;   // MHz: a number this near the frequency locks the receiver
 export const NEAR_BAND = 0.050;    // MHz: a number this near gives the near miss

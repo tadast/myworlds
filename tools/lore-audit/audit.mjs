@@ -1405,10 +1405,10 @@ for (const x of RUIN_TEXTS) {
 }
 
 // ---------------------------------------------------------------- pass 4: real worlds through the worker
-// The compass word from the wreck to the ruin, the way bearingFrom() in generate.js computes it:
-// the tangent frame of cell-grid.js at the middle of the cell of the wreck, north the part of +y
-// in that plane and east the direction of falling lon. tools/ruin-check.mjs holds the same word to
-// bearingTo() of site.js; this copy lets the log be checked with no three.js.
+// The compass word from the wreck to the ruin, the way bearingTo() in carrier.js computes it for
+// generate.js: the tangent frame of cell-grid.js at the middle of the cell of the wreck, north the
+// part of +y in that plane and east the direction of falling lon. tools/ruin-check.mjs holds the
+// same word to bearingTo(); this copy lets a slip there fail the log here.
 function fromWord(world) {
   const w = world.source.dir, d = world.ruin.dir;
   const site = cellSite(dirCell(w[0], w[1], w[2]));
