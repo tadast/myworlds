@@ -23,27 +23,29 @@ const FIELD_MAX = 12;              // characters: '999999999999' still prints as
 
 // The five answers of p2-39, word for word. The lock prints the band the receiver now holds. The
 // near miss and the static print the typed number to three decimals.
+const ORDINAL = { 2: 'second', 3: 'third', 4: 'fourth', 5: 'fifth' };
 export const ANSWERS = {
   nan: 'The receiver takes a number in MHz, for example 406.025.',
   distress: 'The receiver holds the distress band.',
-  lock: (f) => `Locked on ${f} MHz. The probe hears a second source.`,
+  lock: (f, nth = 2) => `Locked on ${f} MHz. The probe hears a ${ORDINAL[nth] || 'new'} source.`,
   near: (f) => `A pattern under the static on ${f} MHz.`,
   static: (f) => `Static on ${f} MHz.`,
 };
 
-// The answer to one text the reader typed, against the frequency of the ruin, `freq` as
-// world.ruin.freq keeps it: `{ kind, text }`. `kind` is 'nan', 'distress', 'lock', 'near', or
+// The answer to one text the reader typed, against the frequency of a source, `freq` as
+// world.ruin.freq keeps it: `{ kind, text }`. `nth` counts the source the lock makes the receiver
+// hear, 2 for the ruin; the text of the lock names it. `kind` is 'nan', 'distress', 'lock', 'near', or
 // 'static', and only 'lock' tunes the world. The distress band comes first, because it is the one
 // band of the overlay the reader has seen, and a reader who types it must learn that the receiver
 // holds it already.
-export function tuneAnswer(text, freq) {
+export function tuneAnswer(text, freq, nth = 2) {
   const v = parseFreq(text);
   if (v == null) return { kind: 'nan', text: ANSWERS.nan };
   const within = (a, b, band) => Math.abs(a - b) <= band + SLACK;
   if (within(v, Number(WRECK_FREQ), LOCK_BAND)) return { kind: 'distress', text: ANSWERS.distress };
   const f = Number(freq);
   const typed = v.toFixed(3);
-  if (Number.isFinite(f) && within(v, f, LOCK_BAND)) return { kind: 'lock', text: ANSWERS.lock(freq) };
+  if (Number.isFinite(f) && within(v, f, LOCK_BAND)) return { kind: 'lock', text: ANSWERS.lock(freq, nth) };
   if (Number.isFinite(f) && within(v, f, NEAR_BAND)) return { kind: 'near', text: ANSWERS.near(typed) };
   return { kind: 'static', text: ANSWERS.static(typed) };
 }

@@ -41,7 +41,7 @@ One step of the story of a world: a goal for the reader. A search is one kind of
 _Avoid_: phase (a phase is a set of issues), stage (a stage is a step of the brief), quest, step
 
 **Search**:
-A chapter whose goal is a source, which the reader finds with the carrier: fixes, wedges, briefs, and a find. An open search is silent until the receiver holds its band. The band of the wreck is held from the start, and the reader tunes to hold each later band. The receiver follows the newest search whose band it holds and whose source is not found. When every such source is found, it stays on the newest. A tap on the source of a closed search marks it, but no card opens and no find is recorded. See `docs/adr/0001-chapters-open-in-strict-order.md`.
+A chapter whose goal is a source, which the reader finds with the carrier: fixes, wedges, briefs, and a find. An open search is silent until the receiver holds its band. The band of the wreck is held from the start, and the reader tunes to hold each later band. The receiver follows the newest search whose band it holds. A tap on the source of a closed search marks it, but no card opens and no find is recorded. See `docs/adr/0001-chapters-open-in-strict-order.md`.
 _Avoid_: hunt, quest, chapter 1 or chapter 2 as the name of a kind
 
 **Progress**:

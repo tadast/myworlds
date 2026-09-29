@@ -245,3 +245,79 @@ export function foundSeeds() {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- the progress, for chapters.js
+// chapters.js holds the rules of the chapters and of the search. These three calls map its
+// progress to the shape on disk and back, and they hold no rule of the story.
+//
+// The progress of a world is one part per chapter, keyed by the id of the chapter, in the order of
+// chaptersOf() in chapters.js: `{ fixes, found, briefed, held }`. `held` says that the receiver
+// holds the band of that chapter. On disk:
+//
+//   the first chapter (the wreck)   the top of the record, as issue 34 wrote it. Its band is the
+//                                   distress band, which the receiver always holds.
+//   the ruin                        `ruin: { fixes, found, briefed }`, with its band held in the
+//                                   `tuned` at the top, as p2-38 wrote it
+//   a later chapter                 `<id>: { fixes, found, briefed, tuned }`
+//
+// A part that holds nothing stays off the disk, so the record of a reader who never tunes stays the
+// record of issue 34. A key this build does not know stays as it is.
+
+// The progress of one seed, for the chapter ids of its world. A seed with no record gives empty
+// parts, so no caller tests for null.
+export function readProgress(seed, ids) {
+  const all = seed ? readAll() : {};
+  const r = all[seed] && typeof all[seed] === 'object' ? all[seed] : null;
+  const out = {};
+  ids.forEach((id, i) => {
+    const o = (i === 0 ? r : r && r[id]) || {};
+    const part = typeof o === 'object' ? o : {};
+    out[id] = {
+      fixes: asFixes(part.fixes),
+      found: !!part.found,
+      briefed: asStage(part.briefed),
+      held: i === 0 ? true : id === 'ruin' ? !!(r && r.tuned) : !!part.tuned,
+    };
+  });
+  return out;
+}
+
+// Write the progress of one seed back, with the time of this write.
+export function writeProgress(seed, ids, parts) {
+  if (!seed || !ids.length) return false;
+  const all = readAll();
+  const old = all[seed] && typeof all[seed] === 'object' ? all[seed] : {};
+  const first = parts[ids[0]];
+  const out = { ...old, fixes: first.fixes, found: first.found, briefed: first.briefed, ts: Date.now() };
+  delete out.tuned;
+  for (const id of ids.slice(1)) {
+    const p = parts[id];
+    const ruin = id === 'ruin';
+    if (ruin && p.held) out.tuned = true;
+    if (p.fixes.length || p.found || p.briefed || (p.held && !ruin)) {
+      out[id] = { fixes: p.fixes, found: p.found, briefed: p.briefed };
+      if (p.held && !ruin) out[id].tuned = true;
+    } else {
+      delete out[id];
+    }
+  }
+  all[seed] = out;
+  return writeAll(all);
+}
+
+// The count of finds per seed, as a Map of seed to a count, for the seeds with a find. The chapters
+// open in order (docs/adr/0001-chapters-open-in-strict-order.md), so a seed counts no find while
+// its first chapter is not found. A record of an older build can hold a find of the ruin before
+// the find of the wreck, and that find counts only after the wreck.
+export function findCounts() {
+  const all = readAll();
+  const out = new Map();
+  for (const seed of Object.keys(all)) {
+    const r = all[seed];
+    if (!r || typeof r !== 'object' || !r.found) continue;
+    let n = 1;
+    for (const v of Object.values(r)) if (v && typeof v === 'object' && !Array.isArray(v) && v.found === true) n++;
+    out.set(seed, n);
+  }
+  return out;
+}
