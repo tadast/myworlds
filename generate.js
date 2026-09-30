@@ -2531,6 +2531,20 @@ function patchFauna(ctx, maxFauna = 0, pulled, g) {
   return { groups, members };
 }
 
+// ---------------------------------------------------------------- the keep-out of a patch
+// The phenomenon, the wreck, the ruin, and the camp of the crew each keep the plants and the groups
+// off discs of the patch, `[x, z, r]` in units of the box. Each one gives its discs, and its mask
+// reads them through inDiscs(), so the patch carries the same discs it masks as patch.keepOut.
+// patch-terrain.js reads them on the ground. A point with a pad reaches a disc when it stands
+// closer than r + pad to its middle.
+function inDiscs(discs, x, z, pad) {
+  for (const d of discs) {
+    const r = d[2] + pad;
+    if ((x - d[0]) * (x - d[0]) + (z - d[1]) * (z - d[1]) < r * r) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------- the phenomenon of a patch
 // A world holds at most one phenomenon. When the landing cell is the cell that holds it, the patch
 // raises the shape at the origin, paints it, and keeps the plants and the animals off it.
@@ -2620,9 +2634,10 @@ function patchActivity(ctx, kind, s) {
   const info = kind === 'volcano'
     ? { kind, radius: CONE_R, peak: CONE_PEAK, crater: CRATER_R }
     : { kind, radius: RING_R, pool: POOL_R };
+  const discs = [[0, 0, reach]];
   return {
-    info, paint, i0, i1,
-    blocked: (x, z) => x * x + z * z < reach * reach,
+    info, paint, i0, i1, discs,
+    blocked: (x, z) => inDiscs(discs, x, z, 0),
   };
 }
 
@@ -2779,10 +2794,11 @@ function patchSource(ctx, kind, s) {
     out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2];
   };
 
+  const discs = [[sx, sz, SOURCE_DISC]];
   return {
     info: { kind, x: sx, y: hs, z: sz, yaw },
-    paint, i0, i1, j0, j1,
-    blocked: (x, z) => (x - sx) * (x - sx) + (z - sz) * (z - sz) < SOURCE_DISC * SOURCE_DISC,
+    paint, i0, i1, j0, j1, discs,
+    blocked: (x, z) => inDiscs(discs, x, z, 0),
   };
 }
 
@@ -2847,15 +2863,13 @@ function patchRuin(ctx, ruin, s) {
     surface[k] = (surface[k] & 15) | (Math.max(surface[k] >> 4, rk) << 4);
   };
 
-  // The mask. The plants and the cover keep off the whole disc with its soft edge. A group asks
-  // with its spread as `pad`, so no member of it starts on the disc either.
-  const on = (x, z, pad) => (x - sx) * (x - sx) + (z - sz) * (z - sz) < (outer + pad) * (outer + pad);
-  const blocked = camp
-    ? (x, z, pad = 0) => on(x, z, pad) || camp.blocked(x, z, pad)
-    : (x, z, pad = 0) => on(x, z, pad);
+  // The mask. The plants and the cover keep off the whole disc with its soft edge, and off the pad
+  // of the camp. A group asks with its spread as `pad`, so no member of it starts on a disc either.
+  const discs = camp ? [[sx, sz, outer], ...camp.discs] : [[sx, sz, outer]];
+  const blocked = (x, z, pad = 0) => inDiscs(discs, x, z, pad);
   const info = { kind: 'ruin', proto: ruin.proto, x: sx, y: hs, z: sz, yaw };
   if (camp) info.camp = camp.info;
-  return { info, paint, stone, i0, i1, j0, j1, blocked };
+  return { info, paint, stone, i0, i1, j0, j1, discs, blocked };
 }
 
 // The traces of the crew at the ruin, p2-43, or null. Decision 3 of p2-00: the goers of the log of
@@ -2877,9 +2891,9 @@ function patchRuin(ctx, ruin, s) {
 // so the shelter stands level with the stones and the flat disc does not move. The door of the
 // shelter faces the middle of the ruin.
 //
-// It gives back `{ info, blocked }`: `info` rides on patch.source.camp as
-// `{ kind: 'camp' | 'cairn', x, y, z, yaw, rover }`, and `blocked(x, z, pad)` keeps the plants and
-// the groups off the pad. `ruin` is world.ruin, and `at` is the ruin on this patch: the middle, its
+// It gives back `{ info, discs }`: `info` rides on patch.source.camp as
+// `{ kind: 'camp' | 'cairn', x, y, z, yaw, rover }`, and `discs` are the discs of the pad, which
+// keep the plants and the groups off it. `ruin` is world.ruin, and `at` is the ruin on this patch: the middle, its
 // height, the yaw, and the radii of the flat disc and of the soft edge.
 const CAMP_TURN = 0.5;         // rad: the most the trace stands off the way to the wreck, each way
 
@@ -2929,13 +2943,7 @@ function ruinCamp(ctx, ruin, rng, at, s) {
     }
   }
 
-  return {
-    info,
-    blocked: (x, z, pad = 0) => circles.some((q) => {
-      const r = q.r + ease + pad;
-      return (x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < r * r;
-    }),
-  };
+  return { info, discs: circles.map((q) => [q.x, q.z, q.r + ease]) };
 }
 
 // The ground of one landing: a square height grid and a colour per vertex, in the frame of the box
@@ -3347,6 +3355,9 @@ function patch(seed, site, opts = {}, post = () => {}) {
       // on every cell but one. See patchSource() and ground-source.js. On the cell of the ruin it is
       // { kind: 'ruin', proto, x, y, z, yaw }; see patchRuin(). p2-41.
       source: src ? src.info : null,
+      // The discs of the phenomenon and of the source, `[x, z, r]`, where no plant grows and no
+      // group starts. patch-terrain.js keeps the herds off them on the ground. See inDiscs().
+      keepOut: [...(act ? act.discs : []), ...(src ? src.discs : [])],
       biome,
       // The temperature at the site, in degrees Celsius. The stats card of the world states the
       // mean of the planet, and a patch is not the mean. The probe overlay reads this one and

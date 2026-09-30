@@ -15,7 +15,8 @@ import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
 import { SourceWreck, SourceRuin } from './ground-source.js';
-import { applyDetail, disposeDetail } from './ground-detail.js';
+import { applyDetail, disposeDetail, GROUND_GAIN } from './ground-detail.js';
+import { PatchTerrain } from './patch-terrain.js';
 import { perf } from './perf.js';
 import { TIERS } from './tiers.js';
 
@@ -258,12 +259,6 @@ const CUT_PAST_FOG = 1.02;
 const CHUNKS = 10;           // the fine terrain splits into 10 by 10 meshes, so the frustum culls it
 const JITTER = 0.055;        // the lightness noise per vertex, so the ground is not one flat swatch
 const TILE = 16;             // cells per tile in the index order, to keep the vertex cache warm
-// The terrain fills the frame, so its fragment shader sets the cost. A standard material runs a
-// full reflection model for a surface that is rough and not metal, and the reader cannot see the
-// difference. A Lambert material draws the same ground for about a third less time. The gain puts
-// the mean pixel back where the standard material had it: the sheen the Lambert model drops is a
-// small constant over a rough surface.
-const GROUND_GAIN = 1.06;
 
 const DEFAULT_SUN = new THREE.Vector3(1, 0.55, 0.8).normalize();
 
@@ -342,7 +337,7 @@ export class Ground {
     this.sea = null;
     this.phenomena = null;
     this.source = null;     // the wreck of issue 34 or the ruin of p2-41, on the one cell that holds it
-    this.keepOut = null;    // the disc of the ruin, [x, z, radius], or null. See load().
+    this.terrain = new PatchTerrain(null);   // the height, the water, and the keep-out of the patch. See load().
     this.atCeiling = false;
     // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
     // it. _driveLod() moves it from the frame time; the last settled value comes from the store,
@@ -500,6 +495,9 @@ export class Ground {
     this.n = p ? p.n : 0;
     this.grid = p ? p.grid : 0;
     this.half = p ? p.size / 2 : PATCH_SIZE / 2;
+    // Every part of the ground stands on this: the height as the mesh draws it, the water, and the
+    // discs of the phenomenon, the wreck, the ruin, and the camp. See patch-terrain.js.
+    this.terrain = new PatchTerrain(result);
     // the clamp of the target follows the box this patch actually drew, not a constant
     this.reach = reachOf(this.half, p && p.floraEdge >= 0 ? p.floraEdge : -1);
     this.rim = null;
@@ -554,10 +552,6 @@ export class Ground {
       }) : null;
       if (this.source) this.content.add(this.source.group);
       if (this.source && this.source.hole) this._openHole(this.source.hole);
-      // The disc of the ruin with its soft edge, [x, z, radius]: the cover grows nothing on it, and
-      // the herds turn away from it. The worker keeps the plants and the groups off the same disc.
-      this.keepOut = this.source && this.source.outer
-        ? [this.source.at.x, this.source.at.z, this.source.outer] : null;
       this._buildCover(result);
     } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
@@ -575,12 +569,9 @@ export class Ground {
     // knob the plants take: a near mesh under lod.distance, a coarse mesh past it.
     this.fauna = new GroundFauna({
       result, world: this.world, tier: this.tier, camera: this.camera, canvas: this.canvas,
-      heightAt: (x, z) => this.heightAt(x, z), lod: this.lod,
+      terrain: this.terrain, lod: this.lod,
       // Issue 17: the shadow of a flyer falls opposite the sun, and it goes out after sundown.
       sunDir: this.sunDir, night: this.sky.night,
-      // p2-41: the worker starts no group on the disc of the ruin, and a herd that wanders turns
-      // away from it as it turns from the water.
-      keepOut: this.keepOut,
     });
     this.content.add(this.fauna.group);
 
@@ -711,8 +702,7 @@ export class Ground {
       patch: result.patch, heights: this.heights, colors: result.colors, surface: this.surface,
       seaLevel: this.sea ? this.sea.level : null, wind: this.wind,
       tone: (k) => 1 + (hash1(k) - 0.5) * 2 * JITTER,
-      heightAt: (x, z) => this.heightAt(x, z),
-      keepOut: this.keepOut,
+      terrain: this.terrain,
     });
     this.content.add(this.cover.group);
   }
@@ -1918,19 +1908,11 @@ export class Ground {
     this.camera.updateProjectionMatrix();
   }
 
-  // The elevation above sea level in metres, bilinear on the grid. Outside the patch it reads 0,
-  // as the contract asks. Use _groundAt() for a camera clamp, because that one follows the rim.
+  // The elevation above sea level in metres, on the triangle the mesh draws. Outside the patch it
+  // reads 0, as the contract asks. Use _groundAt() for a camera clamp, because that one follows the
+  // rim. See patch-terrain.js.
   heightAt(x, z) {
-    const H = this.heights;
-    if (!H) return 0;
-    const n = this.n, half = this.half;
-    const u = (x + half) / this.grid, v = (z + half) / this.grid;
-    if (!(u >= 0 && v >= 0 && u <= n - 1 && v <= n - 1)) return 0;
-    const i0 = Math.min(n - 2, Math.floor(u)), j0 = Math.min(n - 2, Math.floor(v));
-    const fx = u - i0, fz = v - j0;
-    const a = H[j0 * n + i0], b = H[j0 * n + i0 + 1];
-    const c = H[(j0 + 1) * n + i0], d = H[(j0 + 1) * n + i0 + 1];
-    return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
+    return this.terrain.heightAt(x, z);
   }
 
   // The drawn ground height, the rim included. Inside the patch it reads the fine grid, and
@@ -1964,6 +1946,7 @@ export class Ground {
     this.result = null;
     this.heights = null;
     this.surface = null;
+    this.terrain = new PatchTerrain(null);
     this.rim = null;
     this.sky = null;
     this.sea = null;
@@ -1972,7 +1955,6 @@ export class Ground {
   _clear() {
     if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
     if (this.source) { this.source.dispose(); this.source = null; }
-    this.keepOut = null;
     if (this.flora) { this.flora.dispose(); this.flora = null; }
     if (this.cover) { this.cover.dispose(); this.cover = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }

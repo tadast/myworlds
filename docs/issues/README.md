@@ -34,6 +34,7 @@ Open `http://localhost:5555/#Auralis`. The hash is the world seed. `window.__mw`
 | `flora-card.js` | The plant preview on the study card: the subject centred, turning on its own axis. |
 | `phenomena.js` | The one natural activity per world at globe scale. |
 | `music.js` | Chip-tune per world, and the motif of each source. `motifOf()` gives the rhythm of the motif of the wreck with no audio, `setCarrier()` sets its level, and `barClock()` gives the clock the lamp of the wreck blinks on. `ruinMotifOf()` gives the motif of the ruin, the steps of `motifOf()` at twice the step length, an octave lower on a bell; `setRuin()` sets its level on the ruin bus, and `ruinClock()` gives the clock the lamps of the ruin blink on. p2-44. |
+| `patch-terrain.js` | The terrain of one patch: where a thing on the ground stands. `new PatchTerrain(result)` gives `heightAt(x, z)`, the height on the triangle the mesh draws; `wet(x, z, margin)` and `topAt(x, z)`, from the sea level of the patch; and `keptOut(x, z, pad)` and `discs`, from `patch.keepOut`. `Ground` makes one per landing, and the cover and the herds read it. No three.js and no DOM. `tools/patch-terrain-check.mjs` tests it on patches of the worker. |
 | `ground-source.js` | The source on the ground: the wreck of the older probe, its lamp, its mark, the tap that finds it, and the preview the log card turns. `wreckGeometry()` and `WRECK_HULL` also build the mini wreck of the globe. `SourceInspector.show()` takes an element to put under the last entry, the tuner of p2-39. Issue 34. `SourceRuin` draws the ruin on its cell with the shape of `SourceWreck`. p2-41. `RuinInspector` draws the card of the ruin, with the text of `ruinCard()` and the glyphs as inline SVG, and turns the body in its preview on the canvas `#rcv`. p2-42. The glow on the ground blinks `ruinMotifOf()` of `music.js` on `music.ruinClock()`, and the glow of the card blinks it on the clock of the card. p2-44. `SourceRuin` draws the camp or the cairn of `patch.source.camp` with `crewCampGeometry()` of `wreck-geometry.js`, and `RuinInspector` fills `.cruin-crew` with the goers and the second log. p2-43. |
 | `tuner.js` | The tuner of p2-39: the field the reader types the frequency of the log into. `makeTuner({ onTune, onEscape })` builds one form, and `app.js` stands one under the last entry of the log card and one under the Carrier row of the sidebar. The form sends the typed text to `onTune()`, and the page gives back the answer of `tune()` of `chapters.js`. `tuneAnswer(text, freq, nth)` gives the five answers and holds no DOM, so `tools/carrier-fix-check.mjs` tests it in Node. p2-39. |
 | `chapters.js` | The chapters of a world and the progress of the reader: every rule of the story, and the words the page shows for them. `chaptersOf(world)`, `progressOf(world)` with `view()`, `land()`, `read()`, `tune()`, `briefed()`, `clear()`, and `state()`, and `motifLevel()`, `marksOf()`, `briefWords()`, and `CLOSED_LINE`. No three.js and no DOM. `tools/chapters-check.mjs` walks whole stories through it. See **The chapters** below. |
@@ -197,7 +198,7 @@ export class Ground {
   load(result);       // the worker's patch-done result
   update(t, dt);      // steering, LOD, camera clamps
   render();           // renderer.render(this.scene, this.camera)
-  heightAt(x, z);     // metres, bilinear on the grid, 0 outside
+  heightAt(x, z);     // metres, on the triangle the mesh draws, 0 outside; see patch-terrain.js
   dispose();
 }
 ```
@@ -231,6 +232,9 @@ Replies: `progress` messages as today, then `{ type: 'patch-done', result }` or 
                                                   // p2-43: when somebody went, it also holds `camp`,
                                                   // { kind: 'camp' | 'cairn', x, y, z, yaw, rover },
                                                   // the trace of the crew; see ruinCamp() in generate.js
+    keepOut,                                      // the discs [x, z, r] where no plant grows and no group
+                                                  // starts: the phenomenon, the wreck, the ruin with its
+                                                  // soft edge, and each part of the camp. [] on a plain cell
   },
   heights: Float32Array(n * n),                   // row-major, row = z from north (-) to south (+), col = x from west to east
   colors:  Float32Array(n * n * 3),               // per vertex, linear RGB 0..1
@@ -376,11 +380,12 @@ See `docs/ruin.md`, "The body".
 protocol" above. `Ground` takes the class of the body by `patch.source.kind`, `SourceWreck` or
 `SourceRuin` of `ground-source.js`, and both have the same shape: `create()`, `update(t)`,
 `pickAt()`, `mark()`, `unmark()`, `dispose()`, `kind`, `at`, and `marked`. `SourceRuin` adds
-`rangeFrom(x, z)`, `disc` and `outer` (the flat disc and the disc with its soft edge), `grace` (the
-tap of a big body), and `hole`, `{ x, z, r }` of the mouth of the well or null. `Ground` passes
-`hole` to the terrain material, whose fragment shader discards inside it, and it passes
-`[x, z, outer]` as `keepOut` to `GroundCover` and to `GroundFauna`, so the cover grows nothing on
-the disc and a herd that wanders turns away from it. The glow takes `carrierColour(world, 2)`, and
+`rangeFrom(x, z)`, `disc` (the flat disc), `grace` (the tap of a big body), and `hole`,
+`{ x, z, r }` of the mouth of the well or null. `Ground` passes `hole` to the terrain material,
+whose fragment shader discards inside it. The disc with its soft edge and the pad of the camp come
+with the patch in `patch.keepOut`, and `PatchTerrain` of `patch-terrain.js` gives them to
+`GroundCover` and to `GroundFauna`, so the cover grows nothing on them and a herd that wanders
+turns away from them. The herds turn away from the disc of the wreck and of the phenomenon too. The glow takes `carrierColour(world, 2)`, and
 it blinks `ruinMotifOf(world)` of `music.js` on `music.ruinClock()`, the motif the ear hears on
 the ruin bus (p2-44). A tap on the ruin calls `onSelectSource()`, and the floating button reads
 "Study the ruin"; `inspectRuin()` in `app.js` opens the card.

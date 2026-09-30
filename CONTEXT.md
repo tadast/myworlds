@@ -70,6 +70,10 @@ _Avoid_: dive (the dive is the motion of the camera and the cover at one switch)
 The ground of one landing at true scale: the terrain, the plants, the animals, the sea, and the rim of one cell.
 _Avoid_: tile, chunk, ground patch
 
+**Keep-out**:
+The discs of a patch where no plant grows and no animal walks: the phenomenon, the wreck, the ruin with its soft edge, and each part of the camp. The patch call masks them and carries them as `patch.keepOut`, and `patch-terrain.js` gives them to the ground.
+_Avoid_: footprint, blocked area, exclusion zone
+
 ### The device
 
 **Device tier**:

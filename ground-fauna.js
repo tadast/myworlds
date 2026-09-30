@@ -232,17 +232,16 @@ function nearAnchorIn(grid, x, z, reach, st, taken) {
 }
 
 export class GroundFauna {
-  // heightAt(x, z) gives the elevation in metres.
   // lod is the shared LOD knob of the ground: { distance, min, max } in metres.
   // sunDir is the direction of the sun in the ground frame, and night is 0 by day and 1 at night.
   // The shadow of a flyer reads both: it falls opposite the sun, and it fades out after sundown.
-  // keepOut is [x, z, radius] of the disc of the ruin, or null. A walker turns away from it as it
-  // turns from the water, so no herd walks onto the ruin. p2-41.
-  constructor({ result, world, tier, heightAt, camera, canvas, lod, sunDir, night, keepOut = null }) {
+  // terrain is the PatchTerrain of the patch: the height of the ground, the water, and the discs of
+  // the keep-out. A walker turns away from a disc as it turns from the water, so no herd walks onto
+  // the phenomenon, the wreck, the ruin, or the camp. The worker starts no group on them. p2-41.
+  constructor({ result, world, tier, terrain, camera, canvas, lod, sunDir, night }) {
     this.world = world;
     this.tier = tier;
-    this.heightAt = heightAt;
-    this.keepOut = keepOut;
+    this.terrain = terrain;
     this.camera = camera;
     this.canvas = canvas;
     this.lod = lod || DEFAULT_LOD;
@@ -283,8 +282,8 @@ export class GroundFauna {
     // slope at the landing site and run the wrong way.
     this.hooks = {
       slope: (x, z) => ({
-        gx: (this.heightAt(x + SLOPE_STEP, z) - this.heightAt(x - SLOPE_STEP, z)) / (2 * SLOPE_STEP),
-        gz: (this.heightAt(x, z + SLOPE_STEP) - this.heightAt(x, z - SLOPE_STEP)) / (2 * SLOPE_STEP),
+        gx: (this.terrain.heightAt(x + SLOPE_STEP, z) - this.terrain.heightAt(x - SLOPE_STEP, z)) / (2 * SLOPE_STEP),
+        gz: (this.terrain.heightAt(x, z + SLOPE_STEP) - this.terrain.heightAt(x, z - SLOPE_STEP)) / (2 * SLOPE_STEP),
       }),
       // A hold carries one body. The ask skips a plant another animal holds, and the animal that
       // takes a plant claims it until its throw ends. _stepMember() frees the claim.
@@ -576,14 +575,6 @@ export class GroundFauna {
     this.stepMs = this.stepMs ? this.stepMs * 0.9 + ms * 0.1 : ms;
   }
 
-  // True when a point with a pad round it reaches the disc of the ruin. p2-41.
-  _kept(x, z, pad) {
-    const k = this.keepOut;
-    if (!k) return false;
-    const r = k[2] + pad;
-    return (x - k[0]) * (x - k[0]) + (z - k[1]) * (z - k[1]) < r * r;
-  }
-
   // One anchor. It is not drawn: it carries the group and the activity of the group.
   _stepGroup(g, t, dt) {
     const st = g.mover;
@@ -591,10 +582,10 @@ export class GroundFauna {
     stepAny(st, t, dt);
     let x = g.x0 + st.u, z = g.z0 + st.v;
     const lim = this.limit;
-    // a walker turns away from the water, from the disc of the ruin, and from the edge of the
-    // patch; a flyer only from the edge. The disc takes the spread, so the whole herd keeps off it.
+    // a walker turns away from the water, from the discs of the keep-out, and from the edge of the
+    // patch; a flyer only from the edge. A disc takes the spread, so the whole herd keeps off it.
     const blocked = Math.abs(x) > lim || Math.abs(z) > lim
-      || (!g.flies && (this.heightAt(x, z) < WATER_MARGIN || this._kept(x, z, g.spread)));
+      || (!g.flies && (this.terrain.wet(x, z, WATER_MARGIN) || this.terrain.keptOut(x, z, g.spread)));
     if (blocked) {
       // A mover that throws ends its throw here: a throw holds one heading, so it would drive the
       // body into the same water or the same edge for the rest of it.
@@ -675,7 +666,7 @@ export class GroundFauna {
       // sea. A member that throws itself does not, so it takes the same test and the same refusal.
       const st = m.mover, lim = this.limit;
       if (Math.abs(nx) > lim || Math.abs(nz) > lim
-        || (!g.flies && (this.heightAt(nx, nz) < WATER_MARGIN || this._kept(nx, nz, 0)))) {
+        || (!g.flies && (this.terrain.wet(nx, nz, WATER_MARGIN) || this.terrain.keptOut(nx, nz, 0)))) {
         nx = m.x; nz = m.z;
         st.heading += Math.PI * 0.75; st.spd = 0;
         impulseBlocked(st);
@@ -711,7 +702,7 @@ export class GroundFauna {
     m.turn += (lean - m.turn) * (dt > 0 ? Math.min(1, dt * HEADING_EASE) : 1);
     if (m.gait) stepGait(m.gait, m.spd, act, dt);
 
-    const gh = this.heightAt(nx, nz);
+    const gh = this.terrain.heightAt(nx, nz);
     // A flyer holds its height above the ground under it, so it clears a hill, and it breathes:
     // it rises and falls AIR_BOB metres on its own slow clock. Nothing else moves up there, and a
     // body that holds one height reads as a sprite pinned to the sky.
@@ -721,8 +712,8 @@ export class GroundFauna {
     else {
       // it stands on the slope: the up vector is the normal of the terrain under its feet
       const e = 2;
-      _up.set(this.heightAt(nx - e, nz) - this.heightAt(nx + e, nz), 2 * e,
-        this.heightAt(nx, nz - e) - this.heightAt(nx, nz + e)).normalize();
+      _up.set(this.terrain.heightAt(nx - e, nz) - this.terrain.heightAt(nx + e, nz), 2 * e,
+        this.terrain.heightAt(nx, nz - e) - this.terrain.heightAt(nx, nz + e)).normalize();
     }
     _fwd.set(Math.cos(m.heading), 0, Math.sin(m.heading));
     _fwd.addScaledVector(_up, -_fwd.dot(_up)).normalize();
@@ -853,8 +844,8 @@ export class GroundFauna {
     const f = Math.min(h / Math.max(0.18, sun.y), h * SHADE_CAST);
     const sx = nx - sun.x * f, sz = nz - sun.z * f;
     const e = 2;
-    _up.set(this.heightAt(sx - e, sz) - this.heightAt(sx + e, sz), 2 * e,
-      this.heightAt(sx, sz - e) - this.heightAt(sx, sz + e)).normalize();
+    _up.set(this.terrain.heightAt(sx - e, sz) - this.terrain.heightAt(sx + e, sz), 2 * e,
+      this.terrain.heightAt(sx, sz - e) - this.terrain.heightAt(sx, sz + e)).normalize();
     _fwd.set(0, 0, 1);
     _fwd.addScaledVector(_up, -_fwd.dot(_up)).normalize();
     _rgt.crossVectors(_up, _fwd).normalize();
@@ -862,7 +853,7 @@ export class GroundFauna {
     const k = clamp((h - AIR_HOVER[0]) / (AIR_HOVER[1] - AIR_HOVER[0]), 0, 1);
     const r = Math.max(SHADE_MIN, m.e.widthM * 0.5 * (1 + k * (SHADE_SPREAD - 1)));
     _mat.makeBasis(_rgt.multiplyScalar(r), _up.multiplyScalar(r), _fwd.multiplyScalar(r));
-    _mat.setPosition(_pos.set(sx, Math.max(this.heightAt(sx, sz), 0) + SHADE_LIFT, sz));
+    _mat.setPosition(_pos.set(sx, this.terrain.topAt(sx, sz) + SHADE_LIFT, sz));
     this.shade.setMatrixAt(m.shade, _mat);
     // It fades as it spreads, and it goes out with the sun. A night world shows no shadow at all.
     this.shade.geometry.attributes.aShade.setX(m.shade,
@@ -923,15 +914,15 @@ export class GroundFauna {
     const m = this.marked;
     if (!m || !this.ring) return;
     const e = 2;
-    _up.set(this.heightAt(m.x - e, m.z) - this.heightAt(m.x + e, m.z), 2 * e,
-      this.heightAt(m.x, m.z - e) - this.heightAt(m.x, m.z + e)).normalize();
+    _up.set(this.terrain.heightAt(m.x - e, m.z) - this.terrain.heightAt(m.x + e, m.z), 2 * e,
+      this.terrain.heightAt(m.x, m.z - e) - this.terrain.heightAt(m.x, m.z + e)).normalize();
     _fwd.set(0, 0, 1);
     _fwd.addScaledVector(_up, -_fwd.dot(_up)).normalize();
     _rgt.crossVectors(_up, _fwd).normalize();
     const grow = m.scale > 1e-6 ? m.drawScale / m.scale : 1;
     const r = Math.max(RING_MIN, m.e.widthM * RING_SIZE * grow);
     _mat.makeBasis(_rgt.multiplyScalar(r), _up.multiplyScalar(r), _fwd.multiplyScalar(r));
-    _mat.setPosition(_pos.set(m.x, Math.max(this.heightAt(m.x, m.z), 0) + RING_LIFT, m.z));
+    _mat.setPosition(_pos.set(m.x, this.terrain.topAt(m.x, m.z) + RING_LIFT, m.z));
     this.ring.matrix.copy(_mat);
     this.ring.matrixWorldNeedsUpdate = true;
   }

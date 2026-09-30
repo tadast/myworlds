@@ -306,6 +306,14 @@ const bakes = new WeakMap();   // one stack per renderer and size
 
 // The stack, baked on first use and kept until disposeDetail() frees it. A bake takes a few
 // milliseconds of the graphics card.
+// The terrain fills the frame, so its fragment shader sets the cost. A standard material runs a
+// full reflection model for a surface that is rough and not metal, and the reader cannot see the
+// difference. A Lambert material draws the same ground for about a third less time. The gain puts
+// the mean pixel back where the standard material had it: the sheen the Lambert model drops is a
+// small constant over a rough surface. The terrain of ground.js multiplies its colours by it, and
+// the cover of ground-cover.js does the same, so a blade takes the colour of the ground under it.
+export const GROUND_GAIN = 1.06;
+
 export function bakeDetail(renderer, size) {
   let per = bakes.get(renderer);
   if (!per) { per = {}; bakes.set(renderer, per); }

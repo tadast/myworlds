@@ -227,7 +227,6 @@ export class SourceWreck {
 // The glow takes the colour of chapter 2 from carrierColour(), so the ruin, its wedges, and its
 // card read in one colour. It draws with the fog off, as the lamp of the wreck does: the reader
 // walks to it out of the mist on the needle.
-const RUIN_EDGE = 0.4;          // RUIN_EDGE of generate.js: the soft edge outside the flat disc
 const RUIN_RING_BAND = 0.035;   // the part of the radius the band of the ring of the ruin takes
 const RUIN_LIGHT_CD = 1400;     // candela at the lamp, in the light scale of ground.js
 const RUIN_LIGHT_RANGE = 320;   // units, how far the lamp light reaches on HIGH
@@ -328,10 +327,9 @@ export class SourceRuin {
     this.music = music || null;
     this.full = tier ? tier.shadows !== false : true;   // HIGH keeps the light; LOW keeps the glow
     this.at = { x: src.x, z: src.z };
-    // The radius of the flat disc, and of the disc with its soft edge. The worker keeps the plants
-    // and the groups off `outer`, and ground.js keeps the cover and the wandering herds off it.
+    // The radius of the flat disc. The worker keeps the plants and the groups off the disc with its
+    // soft edge, and patch.keepOut carries that disc for the ground. See patch-terrain.js.
     this.disc = row ? row.disc : 24;
-    this.outer = this.disc * (1 + RUIN_EDGE);
     this.rhythm = ruinMotifOf(world);
     this.t0 = -1;
     this.marked = false;

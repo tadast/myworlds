@@ -118,9 +118,14 @@ function splitWorld(w) {
 }
 
 // The lore of a patch: the lore of every plant kind it grows.
+//
+// The keep-out stays out of the facts, as the ruin stays out of the facts of a world. It came after
+// the baseline, and a new key in the facts would move that hash on every patch. The discs are the
+// discs the patch masked, so the arrays above still prove them, and tools/patch-terrain-check.mjs
+// tests them against the plants and the groups.
 function splitPatch(p) {
   const plants = p.plants || [];
-  return [hashJson({ ...p, plants: plants.map((x) => ({ ...x, lore: undefined })) }), hashJson(plants.map((x) => x.lore))];
+  return [hashJson({ ...p, keepOut: undefined, plants: plants.map((x) => ({ ...x, lore: undefined })) }), hashJson(plants.map((x) => x.lore))];
 }
 
 const patchLine = (seed, name, label, p) => [seed, name, 'patch', label, p.patch.biome.replace(/ /g, '_'),
