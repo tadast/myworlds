@@ -2642,8 +2642,10 @@ import { Species } from './species.js';
       cause: strand.key, leads: LEADS.filter((x) => tags.has('lead' + x)),
       // The call, on a world with a ruin only: who goes toward it, the day the beacon went on the
       // mast, how the goers travel, and the traits of the people. A world with no ruin carries
-      // none of these keys.
-      ...(ruin ? { went, goers, beacon, by, traits } : {}),
+      // none of these keys. `years` is the years a second ship from home needs, which some
+      // wordings state. Chapter 3: the rescue comes after that many years, so the crew at the twin
+      // states the same number. It takes no draw of its own.
+      ...(ruin ? { went, goers, beacon, by, traits, years } : {}),
     };
   }
 

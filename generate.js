@@ -30,6 +30,8 @@ import { CELL, dirCell, cellDir, cellDirT, boxTanX, boxTanZ, boxHeading, siteCel
 import { TYPES, TYPE_LABEL, TEMP_BY_TYPE, LAND_BY_TYPE, FLORA_BY_TYPE, FLORA_DENSITY_BY_TYPE } from './world-types.js';
 import { protoOf, protoRow, freqOf, compass8, RUIN_CAMP, campLayout, campCircles } from './ruin-types.js';   // the protos, the hashes, and the camp of the ruin
 import { bearingTo } from './carrier.js';         // the bearing the page reads, for the compass word of the log
+import { fateOf, formOf, TWIN_CAMP, tentParts, tentCircles, tentOf } from './way-types.js';   // chapter 3: the fate, the tent
+import { WayLore } from './way-lore.js';           // chapter 3: the third log, of the crew at the twin
 
 // ---------------------------------------------------------------- hashing / rng
 function cyrb128(str) {
@@ -524,12 +526,15 @@ function climateAt(ctx, y) {
 let cachedCtx = null, cachedKey = null;
 
 // The options of a world call, with the defaults for a caller that passes none.
+// `fate` is a debug option of chapter 3: the id of a fate of way-types.js that the third log takes
+// in place of the fate of the seed, when the crew allows it. The page passes it from `?fate=`, and
+// tools/story-lab.html from its controls. A world with no `fate` is the world of the seed.
 function worldOptions(opts = {}) {
-  return { detail: opts.detail || 96, maxFlora: opts.maxFlora || 6000, maxFauna: opts.maxFauna || 140 };
+  return { detail: opts.detail || 96, maxFlora: opts.maxFlora || 6000, maxFauna: opts.maxFauna || 140, fate: opts.fate || null };
 }
 const worldKey = (seed, opts) => {
   const o = worldOptions(opts);
-  return `${seed}|${o.detail}|${o.maxFlora}|${o.maxFauna}`;
+  return `${seed}|${o.detail}|${o.maxFlora}|${o.maxFauna}${o.fate ? '|' + o.fate : ''}`;
 };
 
 // Everything a world needs before its mesh: the type, the palette, the noise, and the terrain
@@ -573,6 +578,9 @@ function worldContext(seed) {
     // p2-35: the second source, the ruin. makeRuin() fills it in generate() after the source. A
     // world with no source keeps the null. See docs/ruin.md.
     ruin: null,
+    // Chapter 3: the twin, the ruin the way on leads to. makeTwin() fills it in generate() after
+    // the ruin. A world with no ruin keeps the null. See docs/issues/p3-00-the-way-on.md.
+    twin: null,
   };
   // The planet numbers, and the facts the lore reads. `env` fills up as the world is built: the
   // moons, the rings, and the activity are added in generate(), which then writes the lore again.
@@ -884,6 +892,9 @@ function generate(seed, opts = {}, post = () => {}) {
   // p2-35. The ruin stands after the source, because it stands at an arc from the wreck. Its
   // stream is its own too, so no world built before the ruin changes.
   makeRuin(makeRng(seed + '|ruin'), ctx, world, beachW);
+  // Chapter 3. The twin stands after the ruin, because it stands at an arc from the ruin. Its
+  // stream is its own, so no world built before chapter 3 changes.
+  makeTwin(makeRng(seed + '|twin'), ctx, world, beachW);
 
   post(62, 'Painting biomes');
   // per-face colouring, expanded to non-indexed triangles
@@ -1008,6 +1019,9 @@ function generate(seed, opts = {}, post = () => {}) {
   if (world.ruin && world.source && world.source.log) {
     world.ruin.log = RuinLore.writeRuinLog({ world, rng: makeRng(seed + '|ruin-lore') });
   }
+  // Chapter 3. The herd of the twin, the kin of a rolled maker, the fate of the crew, and the third
+  // log. Each reads what the lines above settled, and each rolls from a stream of its own.
+  if (world.twin) finishTwin(ctx, world, opts);
 
   post(98, 'Almost there');
   const result = { world, terrain: { pos: outPos, col: outCol }, flora, clouds, fauna, heightMap, floraGrid };
@@ -1706,6 +1720,106 @@ function makerOf(world, rLimbs, rHeight) {
     height: Math.round(h * 10) / 10,
     rolled: true,
   };
+}
+
+// ---------------------------------------------------------------- the twin, chapter 3
+// The way on of the card of the ruin names a place: the twin, a ruin of the same proto, far across
+// the same world. The reader reads the name and sends it, and the ruin carries the probe there. See
+// docs/issues/p3-00-the-way-on.md.
+//
+// The twin takes the draw of makeRuin(), from the ruin and not from the wreck: two numbers a try,
+// the arc and the bearing, the arc even over the area of the band. It passes the tests of the ruin:
+// dry ground over the beach band, a gentle slope, inside SOURCE_LAT, off the cell of the activity.
+// It keeps TWIN_KEEP cells or more from the wreck too, so the twin never reads as a place the crew
+// could walk to from the ship. A band takes TWIN_TRIES tries, then the next band, as for the ruin.
+//
+// The stream is makeRng(seed + '|twin'), and no other stream draws one number more.
+const TWIN_BANDS = [[60, 150], [40, 200], [20, 300]];   // cells of arc from the ruin
+const TWIN_TRIES = 900;
+const TWIN_KEEP = 20;          // cells: the least arc from the twin to the wreck
+const _twinDir = [0, 0, 0];
+
+function makeTwin(rng, ctx, world, beachW) {
+  world.twin = null;
+  const ruin = world.ruin, src = world.source;
+  if (!ruin || !ruin.dir || !src || !src.dir) return null;
+  const w = ruin.dir;
+  const rCell = dirCell(w[0], w[1], w[2]);
+  const sCell = dirCell(src.dir[0], src.dir[1], src.dir[2]);
+  const f = tangentFrame(Math.asin(clamp(w[1], -1, 1)) * 180 / Math.PI, Math.atan2(w[2], w[0]) * 180 / Math.PI);
+  const E = f.east, S = f.south;
+  const act = world.activity && world.activity.dir;
+  const actMid = act ? cellDir(dirCell(act[0], act[1], act[2]), 0.5, 0.5, _srcAct) : null;
+  const keep = Math.cos(SOURCE_KEEP * CELL), keepWreck = Math.cos(TWIN_KEEP * CELL);
+  const sinLat = Math.sin(SOURCE_LAT * Math.PI / 180);
+  const s0 = src.dir;
+
+  let place = null, band = -1;
+  const seaWas = ctx.seaLevel;
+  ctx.seaLevel = testSeaLevel(ctx);
+  try {
+    for (let b = 0; b < TWIN_BANDS.length && !place; b++) {
+      const cNear = Math.cos(TWIN_BANDS[b][0] * CELL), cFar = Math.cos(Math.min(Math.PI, TWIN_BANDS[b][1] * CELL));
+      for (let t = 0; t < TWIN_TRIES; t++) {
+        const k = cNear - rng() * (cNear - cFar);
+        const brg = rng() * Math.PI * 2;
+        const s = Math.sqrt(Math.max(0, 1 - k * k));
+        const te = Math.sin(brg) * s, tn = Math.cos(brg) * s;
+        const cell = dirCell(w[0] * k + E[0] * te - S[0] * tn, w[1] * k + E[1] * te - S[1] * tn, w[2] * k + E[2] * te - S[2] * tn);
+        if (sameCell(cell, rCell) || sameCell(cell, sCell)) continue;
+        const d = cellDir(cell, 0.5, 0.5, _twinDir);
+        const dot = w[0] * d[0] + w[1] * d[1] + w[2] * d[2];
+        if (dot > cNear || dot < cFar) continue;
+        if (d[1] > sinLat || d[1] < -sinLat) continue;
+        if (s0[0] * d[0] + s0[1] * d[1] + s0[2] * d[2] > keepWreck) continue;
+        if (actMid && d[0] * actMid[0] + d[1] * actMid[1] + d[2] * actMid[2] > keep) continue;
+        if (!groundFits(ctx, d, beachW)) continue;
+        place = [d[0], d[1], d[2]];
+        band = b;
+        break;
+      }
+    }
+  } finally {
+    ctx.seaLevel = seaWas;
+  }
+  if (!place) return null;
+
+  const rMid = cellDir(rCell, 0.5, 0.5, [0, 0, 0]);
+  const arc = Math.acos(clamp(rMid[0] * place[0] + rMid[1] * place[1] + rMid[2] * place[2], -1, 1));
+  world.twin = {
+    kind: 'twin',
+    proto: ruin.proto,
+    dir: place,
+    km: Math.round(arc * ctx.radiusKm / 10) * 10,        // the arc from the ruin, to ten kilometres
+    from: compass8(bearingTo(cellSite(rCell), place)),    // the bearing from the ruin to the twin
+    band,
+    herd: -1,        // the species of the herd: the species of the maker, or the kin. finishTwin()
+    kin: false,
+    fate: null,      // the fate of the crew, or null where nobody reached the ruin. finishTwin()
+    form: null,      // the form of the change, for the fate `change`
+    log: null,       // the third log. finishTwin()
+  };
+  return world.twin;
+}
+
+// The rest of the twin, after the lore of the world: the herd, the kin of a rolled maker, the fate,
+// and the third log. The kin rolls from makeRng(seed + '|kin') and the log from
+// makeRng(seed + '|way-lore'); a world whose maker is a species of the world draws no kin.
+function finishTwin(ctx, world, opts) {
+  const twin = world.twin;
+  const maker = world.ruin && world.ruin.maker;
+  const species = world.species || [];
+  if (maker && !maker.rolled && species[maker.species]) {
+    twin.herd = maker.species;
+  } else {
+    const kin = Species.rollKin(makeRng(ctx.seed + '|kin'), ctx.type, world, ctx.P, maker);
+    species.push(kin);
+    twin.herd = kin.id;
+    twin.kin = true;
+  }
+  twin.fate = fateOf(world, worldOptions(opts).fate);
+  twin.form = twin.fate === 'change' ? formOf(world) : null;
+  twin.log = twin.fate ? WayLore.writeWayLog({ world, rng: makeRng(ctx.seed + '|way-lore'), fate: twin.fate }) : null;
 }
 
 // ---------------------------------------------------------------- gas giant
@@ -2459,8 +2573,16 @@ function patchNiches(ctx, g) {
 //   groups:  x z, kind, count, spread, phase        (6 floats per group)
 //   members: group index, offset x, offset z, phase (4 floats per member)
 // A member offset is the place of the animal in the formation, in metres from the anchor.
+// Chapter 3: `g.herd` = { kind, x, z, r } puts the herd of the twin around the disc of the twin
+// first: HERD_GROUPS groups of the animal of the maker, from makeRng(pseed + '|herd'), in a ring from
+// just past the soft edge to HERD_REACH units out. The groups of the niches follow, as on every patch.
+// `herd` in the result holds the anchors of those groups, [[x, z], ...].
+const HERD_GROUPS = [5, 8];      // groups of the herd around the twin
+const HERD_COUNT = [6, 12];      // animals in one group of the herd
+const HERD_REACH = 140;          // units past the soft edge of the disc
+
 function patchFauna(ctx, maxFauna = 0, pulled, g) {
-  const empty = { groups: new Float32Array(0), members: new Float32Array(0) };
+  const empty = { groups: new Float32Array(0), members: new Float32Array(0), herd: [] };
   const species = ctx.world.species || [];
   if (!species.length || !(maxFauna > 0)) return empty;
 
@@ -2471,10 +2593,13 @@ function patchFauna(ctx, maxFauna = 0, pulled, g) {
   const present = [];
   for (const G of species) {
     if (G.niche === 'sea' || G.niche === 'cloud') continue;
+    if (G.kin) continue;           // chapter 3: the kin lives at the twin and nowhere else. See g.herd
+
     if (G.id === pulled) present.unshift(G);           // the pulled species leads, so it gets a group
     else if (niches.has(G.niche)) present.push(G);
   }
-  if (!present.length) return empty;
+  const H = g.herd && species[g.herd.kind];
+  if (!present.length && !H) return empty;
 
   const rng = makeRng(`${g.pseed}|fauna`);
   const hAt = (x, z) => {
@@ -2486,7 +2611,42 @@ function patchFauna(ctx, maxFauna = 0, pulled, g) {
   const target = Math.round(rrange(rng, GROUPS_MIN, GROUPS_MAX));
   const anchors = [], rows = [];
   let total = 0;
-  for (let k = 0; k < target; k++) {
+  const herdAt = [];
+  if (H) {
+    const hr = makeRng(`${g.pseed}|herd`);
+    const want = HERD_GROUPS[0] + Math.floor(hr() * (HERD_GROUPS[1] - HERD_GROUPS[0] + 1));
+    const metres = Species.bodyMetres(H).metres;
+    for (let k = 0; k < want; k++) {
+      const count = Math.max(1, Math.min(HERD_COUNT[1], Math.max(HERD_COUNT[0], (H.social && H.social.n) || 0) + Math.floor(hr() * 3) - 1));
+      if (total + count > maxFauna) break;
+      const spread = Math.max(4, count * metres * 0.5);
+      let x = 0, z = 0, placed = false;
+      for (let a = 0; a < ANCHOR_TRIES; a++) {
+        const ang = hr() * Math.PI * 2, r = g.herd.r + spread + 6 + hr() * HERD_REACH;
+        x = g.herd.x + Math.cos(ang) * r; z = g.herd.z + Math.sin(ang) * r;
+        if (Math.abs(x) > g.half - spread - 20 || Math.abs(z) > g.half - spread - 20) continue;
+        if (H.cls !== 'air' && hAt(x, z) <= 0) continue;
+        if (g.blocked && g.blocked(x, z, spread)) continue;
+        let clear = true;
+        for (const p of anchors) {
+          const need = Math.max(spread, p.spread) * 1.6;
+          if ((p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < need * need) { clear = false; break; }
+        }
+        if (clear) { placed = true; break; }
+      }
+      if (!placed) continue;
+      anchors.push({ x, z, kind: H.id, count, spread, phase: hr() * Math.PI * 2 });
+      herdAt.push([x, z]);
+      const gi = anchors.length - 1, turn = hr();
+      for (let i = 0; i < count; i++) {
+        const ang = ((i + turn) / count + rrange(hr, -0.14, 0.14)) * Math.PI * 2;
+        const r = count === 1 ? 0 : spread * rrange(hr, 0.45, 1);
+        rows.push([gi, Math.cos(ang) * r, Math.sin(ang) * r, hr() * Math.PI * 2]);
+      }
+      total += count;
+    }
+  }
+  for (let k = 0; k < target && present.length; k++) {
     const G = present[k % present.length];
     const s = G.social || { n: 1, spread: 4 };
     const count = s.n;
@@ -2528,7 +2688,7 @@ function patchFauna(ctx, maxFauna = 0, pulled, g) {
   });
   const members = new Float32Array(rows.length * 4);
   rows.forEach((r, i) => members.set(r, i * 4));
-  return { groups, members };
+  return { groups, members, herd: herdAt };
 }
 
 // ---------------------------------------------------------------- the keep-out of a patch
@@ -2823,11 +2983,14 @@ const RUIN_RIM_STEP = 12;      // units of arc between two points of the rim the
 const RUIN_WORN = 0.35;        // how far the floor moves toward the rock of the palette at the middle
 const RUIN_STONE = 0.8;        // the share of bare rock the fine pattern of the floor takes
 
-function patchRuin(ctx, ruin, s) {
+// Chapter 3: the twin stands on its cell by the same rules, with `kind` 'twin'. It rolls from
+// makeRng(pseed + '|twin'), and in place of the camp of p2-43 it takes the tent of the crew that
+// went through the way; see twinCamp().
+function patchRuin(ctx, ruin, s, kind = 'ruin') {
   const row = ruin && protoRow(ruin.proto);
   if (!row) return null;
   const P = ctx.P;
-  const rng = makeRng(`${s.pseed}|ruin`);
+  const rng = makeRng(`${s.pseed}|${kind}`);
   const flat = row.disc, outer = flat * (1 + RUIN_EDGE);
   const bound = Math.max(s.grid * 4, sourceReach(s) - outer);
   const ang = rng() * Math.PI * 2;
@@ -2838,7 +3001,8 @@ function patchRuin(ctx, ruin, s) {
     rim: Math.max(SOURCE_RIM, Math.ceil(2 * Math.PI * outer / RUIN_RIM_STEP)),
     rise: flat * RUIN_RISE,
   });
-  const camp = ruinCamp(ctx, ruin, rng, { x: sx, y: hs, z: sz, yaw, flat, outer }, s);
+  const at = { x: sx, y: hs, z: sz, yaw, flat, outer };
+  const camp = kind === 'twin' ? twinCamp(ruin, rng, at, s) : ruinCamp(ctx, ruin, rng, at, s);
 
   // The worn floor. The ground colour lifts a little toward the rock of the palette, as stone that
   // feet and weather wore flat, and the biome comes back over the soft edge. It takes no scorch,
@@ -2867,9 +3031,9 @@ function patchRuin(ctx, ruin, s) {
   // of the camp. A group asks with its spread as `pad`, so no member of it starts on a disc either.
   const discs = camp ? [[sx, sz, outer], ...camp.discs] : [[sx, sz, outer]];
   const blocked = (x, z, pad = 0) => inDiscs(discs, x, z, pad);
-  const info = { kind: 'ruin', proto: ruin.proto, x: sx, y: hs, z: sz, yaw };
-  if (camp) info.camp = camp.info;
-  return { info, paint, stone, i0, i1, j0, j1, discs, blocked };
+  const info = { kind, proto: ruin.proto, x: sx, y: hs, z: sz, yaw };
+  if (camp) info[kind === 'twin' ? 'tent' : 'camp'] = camp.info;
+  return { info, paint, stone, i0, i1, j0, j1, discs, blocked, outer };
 }
 
 // The traces of the crew at the ruin, p2-43, or null. Decision 3 of p2-00: the goers of the log of
@@ -2923,8 +3087,14 @@ function ruinCamp(ctx, ruin, rng, at, s) {
 
   // The pad. A node under a circle takes the height of the floor, and the ground eases back over
   // RUIN_CAMP.ease past it. The flat disc already stands at that height, so no node of it moves.
+  padCircles(s, circles, at.y, RUIN_CAMP.ease);
+  return { info, discs: circles.map((q) => [q.x, q.z, q.r + RUIN_CAMP.ease]) };
+}
+
+// The pad of a camp: every node under a circle takes the height `y`, and the ground eases back over
+// `ease` units past it. ruinCamp() and twinCamp() share it.
+function padCircles(s, circles, y, ease) {
   const { heights, n, grid, half } = s;
-  const ease = RUIN_CAMP.ease;
   const toI = (m) => clamp(Math.round((m + half) / grid), 0, n - 1);
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const q of circles) {
@@ -2939,11 +3109,29 @@ function ruinCamp(ctx, ruin, rng, at, s) {
       for (const q of circles) d = Math.min(d, Math.hypot(xm - q.x, zm - q.z) - q.r);
       if (d >= ease) continue;
       const k = j * n + i;
-      heights[k] += (at.y - heights[k]) * smoothstep(ease, 0, d);
+      heights[k] += (y - heights[k]) * smoothstep(ease, 0, d);
     }
   }
+}
 
-  return { info, discs: circles.map((q) => [q.x, q.z, q.r + ease]) };
+// The tent of the crew at the twin, chapter 3, or null when nobody came. tentOf() of way-types.js
+// says what stands, from the ends of the people of the third log. The tent stands at the edge of
+// the disc as the camp of p2-43 does, with its door toward the stones, on a side that one draw of
+// the stream picks: the crew came through the stones and not over the land. The stream has drawn
+// the place and the yaw of the twin; nothing draws after this.
+function twinCamp(twin, rng, at, s) {
+  const info = tentOf(twin);
+  if (!info) return null;
+  const ang = rng() * Math.PI * 2;
+  const ux = Math.cos(ang), uz = Math.sin(ang);
+  let inner = 0;
+  for (const q of tentParts(info)) inner = Math.max(inner, q.x + q.r);
+  const rc = at.flat + TWIN_CAMP.gap + inner;
+  info.x = at.x + ux * rc; info.y = at.y; info.z = at.z + uz * rc;
+  info.yaw = (Math.atan2(uz, -ux) + Math.PI * 2) % (Math.PI * 2);
+  const circles = tentCircles(info);
+  padCircles(s, circles, at.y, TWIN_CAMP.ease);
+  return { info, discs: circles.map((q) => [q.x, q.z, q.r + TWIN_CAMP.ease]) };
 }
 
 // The ground of one landing: a square height grid and a colour per vertex, in the frame of the box
@@ -3129,9 +3317,13 @@ function patch(seed, site, opts = {}, post = () => {}) {
   // care which kind stands there.
   const srcKind = kindIn(ctx.world.source, cell);
   const ruinHere = !srcKind && kindIn(ctx.world.ruin, cell) === 'ruin';
+  // Chapter 3: the twin, on the cell of world.twin. makeTwin() keeps it off the cells of the wreck
+  // and of the ruin, so one cell holds one of the three.
+  const twinHere = !srcKind && !ruinHere && kindIn(ctx.world.twin, cell) === 'twin';
   const srcAt = { heights, n, grid, half, pseed, avoid: act ? act.blocked : null };
   const src = srcKind ? patchSource(ctx, srcKind, srcAt)
-    : ruinHere ? patchRuin(ctx, ctx.world.ruin, srcAt) : null;
+    : ruinHere ? patchRuin(ctx, ctx.world.ruin, srcAt)
+      : twinHere ? patchRuin(ctx, ctx.world.twin, srcAt, 'twin') : null;
   // The plants and the group anchors keep off both footprints. A group passes its spread as the
   // third argument, and only the mask of the ruin reads it.
   const blockAct = act ? act.blocked : null, blockSrc = src ? src.blocked : null;
@@ -3331,10 +3523,15 @@ function patch(seed, site, opts = {}, post = () => {}) {
   const flora = grown.flora;
 
   post(96, 'Calling the animals');
-  const { groups, members } = patchFauna(ctx, opts.maxFauna, pulled, {
+  const { groups, members, herd } = patchFauna(ctx, opts.maxFauna, pulled, {
     pseed, heights, vary, n, grid, half, hPerU, cellT, cellM, cellF,
     blocked,
+    // Chapter 3: the herd of the twin stands around the stones, before every other group.
+    herd: twinHere && src && ctx.world.twin.herd >= 0
+      ? { kind: ctx.world.twin.herd, x: src.info.x, z: src.info.z, r: src.outer } : null,
   });
+  // The anchors of the herd, so the page can stand a person of the chorus among the animals.
+  if (twinHere && src) src.info.herd = herd;
 
   post(98, 'Almost there');
   const biome = BIOME_NAME[biomeIndex(ctx, siteH, siteT, siteM, BEACH_M * H_PER_M)];

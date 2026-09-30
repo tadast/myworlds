@@ -100,6 +100,8 @@ function splitWorld(w) {
     fauna: w.stats && w.stats.fauna,
     floraTags: w.env && w.env.floraTags, plantWord: w.env && w.env.plantWord,
     ...(w.ruin ? { ruinLog: w.ruin.log } : {}),
+    // Chapter 3: the third log, and the lore of the kin of a rolled maker.
+    ...(w.twin ? { twinLog: w.twin.log, kin: (w.species || []).filter((g) => g.kin).map((g) => g.lore) } : {}),
   };
   // The ruin of phase 2 stays out of the facts. It came after the baseline, and a new key in the
   // facts would move that hash on every world, so the facts hash the worlds as they stood before
@@ -109,7 +111,10 @@ function splitWorld(w) {
   const facts = {
     ...w,
     ruin: undefined,
-    species: (w.species || []).map((g) => ({ ...g, lore: undefined })),
+    // Chapter 3: the twin stays out of the facts as the ruin does, and so does the kin, which it pushes
+    // onto the species after the rest of the world. tools/ruin-check.mjs part 7 proves the twin.
+    twin: undefined,
+    species: (w.species || []).filter((g) => !g.kin).map((g) => ({ ...g, lore: undefined })),
     source: w.source && { ...w.source, log: undefined },
     stats: w.stats && { ...w.stats, fauna: undefined },
     env: w.env && { ...w.env, floraTags: undefined, plantWord: undefined },

@@ -1323,5 +1323,42 @@ import { Lore } from './lore.js';
     return list;
   }
 
+  // ---------------------------------------------------------------- the kin of a rolled maker
+  // Chapter 3. The carvings of a ruin whose maker is rolled show a body that no animal of the world
+  // has. The twin holds the last of them: the kin. It rolls from a stream of its own, after every
+  // species of the world and after their lore, so no species of the world moves, and it takes the
+  // next id. The body takes the walker of the limbs of the maker, and the size of the maker. The
+  // kin always walks in a herd, because the twin holds a herd of them.
+  //
+  // `maker` is world.ruin.maker. generate.js pushes the kin onto world.species and marks it `kin`,
+  // so the ground draws it by its id, and the page keeps it off the sidebar until the reader has
+  // stood at the twin.
+  const KIN_LOCO = { 1: 'monopod', 2: 'biped', 3: 'tripod', 4: 'quad', 6: 'hexapod' };
+  function rollKin(rng, type, world, P, maker) {
+    const w = worldFacts(type, world);
+    const niche = (WORLD_NICHES[type] || WORLD_NICHES.terran).niches.find((n) => NICHE[n] && NICHE[n].cls.includes('land')) || 'lowland';
+    const loco = KIN_LOCO[maker && maker.limbs] || 'quad';
+    const G = rollGenome(rng, type, niche, 'land', new Set(), !!P.floraColor, loco, w);
+    G.id = (world.species || []).length;
+    G.colors = rollColors(rng, P.faunaColor, G.id);
+    G.gravity = world.gravity;
+    // The size of the carvings: the body in metres over the constant of its walker.
+    const k = BODY[loco].k;
+    G.size = Math.max(0.5, Math.min(2.4, ((maker && maker.height) || 3) / k));
+    const n = 7 + Math.floor(rng() * 8);
+    G.social = { kind: 'herd', n, spread: n * bodyMetres(G).metres * 0.8 };
+    G.kin = true;
+    const env = L.makeEnv(world.env || { type });
+    const list = world.species || [];
+    const used = {
+      names: new Set(list.map((s) => s.lore && s.lore.name).filter(Boolean)),
+      latin: new Set(list.map((s) => s.lore && s.lore.latin).filter(Boolean)),
+      words: new Set(), lines: new Set(),
+    };
+    describeOne(rng, G, env, world, used);
+    trimStory(rng, G);
+    return G;
+  }
+
   // CATALOGUE is for tools/fauna-lab.html. It lists the forms a roll can pick, and it draws nothing.
-  export const Species = { makeSpeciesSet, describe, bodyMetres, CATALOGUE: { LOCO, PLAN, HEAD, EXTRAS, ALWAYS }, NICHE, RELATIONS, RELATION_CONTRACT, POOLS: { ORIGIN, FEATURE, HABIT, CLIMATE, SKY, CLOSE, DIET, PLAIN_FEATURE, PLOUGH_MOUNDS, SWARM_ORIGIN, HERD_STORY, HERD_STILL, PAIR_STORY, ALONE_STORY, WORLD_ADJ, WORLD_EPITHET } };
+  export const Species = { makeSpeciesSet, describe, bodyMetres, rollKin, CATALOGUE: { LOCO, PLAN, HEAD, EXTRAS, ALWAYS }, NICHE, RELATIONS, RELATION_CONTRACT, POOLS: { ORIGIN, FEATURE, HABIT, CLIMATE, SKY, CLOSE, DIET, PLAIN_FEATURE, PLOUGH_MOUNDS, SWARM_ORIGIN, HERD_STORY, HERD_STILL, PAIR_STORY, ALONE_STORY, WORLD_ADJ, WORLD_EPITHET } };

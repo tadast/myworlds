@@ -109,7 +109,7 @@ export function parseFreq(text) {
 // No word of two to four of these syllables, with no syllable twice in a row, is a word of the
 // word list of macOS (/usr/share/dict/words and propernames, 2026-09-27). Test a change of the
 // list the same way before it goes in.
-const SYLLABLES = ['ka', 'zu', 'vek', 'tho', 'ryn', 'sae', 'quo', 'lor',
+export const SYLLABLES = ['ka', 'zu', 'vek', 'tho', 'ryn', 'sae', 'quo', 'lor',
   'myr', 'ix', 'ol', 'shen', 'dra', 'yve', 'kor', 'uun'];
 
 export function portalSeed(world) {
@@ -282,7 +282,8 @@ export function ruinCard(world) {
       { key: 'stone', label: 'Stone', text: world.type === 'lava' ? 'A stone that takes the heat and holds it.' : 'A stone this world does not make.' },
       { key: 'makers', label: 'Makers', text: makers.join(' ') },
       { key: 'call', label: 'The call', text: call },
-      { key: 'way', label: 'The way on', text: 'The probe reads the name of another world here. It cannot read it yet.', glyphs: glyphsOf(portalSeed(world)) },
+      // Chapter 3: the line is a name, and the reader reads it. See way-types.js.
+      { key: 'way', label: 'The way on', text: 'The probe reads a name here, in the script of the makers. The stones answer when the name is sent back.', glyphs: glyphsOf(portalSeed(world)) },
     ],
   };
 }
