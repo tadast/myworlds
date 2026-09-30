@@ -58,7 +58,9 @@ function ok(part, cond, msg) {
   if (fails <= 40) console.log(`FAIL ${part}: ${msg}`);
 }
 const disk = (seed) => (JSON.parse(store.get(CARRIER_KEY) || '{}'))[seed];
-const states = (v) => v.chapters.map((c) => c.state).join(' ');
+// The states of the two searches. Chapter 3, the way on, has checks of its own below.
+const states = (v) => v.chapters.filter((c) => c.kind === 'search').map((c) => c.state).join(' ');
+const wayState = (v) => (v.way ? v.way.state : '-');
 
 // A site `k` cells of arc from a source, on the bearing `brg` from it.
 function siteFrom(src, k, brg) {
@@ -86,8 +88,8 @@ if (!w) throw new Error('no world with a ruin in 20 seeds');
 const seed = w.seed;
 const ruinFreq = w.ruin.freq;
 
-ok('list', JSON.stringify(chaptersOf(w).map((c) => [c.id, c.kind, c.freq])) === JSON.stringify([['wreck', 'search', WRECK_FREQ], ['ruin', 'search', ruinFreq]]),
-  'the chapters are not the search for the wreck and then the search for the ruin');
+ok('list', JSON.stringify(chaptersOf(w).map((c) => [c.id, c.kind, c.freq])) === JSON.stringify([['wreck', 'search', WRECK_FREQ], ['ruin', 'search', ruinFreq], ['way', 'way', null]]),
+  'the chapters are not the search for the wreck, the search for the ruin, and the way on');
 
 let p = progressOf(w);
 let v = p.view();
@@ -193,6 +195,30 @@ ok('ruin', marksOf().get(seed).text === '✦✦', 'the thumb does not carry two 
 ok('ruin', JSON.stringify(progressOf(w).view()) === JSON.stringify(v), 'a second progress of the world reads another view');
 rows.push(`  story     ${seed} (${w.type}): the wreck, the tune of ${ruinFreq} MHz, and the ruin, found in order; the ruin stayed shut before the wreck`);
 
+// ---------------------------------------------------------------- chapter 3, the way on
+// It opens with the find of the ruin. The arrival at the twin ends it, and the read of the third
+// log and the end of the mission follow. A world whose log holds a person at home takes the crew
+// home; the check puts that log on a copy of the world, so it does not hang on the fate of the seed.
+ok('way', wayState(v) === 'open' && v.way.text === 'A name to read' && !v.way.read && !v.way.home, `after both finds the way reads ${JSON.stringify(v.way)}`);
+ok('way', !p.readLog() && !p.goHome(), 'the log read or the crew went home before the arrival');
+const withCrew = { ...w, twin: { ...w.twin, log: { crew: [{ name: 'Sara', role: 'pilot', end: 'home' }] } } };
+let pw = progressOf(withCrew);
+ok('way', pw.arrive().found && !pw.arrive().found, 'the arrival at the twin is not the find, or it counts twice');
+v = pw.view();
+ok('way', wayState(v) === 'done' && v.way.text === 'At the twin' && v.way.crew, `after the arrival the way reads ${JSON.stringify(v.way)}`);
+ok('way', JSON.stringify(v.row.aims.map((a) => a.id)) === JSON.stringify(['wreck', 'ruin', 'way']), `the aims read ${JSON.stringify(v.row.aims)}`);
+ok('way', marksOf().get(seed).text === '✦✦✦', 'the thumb does not carry three marks');
+ok('way', !pw.goHome(), 'the crew went home before the read of the log');
+ok('way', pw.readLog() && !pw.readLog() && progressOf(withCrew).view().way.text === 'Somebody waits', 'the read of the third log did not stand');
+ok('way', pw.goHome() && !pw.goHome() && progressOf(withCrew).view().way.home, 'the crew did not go home');
+ok('way', marksOf().get(seed).text === '✦✦✦ ⌂' && marksOf().get(seed).home, 'the thumb of a world whose crew went home takes no house');
+ok('way', disk(seed).way && disk(seed).way.found && disk(seed).way.read && disk(seed).way.home, `the store holds ${JSON.stringify(disk(seed).way)}`);
+const noCrew = { ...w, seed: w.seed + '-alone', twin: { ...w.twin, log: null } };
+pw = progressOf(noCrew);
+pw.read('wreck'); pw.read('ruin'); pw.arrive(); pw.readLog();
+ok('way', !pw.goHome() && pw.view().way.text === 'Nobody came' && !pw.view().way.crew, 'a twin with no crew took the crew home');
+rows.push(`  way       the way on opens with the find of the ruin; the arrival, the read of the log, and the way home stand in order`);
+
 // ---------------------------------------------------------------- 3. the follow rule
 // Every record of the two searches: the find of the wreck, the band of the ruin, and the find of the
 // ruin. The table is the rule by hand.
@@ -276,13 +302,13 @@ p = progressOf(lone);
 p.land(sourceCell(w.source));
 p.read('wreck');
 v = p.view();
-ok('lone', v.chapters.length === 1 && v.tuner === null && v.row.text === 'Found' && !v.row.tune, `a world with no ruin reads ${JSON.stringify(v.row)}`);
+ok('lone', v.chapters.length === 1 && v.way === null && v.tuner === null && v.row.text === 'Found' && !v.row.tune, `a world with no ruin reads ${JSON.stringify(v.row)}`);
 ok('lone', p.tune(ruinFreq).kind === 'static' && p.view().follow.id === 'wreck', 'a world with no ruin took a tune');
 
 // A gas giant: no chapter, no row, no landing.
 const gas = { seed: 'gas', type: 'gas', source: null, ruin: null };
 p = progressOf(gas);
-ok('gas', chaptersOf(gas).length === 0 && p.view().row === null && p.land({ lat: 0, lon: 0 }) === null && !p.read('wreck').open, 'a gas giant takes a search');
+ok('gas', chaptersOf(gas).length === 0 && p.view().row === null && p.view().way === null && !p.arrive().found && p.land({ lat: 0, lon: 0 }) === null && !p.read('wreck').open, 'a gas giant takes a search');
 rows.push(`  records   the records of older builds, a bad hand, a full store, the bound of ${MAX_SEEDS} seeds, a world with no ruin, and a gas giant`);
 
 for (const row of rows) console.log(row);

@@ -272,6 +272,28 @@
     </form>
   </dialog>
 
+  <!-- Chapter 3, the way on. A person of the crew at the twin speaks: the talk holds the name, the
+       job, and the line of the third log. A person who lived through it unchanged asks to go home,
+       and the button takes the crew home. The second card states the end of the mission, over the
+       globe. app.js fills both. See docs/issues/p3-00-the-way-on.md. -->
+  <dialog id="talk" aria-labelledby="talk-name">
+    <form method="dialog" class="about-card talk-card">
+      <button type="submit" class="cclose" aria-label="Close">×</button>
+      <p class="talk-who"><b id="talk-name"></b><span class="talk-role"></span></p>
+      <blockquote class="talk-line"></blockquote>
+      <button type="button" class="talk-home" hidden>Take the crew home</button>
+    </form>
+  </dialog>
+  <dialog id="home" aria-labelledby="home-title">
+    <form method="dialog" class="about-card home-card">
+      <button type="submit" class="cclose" aria-label="Close">×</button>
+      <p class="about-kicker">Mission complete</p>
+      <h2 id="home-title"></h2>
+      <p class="home-text"></p>
+      <p class="home-lost"></p>
+    </form>
+  </dialog>
+
   <!-- The probe overlay of issue 31. It shows while the probe is down: the air, the height, the
        hour of the star, and the uplink that explains where the probe has to stop. probe-hud.js
        writes the numbers and draws the noise. The frame starts right of the sidebar, so nothing

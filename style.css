@@ -543,12 +543,12 @@ button.probe[hidden] { display: none; }
 /* ---------- about, and the brief of the carrier
    Two native <dialog> elements of one style. The browser gives the focus trap, the Escape key, and
    the top layer. The brief of issue 34 takes the same card, so the two read as one app. */
-#about, #carrier-brief, #carrier-lost {
+#about, #carrier-brief, #carrier-lost, #talk, #home {
   width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0;
   background: transparent; border: 0; color: var(--text); overflow: visible;
 }
-#about::backdrop, #carrier-brief::backdrop, #carrier-lost::backdrop { background: rgba(7, 10, 22, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-#about[open], #carrier-brief[open], #carrier-lost[open] { animation: about-in 0.28s ease-out; }
+#about::backdrop, #carrier-brief::backdrop, #carrier-lost::backdrop, #talk::backdrop, #home::backdrop { background: rgba(7, 10, 22, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+#about[open], #carrier-brief[open], #carrier-lost[open], #talk[open], #home[open] { animation: about-in 0.28s ease-out; }
 @keyframes about-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
 .about-card {
   position: relative; margin: 0; padding: 28px 26px 22px; text-align: center;
@@ -564,7 +564,7 @@ button.probe[hidden] { display: none; }
   animation: spin 24s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) { #about[open], #carrier-brief[open], #carrier-lost[open], .about-orb { animation: none; } }
-#about h2, #carrier-brief h2, #carrier-lost h2 { margin: 0 0 14px; font-size: 24px; font-weight: 600; letter-spacing: 0.3px; }
+#about h2, #carrier-brief h2, #carrier-lost h2, #home h2 { margin: 0 0 14px; font-size: 24px; font-weight: 600; letter-spacing: 0.3px; }
 #about h2 { margin-bottom: 0; }
 /* The about card is centred, because it is four short paragraphs about the app. The brief is a set
    of instructions, so its body reads left to right under a centred title. */
@@ -846,3 +846,64 @@ button.probe[hidden] { display: none; }
     border-color: var(--hud-tint); box-shadow: 0 0 22px color-mix(in srgb, var(--hud-tint) 70%, transparent);
   }
 }
+
+/* ---------- chapter 3, the way on
+   The decoder stands in the row of the way on of the card of the ruin: the reply, the sounds, and a
+   field under each glyph of the name. A glyph that lit in a send takes the colour of the ruin, and a
+   glyph that stayed dark takes a dim mark. A letter the codex holds as proven shows in the colour of
+   the ruin on every world. decoder.js builds it; see docs/issues/p3-00-the-way-on.md. */
+.cword { font-size: 15px; font-weight: 600; letter-spacing: 0.12em; color: var(--ruin, var(--accent)); }
+.cdecoder { margin-top: 12px; }
+.decoder { display: flex; flex-direction: column; gap: 12px; max-width: 62ch; }
+.dec-part { display: flex; flex-direction: column; gap: 6px; }
+.dec-label { font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.dec-line { display: flex; flex-wrap: wrap; gap: 2px; color: var(--ruin, var(--accent)); }
+.dec-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 26px; }
+.dec-cell svg { display: block; }
+.dec-cell b { font-size: 12px; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+.dec-gap { width: 14px; }
+.dec-sounds { display: flex; flex-wrap: wrap; gap: 4px; }
+.dec-sound { font-size: 12px; padding: 2px 9px; }
+.dec-in input {
+  width: 26px; height: 30px; padding: 0; text-align: center; text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--text); font: inherit; font-size: 15px; font-weight: 600;
+}
+.dec-in input:focus { outline: none; border-color: var(--ruin, var(--accent)); box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.18); }
+.dec-in.known input { color: var(--ruin, var(--accent)); }
+.dec-in.lit svg { filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 9px currentColor); }
+.dec-in.lit input { border-color: var(--ruin, var(--accent)); color: var(--ruin, var(--accent)); }
+.dec-in.dark { opacity: 0.55; }
+.dec-in.dark input { border-color: rgba(255, 120, 120, 0.45); }
+.dec-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.dec-send {
+  padding: 7px 16px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px;
+  background: var(--glass-2); border: 1px solid var(--ruin, var(--accent)); color: var(--ruin, var(--accent));
+}
+.dec-send:hover, .dec-send:focus-visible { background: rgba(255, 255, 255, 0.1); }
+.dec-answer { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text); }
+.dec-answer:empty { display: none; }
+.dec-answer[data-kind="open"] { color: var(--ruin, var(--accent)); font-weight: 600; }
+.decoder.open .dec-in svg { animation: dec-open 0.9s ease-in-out infinite alternate; }
+@keyframes dec-open { to { filter: drop-shadow(0 0 10px currentColor) drop-shadow(0 0 18px currentColor); } }
+@media (prefers-reduced-motion: reduce) { .decoder.open .dec-in svg { animation: none; } }
+/* The talk with a person of the crew at the twin, and the end of the mission. */
+.talk-card { text-align: left; }
+.talk-who { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin: 0 40px 12px 0; }
+.talk-who b { font-size: 22px; font-weight: 600; }
+.talk-role { color: var(--muted); font-size: 13px; }
+.talk-line {
+  margin: 0 0 18px; padding: 2px 0 2px 14px; border-left: 2px solid var(--accent-2);
+  font-size: 17px; line-height: 1.5; color: #fff;
+}
+.talk-home {
+  display: block; width: 100%; padding: 11px 18px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 600; color: #0b1026;
+  background: var(--accent-2); border: 0;
+}
+.talk-home:hover, .talk-home:focus-visible { filter: brightness(1.08); }
+.talk-home[hidden] { display: none; }
+.home-card h2 { margin-bottom: 12px; }
+.home-lost { color: var(--muted); }
+.home-lost:empty { display: none; }
+#info .way-row { color: var(--ruin, var(--accent-2)); }

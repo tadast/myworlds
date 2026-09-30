@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Story lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  The story lab of chapter 3. It builds a world in the page with generate.js and shows its whole
+  story: the log of the wreck, the second log at the ruin, and the third log at the twin under each
+  of the six fates of way-types.js, side by side. The fate the seed takes is marked. Each fate has a
+  link that opens the game on that seed with `?fate=<id>&chapter=3`, so the reader of the lab can walk
+  that timeline on the ground: land on the ruin, read the name, jump, and meet the crew.
+
+  The scan builds the audit seeds one after another and lists the worlds with a crew at the ruin, with
+  the fate, the form, the type, and the crew, so a timeline of one kind is easy to find.
+
+  The address takes the seed: tools/story-lab.html#audit-2. See docs/issues/p3-00-the-way-on.md.
+-->
+<style>
+  :root { --bg: #0b1020; --fg: #e8ecff; --dim: #8e97bd; --line: #243056; --on: #7cc4ff; --gold: #ffb86b; --good: #8fe0a4; --bad: #ff8a7a; --odd: #c9a7ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  header h1 { margin: 0; font-size: 16px; }
+  header input { width: 160px; background: #121a33; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
+  button, .btn { background: #121a33; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 13px; text-decoration: none; display: inline-block; }
+  button:hover, .btn:hover { border-color: var(--on); color: var(--on); }
+  #status { color: var(--dim); font-size: 13px; }
+  main { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  aside { border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: calc(100vh - 90px); overflow: auto; position: sticky; top: 70px; }
+  aside h2, section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--on); margin: 4px 0 8px; }
+  #filters { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  #filters select { background: #121a33; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  td, th { padding: 3px 4px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { color: var(--dim); font-weight: 500; }
+  tr.pick { cursor: pointer; }
+  tr.pick:hover td { background: #121a33; }
+  tr.cur td { background: #17224a; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 16px; margin: 0 0 12px; }
+  .facts div { border-bottom: 1px solid var(--line); padding: 2px 0; }
+  .facts b { display: block; color: var(--dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  section { margin-bottom: 18px; }
+  .track { position: relative; height: 54px; margin: 6px 0 16px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+  .track .bar { position: absolute; top: 18px; height: 10px; border-radius: 5px; }
+  .track .lab { position: absolute; top: 32px; font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .track .tick { position: absolute; top: 0; font-size: 11px; color: var(--dim); white-space: nowrap; }
+  details { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
+  summary { cursor: pointer; color: var(--dim); }
+  .entry { margin: 8px 0; }
+  .entry h4 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); }
+  .entry p { margin: 2px 0 0; max-width: 70ch; }
+  .entry.titled h4 { color: var(--gold); }
+  #fates { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+  .fate { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .fate.real { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+  .fate header { position: static; padding: 0 0 6px; border: 0; gap: 8px; background: none; }
+  .fate h3 { margin: 0; font-size: 15px; }
+  .tag { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--dim); }
+  .tag.real { color: var(--gold); border-color: var(--gold); }
+  .ends { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
+  .end { font-size: 12px; border-radius: 6px; padding: 1px 6px; background: #121a33; }
+  .end.home { color: var(--good); } .end.lost { color: var(--bad); } .end.gone { color: var(--dim); } .end.changed { color: var(--odd); }
+  .voice { margin: 8px 0 0; padding: 6px 10px; border-left: 2px solid var(--gold); color: #fff; }
+  .none { color: var(--dim); font-style: italic; }
+  .warn { color: var(--bad); }
+</style>
+<script type="importmap">
+  { "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/addons/" } }
+</script>
+</head>
+<body>
+<header>
+  <h1>Story lab</h1>
+  <form id="go"><input id="seed" placeholder="seed" autocomplete="off"> <button>Show</button></form>
+  <button id="scan">Scan 80 seeds</button>
+  <span id="status"></span>
+</header>
+<main>
+  <aside>
+    <h2>Worlds with a crew at the ruin</h2>
+    <div id="filters">
+      <select id="f-fate"><option value="">every fate</option></select>
+      <select id="f-type"><option value="">every type</option></select>
+      <select id="f-went"><option value="">every crew</option><option>all</option><option>some</option><option>one</option></select>
+    </div>
+    <table><thead><tr><th>seed</th><th>type</th><th>went</th><th>fate</th><th>form</th></tr></thead><tbody id="list"></tbody></table>
+  </aside>
+  <div id="out"><p class="none">Type a seed, or scan and pick a world.</p></div>
+</main>
+<script type="module">
+import * as generate from '../generate.js';
+import { FATES, fatesFor, homeOf, nameOf, callSign } from '../way-types.js';
+
+const OPTS = { detail: 24, maxFlora: 200, maxFauna: 40 };
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const status = (t) => { $('#status').textContent = t; };
+const worldOf = (seed, fate = null) => generate.world(seed, fate ? { ...OPTS, fate } : OPTS).world;
+const gameUrl = (seed, fate) => `../index.html?chapter=3${fate ? '&fate=' + fate : ''}#${encodeURIComponent(seed)}`;
+
+for (const f of FATES) $('#f-fate').insertAdjacentHTML('beforeend', `<option value="${f.id}">${f.id}</option>`);
+for (const t of ['terran', 'ocean', 'desert', 'ice', 'lava', 'exotic']) $('#f-type').insertAdjacentHTML('beforeend', `<option>${t}</option>`);
+
+const entryHtml = (e) => `<div class="entry${e.title ? ' titled' : ''}"><h4>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''} <span style="opacity:.5">${esc(e.slot)}</span></h4><p>${esc(e.text)}</p>${e.slot === 'end.cut' ? '<p class="none">[log ends abruptly]</p>' : ''}</div>`;
+
+// The track of the days: the first log, the trip and the stay at the ruin, and the third log, and
+// the rescue at the end when the fate leaves somebody at home.
+function trackHtml(first, second, third) {
+  const end = third ? third.days : second ? second.days : first.days;
+  const span = Math.max(1, end);
+  const bar = (a, b, col, label, up = false) => `<div class="bar" style="left:${(a / span) * 100}%;width:${Math.max(0.6, ((b - a) / span) * 100)}%;background:${col}"></div>`
+    + `<div class="lab" style="left:${(a / span) * 100}%;${up ? 'top:0' : ''}">${label}</div>`;
+  let h = bar(0, first.days, '#6f86d6', `wreck · day 1–${first.days}`);
+  if (second) h += bar(second.arrived, second.days, '#b58cff', `ruin · ${second.arrived}–${second.days}`);
+  if (third) h += bar(third.through, third.days, '#ffb86b', `twin · ${third.through}–${third.days}`, true);
+  return `<div class="track">${h}<div class="tick" style="right:0;top:auto;bottom:-4px">day ${end}${third && homeOf(third).length ? ` · rescue after ${third.years} years` : ''}</div></div>`;
+}
+
+function show(seed) {
+  status(`Building ${seed}…`);
+  location.hash = encodeURIComponent(seed);
+  setTimeout(() => {
+    const t0 = performance.now();
+    const w = worldOf(seed);
+    const first = w.source && w.source.log;
+    if (!w.ruin || !first) { $('#out').innerHTML = `<p class="none">${esc(seed)}: ${w.type === 'gas' ? 'a gas giant has no surface' : 'no ruin'}, so no chapter 3.</p>`; status(''); return; }
+    const second = w.ruin.log;
+    const twin = w.twin;
+    const G = twin && w.species[twin.herd];
+    const maker = w.ruin.maker;
+    const facts = [
+      ['world', `${w.designation} · ${w.typeLabel}`], ['temp', w.stats.temp], ['ship', `${first.probe} · ${first.crew.length} crew`],
+      ['cause', first.cause], ['went', `${first.went}${first.goers && first.goers.length ? ': ' + first.goers.join(', ') : ''}${first.by ? ' by ' + first.by : ''}`],
+      ['ruin', `${w.ruin.proto} · ${w.ruin.freq} MHz · ${w.ruin.from}`],
+      ['maker', maker.rolled ? `rolled: ${maker.limbs} limbs, ${maker.height} m` : w.species[maker.species].lore.name],
+      ['twin', twin ? `${twin.km} km ${twin.from} of the ruin` : '—'],
+      ['herd', G ? `${G.lore.name}${twin.kin ? ' (kin: lives only at the twin)' : ''}` : '—'],
+      ['name', `${nameOf(w)} · key "${callSign(w)}"`],
+      ['second log', second ? `${second.entries.length} entries, ends ${second.entries[second.entries.length - 1].slot}` : 'none'],
+      ['fate of the seed', twin && twin.fate ? `${twin.fate}${twin.form ? ' · ' + twin.form : ''}` : 'none: nobody reached the ruin'],
+    ];
+    let html = `<section><h2>${esc(seed)}</h2><div class="facts">${facts.map(([k, v]) => `<div><b>${k}</b>${esc(v)}</div>`).join('')}</div>`
+      + `<a class="btn" href="${gameUrl(seed, null)}" target="_blank">Play this world at chapter 3</a></section>`;
+    html += `<section><h2>The log of the wreck</h2><details><summary>${first.entries.length} entries · last entry: ${esc(first.entries[first.entries.length - 1].text.slice(0, 120))}…</summary>${first.entries.map(entryHtml).join('')}</details></section>`;
+    if (second) {
+      html += `<section><h2>The second log, at the ruin</h2><details><summary>${esc(second.crew.map((c) => c.name + ' (' + c.role + ')').join(', '))} · last entry: ${esc(second.entries[second.entries.length - 1].text.slice(0, 110))}…</summary>${second.entries.map(entryHtml).join('')}</details></section>`;
+    } else {
+      html += `<section><h2>The second log</h2><p class="none">Nobody went to the ruin. The twin holds the herd and no crew.</p></section>`;
+    }
+    if (second && twin) {
+      const allowed = fatesFor(second.crew.length);
+      html += `<section><h2>The six timelines at the twin</h2>${trackHtml(first, second, twin.log)}<div id="fates">`;
+      for (const f of FATES) {
+        if (!allowed.includes(f.id)) {
+          html += `<div class="fate"><header><h3>${f.title}</h3><span class="tag">${f.id}</span></header><p class="none">A crew of ${second.crew.length} cannot take this fate.</p></div>`;
+          continue;
+        }
+        const wf = f.id === twin.fate ? w : worldOf(seed, f.id);
+        const log = wf.twin.log;
+        const real = f.id === twin.fate;
+        const ends = log ? log.crew.map((c) => `<span class="end ${c.end}">${esc(c.name)} · ${c.end}</span>`).join('') : '';
+        const voice = log && log.voice ? `<p class="voice">${esc(log.voice.speaker)}: “${esc(log.voice.line)}”${log.voice.home ? '' : ' <span class="none">(no rescue)</span>'}</p>` : '<p class="none">Nobody meets the probe.</p>';
+        html += `<div class="fate${real ? ' real' : ''}"><header><h3>${f.title}</h3><span class="tag${real ? ' real' : ''}">${real ? 'this seed' : f.id}</span>${wf.twin.form ? `<span class="tag">${wf.twin.form}</span>` : ''}<a class="btn" href="${gameUrl(seed, f.id)}" target="_blank">Play</a></header>`
+          + `<div class="ends">${ends}</div>${log ? log.entries.map(entryHtml).join('') : '<p class="warn">no log</p>'}${voice}</div>`;
+      }
+      html += '</div></section>';
+    }
+    $('#out').innerHTML = html;
+    status(`${seed} built in ${Math.round(performance.now() - t0)} ms`);
+    document.querySelectorAll('#list tr').forEach((tr) => tr.classList.toggle('cur', tr.dataset.seed === seed));
+  }, 20);
+}
+
+// The scan: the audit seeds, one world a tick, so the page stays alive.
+const rows = [];
+function renderList() {
+  const ff = $('#f-fate').value, ft = $('#f-type').value, fw = $('#f-went').value;
+  $('#list').innerHTML = rows.filter((r) => (!ff || r.fate === ff) && (!ft || r.type === ft) && (!fw || r.went === fw))
+    .map((r) => `<tr class="pick" data-seed="${esc(r.seed)}"><td>${esc(r.seed)}</td><td>${r.type}</td><td>${r.went} ${r.n}${r.kin ? ' · kin' : ''}</td><td>${r.fate}</td><td>${r.form || ''}</td></tr>`).join('');
+  document.querySelectorAll('#list tr').forEach((tr) => tr.addEventListener('click', () => show(tr.dataset.seed)));
+}
+$('#scan').addEventListener('click', () => {
+  rows.length = 0;
+  let i = 0;
+  const tick = () => {
+    const seed = 'audit-' + i;
+    const w = worldOf(seed);
+    const log = w.ruin && w.ruin.log;
+    if (log && w.twin) rows.push({ seed, type: w.type, went: log.went, n: log.crew.length, fate: w.twin.fate, form: w.twin.form, kin: w.twin.kin });
+    status(`Scanning ${seed}… ${rows.length} worlds with a crew`);
+    if (++i < 80) setTimeout(tick, 0); else { status(`${rows.length} of 80 seeds have a crew at the ruin`); renderList(); }
+    if (i % 10 === 0) renderList();
+  };
+  tick();
+});
+for (const id of ['#f-fate', '#f-type', '#f-went']) $(id).addEventListener('change', renderList);
+$('#go').addEventListener('submit', (e) => { e.preventDefault(); const s = $('#seed').value.trim(); if (s) show(s); });
+const fromHash = decodeURIComponent(location.hash.slice(1));
+if (fromHash) { $('#seed').value = fromHash; show(fromHash); }
+</script>
+</body>
+</html>

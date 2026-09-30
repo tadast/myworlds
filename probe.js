@@ -13,8 +13,8 @@
 //
 //   mode    'orbit', 'descending', 'ground', or 'ascending'
 //   site    the site of the landing, fixed at the start of the descent, or null in orbit
-//   dive    the dive that runs, `{ kind, phase, t0, dur, path }`, or null. `kind` is 'descend' or
-//           'ascend'. `phase` is 'in' while the cover closes and 'out' while it opens. `path` is
+//   dive    the dive that runs, `{ kind, phase, t0, dur, path }`, or null. `kind` is 'descend',
+//           'ascend', or 'jump' (chapter 3: from the ruin to the twin, ground to ground). `phase` is 'in' while the cover closes and 'out' while it opens. `path` is
 //           what the page gave descend() for the camera; the probe does not read it.
 //   patch   the patch the worker builds for the site, `{ done, result }`
 //   job     the number of the last descent. A patch that arrives for an older descent is dropped.
@@ -30,6 +30,11 @@
 export const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
 export const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
 export const FADE_MS = 600;      // ms, the time the cover takes to open after the switch
+// Chapter 3: the jump from the ruin to the twin. The probe stays on the ground the whole time: the
+// ruin flares for JUMP_MS while the cover goes white, the ground switches under the cover, and the
+// twin flares and fades for JUMP_OUT_MS while the cover opens. See docs/issues/p3-00-the-way-on.md.
+export const JUMP_MS = 4200;
+export const JUMP_OUT_MS = 2600;
 
 const smooth = (k) => k * k * (3 - 2 * k);   // the smoothstep of three.js from 0 to 1
 
@@ -66,9 +71,27 @@ export class Probe {
     return true;
   }
 
+  // Chapter 3: the probe jumps from the ground it stands on to `site`, the cell of the twin, at time
+  // `now`. It stays in the mode 'ground', and the dive holds the frames until the switch. Gives false
+  // unless it stands on the ground with no dive. The page then asks the worker for the patch of
+  // `site` under `job`, as for a descent. The landing heard nothing yet, so the fix, the stage, and the
+  // key go: a jump takes no fix of its own until the page hears the carrier at the twin.
+  jump(site, now) {
+    if (this.mode !== 'ground' || this.dive || !site) return false;
+    this.site = { ...site };
+    this.patch = { done: false, result: null };
+    this.job++;
+    this.fix = null;
+    this.stage = null;
+    this.heard = null;
+    this.dive = { kind: 'jump', phase: 'in', t0: now, dur: JUMP_MS, path: null };
+    return true;
+  }
+
   // The patch of descent `job` arrived, or failed with null. A patch of an older descent is dropped.
   patchDone(job, result) {
-    if (job !== this.job || this.mode !== 'descending') return;
+    const jumping = this.dive && this.dive.kind === 'jump' && this.dive.phase === 'in';
+    if (job !== this.job || (this.mode !== 'descending' && !jumping)) return;
     this.patch = { done: true, result: result || null };
   }
 
@@ -100,6 +123,8 @@ export class Probe {
   //     'leave'     the ascent switches to the globe
   //     'surfaced'  the cover is open over the globe, and the probe is in orbit. `fix` is the fix
   //                 that waited for this moment, or null.
+  //     'swap'      the jump switches to the ground of the twin under the white cover. `patch` is
+  //                 the patch, or null. The event 'landed' ends the jump.
   step(now) {
     const d = this.dive;
     if (!d) return null;
@@ -109,7 +134,13 @@ export class Probe {
     if (raw < 1) return out;
     if (d.phase === 'in') {
       // the switch waits for the patch, or for the guard, whichever comes first after the floor
-      if (d.kind === 'descend' && !this.patch.done && now - d.t0 < PATCH_WAIT) return out;
+      if ((d.kind === 'descend' || d.kind === 'jump') && !this.patch.done && now - d.t0 < PATCH_WAIT) return out;
+      if (d.kind === 'jump') {
+        out.event = 'swap';
+        out.patch = this.patch.result;
+        this.dive = { ...d, phase: 'out', t0: now, dur: JUMP_OUT_MS };
+        return out;
+      }
       if (d.kind === 'descend') {
         this.mode = 'ground';
         out.event = 'enter';

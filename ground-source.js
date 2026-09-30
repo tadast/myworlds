@@ -21,9 +21,10 @@
 // class by patch.source.kind. See "The ruin on its patch" in docs/ruin.md. p2-41.
 import * as THREE from 'three';
 import { motifOf, ruinMotifOf } from './music.js';
-import { wreckGeometry, hullOf, crewCampGeometry } from './wreck-geometry.js';
+import { wreckGeometry, hullOf, crewCampGeometry, twinCampGeometry } from './wreck-geometry.js';
 import { ruinGeometry, ruinPalette } from './ruin-geometry.js';
 import { protoRow, ruinCard } from './ruin-types.js';
+import { twinCard } from './way-types.js';
 import { carrierColour } from './carrier-globe.js';
 
 const DISC_R = 12;           // units, the ring of the mark. The worker flattens 14.
@@ -39,6 +40,7 @@ const LIGHT_CD = 900;        // candela at the lamp, in the light scale of groun
 const PICK_PAD = 6;          // units: the tap box stands this far out from the body
 
 const _a = new THREE.Vector3();
+const _white = new THREE.Color(1, 1, 1);
 const _ray = new THREE.Raycaster();
 const _ndc = new THREE.Vector2();
 
@@ -236,6 +238,13 @@ const FLOAT_TURN = 0.06;        // rad/s: the orbit of the floaters turns once i
 const FLOAT_LIFT = 1.4;         // units: how far a slab of the floaters rises and falls
 const FLOAT_RATE = [0.3, 0.55]; // rad/s: the range of the rate of the lift of one slab
 const GOLDEN = 2.399963;        // rad: the golden angle, so no two slabs lift in step
+// Chapter 3: the flare of the jump. The glow goes white and bright, the light grows, and a beam of
+// light stands over the stones, as wide as a part of the disc and up past the fog.
+const FLARE_BEAM_H = 900;       // units, the height of the beam
+const FLARE_BEAM_R = 0.42;      // the radius of the beam, as a part of the flat disc
+const FLARE_LIGHT = 5;          // the light at the full flare, over RUIN_LIGHT_CD
+const FLARE_MOTES = 260;        // points of light that rise round the beam
+const FLARE_RISE = 38;          // units a second, how fast a point rises at the full flare
 
 // The rhythm the glow of the ruin blinks is ruinMotifOf() of music.js: the motif the ear hears on
 // the ruin bus, the steps of the wreck at twice their length. p2-44.
@@ -312,9 +321,12 @@ function hullDistance(hull, x, z) {
 
 export class SourceRuin {
   // The ruin of this patch, or null when the patch carries none.
+  //
+  // Chapter 3: the twin stands here too, with `kind` 'twin'. It has the body of the ruin, the same
+  // glow and voice, and in place of the camp of p2-43 the tent of the crew that went through the way.
   static create(opts) {
     const src = opts && opts.patch && opts.patch.source;
-    if (!src || src.kind !== 'ruin') return null;
+    if (!src || (src.kind !== 'ruin' && src.kind !== 'twin')) return null;
     return new SourceRuin(opts);
   }
 
@@ -408,10 +420,11 @@ export class SourceRuin {
     // A tap on the camp marks the ruin, because the camp is a part of the find. The range still
     // measures to the stones.
     this.camp = null;
-    const camp = src.camp;
+    const camp = src.camp || src.tent || null;
     if (camp) {
       const pal = ruinPalette(world && world.type);
-      const geo = crewCampGeometry(camp, { stone: pal.stone, dark: pal.dark });
+      const geo = src.tent ? twinCampGeometry(camp, { stone: pal.stone, dark: pal.dark })
+        : crewCampGeometry(camp, { stone: pal.stone, dark: pal.dark });
       this.camp = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
       this.camp.castShadow = shadows;
       this.camp.receiveShadow = shadows;
@@ -439,9 +452,63 @@ export class SourceRuin {
   update(t) {
     // The rules of the lamp of the wreck: a floor that never goes out, a tail, and a breath.
     const k = lampLevel(this.rhythm, this._clock(t));
+    const f = this.flareK || 0;
     this.glowMat.color.copy(this.glowColor).multiplyScalar(0.35 + 0.65 * k);
-    if (this.light) this.light.intensity = RUIN_LIGHT_CD * k;
-    if (this.orbit) this._turn(t);
+    if (f > 0) this.glowMat.color.lerp(_white, f).multiplyScalar(1 + f);
+    if (this.light) this.light.intensity = RUIN_LIGHT_CD * (k + f * FLARE_LIGHT);
+    if (this.orbit) this._turn(t * (1 + f * 6));
+    if (this.motes) {
+      this.motes.visible = f > 0.01;
+      this.motes.material.opacity = Math.min(1, f * 1.4);
+      const a = this.motes.geometry.attributes.position, m = this.moteSeed, top = FLARE_BEAM_H * 0.45;
+      for (let i = 0; i < a.count; i++) {
+        const k = i * 3;
+        const y = (m[k + 2] * top + t * FLARE_RISE * (0.4 + f) * (0.6 + m[k + 1] * 0.8)) % top;
+        const r = this.disc * (0.25 + 0.95 * m[k]) * (1 - 0.6 * y / top);
+        const ang = m[k + 1] * Math.PI * 2 + t * (0.6 + m[k] * 0.9);
+        a.array[k] = Math.cos(ang) * r; a.array[k + 1] = y; a.array[k + 2] = Math.sin(ang) * r;
+      }
+      a.needsUpdate = true;
+    }
+    if (this.beam) {
+      this.beam.visible = f > 0.01;
+      this.beam.material.opacity = 0.75 * f;
+      const w = 0.25 + 0.75 * Math.min(1, f * 1.6);
+      this.beam.scale.set(w, 1, w);
+      this.beam.rotation.y = t * 0.8;
+    }
+  }
+
+  // Chapter 3: the flare of the jump, `k` from 0 to 1. The ruin flares as the name opens the way,
+  // and the twin flares on the arrival and fades. The page drives it on the frames of the jump.
+  flare(k) {
+    this.flareK = Math.max(0, Math.min(1, k));
+    if (this.flareK > 0 && !this.beam) {
+      const r = this.disc * FLARE_BEAM_R;
+      const geo = new THREE.CylinderGeometry(r, r * 0.6, FLARE_BEAM_H, 24, 1, true);
+      geo.translate(0, FLARE_BEAM_H / 2, 0);
+      this.beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: this.glowColor.clone().lerp(_white, 0.55), transparent: true, opacity: 0, fog: false,
+        depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+      }));
+      this.beam.renderOrder = 4;
+      this.beam.frustumCulled = false;
+      this.group.add(this.beam);
+      // The points rise in a spiral round the beam and narrow toward the sky. Three numbers a point
+      // fix its radius, its phase, and its start, from a fixed sequence, so every flare is the same.
+      // The R3 sequence gives the three numbers of point i, so the points fill the cone with no line.
+      const R3 = [0.8191725134, 0.6710436067, 0.5497004779];
+      this.moteSeed = Float32Array.from({ length: FLARE_MOTES * 3 }, (_, k) => ((0.5 + R3[k % 3] * (Math.floor(k / 3) + 1)) % 1));
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(FLARE_MOTES * 3), 3));
+      this.motes = new THREE.Points(pg, new THREE.PointsMaterial({
+        color: this.glowColor.clone().lerp(_white, 0.35), size: 1.6, sizeAttenuation: true, transparent: true,
+        opacity: 0, fog: false, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+      }));
+      this.motes.renderOrder = 4;
+      this.motes.frustumCulled = false;
+      this.group.add(this.motes);
+    }
   }
 
   _turn(t) {
@@ -516,6 +583,8 @@ export class SourceRuin {
     this.camp = null;
     this.ring = null;
     this.light = null;
+    this.beam = null;
+    this.motes = null;
   }
 }
 
@@ -767,7 +836,7 @@ export function glyphSvg(glyphs) {
 // entry of that log, and an end of the kind `cut` takes the note of p2-37. One person left one note,
 // and the row marks that person as its writer. A world where nobody went holds no second log, so the
 // slot stays empty and takes no room: the reader is the first to stand at the ruin.
-function ruinCrewHtml(log) {
+function ruinCrewHtml(log, head = 'The crew at the ruin') {
   if (!log || !log.entries || !log.entries.length) return '';
   const note = log.went === 'one';
   const rows = (log.crew || []).map((c) =>
@@ -775,15 +844,22 @@ function ruinCrewHtml(log) {
   const entries = log.entries.map((e) => `<div class="clog-entry${e.title ? ' ctitled' : ''}">`
     + `<h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p>`
     + `${e.slot === ABRUPT_SLOT ? `<p class="cabrupt">${ABRUPT}</p>` : ''}</div>`).join('');
-  return `<h3 class="cruin-head">The crew at the ruin</h3>`
+  return `<h3 class="cruin-head">${esc(head)}</h3>`
     + `<div class="cruin-goers${note ? ' cnote' : ''}">${rows}</div><div class="cruin-log">${entries}</div>`;
 }
 
-function ruinRowHtml(r) {
-  if (r.key === 'way') {
+// Chapter 3: the way on holds the line of glyphs and, while the chapter is open, the decoder under
+// it; decoder.js builds the form and the page puts it in the slot. After the arrival the row shows
+// the name the glyphs spell, and the card of the twin shows it in the row `name`. See
+// docs/issues/p3-00-the-way-on.md.
+function ruinRowHtml(r, way) {
+  if (r.key === 'way' || r.key === 'name') {
+    const word = r.word || (way && way.word);
+    const read = word ? `<span class="cword">${esc(word)}</span>` : '';
+    const text = r.key === 'way' && way && way.text ? way.text : r.text;
     return `<div class="crow cway" data-row="${r.key}"><dt>${esc(r.label)}</dt><dd>`
-      + `<div class="cglyphs">${glyphSvg(r.glyphs || [])}<span class="csoon">Coming soon</span></div>`
-      + `<p>${esc(r.text)}</p></dd></div>`;
+      + `<div class="cglyphs">${glyphSvg(r.glyphs || [])}${read}</div>`
+      + `<p>${esc(text)}</p>${r.key === 'way' && way && way.el ? '<div class="cdecoder"></div>' : ''}</dd></div>`;
   }
   return `<div class="crow" data-row="${r.key}"><dt>${esc(r.label)}</dt><dd>${esc(r.text)}</dd></div>`;
 }
@@ -809,8 +885,12 @@ export class RuinInspector {
   // `glow` is the colour of chapter 2 on this world, the colour of the glow on the ground. `accent`
   // is that colour made light enough to read on the dark card, for the text. `groundColor` is the
   // ground colour of the world.
-  show(world, { glow, accent, groundColor } = {}) {
-    const text = ruinCard(world);
+  //
+  // Chapter 3: `twin` shows the card of the twin, with the third log. `way` is the row of the way
+  // on of the card of the ruin: `{ el, word, text }`, the decoder while the chapter is open, and the
+  // name the glyphs spell after the arrival.
+  show(world, { glow, accent, groundColor, twin = false, way = null } = {}) {
+    const text = twin ? twinCard(world) : ruinCard(world);
     if (!text) return;
     if (!this.renderer) this.renderer = cardRenderer(this.canvas);
     const key = `${world.seed}|${world.type}|${world.ruin.proto}`;
@@ -822,8 +902,10 @@ export class RuinInspector {
 
     this.nameEl.textContent = text.name;
     this.latinEl.textContent = text.sub;
-    this.rowsEl.innerHTML = text.rows.map(ruinRowHtml).join('');
-    if (this.crewEl) this.crewEl.innerHTML = ruinCrewHtml(world.ruin.log);
+    this.rowsEl.innerHTML = text.rows.map((r) => ruinRowHtml(r, way)).join('');
+    const slot = this.rowsEl.querySelector('.cdecoder');
+    if (slot && way && way.el) slot.appendChild(way.el);
+    if (this.crewEl) this.crewEl.innerHTML = twin ? ruinCrewHtml(world.twin.log, 'The crew at the twin') : ruinCrewHtml(world.ruin.log);
     if (this.scrollEl) this.scrollEl.scrollTop = 0;
     this.card.hidden = false;
     requestAnimationFrame(() => this.card.classList.add('show'));

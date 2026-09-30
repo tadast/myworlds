@@ -13,6 +13,10 @@ import { PlantInspector } from './flora-card.js';
 import { SourceInspector, RuinInspector } from './ground-source.js';
 import { makeTuner } from './tuner.js';
 import { Probe } from './probe.js';
+import { wayKey, sendName, nameOf, homeOf, FATE_IDS } from './way-types.js';   // chapter 3
+import { readCodex, writeCodex } from './carrier-store.js';
+import { makeDecoder } from './decoder.js';
+import { protoRow } from './ruin-types.js';
 import { hullOf } from './wreck-geometry.js';
 import { Ground } from './ground.js';
 import { TIERS, worldOpts, patchOpts } from './tiers.js';
@@ -45,6 +49,17 @@ const SOURCE_DOT = new URLSearchParams(location.search).has('source');
 // check on the place: with `?source` on too, the ruin stands 12 to 35 cells from the wreck on
 // nearly every world. It stays out of the UI.
 const RUIN_DOT = new URLSearchParams(location.search).has('ruin');
+// Chapter 3, for the tests and for the tools of the story. `?fate=<id>` gives the third log the fate
+// `<id>` of way-types.js in place of the fate of the seed, when the crew allows it: a debug option of
+// the world call, so the worker and the patch read the same log. `?chapter=3` gives the reader the
+// finds of chapters 1 and 2 on each world that loads, so chapter 3 opens at once. Neither stands
+// in the interface. See docs/issues/p3-00-the-way-on.md and tools/story-lab.html.
+const FATE = (() => { const f = new URLSearchParams(location.search).get('fate'); return FATE_IDS.includes(f) ? f : null; })();
+const SKIP_TO = Number(new URLSearchParams(location.search).get('chapter')) || 0;
+const wOpts = () => (FATE ? { ...worldOpts(Q), fate: FATE } : worldOpts(Q));
+const pOpts = () => { const o = patchOpts(Q); if (FATE) o.world = { ...o.world, fate: FATE }; return o; };
+// Chapter 3: the level of the voice of the ruin during the jump, 0 to 1. setCarrierLevel() reads it.
+let jumpVoice = 0, lastJumpVoice = 0;
 const HUD_MS = 500;       // ms, the overlay reads twice a second
 
 // ---------------------------------------------------------------- dom
@@ -567,6 +582,7 @@ const SLOPE_STEP = 0.02;
   // The colour of the carrier comes off the colours of this terrain, so a wedge stands out on it.
   if (world.type !== 'gas') pickCarrierColour(world, terrain.col, terrain.pos);
   progress = progressOf(world);
+  if (SKIP_TO >= 3) skipToWay(progress, world);
   carrierGroup = makeCarrierGroup(world, progress.view(), heightMap);
   if (carrierGroup) planet.add(carrierGroup);
 
@@ -863,6 +879,7 @@ function step(now) {
   const t = clock.elapsedTime;
   if (probe.dive) stepDive(now);
   if (probe.mode === 'ground') {          // the globe stays in memory, but none of its work runs
+    if (homeRun) stepHome(now);
     ground.update(t, dt);
     ground.render();
     probeHud.update(ground.telemetry(), now);
@@ -1136,12 +1153,12 @@ let ground = null;        // the Ground instance while the probe is down
 
 // The patch for the site the probe dives to. The dive holds the screen until the reply lands, so the
 // reader never sees the ground build. The reply goes to the descent that asked for it.
-function requestPatch() {
+function requestPatch(label = null) {
   const t0 = performance.now();
   const job = probe.job, target = probe.site;
-  if (diveLabel) diveLabel.textContent = 'Sending the probe';
+  if (diveLabel) diveLabel.textContent = label || 'Sending the probe';
   patchJob = {
-    progress: (msg) => { if (diveLabel) diveLabel.textContent = msg.label; },
+    progress: (msg) => { if (diveLabel && !label) diveLabel.textContent = msg.label; },
     done: (result) => {
       patchJob = null;
       probe.patchDone(job, result);
@@ -1156,7 +1173,7 @@ function requestPatch() {
   };
   getWorker().postMessage({
     type: 'patch', seed: current.world.seed,
-    site: { lat: target.lat, lon: target.lon, kind: target.kind ?? -1 }, opts: patchOpts(Q),
+    site: { lat: target.lat, lon: target.lon, kind: target.kind ?? -1 }, opts: pOpts(),
   });
 }
 
@@ -1202,6 +1219,7 @@ function ascend() {
 function stepDive(now) {
   const s = probe.step(now);
   if (!s) return;
+  if (s.kind === 'jump') { stepJump(s); return; }
   if (s.path && s.phase === 'in') {
     camera.position.lerpVectors(s.path.from, s.path.to, s.k);
     camera.lookAt(s.path.look);
@@ -1260,10 +1278,12 @@ function enterGround(result, view) {
     // The lamp of the wreck blinks the rhythm of the motif on the bar clock of the song, so the
     // eye and the ear agree. Issue 34, slice 3.
     music,
-    onSelect: (kind) => { markedKind = kind; markedPlant = null; markedSource = false; },
-    onSelectPlant: (kind) => { markedPlant = kind; markedKind = null; markedSource = false; },
-    onSelectSource: () => { markedSource = true; markedKind = null; markedPlant = null; },
-    onDeselect: () => { markedKind = null; markedPlant = null; markedSource = false; },
+    onSelect: (kind) => { markedKind = kind; markedPlant = null; markedSource = false; markedPerson = null; },
+    onSelectPlant: (kind) => { markedPlant = kind; markedKind = null; markedSource = false; markedPerson = null; },
+    onSelectSource: () => { markedSource = true; markedKind = null; markedPlant = null; markedPerson = null; },
+    // Chapter 3: a person of the crew at the twin. The floating button offers the talk.
+    onSelectPerson: (name) => { markedPerson = name; markedKind = null; markedPlant = null; markedSource = false; },
+    onDeselect: () => { markedKind = null; markedPlant = null; markedSource = false; markedPerson = null; },
   });
   // The plant lore of this patch. It arrives with the patch, because it reads the biome of the
   // site, and it goes away with the patch. See describePatchFlora() in generate.js.
@@ -1278,6 +1298,11 @@ function enterGround(result, view) {
   ground.load(result, { sunDir: sky.sunDir, view: sky, carrier });
   if (result) console.info(`[myworlds] ground mesh built in ${Math.round(performance.now() - t0)} ms`);
   if (view) ground.setView(view);   // a shared link brings its own camera
+  // Chapter 3: on a landing at the twin after the read of the third log, the people of the tent
+  // stand outside already.
+  const wv = progress && progress.view().way;
+  // After the way home the tent stands empty.
+  if (ground.crew && wv && wv.read && !wv.home) ground.crew.release(false);
   ground.resize(innerWidth, innerHeight);
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
   probeHud.show();
@@ -1298,7 +1323,8 @@ function dropGround() {
   if (plantInspector.open) closeCard();   // the plant of a patch cannot be studied from orbit
   probeHud.hide();
   if (ground) { ground.dispose(); ground = null; }
-  markedKind = null; markedPlant = null; markedSource = false;
+  markedKind = null; markedPlant = null; markedSource = false; markedPerson = null;
+  crewWaits = false;
   groundPlants = []; groundVariant = 0;
   perf.reset();       // the ground frames say nothing about the globe
 }
@@ -1415,6 +1441,8 @@ let markedPlant = null;   // the kind of the marked plant, or null while nothing
 // Issue 34: the wreck takes the same button. One patch holds at most one wreck, so a flag says all
 // there is to say. The button then reads "Download the log" and it opens the card of the source.
 let markedSource = false;
+// Chapter 3: the name of the marked person of the crew at the twin, or null. The button offers the talk.
+let markedPerson = null;
 let creatureLabel = '';
 // The plants of the patch the probe is standing on, tallest first, and the flora signature the
 // card builds a preview with. Both are empty in orbit, because a plant belongs to a patch.
@@ -1438,8 +1466,12 @@ function updateCreatureFloat() {
       // The ruin is a subject, and the button takes the form the animal and the plant take. p2-41.
       // The source of a closed chapter has no card, and the button says so. ADR-0001.
       const kind = ground && ground.source && ground.source.kind;
-      label = progress && progress.state(kind) === 'closed' ? CLOSED_LINE
-        : kind === 'ruin' ? 'Study the ruin' : 'Download the log';
+      label = progress && progress.state(chapterOfKind(kind)) === 'closed' ? CLOSED_LINE
+        : kind === 'ruin' ? 'Study the ruin'
+          : kind === 'twin' ? (current && current.world.twin && current.world.twin.log ? 'Read the log of the crew' : 'Study the twin')
+            : 'Download the log';
+    } else if (markedPerson) {
+      label = `Talk to ${markedPerson}`;
     }
   }
   if (label === creatureLabel) return;
@@ -1451,7 +1483,8 @@ if (creatureFloat) {
   creatureFloat.addEventListener('click', () => {
     if (markedKind !== null) inspect(markedKind);
     else if (markedPlant !== null) inspectPlant(markedPlant);
-    else if (markedSource) (ground && ground.source && ground.source.kind === 'ruin' ? inspectRuin : inspectSource)();
+    else if (markedSource) (ground && ground.source && ground.source.kind !== 'wreck' ? inspectRuin : inspectSource)();
+    else if (markedPerson) openTalk(markedPerson);
   });
 }
 
@@ -1619,7 +1652,7 @@ function generate(seed, { save = true } = {}) {
     overlayLabel.textContent = 'Worker failed to load. Serve over http, not file://.';
     setTimeout(() => { overlay.classList.remove('show'); busy = false; }, 2500);
   };
-  w.postMessage({ type: 'generate', seed, opts: worldOpts(Q) });
+  w.postMessage({ type: 'generate', seed, opts: wOpts() });
 }
 
 function resetCamera() {
@@ -1922,7 +1955,8 @@ function setCarrierLevel(v = carrierView()) {
     here = { kind: s ? s.kind : null, range: s ? s.rangeFrom(p.x, p.z) : Infinity, reach: ground.reach };
   }
   music.setCarrier(motifLevel(v, 'wreck', here));
-  music.setRuin(motifLevel(v, 'ruin', here));
+  // Chapter 3: the voice of the ruin swells with the flare of the jump.
+  music.setRuin(Math.max(motifLevel(v, 'ruin', here), jumpVoice));
 }
 
 // The value of the Carrier row: the words of the row, the Clear chip while the search holds a fix,
@@ -2022,6 +2056,7 @@ function renderInfo(w) {
       ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
       ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
       ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrierRow(carrier.row)}</dd>${slot}` : ''}
+      ${carrier && carrier.way && carrier.way.text ? `<dt>Way on</dt><dd class="carrier way-row">${escapeHtml(carrier.way.text)}</dd>` : ''}
       ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
       <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
       <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
@@ -2073,7 +2108,12 @@ const sourceInspector = new SourceInspector({ card: creatureCard, canvas: source
 const ruinInspector = new RuinInspector({ card: creatureCard, canvas: ruinCanvas });   // p2-42
 // What the card shows: 'animal', 'plant', 'source', or 'ruin'. The arrows and the close read it.
 const cardOpen = () => inspector.open || plantInspector.open || sourceInspector.open || ruinInspector.open;
-function closeCard() { inspector.hide(); plantInspector.hide(); sourceInspector.hide(); ruinInspector.hide(); }
+function closeCard() {
+  inspector.hide(); plantInspector.hide(); sourceInspector.hide(); ruinInspector.hide();
+  // Chapter 3: the reader has read the third log, and the people of the tent come out.
+  if (crewWaits && ground && ground.crew) ground.crew.release(true);
+  crewWaits = false;
+}
 function discColor() {
   const pal = current.world.palette;
   return current.world.type === 'gas' ? pal.atmo : (pal.ground || '#7fa860');
@@ -2146,6 +2186,7 @@ function inspectSource() {
 // RuinInspector in ground-source.js draws it, and ruinCard() of ruin-types.js writes its text. The glow and the text take the colour of chapter 2, as the wedges of the ruin
 // do; the text takes it lightened, as the drawings of the brief do, because the card is dark.
 function inspectRuin() {
+  if (ground && ground.source && ground.source.kind === 'twin') { inspectTwin(); return; }
   const ruin = current && current.world.ruin;
   if (!ruin || !ground || !ground.source || ground.source.kind !== 'ruin') return;
   if (!readSource('ruin').open) return;
@@ -2159,6 +2200,7 @@ function inspectRuin() {
   creatureCard.dataset.subject = 'ruin';
   ruinInspector.show(current.world, {
     glow: carrierColour(current.world, 2), accent: briefColour(current.world), groundColor: discColor(),
+    way: wayRow(current.world),
   });
 }
 creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
@@ -2385,6 +2427,287 @@ renderWorlds();
   generate(seed);
 }
 
+// ---------------------------------------------------------------- chapter 3, the way on
+// The card of the ruin holds the name of the twin in the script of the makers. While chapter 3 is
+// open, the row of the way on holds the decoder of decoder.js: the key, the sounds, and a field for
+// each glyph. The right name opens the way: the ruin flares, the cover goes white, and the probe
+// jumps to the twin. The arrival ends the chapter. At the twin the card holds the third log, and
+// the people of the tent come out once the reader has read it. A tap on one of them offers the talk,
+// and a person who lived through it unchanged asks to go home. See docs/issues/p3-00-the-way-on.md.
+
+// The chapter of the source of a kind: the wreck, the ruin, or the twin, whose chapter is the way on.
+const chapterOfKind = (kind) => (kind === 'twin' ? 'way' : kind);
+
+// The reader read the third log, and the people of the tent wait for the close of the card.
+let crewWaits = false;
+
+// The row of the way on of the card of the ruin: the decoder while the chapter is open, and the
+// name the glyphs spell after the arrival. Null while the chapter is closed.
+function wayRow(world) {
+  const st = progress && progress.state('way');
+  if (!st || st === 'closed' || !world.twin) return null;
+  if (st === 'done') {
+    return { word: nameOf(world), text: `The name carries the probe to the twin, ${world.twin.km.toLocaleString('en-GB')} km to the ${world.twin.from}.` };
+  }
+  const key = wayKey(world);
+  const dec = makeDecoder({
+    key, codex: readCodex(), probe: world.source && world.source.log && world.source.log.probe,
+    onChange: (codex) => writeCodex(codex),
+    onSend: (text) => {
+      const a = sendName(text, nameOf(world));
+      if (a.kind === 'open') setTimeout(() => startJump(), 1100);
+      return a;
+    },
+  });
+  return { el: dec.el, text: 'The probe reads a name here, in the script of the makers. The stones sent the call sign of the ship back in the same script. Send the name, and the stones answer.' };
+}
+
+// The site of the twin: the middle of its cell, as a landing takes it.
+function twinSite(world) {
+  const at = world && world.twin ? sourceSite(world, world.twin) : null;
+  return at ? snapSite({ lat: at.lat, lon: at.lon, kind: -1 }) : null;
+}
+
+// The jump. The probe stands at the ruin, and the right name opens the way. The worker builds the
+// patch of the twin while the ruin flares.
+function startJump() {
+  if (!current || !current.world.twin || !ground || probe.mode !== 'ground' || probe.dive) return false;
+  const site = twinSite(current.world);
+  if (!site || !probe.jump(site, performance.now())) return false;
+  closeCard();
+  markedKind = null; markedPlant = null; markedSource = false; markedPerson = null;
+  if (ground.source) ground.source.unmark();
+  ground.controls.enabled = false;
+  diveEl.style.background = jumpWhite(current.world);
+  requestPatch('The stones answer the name');
+  updateProbeBtn();
+  return true;
+}
+
+// The white of the cover of the jump: white with a little of the colour of the glow of the ruin.
+function jumpWhite(world) {
+  const c = new THREE.Color(carrierColour(world, 2)).lerp(new THREE.Color(1, 1, 1), 0.82);
+  return '#' + c.getHexString();
+}
+
+// One frame of the jump. The ruin flares through the whole first phase, and the cover goes white
+// over its second half. Under the white the ground switches to the twin, and the twin flares and
+// fades as the cover opens.
+function stepJump(s) {
+  const smooth = (a, b, x) => THREE.MathUtils.smoothstep(x, a, b);
+  if (s.phase === 'in') {
+    if (ground && ground.source) ground.source.flare(s.k);
+    if (ground) {
+      // The probe rises a little and looks at the light.
+      const c = ground.camera, tg = ground.controls.target;
+      c.position.y += 0.08 * s.k;
+      if (ground.source) {
+        const g = ground.source.group.position;
+        tg.lerp(_jumpAim.set(g.x, tg.y, g.z), 0.02);
+      }
+    }
+    diveEl.style.opacity = String(smooth(0.45, 1, s.k));
+    jumpVoice = s.k;
+  } else {
+    if (ground && ground.source) ground.source.flare(1 - s.k);
+    diveEl.style.opacity = String(1 - s.k);
+    jumpVoice = 1 - s.k;
+  }
+  if (s.event === 'swap' || s.event === 'landed' || Math.abs(jumpVoice - lastJumpVoice) > 0.08) { lastJumpVoice = jumpVoice; setCarrierLevel(); }
+  if (s.event === 'swap') arriveTwin(s.patch);
+  else if (s.event === 'landed') {
+    jumpVoice = 0; setCarrierLevel();
+    if (ground) { ground.controls.enabled = true; if (ground.source) ground.source.flare(0); }
+    if (diveLabel) diveLabel.textContent = '';
+    updateProbeBtn();
+  }
+}
+const _jumpAim = new THREE.Vector3();
+
+
+// The switch to the twin under the white cover: the ground of the ruin goes, the ground of the twin
+// comes, and the arrival ends the way on.
+function arriveTwin(result) {
+  dropGround();
+  enterGround(result, twinView(result));
+  if (ground) { ground.controls.enabled = false; if (ground.source) ground.source.flare(1); }
+  if (progress && progress.arrive().found) showProgress();
+  if (diveLabel) diveLabel.textContent = current && current.world.twin
+    ? `${current.world.twin.km.toLocaleString('en-GB')} km to the ${current.world.twin.from}` : '';
+}
+
+// The camera of the arrival: over the tent, when the crew left one, and looking at the stones.
+function twinView(result) {
+  const src = result && result.patch && result.patch.source;
+  if (!src || src.kind !== 'twin') return null;
+  const tent = src.tent;
+  const row = protoRow(src.proto);
+  const disc = row ? row.disc : 36;
+  const az = tent ? Math.atan2(tent.x - src.x, tent.z - src.z) : (src.yaw || 0) + 0.6;
+  return { kind: 'ground', x: src.x, z: src.z, dist: disc * 2.1 + 26, az, pol: 1.2 };
+}
+
+// The card of the twin: the rows of twinCard() of way-types.js, and the third log. A landing by
+// chance on the twin while the chapter is open counts as the arrival. The first open with a log is
+// the read: the people of the tent come out when the card closes.
+function inspectTwin() {
+  const twin = current && current.world.twin;
+  if (!twin || !ground || !ground.source || ground.source.kind !== 'twin' || !progress) return;
+  const st = progress.state('way');
+  if (st === 'closed') return;
+  if (st === 'open' && progress.arrive().found) showProgress();
+  markedKind = null; markedPlant = null; markedPerson = null;
+  if (ground.fauna) ground.fauna.unmark();
+  if (ground.flora) ground.flora.unmark();
+  if (ground.crew) ground.crew.unmark();
+  inspector.hide(); plantInspector.hide(); sourceInspector.hide();
+  creatureCard.classList.add('show');
+  creatureCard.hidden = false;
+  creatureCanvas.hidden = true; plantCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = false;
+  creatureCard.dataset.subject = 'ruin';
+  ruinInspector.show(current.world, {
+    glow: carrierColour(current.world, 2), accent: briefColour(current.world), groundColor: discColor(), twin: true,
+  });
+  if (twin.log && progress.readLog()) {
+    crewWaits = !!(ground.crew && homeOf(twin.log).length);
+    showProgress();
+  }
+}
+
+// ---------------------------------------------------------------- the talk, and the way home
+const talkDlg = $('#talk');
+const homeDlg = $('#home');
+let talkName = null;
+
+// A person of the crew at the twin speaks: the line of `voice` of the third log. A person who lived
+// through it unchanged asks to go home, and the button takes the crew home.
+function openTalk(name) {
+  const log = current && current.world.twin && current.world.twin.log;
+  const c = log && log.crew.find((x) => x.name === name);
+  if (!c || !talkDlg) return;
+  talkName = name;
+  const voice = log.voice || null;
+  const line = voice ? voice.line : '…';
+  talkDlg.querySelector('#talk-name').textContent = c.name;
+  talkDlg.querySelector('.talk-role').textContent = c.role ? `${c.role} of ${log.probe}` : log.probe;
+  talkDlg.querySelector('.talk-line').textContent = line;
+  const v = progress && progress.view().way;
+  const btn = talkDlg.querySelector('.talk-home');
+  btn.hidden = !(c.end === 'home' && voice && voice.home && v && !v.home);
+  if (ground) ground.controls.enabled = false;
+  talkDlg.showModal();
+}
+if (talkDlg) {
+  talkDlg.addEventListener('click', (e) => { if (e.target === talkDlg) talkDlg.close(); });
+  talkDlg.addEventListener('close', () => { if (probe.mode === 'ground' && ground && !probe.dive && !homeRun) ground.controls.enabled = true; });
+  talkDlg.querySelector('.talk-home').addEventListener('click', () => { talkDlg.close(); takeHome(); });
+}
+if (homeDlg) homeDlg.addEventListener('click', (e) => { if (e.target === homeDlg) homeDlg.close(); });
+
+// The way home: the mission ends. The twin flares, the people of the tent rise in its light, and the
+// probe climbs to orbit with them. The card of the end stands over the globe.
+let homeRun = null;
+const HOME_MS = 3600;
+function takeHome() {
+  if (!progress || !progress.goHome() || !ground) return;
+  showProgress();
+  markedPerson = null;
+  if (ground.crew) ground.crew.unmark();
+  ground.controls.enabled = false;
+  homeRun = { t0: performance.now(), log: current.world.twin.log, world: current.world };
+}
+
+// One frame of the way home, from step() while the probe stands on the ground.
+function stepHome(now) {
+  if (!homeRun || !ground) return;
+  const k = Math.min(1, (now - homeRun.t0) / HOME_MS);
+  if (ground.source) ground.source.flare(Math.sin(Math.PI * Math.min(1, k * 1.2)) * 0.9);
+  if (ground.crew) ground.crew.lift(k);
+  if (k < 1) return;
+  const run = homeRun;
+  homeRun = null;
+  ascend();
+  showHome(run);
+}
+
+function showHome(run) {
+  if (!homeDlg) return;
+  const log = run.log;
+  const home = homeOf(log).map((c) => c.name);
+  const names = home.length === 1 ? home[0] : `${home.slice(0, -1).join(', ')} and ${home[home.length - 1]}`;
+  homeDlg.querySelector('#home-title').textContent = `The crew of ${log.probe} is going home`;
+  homeDlg.querySelector('.home-text').textContent = `${names} waited ${log.years} years on ${run.world.designation}. The probe carries ${home.length === 1 ? 'that person' : 'them'} up to the ship.`;
+  const lost = log.crew.filter((c) => c.end !== 'home');
+  homeDlg.querySelector('.home-lost').textContent = lost.length
+    ? `${lost.map((c) => c.name).join(', ')} did not come home.` : '';
+  setTimeout(() => { if (!homeDlg.open) homeDlg.showModal(); }, 1400);
+}
+
+// Give the reader the finds of chapters 1 and 2 of `world`, so chapter 3 opens: the debug option
+// `?chapter=3` and the hook below.
+function skipToWay(p, world) {
+  if (!p || !world || !world.ruin) return false;
+  p.read('wreck');
+  p.tune(world.ruin.freq);
+  p.read('ruin');
+  return p.state('way') !== 'closed';
+}
+
+// The hooks of chapter 3 for the tests and the tools, on window.__mw.way:
+//
+//   skip()        the finds of chapters 1 and 2 on the world on the screen
+//   name()        the name the glyphs spell, which the page never shows before the arrival
+//   send(text)    the answer of the ruin to a name, as the decoder sends it
+//   landRuin()    a landing on the cell of the ruin, as a promise
+//   jump()        the jump from the ruin to the twin, as a promise; it needs the probe at the ruin
+//   landTwin()    a landing on the cell of the twin, as a promise
+//   read()        opens the card of the twin, which reads the third log
+//   release()     the people of the tent come out now
+//   talk(name)    opens the talk with a person
+//   home()        takes the crew home
+//   log()         the third log of the world on the screen
+const wayHooks = {
+  skip() { const ok = skipToWay(progress, current && current.world); showProgress(); return ok ? carrierView().way : null; },
+  name() { return current ? nameOf(current.world) : null; },
+  send(text) { return current ? sendName(text, nameOf(current.world)) : null; },
+  async landRuin() {
+    const at = current && current.world.ruin && sourceSite(current.world, current.world.ruin);
+    if (!at) throw new Error('the world holds no ruin');
+    return landAt(at.lat, at.lon);
+  },
+  async landTwin() {
+    const at = twinSite(current && current.world);
+    if (!at) throw new Error('the world holds no twin');
+    return landAt(at.lat, at.lon);
+  },
+  async jump() {
+    if (!startJump()) throw new Error('the probe cannot jump now: it must stand on the ground with no dive');
+    await untilMode('ground');
+    const t0 = performance.now();
+    while (probe.dive) {
+      if (performance.now() - t0 > HOOK_LIMIT) throw new Error('the jump did not end');
+      if (document.visibilityState !== 'visible') step(performance.now());
+      await new Promise((r) => setTimeout(r, HOOK_TICK));
+    }
+    return { site: probe.site, source: ground && ground.source ? ground.source.kind : null, way: carrierView().way };
+  },
+  read() { if (ground && ground.source && ground.source.kind === 'twin') { markedSource = true; inspectTwin(); } return carrierView().way; },
+  release() { if (ground && ground.crew) ground.crew.release(true); crewWaits = false; },
+  talk(name) { openTalk(name || (homeOf(current.world.twin.log)[0] || {}).name); },
+  home() { takeHome(); return !!homeRun; },
+  log() { return current && current.world.twin ? current.world.twin.log : null; },
+  // Wait for the dive and the way home that run, and step the frames of a hidden page meanwhile.
+  async settle() {
+    const t0 = performance.now();
+    while (probe.dive || homeRun || probe.mode === 'descending' || probe.mode === 'ascending') {
+      if (performance.now() - t0 > HOOK_LIMIT) throw new Error('the probe did not settle');
+      if (document.visibilityState !== 'visible') step(performance.now());
+      await new Promise((r) => setTimeout(r, HOOK_TICK));
+    }
+    return probe.mode;
+  },
+};
+
 // ---------------------------------------------------------------- scripted landings, p2-38
 // Two debug hooks for the tests of a search. landAt() sends the probe to the cell of a site, as a
 // tap on that cell does, and recall() brings it back. Each gives a promise, so a test can walk a
@@ -2454,4 +2777,5 @@ window.__mw = {
   get tuners() { return { card: cardTuner, side: sideTuner }; },   // p2-39: the two tuners
   landAt,                        // p2-38: a scripted landing, as a promise
   recall,                        // p2-38: a scripted recall, as a promise
+  way: wayHooks,                 // chapter 3: see wayHooks
 };
