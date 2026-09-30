@@ -28,13 +28,11 @@
 // and a blade that does not grow stops before it reads the heights. That halved the triangles, and
 // the cover now adds 0.7 to 2 ms to the frame on the development Mac, and 0.2 ms on the low tier.
 import * as THREE from 'three';
-import { detailShared } from './ground-detail.js';
+import { detailShared, GROUND_GAIN } from './ground-detail.js';
 
 const TILE = 2;              // metres: the side of one tile
 const THIN = 0.25;           // the share of the blades the far cover keeps
 const SETS = [1, 0.5, THIN]; // the share of the blades each set holds, near to far
-const SOURCE_DISC = 14;      // metres: the disc the wreck flattens, SOURCE_DISC in generate.js
-const GAIN = 1.06;           // GROUND_GAIN of ground.js: the terrain multiplies its colours by this
 const COLOR_MAX = 1.25;      // the colour textures store colour / COLOR_MAX, so a bright vertex fits
 const WALK_MS = 4;           // ms of the frame the walk over the nodes may take, see _start()
 const REACH_UP = 0.8;        // metres: how far a blade or a stone stands over the ground
@@ -274,7 +272,7 @@ void covPlace(out vec3 pos, out vec3 nrm) {
 
   // the colour of the ground under the blade, with the dry patches and the light of the pattern
   float big = covMacro(mat2(0.8, 0.6, -0.6, 0.8) * p / COV_BIG, 0);
-  vec3 base = g.rgb * ${f3(COLOR_MAX * GAIN)};
+  vec3 base = g.rgb * ${f3(COLOR_MAX * GROUND_GAIN)};
   // The ground turns dry only on its share of cover, so a blade on mixed ground turns with it.
   float dry = max(smoothstep(0.55, 0.8, big) * 0.55, step(0.88, fract(r1.z * 7.31)) * 0.5) * min(g.a / uCovShare, 1.0);
   base = mix(base, covHue(base, uCovBlade.w) * 1.06, dry);
@@ -321,7 +319,7 @@ void covPlace(out vec3 pos, out vec3 nrm) {
   nrm = normalize(vec3(rn.x - slope.x * rn.y, rn.y, rn.z - slope.y * rn.y));
   // A stone is the ground, greyer and darker, and on snow it is the dark rock under the snow. It
   // is darker at its foot, where it meets the ground.
-  vec3 c0 = textureLod(uCovG, covUv(p), 0.0).rgb * ${f3(COLOR_MAX * GAIN)};
+  vec3 c0 = textureLod(uCovG, covUv(p), 0.0).rgb * ${f3(COLOR_MAX * GROUND_GAIN)};
   c0 = mix(c0, vec3(covLum(c0)), 0.4) * (0.72 - 0.34 * s.g);
   float foot = mix(0.62, 1.0, smoothstep(-0.2, 0.45, position.y));
   vCovCol = c0 * (0.78 + 0.4 * r2.y) * foot;
@@ -356,27 +354,21 @@ function coverMaterial(kind, uniforms, macro, macroBig, low) {
 // ---------------------------------------------------------------- the cover
 export class GroundCover {
   // heights, colors, surface: the arrays of the patch, and patch its description. tone(k): the
-  // lightness noise the terrain gives node k. heightAt(x, z): the ground.
-  // keepOut: [x, z, radius] of the disc of the ruin, or null. ground.js reads it off the ruin.
+  // lightness noise the terrain gives node k. terrain: the PatchTerrain of the patch, which gives
+  // the height of the ground and the discs of the keep-out.
   constructor({ renderer, type, tier, patch, heights, colors, surface, seaLevel = null,
-    wind = 0, tone = () => 1, heightAt, keepOut = null }) {
+    wind = 0, tone = () => 1, terrain }) {
     const { n, grid } = patch, half = patch.size / 2;
-    // The disc of the phenomenon, the disc of the wreck, and the disc of the ruin grow nothing, as
-    // the worker keeps the plants off them. p2-41.
-    const blocks = [];
-    if (patch.activity && patch.activity.radius) blocks.push([0, 0, patch.activity.radius]);
-    if (patch.source && patch.source.kind === 'wreck') blocks.push([patch.source.x, patch.source.z, SOURCE_DISC]);
-    if (keepOut) blocks.push(keepOut);
     const low = !tier.shadows;
     this.cfg = TIERS[low ? 'low' : 'high'];
-    this.heightAt = heightAt;
+    this.heightAt = (x, z) => terrain.heightAt(x, z);
     this.group = new THREE.Group();
     this.count = { tiles: 0, sets: [0, 0, 0], stones: 0 };
     const shared = detailShared(renderer, type, low);
     const grass = TYPES[type] || TYPES.terran;
 
     this.buildMs = 0;
-    this._start({ heights, colors, surface, n, grid, half, seaLevel, blocks, tone, shared, grass });
+    this._start({ heights, colors, surface, n, grid, half, seaLevel, terrain, tone, shared, grass });
 
     const c = this.cfg;
     const blades = Math.round(c.density * TILE * TILE);
@@ -411,7 +403,7 @@ export class GroundCover {
   // The walk over the nodes takes about 80 ms on the high tier, so it runs a few rows at a time
   // in update() while the probe comes down, and the cover shows once it is done. The probe lands
   // hundreds of metres up, so the walk is over long before a blade could show.
-  _start({ heights, colors, surface, n, grid, half, seaLevel, blocks, tone, shared, grass }) {
+  _start({ heights, colors, surface, n, grid, half, seaLevel, terrain, tone, shared, grass }) {
     const N = n * n;
     const h = new THREE.DataTexture(heights instanceof Float32Array ? heights : Float32Array.from(heights),
       n, n, THREE.RedFormat, THREE.FloatType);
@@ -423,7 +415,7 @@ export class GroundCover {
       return d;
     };
     this.textures = { h, g: tex(new Uint8Array(N * 4), THREE.RGBAFormat), s: tex(new Uint8Array(N * 2), THREE.RGFormat) };
-    this._walk = { j: 0, heights, colors, surface, n, grid, half, seaLevel, blocks, tone, shared, grass, ms: 0 };
+    this._walk = { j: 0, heights, colors, surface, n, grid, half, seaLevel, terrain, tone, shared, grass, ms: 0 };
   }
 
   // Walk rows for about `budget` ms. Returns true once every row is done and the textures are sent.
@@ -431,7 +423,7 @@ export class GroundCover {
     const W = this._walk;
     if (!W) return true;
     const t0 = performance.now();
-    const { heights, colors, surface, n, grid, half, seaLevel, blocks, tone, grass } = W;
+    const { heights, colors, surface, n, grid, half, seaLevel, terrain, tone, grass } = W;
     const F = W.shared.families, gd = this.textures.g.image.data, sd = this.textures.s.image.data;
     const to8 = (v) => (v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255));
     const inv = 1 / COLOR_MAX, looseStones = STONES.loose * grass.loose;
@@ -445,10 +437,9 @@ export class GroundCover {
         let blade = cover * grass.share;
         let stone = cover * STONES.cover + loose * looseStones + rock * STONES.rock + snow * STONES.snow;
         if (seaLevel != null && heights[k] < seaLevel + 0.1) blade = 0;
-        for (let b = 0; b < blocks.length; b++) {
-          const x = -half + i * grid, B = blocks[b];
-          if ((x - B[0]) * (x - B[0]) + (z - B[1]) * (z - B[1]) < B[2] * B[2]) { blade = 0; stone = 0; }
-        }
+        // The discs of the phenomenon, the wreck, the ruin, and the camp grow nothing, as the
+        // worker keeps the plants off them. p2-41.
+        if (terrain.keptOut(-half + i * grid, z)) { blade = 0; stone = 0; }
         const t = tone(k) * inv, o = k * 4, c = k * 3;
         gd[o] = to8(colors[c] * t); gd[o + 1] = to8(colors[c + 1] * t); gd[o + 2] = to8(colors[c + 2] * t);
         gd[o + 3] = to8(blade);
