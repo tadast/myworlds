@@ -44,6 +44,50 @@ _Avoid_: phase (a phase is a set of issues), stage (a stage is a step of the bri
 A chapter whose goal is a source, which the reader finds with the carrier: fixes, wedges, briefs, and a find. An open search is silent until the receiver holds its band. The band of the wreck is held from the start, and the reader tunes to hold each later band. The receiver follows the newest search whose band it holds. A tap on the source of a closed search marks it, but no card opens and no find is recorded. See `docs/adr/0001-chapters-open-in-strict-order.md`.
 _Avoid_: hunt, quest, chapter 1 or chapter 2 as the name of a kind
 
+**The way on**:
+Chapter 3, and the last row of the card of the ruin. It is not a search: the reader reads the name, sends it, and the ruin carries the probe to the twin. The arrival ends it. `docs/issues/p3-00-the-way-on.md` holds the plan.
+_Avoid_: portal (except the old `portalSeed()`), teleport (in the code)
+
+**Twin**:
+The ruin of the same proto, far across the same world, that the way on leads to: `world.twin`, with `kind: 'twin'`. It stands 60 to 150 cells from the ruin on nearly every world.
+_Avoid_: second ruin, far ruin
+
+**Name**:
+The word the glyphs of the way on spell, `portalSeed(world)`: the name the makers gave the twin.
+_Avoid_: password, code, answer
+
+**Key**:
+The call sign of the ship in the script of the makers, with its letters under it, and the sixteen sounds of the call. The card of the ruin shows it from chapter 3 on.
+_Avoid_: hint, cipher
+
+**Send**:
+The reader sends a name to the ruin, and the ruin lights each glyph that is right. `sendName()` of `way-types.js`.
+_Avoid_: guess, submit
+
+**Codex**:
+The letters the reader has given the glyphs, on every world, because the script is one script. `myworlds.codex.v1`.
+_Avoid_: dictionary
+
+**Jump**:
+The move of the probe from the ruin to the twin, ground to ground. `probe.jump()`.
+_Avoid_: teleport, warp
+
+**Herd**:
+The animals of the maker at the twin: the species of the maker, or the kin.
+_Avoid_: flock
+
+**Kin**:
+The species that `rollKin()` of `species.js` rolls for a rolled maker. It lives at the twin and nowhere else.
+_Avoid_: new species
+
+**Fate**:
+One of the six ways the third log ends: `pact`, `trek`, `split`, `sour`, `mad`, or `change`. `world.twin.fate`. The ends of the people follow it: `home`, `lost`, `gone`, or `changed`.
+_Avoid_: ending (an ending is the last entry of the first log)
+
+**Home**:
+The end of the mission: the reader takes the crew home from the twin.
+_Avoid_: rescue (in the code)
+
 **Progress**:
 The state of the chapters of one world for the reader: the state of each chapter, the fixes and the briefs of each search, and the bands the receiver holds. The carrier store keeps it by seed.
 _Avoid_: record (the record is the shape on disk), save
