@@ -466,14 +466,16 @@ function ruinLampLevel(m, clock) {
   return floor + (1 - floor) * k;
 }
 
-function makeRuinModel(world, hm) {
-  const ruin = world && world.ruin;
+// Chapter 3: the twin takes the same pin after the arrival, with `src` the twin: the same proto,
+// the same stone, and the same colour, so the two pins read as one thing in two places.
+function makeRuinModel(world, hm, src = world && world.ruin) {
+  const ruin = src;
   const at = ruin && ruin.proto && sourceSite(world, ruin);
   if (!at) return null;
   const colour = new THREE.Color(carrierColour(world, 2));
 
   const obj = new THREE.Group();
-  obj.name = 'carrier-ruin';
+  obj.name = ruin.kind === 'twin' ? 'carrier-twin' : 'carrier-ruin';
   const dir = siteDir(at.lat, at.lon, new THREE.Vector3());
   obj.position.copy(dir).multiplyScalar(drapeR(world, hm, dir) - DRAPE_LIFT);
   obj.quaternion.setFromUnitVectors(_yUp, dir);
@@ -546,13 +548,13 @@ function floatRuin(r, dt, music) {
   r.lampMat.color.copy(r.colour).multiplyScalar(0.3 + 0.7 * r.level);
 }
 
-// Take the pin of the ruin off a group and give its buffers back.
-function dropRuin(u) {
-  if (!u.ruin) return;
-  const r = u.ruin;
+// Take the pin of the ruin, or of the twin with `key` 'twin', off a group and give its buffers back.
+function dropRuin(u, key = 'ruin') {
+  if (!u[key]) return;
+  const r = u[key];
   r.obj.removeFromParent();
   for (const x of [r.geo, r.pinGeo, r.lampGeo, r.mat, r.pinMat, r.lampMat]) x.dispose();
-  u.ruin = null;
+  u[key] = null;
 }
 
 // The colour of the carrier on one world: the wedges, the visited cells, and the pin of a find.
@@ -673,9 +675,11 @@ export function makeCarrierGroup(world, view, heightMap = null) {
     found: part.state === 'done',             // the source of this search is found
     wreckFound: !!view.found.wreck,           // the wreck is found, whatever search runs
     ruinFound: !!view.found.ruin,             // the ruin is found
+    twinFound: !!view.found.way,              // chapter 3: the probe has stood at the twin
     fade: null,       // { fix, t, k } while one wedge fades in
     wreck: null,      // the mini wreck of a find. makeWreckModel() builds it.
     ruin: null,       // the mini ruin of the find of chapter 2. makeRuinModel() builds it. p2-42
+    twin: null,       // the mini twin of chapter 3, on the same pattern
     goal: null,       // the site of the goal cell, or null. goalCell() finds it.
     goalT: 0,         // seconds: the clock of the pulse of the goal
   };
@@ -701,6 +705,13 @@ function rebuild(group) {
     if (u.ruin && u.ruin.obj.parent !== group) group.add(u.ruin.obj);
   } else {
     dropRuin(u);
+  }
+  // Chapter 3: the arrival at the twin stands a pin of its own at the twin.
+  if (u.twinFound && u.world.twin) {
+    if (!u.twin) u.twin = makeRuinModel(u.world, u.hm, u.world.twin);
+    if (u.twin && u.twin.obj.parent !== group) group.add(u.twin.obj);
+  } else {
+    dropRuin(u, 'twin');
   }
   writeUniforms(group);
 }
@@ -740,6 +751,7 @@ export function updateCarrierGroup(group, dt, music = null) {
   const u = group.userData;
   if (u.wreck) floatWreck(u.wreck, dt);
   if (u.ruin) floatRuin(u.ruin, dt, music);
+  if (u.twin) floatRuin(u.twin, dt, music);
   if (u.fade) {
     u.fade.t += dt;
     const k = THREE.MathUtils.clamp(u.fade.t / FADE_S, 0, 1);
@@ -764,6 +776,7 @@ export function disposeCarrierGroup(group) {
   clearUniforms(group);
   dropWreck(u);
   dropRuin(u);
+  dropRuin(u, 'twin');
   if (group.parent) group.parent.remove(group);
   group.clear();
   group.userData = {};

@@ -437,7 +437,7 @@ rounds. `update()` of the floaters costs 0.004 ms. `renderer.info.memory` of the
   covers 22.5 degrees each way, and a bearing on the line between two words takes the one clockwise.
 - `portalSeed(world)` gives the seed of the world the way on names: two to four syllables from a
   fixed list of 16, capitalised, with no syllable twice in a row. p2-42 draws it as glyphs, and a
-  later issue opens that world. It never equals the seed of its own world. No word of two to four
+  chapter 3 reads it as the name of the twin; see `docs/issues/p3-00-the-way-on.md`. It never equals the seed of its own world. No word of two to four
   of the syllables is a word of the word list of macOS (`/usr/share/dict/words` and
   `propernames`), so it reads as a name. The card of p2-42 draws it in the script of the makers;
   see "The glyphs".
@@ -646,7 +646,7 @@ sentences in the voice of the log:
 | Stone | "A stone this world does not make." On a lava world: "A stone that takes the heat and holds it." |
 | Makers | decision 4; see below |
 | The call | decision 6: "It began to send on day 3 of the log of Lantern 10. That was the day the crew put the beacon on the mast." The day is `log.beacon` and the ship is `log.probe` of the log of the wreck |
-| The way on | decision 12: the line of glyphs of `portalSeed(world)`, the chip "Coming soon" beside it, and under it "The probe reads the name of another world here. It cannot read it yet." |
+| The way on | decision 12: the line of glyphs of `portalSeed(world)`, and under it "The probe reads a name here, in the script of the makers. The stones answer when the name is sent back." From chapter 3 on the row holds the decoder of `decoder.js`, and after the arrival at the twin it shows the name in letters. See `docs/issues/p3-00-the-way-on.md` |
 
 **The makers.** A maker of a species: "The carvings show a body with six legs. It is the body of the
 hardpan long-day hopper." The name is the name of the fauna card, in the case of a sentence, as the
@@ -668,7 +668,7 @@ or a well take the sentence.
 
 **The voice.** The log holds no sentence over 20 words, and the card holds none either: the longest
 has 15. So the call row states the day and the ship in one sentence and the beacon in a second.
-"Coming soon" stands in the chip and in no sentence.
+Chapter 3 took the chip "Coming soon" away.
 
 ### The glyphs
 
@@ -683,7 +683,7 @@ The card draws the line as inline SVG in the colour of the ruin, one glyph per l
 `portalSeed(world)`. The SVG holds no text, and no attribute holds the seed, so the page does not
 print the name the glyphs spell. One seed gives one line on every open, and two seeds of the way on
 give two lines: over the 1,482 seeds of the way on of `tools/ruin-check.mjs`, no two share a line.
-The later issue that opens the way reads the same script. Do not change a glyph.
+Chapter 3 reads the same script, and the codex of the reader keeps its letters on every world. Do not change a glyph.
 
 ### The find of chapter 2
 

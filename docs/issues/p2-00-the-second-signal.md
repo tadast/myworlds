@@ -280,8 +280,9 @@ searches, finds the ruin, and reads its card. p2-43 and p2-44 add the payoff and
 
 ## Left for later
 
-- **The way on.** The glyphs of the card decode to `portalSeed(world)`, and a ring or a gate opens
-  that world. The search then goes on across worlds.
+- **The way on.** Built as chapter 3, `docs/issues/p3-00-the-way-on.md`: the glyphs decode to
+  `portalSeed(world)`, the name of the twin on the same world, and the ruin carries the probe there.
+  A way on across worlds is still left for later.
 - A third band on the same world, which the card of the ruin states.
 - The prototypes that the owner did not keep: henge, ziggurat, dishes, and monolith.
 - A ruin on a gas giant, which needs a probe between the cloud decks first.

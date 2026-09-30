@@ -15,6 +15,7 @@ import { GroundFauna } from './ground-fauna.js';
 import { Sea } from './ground-sea.js';
 import { Phenomena } from './ground-phenomena.js';
 import { SourceWreck, SourceRuin } from './ground-source.js';
+import { GroundCrew } from './ground-crew.js';
 import { applyDetail, disposeDetail, GROUND_GAIN } from './ground-detail.js';
 import { PatchTerrain } from './patch-terrain.js';
 import { perf } from './perf.js';
@@ -230,7 +231,7 @@ const PICK_GRACE = 2;
 const WRECK_GRACE = 20;
 // The body of the source on its cell, by patch.source.kind. Each class has the same shape, so the
 // rest of this file reads this.source and does not care which kind stands there. p2-41.
-const SOURCE_KINDS = { wreck: SourceWreck, ruin: SourceRuin };
+const SOURCE_KINDS = { wreck: SourceWreck, ruin: SourceRuin, twin: SourceRuin };
 // The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
 // at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM in
@@ -313,11 +314,12 @@ function makeGeometry(pos, col, idx, sur) {
 
 export class Ground {
   // tier: the ground row of tiers.js: { grid, size, maxFlora, maxFauna, shadows, lodMax }
-  constructor({ renderer, canvas, world, site, tier, music, onSelect, onSelectPlant, onSelectSource, onDeselect }) {
+  constructor({ renderer, canvas, world, site, tier, music, onSelect, onSelectPlant, onSelectSource, onSelectPerson, onDeselect }) {
     this.renderer = renderer;
     this.onSelect = onSelect || null;       // (kind) => void, a tap marked an animal of this species
     this.onSelectPlant = onSelectPlant || null; // (kind) => void, a tap marked a plant of this kind
     this.onSelectSource = onSelectSource || null; // () => void, a tap marked the wreck (issue 34) or the ruin (p2-41)
+    this.onSelectPerson = onSelectPerson || null; // (name) => void, a tap marked a person of the crew at the twin (chapter 3)
     this.onDeselect = onDeselect || null;   // () => void, a tap on the ground took every mark off
     // The music of the app. The lamp of the wreck reads its bar clock, so the eye and the ear keep
     // one rhythm. It is null in a session with no music and the lamp then takes the clock of the
@@ -337,6 +339,7 @@ export class Ground {
     this.sea = null;
     this.phenomena = null;
     this.source = null;     // the wreck of issue 34 or the ruin of p2-41, on the one cell that holds it
+    this.crew = null;       // chapter 3: the people of the third log at the twin. See ground-crew.js
     this.terrain = new PatchTerrain(null);   // the height, the water, and the keep-out of the patch. See load().
     this.atCeiling = false;
     // The one knob of issue 11, in metres. The flora cards and the coarse fauna meshes both read
@@ -552,6 +555,12 @@ export class Ground {
       }) : null;
       if (this.source) this.content.add(this.source.group);
       if (this.source && this.source.hole) this._openHole(this.source.hole);
+      // Chapter 3: the people of the third log at the twin. The page releases the people of the
+      // tent once the reader has read the log. See ground-crew.js.
+      this.crew = GroundCrew.create({
+        world: this.world, patch: p, tier: this.tier, heightAt: (x, z) => this.heightAt(x, z),
+      });
+      if (this.crew) this.content.add(this.crew.group);
       this._buildCover(result);
     } else {
       // the placeholder ground of issue 03: one flat plane in the ground colour of the palette
@@ -1163,6 +1172,7 @@ export class Ground {
     // the lamp of the wreck blinks the rhythm of the motif, on the clock of the song or of the
     // landing. It costs one loop over the steps of one bar.
     if (this.source) this.source.update(t);
+    if (this.crew) this.crew.update(t, dt, this.camera);
     // the sea follows the target, so it must move after the target clamp
     if (this.sea) this.sea.update(t, tg);
 
@@ -1858,6 +1868,21 @@ export class Ground {
     // SourceWreck.pickAt(), which knows nothing about the terrain.
     // A ruin states a grace of its own size: the far wall of the well and a spire over a ridge
     // stand further past the ground than the hull does. p2-41.
+    // Chapter 3: a tap on a person of the crew at the twin marks that person. A person stands in
+    // front of the tent and the stones, so the person wins over them, and over an animal or a plant
+    // that stands further back.
+    const person = this.crew ? this.crew.pickAt(nx, ny, this.camera) : null;
+    if (person && !(hit && person.dist > this.camera.position.distanceTo(hit) + 3)
+      && !(creature && creature.dist + PICK_GRACE < person.dist) && !(plant && plant.dist + PICK_GRACE < person.dist)) {
+      if (this.flora) this.flora.unmark();
+      if (this.fauna) this.fauna.unmark();
+      if (this.source) this.source.unmark();
+      const pal = (this.world && this.world.palette) || {};
+      this.crew.mark(person.name, (pal.fauna && pal.fauna.accent) || '#ffffff');
+      this.glideTo(person.point, null, true);
+      if (this.onSelectPerson) this.onSelectPerson(person.name);
+      return;
+    }
     let wreck = this.pickSource ? this.pickSource(nx, ny) : null;
     const grace = (this.source && this.source.grace) || WRECK_GRACE;
     if (wreck && hit && wreck.dist > this.camera.position.distanceTo(hit) + grace) wreck = null;
@@ -1866,6 +1891,7 @@ export class Ground {
       if (this.flora) this.flora.unmark();
       if (this.fauna) this.fauna.unmark();
       this.source.mark();
+      if (this.crew) this.crew.unmark();
       this.glideTo(wreck.point, null, true);
       if (this.onSelectSource) this.onSelectSource();
       return;
@@ -1874,6 +1900,7 @@ export class Ground {
       this.flora.mark(plant);
       if (this.fauna) this.fauna.unmark();
       if (this.source) this.source.unmark();
+      if (this.crew) this.crew.unmark();
       this.glideTo(plant.point, null, true);
       if (this.onSelectPlant) this.onSelectPlant(plant.kind);
       return;
@@ -1881,6 +1908,7 @@ export class Ground {
     if (creature && creature.point) {
       if (this.flora) this.flora.unmark();
       if (this.source) this.source.unmark();
+      if (this.crew) this.crew.unmark();
       if (this.fauna && creature.member) this.fauna.markMember(creature.member);
       // A flyer over the eye needs a turn of the view. A glide of the target cannot reach it, and
       // it would point the view at the ground under it instead.
@@ -1890,10 +1918,11 @@ export class Ground {
       return;
     }
     if ((this.fauna && this.fauna.marked) || (this.flora && this.flora.marked)
-      || (this.source && this.source.marked)) {
+      || (this.source && this.source.marked) || (this.crew && this.crew.marked)) {
       if (this.fauna) this.fauna.unmark();
       if (this.flora) this.flora.unmark();
       if (this.source) this.source.unmark();
+      if (this.crew) this.crew.unmark();
       if (this.onDeselect) this.onDeselect();
     }
     if (hit) this.glideTo(hit);
@@ -1955,6 +1984,7 @@ export class Ground {
   _clear() {
     if (this.phenomena) { this.phenomena.dispose(); this.phenomena = null; }
     if (this.source) { this.source.dispose(); this.source = null; }
+    if (this.crew) { this.crew.dispose(); this.crew = null; }
     if (this.flora) { this.flora.dispose(); this.flora = null; }
     if (this.cover) { this.cover.dispose(); this.cover = null; }
     if (this.fauna) { this.fauna.dispose(); this.fauna = null; }

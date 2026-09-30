@@ -520,7 +520,9 @@ for (let i = 0; i < SEEDS; i++) {
   byFrom[r.from] = (byFrom[r.from] || 0) + 1;
 
   // The maker.
-  const mk = r.maker, sp = w.species || [];
+  // Chapter 3 pushes the kin of a rolled maker onto the species, after the maker. It lives only at
+  // the twin, so the rule of the maker reads the species of the world without it.
+  const mk = r.maker, sp = (w.species || []).filter((g) => !g.kin);
   const motions = sp.map((g) => SourceLore.motionOf(g));
   const firstMotion = MAKER_MOTION.find((x) => motions.includes(x));
   if (mk.rolled) {

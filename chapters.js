@@ -30,10 +30,15 @@
 //   marksOf()           the marks of the finds on the thumbs of the saved worlds
 //   briefWords()        the title and the hint of a brief
 //   CLOSED_LINE         the line of the floating button over the source of a closed search
+//
+// Chapter 3, the way on, is not a search: the reader reads a name on the card of the ruin, sends it,
+// and the ruin carries the probe to the twin. The arrival is its find. See
+// docs/issues/p3-00-the-way-on.md.
 import { carrierAt, carrierBox, sourceSite, snapSite, WRECK_FREQ } from './carrier.js';
 import { CELL, siteCell, siteDir, sameCell } from './cell-grid.js';
 import { wedgePlanes, inWedge, goalCell } from './wedge.js';
 import { tuneAnswer } from './tuner.js';
+import { homeOf } from './way-types.js';
 import { readProgress, readAllProgress, writeProgress, MAX_FIXES, BRIEF_STAGES } from './carrier-store.js';
 
 // The floating button over the source of a closed search. The card of the way on already says "The
@@ -49,13 +54,17 @@ export const CLOSED_LINE = 'Silent · nothing to read yet';
 // it sends on, with no unit. The id of a search is the kind of its source.
 //
 // ORDER holds the id of every chapter a world can hold, in the order of the story.
-const ORDER = ['wreck', 'ruin'];
+//
+// Chapter 3 is `{ id: 'way', kind: 'way' }`: the way on, from the ruin to the twin. Its source is the
+// twin. It holds no band and takes no fix, so the receiver never follows it.
+const ORDER = ['wreck', 'ruin', 'way'];
 
 export function chaptersOf(world) {
   if (!world || !world.source || !world.source.dir) return [];
   const list = [{ id: 'wreck', kind: 'search', name: 'Wreck', source: world.source, freq: WRECK_FREQ }];
   if (world.ruin && world.ruin.dir) {
     list.push({ id: 'ruin', kind: 'search', name: 'Ruin', source: world.ruin, freq: world.ruin.freq });
+    if (world.twin && world.twin.dir) list.push({ id: 'way', kind: 'way', name: 'Twin', source: world.twin, freq: null });
   }
   return list;
 }
@@ -109,10 +118,13 @@ export function marksOf() {
   for (const [seed, parts] of readAllProgress(ORDER)) {
     const finds = statesOf(ORDER.map((id) => parts[id].found)).filter((s) => s === 'done').length;
     if (!finds) continue;
+    // Chapter 3: the arrival at the twin makes the third mark, and the end of the mission a house.
+    const home = finds === ORDER.length && parts.way.home;
     out.set(seed, {
-      finds,
-      text: '✦'.repeat(finds),
-      title: finds === 1 ? 'A source of this world is found' : `${finds} sources of this world are found`,
+      finds, home,
+      text: '✦'.repeat(finds) + (home ? ' ⌂' : ''),
+      title: home ? 'The crew of this world went home'
+        : finds === 1 ? 'A source of this world is found' : `${finds} sources of this world are found`,
     });
   }
   return out;
@@ -220,9 +232,33 @@ class Progress {
     const v = {
       seed: this.seed, chapters, follow, found, tuner,
       finds: searches.filter((c) => c.state === 'done').length, of: searches.length,
+      way: this._way(states),
     };
     v.row = rowOf(v);
     return v;
+  }
+
+  // Chapter 3, the way on, as the page reads it, or null on a world with no twin:
+  //
+  //   state   'closed', 'open', or 'done'. It opens with the find of the ruin, and the arrival at
+  //           the twin ends it
+  //   read    the reader opened the card of the twin, which holds the third log
+  //   home    the reader took the crew home. The mission is over
+  //   crew    the third log holds a person whose end is `home`, so the tent has somebody to take
+  //   text    the words of the Way row of the sidebar
+  _way(states) {
+    const i = this.ids.indexOf('way');
+    if (i < 0) return null;
+    const p = this.parts.way;
+    const log = this.world.twin && this.world.twin.log;
+    const crew = homeOf(log).length > 0;
+    const state = states[i];
+    const text = state === 'closed' ? null
+      : state === 'open' ? 'A name to read'
+        : p.home ? 'The crew is home'
+          : !p.read ? 'At the twin'
+            : crew ? 'Somebody waits' : log ? 'Log read' : 'Nobody came';
+    return { state, read: p.read, home: p.home, crew, text };
   }
 
   // A landing at a site. The receiver reads the carrier of the search it follows, the fix of the
@@ -321,6 +357,40 @@ class Progress {
     return { open: true, found: true };
   }
 
+  // Chapter 3. The probe stands at the twin: the arrival ends the way on. It counts only while the
+  // chapter is open, and it gives `{ found }`, true when this arrival is the find.
+  arrive() {
+    this._reload();
+    const i = this.ids.indexOf('way');
+    if (i < 0 || this._states()[i] !== 'open') return { found: false };
+    this.parts.way.found = true;
+    this._save();
+    return { found: true };
+  }
+
+  // Chapter 3. The reader read the third log on the card of the twin. The people of the tent walk
+  // out after it. Gives true when this read is new.
+  readLog() {
+    this._reload();
+    const i = this.ids.indexOf('way');
+    if (i < 0 || this._states()[i] !== 'done' || this.parts.way.read) return false;
+    this.parts.way.read = true;
+    this._save();
+    return true;
+  }
+
+  // Chapter 3. The reader takes the crew home: the end of the mission. It needs the read of the log
+  // and a person to take. Gives true when this press is the end.
+  goHome() {
+    this._reload();
+    const i = this.ids.indexOf('way');
+    if (i < 0 || this._states()[i] !== 'done' || this.parts.way.home || !this.parts.way.read) return false;
+    if (!homeOf(this.world.twin && this.world.twin.log).length) return false;
+    this.parts.way.home = true;
+    this._save();
+    return true;
+  }
+
   // One text the reader typed into the tuner: the answer of tuneAnswer() in tuner.js against the
   // band of the tuner. A lock makes the receiver hold that band, and the search starts.
   tune(text) {
@@ -414,7 +484,8 @@ function rowOf(v) {
   const text = v.follow.index > 0
     ? (found ? `Found ${v.finds} of ${v.of}` : n === 0 ? 'Tuned' : count)
     : (found ? 'Found' : n === 0 ? 'Not heard' : count);
-  const done = v.chapters.filter((ch) => ch.kind === 'search' && ch.state === 'done');
+  // The twin of chapter 3 takes an Aim chip of its own after the arrival.
+  const done = v.chapters.filter((ch) => (ch.kind === 'search' || ch.kind === 'way') && ch.state === 'done');
   const aims = done.length === 1 ? [{ id: done[0].id, label: 'Aim' }] : done.map((ch) => ({ id: ch.id, label: ch.name }));
   return {
     text, n,

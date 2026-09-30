@@ -13,9 +13,12 @@
 // 3. The refusals. A descent while the probe is not in orbit, an ascent while it is not on the
 //    ground with no dive, and a patch of an older descent change nothing.
 // 4. The abort. From every mode the probe stands in orbit again, and the fix of the landing goes.
+// 5. The jump of chapter 3. From the ground with no dive, the probe jumps to the twin: it stays on
+//    the ground, the cover closes over JUMP_MS and waits for the patch, the switch gives `swap`, and
+//    the cover opens over JUMP_OUT_MS to `landed`. The fix, the stage, and the key of the landing go.
 import { root } from './three-hook.mjs';
 
-const { Probe, DIVE_MS, FADE_MS, PATCH_WAIT } = await import(root + 'probe.js');
+const { Probe, DIVE_MS, FADE_MS, PATCH_WAIT, JUMP_MS, JUMP_OUT_MS } = await import(root + 'probe.js');
 
 let fails = 0;
 function ok(part, cond, msg) {
@@ -104,9 +107,32 @@ for (const [name, make] of Object.entries(MODES)) {
   ok('abort', ran === (name !== 'orbit') && clean(q) && q.step(1e6) === null, `an abort from ${name} left ${JSON.stringify({ mode: q.mode, fix: q.fix, dive: q.dive })}`);
 }
 
+// ---------------------------------------------------------------- 5. the jump
+{
+  const TWIN = { lat: -40.5, lon: 101.25, kind: -1 };
+  const q = MODES.ground();
+  const job = q.job;
+  ok('jump', !new Probe().jump(TWIN, 0), 'a probe in orbit jumped');
+  ok('jump', q.jump(TWIN, 20000) && q.mode === 'ground' && q.site.lat === TWIN.lat && q.site !== TWIN && q.job === job + 1, 'the jump did not fix a copy of the site of the twin');
+  ok('jump', q.fix === null && q.stage === null && q.heard === null && !q.patch.done, 'the jump kept what the landing at the ruin heard');
+  ok('jump', !q.jump(TWIN, 20001) && !q.ascend(20001), 'a second jump or an ascent ran during the jump');
+  let e = run(q, 20000, 20000 + JUMP_MS + 200);
+  ok('jump', e.length === 0 && q.dive.phase === 'in' && q.mode === 'ground', 'the switch of the jump did not wait for the patch');
+  q.patchDone(job, { patch: 'old' });
+  ok('jump', !q.patch.done, 'a patch of the landing before the jump ended the wait');
+  q.patchDone(q.job, { patch: 'T' });
+  e = run(q, 20000 + JUMP_MS + 216, 20000 + JUMP_MS + 216 + JUMP_OUT_MS + 64);
+  ok('jump', e.length === 2 && e[0][0] === 'swap' && e[0][2].patch.patch === 'T' && e[1][0] === 'landed' && q.dive === null && q.mode === 'ground',
+    `the jump gives ${JSON.stringify(e.map((x) => x[0]))}`);
+  const r = MODES.ground();
+  r.jump(TWIN, 30000);
+  ok('jump', r.abort() && clean(r), 'an abort during the jump did not return to a clean orbit');
+}
+
 console.log(`  landing   the descent waits for the patch, the ascent gives the fix at its end; ${DIVE_MS} ms dive, ${FADE_MS} ms cover`);
 console.log(`  guard     no patch lands the probe after ${PATCH_WAIT} ms, on no patch`);
 console.log('  refusals  a second descent, an early ascent, a hear off the ground, and an older patch change nothing');
+console.log(`  jump      from the ground to the twin: the cover closes over ${JUMP_MS} ms, waits for the patch, swaps, and opens over ${JUMP_OUT_MS} ms`);
 console.log(`  abort     every mode of ${Object.keys(MODES).join(', ')} returns to a clean orbit`);
 console.log('');
 if (fails) { console.log(`FAIL: ${fails} checks`); process.exit(1); }

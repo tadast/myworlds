@@ -17,6 +17,7 @@
 // build their wreck here. Each body is in its own frame: y up, the origin on the ground under it.
 import * as THREE from 'three';
 import { RUIN_CAMP } from './ruin-types.js';
+import { TWIN_CAMP, tentParts as twinParts } from './way-types.js';
 
 // The metal of a machine. It takes no colour from the palette: a wreck must read as a made thing on
 // a green world and on an ice world alike, and a hull in the colours of the biome would read as
@@ -330,6 +331,122 @@ export function crewCampGeometry(info, { stone = '#8a8578', dark = '#5e5a52' } =
       ...(info && info.rover ? roverParts(...RUIN_CAMP.roverAt) : [])];
   pose(p, new THREE.Matrix4().makeScale(k, k, k));
   return mergeParts(p);
+}
+
+// ---------------------------------------------------------------- the tent at the twin, chapter 3
+// The crew went through the way with what it carried, so the twin holds no shelter and no rover: a
+// ridge tent in the paint of a hatch, a ring of stones for the stove, the packs, and the flag. What
+// else stands follows the fate: graves, a ring of stones with the marks of the makers cut into them,
+// or the suits of the crew laid out by the door. TWIN_CAMP of way-types.js holds the layout, and
+// generate.js places the tent from the same numbers.
+//
+// The frame is the frame of the camp of p2-43: y up, x toward the middle of the twin, so the door
+// of the tent faces the stones. `info` is patch.source.tent: { up, graves, marks, suits }.
+const C_TENT = C_DOOR;
+const C_TENT_FLY = '#e3ddd0';
+const C_SUIT = '#dcdfe3';
+
+// The tent standing: a ridge along x, the door on the +x end, a pale fly over the ridge, and a
+// ground sheet. When nobody lives there it lies flat: a low sheet and a bent pole.
+function tentParts(up) {
+  const p = [];
+  const L = 4.0, W = 3.0, H = 2.1;
+  if (up) {
+    const body = plate([[-W / 2, 0], [W / 2, 0], [0, H]], L);
+    p.push(part(body, C_TENT, 0, 0, 0, 0, Math.PI / 2, 0));
+    p.push(part(plate([[-W * 0.32, 0], [W * 0.32, 0], [0, H * 0.72]], 0.06), C_HULL_DARK, L / 2 + 0.03, 0, 0, 0, Math.PI / 2, 0));
+    p.push(part(new THREE.BoxGeometry(L + 0.3, 0.08, 0.9), C_TENT_FLY, 0, H - 0.08, 0));
+    p.push(part(new THREE.BoxGeometry(L + 0.8, 0.04, W + 0.6), C_HULL_DARK, 0, 0.02, 0));
+    p.push(strut([L / 2 + 0.2, 0, 0], [L / 2 + 0.2, H + 0.2, 0], 0.05, 0.05, C_LEG, 4));
+    p.push(strut([-L / 2 - 0.2, 0, 0], [-L / 2 - 0.2, H + 0.2, 0], 0.05, 0.05, C_LEG, 4));
+  } else {
+    p.push(partS(new THREE.BoxGeometry(L, 0.35, W), C_TENT, [0, 0.17, 0], [0.04, 0.3, -0.03], [1, 1, 1]));
+    p.push(partS(new THREE.BoxGeometry(L * 0.7, 0.2, W * 0.8), C_TENT_FLY, [-0.3, 0.4, 0.2], [0, 0.5, 0.05], [1, 1, 1]));
+    p.push(strut([L / 2 + 0.1, 0, 0.4], [L / 2 + 0.9, 1.4, 1.1], 0.05, 0.05, C_LEG, 4));
+  }
+  return p;
+}
+
+// The stove: a ring of seven small stones round a dark bed of ash.
+function fireParts(x, z, stone, dark) {
+  const p = [part(new THREE.CylinderGeometry(0.7, 0.75, 0.08, 8), dark, x, 0.04, z)];
+  for (let i = 0; i < 7; i++) {
+    const a = i * 2 * Math.PI / 7;
+    p.push(partS(new THREE.DodecahedronGeometry(0.22, 0), stone, [x + 0.85 * Math.cos(a), 0.12, z + 0.85 * Math.sin(a)], [i, i * 0.7, 0], [1, 0.7, 1]));
+  }
+  return p;
+}
+
+// The packs: two frames on the ground and a case, by the door.
+function packParts(x, z) {
+  return [
+    part(new THREE.BoxGeometry(0.7, 0.9, 0.45), C_CRATE, x, 0.45, z - 0.4, 0, 0.4, 0),
+    part(new THREE.BoxGeometry(0.7, 0.8, 0.45), C_HULL, x + 0.3, 0.4, z + 0.5, 0, -0.3, 0.2),
+    part(new THREE.BoxGeometry(0.9, 0.3, 0.55), C_DOOR, x - 0.6, 0.15, z + 0.1, 0, 0.9, 0),
+  ];
+}
+
+// A grave: a low mound of stones and one upright stone with a strip of the cloth of the flag.
+function graveParts(x, z, stone, dark) {
+  const p = [partS(new THREE.DodecahedronGeometry(0.7, 0), dark, [x, 0.12, z], [0.2, 0.4, 0], [1.3, 0.35, 0.8])];
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + 0.4;
+    p.push(partS(new THREE.DodecahedronGeometry(0.26, 0), stone, [x + 0.55 * Math.cos(a), 0.2, z + 0.4 * Math.sin(a)], [i, i, 0], [1, 0.7, 1]));
+  }
+  p.push(part(new THREE.BoxGeometry(0.16, 0.9, 0.42), stone, x - 0.75, 0.45, z, 0, 0, 0.08));
+  p.push(part(new THREE.BoxGeometry(0.05, 0.14, 0.44), C_FLAG, x - 0.66, 0.72, z, 0, 0, 0.08));
+  return p;
+}
+
+// A stone of the ring of marks: a slab set on end, with a dark band where the marks are cut.
+function markParts(x, z, i, stone, dark) {
+  const lean = ((i * 0.37) % 0.3) - 0.15;
+  const turn = Math.atan2(-z, x);
+  return [
+    part(new THREE.BoxGeometry(0.28, 1.4, 0.55), stone, x, 0.7, z, lean, turn, 0),
+    part(new THREE.BoxGeometry(0.3, 0.5, 0.45), dark, x, 0.85, z, lean, turn, 0),
+  ];
+}
+
+// The suits of the crew, laid out flat in a row by the door: a torso, a helmet, and two legs each.
+function suitParts(x, n) {
+  const p = [];
+  for (let i = 0; i < n; i++) {
+    const z = (i - (n - 1) / 2) * 0.75;
+    p.push(part(new THREE.BoxGeometry(0.7, 0.18, 0.5), C_SUIT, x, 0.09, z));
+    p.push(part(new THREE.SphereGeometry(0.2, 8, 5), C_SUIT, x + 0.55, 0.16, z));
+    p.push(part(new THREE.BoxGeometry(0.3, 0.1, 0.28), C_GLASS, x + 0.6, 0.2, z));
+    for (const s of [-1, 1]) p.push(part(new THREE.BoxGeometry(0.7, 0.14, 0.17), C_SUIT, x - 0.7, 0.07, z + s * 0.12));
+  }
+  return p;
+}
+
+// The tent of one patch of the twin, in the frame of the camp, after the scale of TWIN_CAMP.
+// `stone` and `dark` are the colours of the stone of the ruin, as for the cairn of p2-43.
+export function twinCampGeometry(info, { stone = '#8a8578', dark = '#5e5a52' } = {}) {
+  const k = TWIN_CAMP.scale;
+  const p = [
+    ...tentParts(!!(info && info.up)),
+    ...fireParts(TWIN_CAMP.fire[0], TWIN_CAMP.fire[1], stone, dark),
+    ...packParts(TWIN_CAMP.packs[0], TWIN_CAMP.packs[1]),
+  ];
+  if (info && info.up) p.push(...flagParts(TWIN_CAMP.flag[0], TWIN_CAMP.flag[1]));
+  if (info && info.suits) p.push(...suitParts(TWIN_CAMP.suits[0], Math.min(5, info.suits)));
+  for (const c of tentLayoutOf(info)) {
+    if (c.part === 'grave') p.push(...graveParts(c.x, c.z, stone, dark));
+    if (c.part === 'mark') p.push(...markParts(c.x, c.z, c.i, stone, dark));
+  }
+  pose(p, new THREE.Matrix4().makeScale(k, k, k));
+  return mergeParts(p);
+}
+
+// The graves and the stones of the marks before the scale, from the circles of tentParts() of
+// way-types.js, which carry the scale: this divides it back out.
+function tentLayoutOf(info) {
+  const k = TWIN_CAMP.scale;
+  let i = 0;
+  return twinParts(info).filter((c) => c.part === 'grave' || c.part === 'mark')
+    .map((c) => ({ part: c.part, x: c.x / k, z: c.z / k, i: i++ }));
 }
 
 // ---------------------------------------------------------------- the four hulls

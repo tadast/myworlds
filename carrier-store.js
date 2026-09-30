@@ -108,6 +108,9 @@ function writeAll(all) {
 //   the ruin                        `ruin: { fixes, found, briefed }`, with its band held in the
 //                                   `tuned` at the top, as p2-38 wrote it
 //   a later chapter                 `<id>: { fixes, found, briefed, tuned }`
+//   the way on, chapter 3           `way: { found, read, home }`: the arrival at the twin, the
+//                                   read of the third log, and the end of the mission. See
+//                                   docs/issues/p3-00-the-way-on.md
 //
 // A part that holds nothing stays off the disk, so the record of a reader who never tunes stays the
 // record of issue 34. A key this build does not know stays as it is.
@@ -140,6 +143,8 @@ function partsOf(rec, ids) {
       found: !!part.found,
       briefed: asStage(part.briefed),
       held: i === 0 ? true : id === 'ruin' ? !!(r && r.tuned) : !!part.tuned,
+      read: !!part.read,      // chapter 3: the reader read the third log at the twin
+      home: !!part.home,      // chapter 3: the reader took the crew home
     };
   });
   return out;
@@ -157,9 +162,11 @@ export function writeProgress(seed, ids, parts) {
     const p = parts[id];
     const ruin = id === 'ruin';
     if (ruin && p.held) out.tuned = true;
-    if (p.fixes.length || p.found || p.briefed || (p.held && !ruin)) {
+    if (p.fixes.length || p.found || p.briefed || (p.held && !ruin) || p.read || p.home) {
       out[id] = { fixes: p.fixes, found: p.found, briefed: p.briefed };
       if (p.held && !ruin) out[id].tuned = true;
+      if (p.read) out[id].read = true;
+      if (p.home) out[id].home = true;
     } else {
       delete out[id];
     }
@@ -168,3 +175,31 @@ export function writeProgress(seed, ids, parts) {
   return writeAll(all);
 }
 
+
+// ---------------------------------------------------------------- the codex, chapter 3
+// The makers write in one script on every world, so the letters the reader gives the glyphs belong
+// to the reader and not to a world. The codex keeps them under a key of its own: for each glyph of
+// the script, by its index 0 to 25, the letter the reader typed, and whether a send proved it. The
+// next world fills its fields from the codex. See docs/issues/p3-00-the-way-on.md.
+//
+//   { letters: { "10": "k", ... }, proven: { "10": true, ... } }
+export const CODEX_KEY = 'myworlds.codex.v1';
+
+export function readCodex() {
+  const out = { letters: {}, proven: {} };
+  try {
+    const raw = localStorage.getItem(CODEX_KEY);
+    const c = raw ? JSON.parse(raw) : null;
+    if (!c || typeof c !== 'object') return out;
+    for (let k = 0; k < 26; k++) {
+      const v = c.letters && c.letters[k];
+      if (typeof v === 'string' && /^[a-z]$/.test(v)) out.letters[k] = v;
+      if (c.proven && c.proven[k] === true && out.letters[k]) out.proven[k] = true;
+    }
+  } catch { /* a private window or a store that is switched off: the codex starts empty */ }
+  return out;
+}
+
+export function writeCodex(codex) {
+  try { localStorage.setItem(CODEX_KEY, JSON.stringify(codex)); return true; } catch { return false; }
+}
