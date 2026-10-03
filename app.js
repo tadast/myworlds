@@ -24,12 +24,13 @@ import { skyView } from './ground-sky.js';
 import { ProbeHud } from './probe-hud.js';
 import { perf, Hud } from './perf.js';
 import { rollStar, StarSystem } from './star.js';
+import { makeDeck } from './deck.js';
+import { guideOf, noteAnimal, notePlant } from './field-guide.js';
 
 // ---------------------------------------------------------------- config
 const isCoarse = matchMedia('(pointer: coarse)').matches;
 const isSmall = Math.min(innerWidth, innerHeight) < 600;
 const LOW = isCoarse || isSmall || (navigator.hardwareConcurrency || 4) <= 4;
-const COMPACT = isCoarse || isSmall; // the sidebar folds away so the planet stays visible
 // One object holds the whole device tier: the row of tiers.js this device takes, and the pixel ratio
 // of the display under the cap of that row. `Q` is the globe, and `Q.ground` is the probe. See
 // tiers.js for the numbers and the reasons behind them.
@@ -65,41 +66,15 @@ const HUD_MS = 500;       // ms, the overlay reads twice a second
 // ---------------------------------------------------------------- dom
 const $ = (s) => document.querySelector(s);
 const canvas = $('#c');
-const form = $('#seed-form');
-const input = $('#seed');
-const diceBtn = $('#dice');
-const worldsEl = $('#worlds');
-const infoEl = $('#info');
-const infoBody = $('#info-body');
-const hworld = $('#hworld');
 const overlay = $('#overlay');
 const overlayLabel = $('#overlay-label');
 const overlayBar = $('#overlay-bar');
-const toggleBtn = $('#toggle');
-const panel = $('#panel');
-const shareBtn = $('#share');
-const probeBtn = $('#probe');
-const probeIconBtn = $('#probe-icon');
-const probeFloat = $('#probe-float');
 // The instrument of the probe, issue 31. It shows while the probe is down and it reads one
 // telemetry object per frame from the ground. See probe-hud.js. The carrier block of it is a
 // control, and a press on it opens the brief of the distress signal; see openBrief() below.
 const probeHud = new ProbeHud($('#probe-hud'), { onCarrier: () => openBrief() });
-const creatureFloat = $('#creature-float');
-const aimEl = $('#aim');
-const helpEl = $('#help');
-// The two lines of help, one per place the reader stands. The globe turns under the pointer and the
-// ground carries the reader over it, so the first gesture does a different thing in each, and the
-// line has to say which. See updateHelp().
-const HELP_ORBIT = 'Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife';
-// A touch screen gets the help of the fingers, and every other screen gets the help of the keys.
-const HELP_GROUND = isCoarse
-  ? 'Drag or hold to move · two fingers: slide to look, pinch to zoom, twist to turn'
-  : 'Drag or hold to move · WASD fly level, Space or E up, C or Q down, Shift runs · arrows, R F, or right-drag to look';
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
-const muteBtn = $('#mute');
-const volInput = $('#vol');
 
 // ---------------------------------------------------------------- renderer / scene
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -574,7 +549,7 @@ const SLOPE_STEP = 0.02;
   // The wedges of the search, from the store. They ride under the planet too, so they turn with
   // the world, and the far side of the globe hides the part of a wedge that runs behind it. A gas
   // giant gets no probe and a world where makeSource() found no cell has nothing to hear, so both
-  // give null here and the sidebar hides the Carrier row. Issue 34, slice 2.
+  // give null here and the Story window tells no story. Issue 34, slice 2.
   //
   // The height map goes in because the pin of a find stands on the terrain. It comes off the same
   // reply as `world`, so it stands here already; `current` does not, and it is written further
@@ -869,8 +844,7 @@ function frame() {
   perf.frame(now, !!probe.dive || busy);
   if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
   step(now);
-  updateCreatureFloat();
-  updateProbeFloat();
+  deck.sync();
   perf.work(performance.now() - now);
 }
 
@@ -1015,7 +989,6 @@ let hashAt = 0;
 function updateSite(t) {
   site = aiming ? snapSite(pullSite(pickSite(camera, current, aimNdc), current)) : null;
   showMarker(site, current);
-  updateProbeBtn();
   if (t - hashAt > 0.5) { hashAt = t; writeHash(); }   // the address bar follows, but not every frame
 }
 
@@ -1104,8 +1077,8 @@ function placeCameraOverSite(target) {
 }
 
 // ---------------------------------------------------------------- the aim
-// The reader presses the button, the app shows the message, and the next tap on the planet sends
-// the probe to the cell under the tap. The square follows the pointer while the aim is on, so the
+// The reader presses the probe button, the interface shows the aim bar, and the next tap on the
+// planet sends the probe to the cell under the tap. The square follows the pointer while the aim is on, so the
 // reader sees the ground before the tap. A drag turns the planet and sends nothing.
 let aiming = false;
 const aimNdc = new THREE.Vector2(0, 0);
@@ -1119,20 +1092,15 @@ function setAimNdc(x, y) {
 function startAim() {
   if (aiming || !canDescend()) return;
   aiming = true;
-  aimEl.hidden = false;
   canvas.style.cursor = 'crosshair';
-  if (COMPACT) setCollapsed(true);   // the sheet covers the planet the reader must tap
-  updateProbeBtn();
 }
 
 function stopAim() {
   if (!aiming) return;
   aiming = false;
-  aimEl.hidden = true;
   canvas.style.cursor = '';
   site = null;
   showMarker(null, current);
-  updateProbeBtn();
 }
 
 // The tap that sends the probe. A tap that misses the planet keeps the aim on.
@@ -1203,7 +1171,6 @@ function descend(target = site, view = null) {
   probe.descend(target, performance.now(), { view, path });
   controls.enabled = false;
   writeHash();
-  updateProbeBtn();
   diveEl.style.background = current.world.palette.atmo || '#8fb7ff';
   requestPatch();
 }
@@ -1212,7 +1179,6 @@ function descend(target = site, view = null) {
 function ascend() {
   if (!probe.ascend(performance.now())) return;
   ground.controls.enabled = false;
-  updateProbeBtn();
 }
 
 // One frame of the dive: the camera of the descent, the cover, and the event of the probe.
@@ -1227,7 +1193,7 @@ function stepDive(now) {
   diveEl.style.opacity = String(s.cover);
   if (s.event === 'enter') enterGround(s.patch, s.view);
   else if (s.event === 'leave') leaveGround();
-  else if (s.event === 'landed') { if (ground) ground.controls.enabled = true; updateProbeBtn(); }
+  else if (s.event === 'landed') { if (ground) ground.controls.enabled = !deckHolds; }
   else if (s.event === 'surfaced') surface(s.fix);
   if ((s.event === 'enter' || s.event === 'leave') && diveLabel) diveLabel.textContent = '';
 }
@@ -1281,7 +1247,7 @@ function enterGround(result, view) {
     onSelect: (kind) => { markedKind = kind; markedPlant = null; markedSource = false; markedPerson = null; },
     onSelectPlant: (kind) => { markedPlant = kind; markedKind = null; markedSource = false; markedPerson = null; },
     onSelectSource: () => { markedSource = true; markedKind = null; markedPlant = null; markedPerson = null; },
-    // Chapter 3: a person of the crew at the twin. The floating button offers the talk.
+    // Chapter 3: a person of the crew at the twin. The study chip offers the talk.
     onSelectPerson: (name) => { markedPerson = name; markedKind = null; markedPlant = null; markedSource = false; },
     onDeselect: () => { markedKind = null; markedPlant = null; markedSource = false; markedPerson = null; },
   });
@@ -1306,8 +1272,8 @@ function enterGround(result, view) {
   ground.resize(innerWidth, innerHeight);
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
   probeHud.show();
-  // The landing took a fix, so the progress changed. The sidebar gains its flora row, the Carrier
-  // row counts the fix, and the fifth block pulses. Risk 4 of issue 34: a reader may never look at
+  // The landing took a fix, so the progress changed. The Planet window gains the plants of the
+  // patch, the Story window counts the fix, and the fifth block pulses. Risk 4 of issue 34: a reader may never look at
   // the fifth block. The block pulses on every landing that hears the carrier until the reader
   // opens the brief of this stage of the search, and it stands quiet after the find as well,
   // because a reader who has read the log knows what the block is.
@@ -1334,7 +1300,6 @@ function dropGround() {
 function leaveGround() {
   dropGround();
   setCarrierLevel();  // the probe has left the cell, so the motif takes its orbit level
-  if (current) renderInfo(current.world);  // the sidebar loses its flora row
   if (probe.site) placeCameraOverSite(probe.site);
   writeHash();
 }
@@ -1347,9 +1312,7 @@ function leaveGround() {
 function surface(fix) {
   controls.enabled = true;
   if (fix && carrierGroup && followHolds(fix)) addWedge(carrierGroup, fix, { fade: true });
-  // The sidebar is back in orbit, so the Carrier row shows its Aim chips again.
-  if (current) renderInfo(current.world);
-  updateProbeBtn();
+  deck.touch();       // the story is back in orbit: the objective counts the wedges again
 }
 
 // A new world always returns to orbit, whatever the probe was doing. The fix of a landing goes with
@@ -1362,130 +1325,69 @@ function abortProbe() {
   setCarrierLevel();       // the probe is off the ground, so the motif takes its orbit level
   diveEl.style.opacity = '0';
   if (diveLabel) diveLabel.textContent = '';
-  updateProbeBtn();
 }
 
-let probeLabel = '';
-// The help line follows the reader. The ground gets its own gestures since issue 23, and a line
-// that still said "drag to spin" would send the reader looking for a control that is not there.
-function updateHelp() {
-  if (!helpEl) return;
-  const text = probe.mode === 'ground' ? HELP_GROUND : HELP_ORBIT;
-  if (helpEl.textContent !== text) helpEl.textContent = text;
+// The probe button of the dock: it sends the probe, it cancels the aim, and it recalls the probe.
+function onProbeClick() {
+  if (probe.mode === 'ground') ascend();
+  else if (aiming) stopAim();
+  else startAim();
 }
 
-function updateProbeBtn() {
-  if (!probeBtn) return;
-  updateHelp();
-  const down = probe.mode === 'ground';
-  const show = !probe.dive && !busy && (down || canDescend());
-  const label = down ? 'Recall the probe' : aiming ? 'Cancel the probe' : 'Send a probe to the surface';
-  const changed = probeBtn.hidden === show || probeLabel !== label;
-  probeBtn.hidden = !show;
-  probeBtn.textContent = label;
-  probeLabel = label;
-  // The header carries the same probe as an icon. It shows and says the same thing, and it stays
-  // on screen while the sidebar is folded away, where the text button cannot go.
-  if (probeIconBtn) {
-    probeIconBtn.hidden = !show;
-    probeIconBtn.setAttribute('aria-label', label);
-    probeIconBtn.title = label;
-    probeIconBtn.setAttribute('aria-pressed', String(down || aiming));
-  }
-  // The button only moves into view when it appears or when it changes what it says. A call on
-  // every frame of the dive would fight the scroll of the reader.
-  if (show && changed) showProbeBtn();
-}
-
-// ---------------------------------------------------------------- the floating probe button
-// The zoom used to carry the reader between the two places: half a second of zoom out at the
-// ceiling of the ground recalled the probe. That reads as a fault. A reader who pulls back to see
-// more of the patch is thrown off the world, and the gesture that framed the view also ended it.
+// ---------------------------------------------------------------- the study chip
+// One tap on an animal marks it: a ring lies on the ground under it, and the study chip over the
+// dock offers its card. The card then opens from the chip, so no tap ever covers the view the
+// reader is crossing with a card. The chip hides while the card is open, and it comes back when the
+// card closes, so the reader can reopen it. A tap on the ground, the Escape key, or the recall of
+// the probe takes the mark off.
 //
-// The zoom now stops at the limit and does nothing else, and the limit offers the journey instead.
-// At the ceiling of the ground the button recalls the probe. At the closest zoom of the globe it
-// sends one. It only shows at the limit, where the zoom has nothing left to give and the reader who
-// keeps pulling is asking to travel, so it never covers a view the reader is still moving.
-const FLOAT_NEAR = CAM_MIN + 0.005;   // globe radii: the camera counts as fully zoomed in here
-let floatLabel = '';
-function updateProbeFloat() {
-  if (!probeFloat) return;
-  let label = '';
-  if (!probe.dive && !busy && !aiming) {
-    // The two floating buttons share one place on the screen. At the ceiling the recall takes it,
-    // because the reader who pulls back to the limit asks to travel; the mark stays on the ground.
-    if (probe.mode === 'ground' && ground && ground.atCeiling) label = 'Recall the probe';
-    else if (canDescend() && camera.position.length() <= FLOAT_NEAR) label = 'Send a probe to the surface';
-  }
-  if (label === floatLabel) return;
-  floatLabel = label;
-  // The text holds through the fade out, so the reader never reads a label change on a button
-  // that is going away.
-  if (label) probeFloat.textContent = label;
-  probeFloat.classList.toggle('show', !!label);
-}
-if (probeFloat) probeFloat.addEventListener('click', onProbeClick);
-
-// ---------------------------------------------------------------- the marked animal button
-// One tap on an animal marks it: a ring lies on the ground under it, and this button offers its
-// card, the way the floating probe button offers the journey. The card then opens from the
-// button, so no tap ever covers the view the reader is crossing with a card. The button hides
-// while the card is open, and it comes back when the card closes, so the reader can reopen it.
-// A tap on the ground, the Escape key, or the recall of the probe takes the mark off.
-//
-// Issue 24 gives the plants the same button. A tap on a plant marks it the same way and this
-// button offers its card, so the reader learns one gesture and it works on everything that grows
-// or walks. Only one thing is marked at a time, so the button always names what the ring is under.
+// Issue 24 gives the plants the same chip. A tap on a plant marks it the same way and the chip
+// offers its card, so the reader learns one gesture and it works on everything that grows or
+// walks. Only one thing is marked at a time, so the chip always names what the ring is under.
 let markedKind = null;    // the species of the marked animal, or null while nothing is marked
 let markedPlant = null;   // the kind of the marked plant, or null while nothing is marked
-// Issue 34: the wreck takes the same button. One patch holds at most one wreck, so a flag says all
-// there is to say. The button then reads "Download the log" and it opens the card of the source.
+// Issue 34: the wreck takes the same chip. One patch holds at most one wreck, so a flag says all
+// there is to say. The chip then reads "Download the log" and it opens the card of the source.
 let markedSource = false;
-// Chapter 3: the name of the marked person of the crew at the twin, or null. The button offers the talk.
+// Chapter 3: the name of the marked person of the crew at the twin, or null. The chip offers the talk.
 let markedPerson = null;
-let creatureLabel = '';
 // The plants of the patch the probe is standing on, tallest first, and the flora signature the
 // card builds a preview with. Both are empty in orbit, because a plant belongs to a patch.
 let groundPlants = [];
 let groundVariant = 0;
 const plantOf = (kind) => groundPlants.find((p) => p.kind === kind) || null;
 
-function updateCreatureFloat() {
-  if (!creatureFloat) return;
-  let label = '';
-  // At the ceiling the recall of the probe takes the spot. See updateProbeFloat().
-  if (probe.mode === 'ground' && !probe.dive && !busy && creatureCard.hidden && !(ground && ground.atCeiling)) {
-    if (markedKind !== null) {
-      const G = current && current.world.species[markedKind];
-      if (G) label = `Study the ${G.lore.name}`;
-    } else if (markedPlant !== null) {
-      const p = plantOf(markedPlant);
-      if (p) label = `Study the ${p.lore.name}`;   // the same form the animal takes, so one button reads one way
-    } else if (markedSource) {
-      // The wreck is not a subject to study. The probe pulls the log off its recorder, so the button says that.
-      // The ruin is a subject, and the button takes the form the animal and the plant take. p2-41.
-      // The source of a closed chapter has no card, and the button says so. ADR-0001.
-      const kind = ground && ground.source && ground.source.kind;
-      label = progress && progress.state(chapterOfKind(kind)) === 'closed' ? CLOSED_LINE
-        : kind === 'ruin' ? 'Study the ruin'
-          : kind === 'twin' ? (current && current.world.twin && current.world.twin.log ? 'Read the log of the crew' : 'Study the twin')
-            : 'Download the log';
-    } else if (markedPerson) {
-      label = `Talk to ${markedPerson}`;
-    }
+// The words of the study chip, or '' while it has nothing to offer. A creature or a plant the
+// field guide does not hold yet takes no name: the card names it, and the find is the open.
+function studyLabel() {
+  if (probe.mode !== 'ground' || probe.dive || busy || !creatureCard.hidden) return '';
+  if (markedKind !== null) {
+    const G = current && current.world.species[markedKind];
+    if (!G) return '';
+    return guideOf(current.world.seed).fauna.includes(markedKind) ? `Study the ${G.lore.name}` : 'Study this creature';
   }
-  if (label === creatureLabel) return;
-  creatureLabel = label;
-  if (label) creatureFloat.textContent = label;
-  creatureFloat.classList.toggle('show', !!label);
+  if (markedPlant !== null) {
+    const p = plantOf(markedPlant);
+    if (!p) return '';
+    return guideOf(current.world.seed).flora.includes(p.lore.name) ? `Study the ${p.lore.name}` : 'Study this plant';
+  }
+  if (markedSource) {
+    // The wreck is not a subject to study. The probe pulls the log off its recorder, so the chip says that.
+    // The ruin is a subject, and the chip takes the form the animal and the plant take. p2-41.
+    // The source of a closed chapter has no card, and the chip says so. ADR-0001.
+    const kind = ground && ground.source && ground.source.kind;
+    return progress && progress.state(chapterOfKind(kind)) === 'closed' ? CLOSED_LINE
+      : kind === 'ruin' ? 'Study the ruin'
+        : kind === 'twin' ? (current && current.world.twin && current.world.twin.log ? 'Read the log of the crew' : 'Study the twin')
+          : 'Download the log';
+  }
+  return markedPerson ? `Talk to ${markedPerson}` : '';
 }
-if (creatureFloat) {
-  creatureFloat.addEventListener('click', () => {
-    if (markedKind !== null) inspect(markedKind);
-    else if (markedPlant !== null) inspectPlant(markedPlant);
-    else if (markedSource) (ground && ground.source && ground.source.kind !== 'wreck' ? inspectRuin : inspectSource)();
-    else if (markedPerson) openTalk(markedPerson);
-  });
+function openStudy() {
+  if (markedKind !== null) inspect(markedKind);
+  else if (markedPlant !== null) inspectPlant(markedPlant);
+  else if (markedSource) (ground && ground.source && ground.source.kind !== 'wreck' ? inspectRuin : inspectSource)();
+  else if (markedPerson) openTalk(markedPerson);
 }
 
 // creatures roam around their home spot on procedural paths, follow the ground, and stay out of the sea
@@ -1594,7 +1496,6 @@ function generate(seed, { save = true } = {}) {
   if (!seed || busy) return;
   busy = true;
   abortProbe();               // a new world always comes back to orbit and drops the aim
-  updateProbeBtn();
   const genStart = performance.now();
   overlay.classList.add("show");
   overlayBar.style.width = '2%';
@@ -1623,7 +1524,8 @@ function generate(seed, { save = true } = {}) {
       // a frame of it: makeThumb() draws the scene, and that draw would build the programs itself.
       // See warmShaders().
       await warmShaders();
-      renderInfo(msg.result.world);
+      const v0 = carrierView();
+      syncTuners(v0 && v0.tuner);
       music.play(msg.result.world);
       // The motif of the new world starts where its search stands: silent on a world with no find,
       // and under the song on a world the reader has already solved. Issue 34, slice 5.
@@ -1633,11 +1535,10 @@ function generate(seed, { save = true } = {}) {
       const landing = wanted && current.world.type !== 'gas' ? wanted : null;
       const landView = view && view.kind === 'ground' ? view : null;
       writeHash();
-      input.value = seed;
-      if (COMPACT) setCollapsed(true);
+      deck.touch();
       setTimeout(() => {
         overlay.classList.remove("show"); busy = false;
-        if (landing) descend(landing, landView); else updateProbeBtn();
+        if (landing) descend(landing, landView);
       }, 250);
     },
     fail: (message) => {
@@ -1696,53 +1597,23 @@ function saveWorld(world) {
   list.push({ seed: world.seed, type: world.type, typeLabel: world.typeLabel, designation: world.designation, ts: Date.now(), thumb });
   while (list.length > MAX_SAVED) list.shift();
   persist(list);
-  renderWorlds();
 }
 function deleteWorld(seed) {
   persist(loadWorlds().filter((w) => w.seed !== seed));
-  renderWorlds();
 }
 
-function renderWorlds() {
-  const list = loadWorlds().slice().reverse();
-  const marks = marksOf();      // one read of the carrier store answers the whole list
-  worldsEl.innerHTML = '';
-  if (!list.length) {
-    worldsEl.innerHTML = '<p class="empty">No worlds yet. Type a name above.</p>';
-    return;
-  }
-  for (const w of list) {
-    const el = document.createElement('button');
-    el.type = 'button';
-    el.className = 'world' + (current && current.world.seed === w.seed ? ' active' : '');
-    el.title = `${w.seed} · ${w.typeLabel}`;
-    // A world whose source the reader has found carries a mark on its thumb, one for each find: the
-    // wreck, and then the ruin of phase 2. Issue 34, slice 2, and p2-38. See marksOf() in chapters.js.
+// The saved worlds for the interface, newest first. A world whose source the reader has found
+// carries a mark, one for each find: the wreck, and then the ruin of phase 2. Issue 34, slice 2, and
+// p2-38. See marksOf() in chapters.js. One read of the carrier store answers the whole list.
+function savedWorlds() {
+  const marks = marksOf();
+  return loadWorlds().slice().reverse().map((w) => {
     const m = marks.get(w.seed);
-    const mark = m ? `<i class="found" title="${m.title}">${m.text}</i>` : '';
-    el.innerHTML = `<img alt="" src="${w.thumb || ''}"><span class="wname">${escapeHtml(w.seed)}</span><span class="wtype">${escapeHtml(w.typeLabel || w.type)}</span>${mark}<i class="del" title="Forget this world">×</i>`;
-    el.querySelector('img').addEventListener('error', (e) => { e.target.style.visibility = 'hidden'; });
-    el.addEventListener('click', (e) => {
-      if (e.target.classList.contains('del')) { e.stopPropagation(); deleteWorld(w.seed); return; }
-      generate(w.seed);
-    });
-    worldsEl.appendChild(el);
-  }
-}
-function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-
-// ---------------------------------------------------------------- the Carrier row, issue 34
-// The row states the search of this world: nothing heard, the fixes it holds, or the find. A gas
-// giant gets no probe and a world where makeSource() found no cell has nothing to hear, so both
-// hide the row. The button drops the wedges and keeps the find, because a reader who has found the
-// wreck has earned the mark and no button takes it back.
-//
-// The row follows the search the receiver follows. rowOf() in chapters.js writes its words; see
-// view() there. The view of the world on the screen, or null where the world takes no row.
-function carrierState(w) {
-  if (!w || !progress || progress.seed !== w.seed) return null;
-  const v = progress.view();
-  return v.row ? v : null;
+    return {
+      seed: w.seed, type: w.type, typeLabel: w.typeLabel || w.type, designation: w.designation, thumb: w.thumb,
+      marks: m ? m.text : '', title: m ? m.title : '', active: !!current && current.world.seed === w.seed,
+    };
+  });
 }
 
 // ---------------------------------------------------------------- the brief of the carrier
@@ -1828,11 +1699,11 @@ function openBrief() {
 
 briefDlg.addEventListener('click', (e) => { if (e.target === briefDlg) briefDlg.close(); });
 
-// The record of the missing carrier. The Carrier row states "Not heard" until the first landing
-// catches the beacon, and the words are a link to this: a reader who has never landed reads why the
-// row stands there and what a landing would catch. It marks nothing in the store, because the
-// reader has heard nothing yet, and it opens from the sidebar, which stands in orbit and on the
-// ground alike.
+// The record of the missing carrier. Chapter 1 of the Story window offers it until the first
+// landing catches the beacon: a reader who has never landed reads why the search is there and what
+// a landing would catch. It marks nothing in the store, because the reader has heard nothing yet,
+// and it opens from the window, which stands in orbit and on the ground alike. It names no wreck:
+// nobody knows yet what sends the signal. See docs/ui.md.
 const lostDlg = $('#carrier-lost');
 
 function openLost() {
@@ -1850,16 +1721,16 @@ briefDlg.addEventListener('close', () => {
 });
 
 // The return path to the wreck. A reader who found the source a week ago has to find its cell
-// again, and the mini wreck on the globe is 0.06 radii tall. So the Carrier row carries an Aim chip
-// once the world is found: it turns the camera onto the cell of the source and starts the aim, so
+// again, and the mini wreck on the globe is 0.06 radii tall. So each found chapter of the Story
+// window carries a button that turns the camera onto the cell of the source and starts the aim, so
 // the reader stands in the state a tap on that cell of the globe gives. The next tap sends the
-// probe. The chip only shows in orbit, because the aim means nothing on the ground.
+// probe. The button only shows in orbit, because the aim means nothing on the ground.
 //
 // The pick reads the screen centre, and placeCameraOverSite() puts the site there, so the square
 // marker lands on the cell of the source with no new math.
 //
-// `src` is the source to aim at. The chips of the Carrier row give the wreck or the ruin, and each
-// shows only after the find of its source, so no chip gives a search away. With no argument the
+// `src` is the source to aim at. The Story window gives the wreck, the ruin, or the twin, and each
+// button shows only after the find of its source, so no button gives a search away. With no argument the
 // debug handle aims at the source of the search the receiver follows, which the tests of a search
 // use. p2-38.
 function aimAtSource(src = carrierView() && carrierView().follow && carrierView().follow.source) {
@@ -1874,8 +1745,9 @@ function aimAtSource(src = carrierView() && carrierView().follow && carrierView(
 // ---------------------------------------------------------------- a change of the progress
 // A landing, a find, a tune, and a clear each change the progress, and each then calls this. It
 // shows the new view everywhere the page shows the story: the wedges and the pins on the globe, the
-// carrier block of the overlay, the Carrier row and the two tuners, the marks on the thumbs, and the
-// levels of the motifs. chapters.js holds every rule, and this function only shows its view.
+// carrier block of the overlay, the two tuners, the Story window and the objective, the marks on the
+// thumbs, and the levels of the motifs. chapters.js holds every rule, and this function only shows
+// its view.
 //
 // A find or a tune changes the search the receiver follows, or its state. A probe on the ground then
 // reads the carrier of its landing again. The overlay turns to the new band at once, and after a
@@ -1890,8 +1762,8 @@ function showProgress() {
   const v = progress.view();
   rebuildCarrierGroup(v);
   setBriefPulse();
-  renderInfo(current.world);
-  renderWorlds();
+  syncTuners(v.tuner);
+  deck.touch();
   setCarrierLevel(v);
 }
 
@@ -1928,7 +1800,7 @@ function tune() {
 //
 // A find stands in the store, and the store drops the fixes of that search with it. The globe is
 // built again from the progress: the wedges give way to the pin and the mini model at the source.
-// The sidebar states the find in two places, the Carrier row of this world and the thumb of the
+// The interface states the find in two places, the Story window of this world and the thumb of the
 // saved one, and the motif of the source joins the song of this world for good. The reader is on
 // the ground when this runs, so the model arrives while the globe is not drawn, and it stands there
 // at the end of the ascent. The landing reads the carrier again: the found search pulses no more.
@@ -1959,135 +1831,30 @@ function setCarrierLevel(v = carrierView()) {
   music.setRuin(Math.max(motifLevel(v, 'ruin', here), jumpVoice));
 }
 
-// The value of the Carrier row: the words of the row, the Clear chip while the search holds a fix,
-// the Tune chip, and the Aim chips in orbit. "Not heard" is a link to the record of the missing
-// carrier, on the first search only. An Aim chip stands for each found source: one found source
-// takes the chip "Aim", and more finds take one chip each, named for the source. p2-38. The Tune
-// chip opens the tuner under the row, in orbit and on the ground. p2-39.
-function carrierRow(row) {
-  const words = row.lost
-    ? `<button type="button" class="carrier-lost" title="Read the record of the incident">${row.text}</button>` : row.text;
-  const clear = row.clear ? '<button type="button" class="chip carrier-clear" title="Drop the wedges of this search">Clear</button>' : '';
-  const tune = row.tune
-    ? `<button type="button" class="chip carrier-tune" aria-expanded="${sideTunerOpen}" title="Type a frequency into the receiver">Tune</button>` : '';
-  const aims = probe.mode !== 'orbit' ? '' : row.aims.map((a) =>
-    `<button type="button" class="chip carrier-aim" data-aim="${a.id}" title="Aim the probe at the ${a.id}">${a.label}</button>`).join('');
-  return words + clear + tune + aims;
-}
-
 // ---------------------------------------------------------------- the tuner, p2-39
 // The field the reader types the frequency of the log into. tuner.js builds it, and the page stands
-// it in two places: under the last entry of the card of the wreck, and under the Carrier row of the
-// sidebar, where the Tune chip opens it. Each place keeps its own tuner, so the text of one field
-// and its last answer outlive a render of the sidebar.
+// it in two places: under the last entry of the card of the wreck, and in the Now panel of the
+// Story window, while the band waits for it. Each place keeps its own tuner, so the text of one
+// field and its last answer outlive a render of the window.
 //
 // Both places show only on a world with a ruin, and only after the find of the wreck: the card of
-// the wreck opens only on its cell, and that first open is the find. After the tune both places
-// show the locked band and no field. The sidebar then shows the band under the row for good, and
-// the Tune chip goes away. The view of chapters.js gives the tuner, and it gives the band only
-// after the lock. docs/adr/0001-chapters-open-in-strict-order.md.
+// the wreck opens only on its cell, and that first open is the find. After the tune both tuners
+// show the locked band and no field, and the Story window shows the band in the row of chapter 2.
+// The view of chapters.js gives the tuner, and it gives the band only after the lock.
+// docs/adr/0001-chapters-open-in-strict-order.md.
 //
 // A lock calls showProgress(). On the ground the landing reads the carrier again and takes the
 // first fix of chapter 2, and the carrier block turns to the ruin and takes the colour of chapter
 // 2. In orbit the next landing takes the first fix.
-let sideTunerOpen = false;      // the reader pressed the Tune chip of the sidebar
-let sideTunerSeed = null;       // the world the sidebar tuner last showed
 const cardTuner = makeTuner({ onTune: tuneText });
-const sideTuner = makeTuner({
-  onTune: tuneText,
-  // Escape closes the form of the sidebar and gives the focus back to the chip.
-  onEscape: () => {
-    sideTunerOpen = false;
-    if (current) renderInfo(current.world);
-    const chip = infoBody.querySelector('.carrier-tune');
-    if (chip) chip.focus();
-  },
-});
+const deckTuner = makeTuner({ onTune: tuneText });
 
 // Both tuners show the tuner of a view of chapters.js, or hide where the world takes none.
 function syncTuners(st) {
-  for (const t of [cardTuner, sideTuner]) {
+  for (const t of [cardTuner, deckTuner]) {
     t.el.hidden = !st;
     t.set(st);
   }
-}
-
-// The Tune chip opens the form under the row and puts the focus in the field. A second press
-// closes it. The body of the sidebar is the one scroll region, so the form scrolls into view when
-// it stands under the edge.
-function toggleSideTuner() {
-  if (!current) return;
-  sideTunerOpen = !sideTunerOpen;
-  renderInfo(current.world);
-  if (!sideTunerOpen) {
-    const chip = infoBody.querySelector('.carrier-tune');
-    if (chip) chip.focus();
-    return;
-  }
-  sideTuner.focus();
-  const body = panel.querySelector('.body');
-  if (!body) return;
-  const b = body.getBoundingClientRect(), t = sideTuner.el.getBoundingClientRect();
-  if (t.top < b.top || t.bottom > b.bottom) sideTuner.el.scrollIntoView({ block: 'nearest' });
-}
-
-function renderInfo(w) {
-  const s = w.stats;
-  const carrier = carrierState(w);
-  if (sideTunerSeed !== w.seed) { sideTunerOpen = false; sideTunerSeed = w.seed; }
-  const tuner = carrier && carrier.tuner;
-  if (!tuner || tuner.held) sideTunerOpen = false;
-  // The form stands under the row while the chip holds it open, and the locked band stands there
-  // for good after the tune. It takes a whole line of the grid, because on a phone the grid holds
-  // two rows side by side and a quarter of the sheet is too narrow for a field.
-  const slot = tuner && (tuner.held || sideTunerOpen) ? '<dd class="tuner-slot"></dd>' : '';
-  // A render builds the rows again, and the field loses the focus when its old row goes. So the
-  // focus comes back to the field after the render.
-  const typing = sideTuner.el.contains(document.activeElement);
-  infoBody.innerHTML = `
-    <div class="iname">${escapeHtml(w.seed)}</div>
-    <div class="itype">${escapeHtml(w.designation)} · ${escapeHtml(w.typeLabel)}</div>
-    <dl>
-      <dt>Radius</dt><dd>${s.radius}</dd>
-      <dt>Gravity</dt><dd>${s.gravity}</dd>
-      <dt>Day</dt><dd>${s.day}</dd>
-      ${s.tilt ? `<dt>Tilt</dt><dd>${s.tilt}</dd>` : ''}
-      <dt>Temp</dt><dd>${s.temp}</dd>
-      ${s.land ? `<dt>Land</dt><dd>${s.land}</dd>` : ''}
-      ${s.activity ? `<dt>Activity</dt><dd>${escapeHtml(s.activity)}</dd>` : ''}
-      ${carrier ? `<dt>Carrier</dt><dd class="carrier">${carrierRow(carrier.row)}</dd>${slot}` : ''}
-      ${carrier && carrier.way && carrier.way.text ? `<dt>Way on</dt><dd class="carrier way-row">${escapeHtml(carrier.way.text)}</dd>` : ''}
-      ${w.star ? `<dt>Star</dt><dd>${escapeHtml(w.star.label)}</dd>` : ''}
-      <dt>Moons</dt><dd>${w.moons.length ? w.moons.map((m) => escapeHtml(m.name)).join(', ') : 'none'}</dd>
-      <dt>Fauna</dt><dd class="chips">${(w.faunaKinds || []).length ? w.faunaKinds.map((k) => `<button type="button" class="chip" data-kind="${k}">${escapeHtml(w.species[k].lore.name)}</button>`).join('') : 'none seen'}</dd>
-      ${groundPlants.length ? `<dt>Flora</dt><dd class="chips">${groundPlants.map((p) => `<button type="button" class="chip" data-plant="${p.kind}">${escapeHtml(p.lore.name)}</button>`).join('')}</dd>` : ''}
-    </dl>`;
-  const lostBtn = infoBody.querySelector('.carrier-lost');
-  if (lostBtn) lostBtn.addEventListener('click', openLost);
-  const clearBtn = infoBody.querySelector('.carrier-clear');
-  if (clearBtn) clearBtn.addEventListener('click', clearCarrier);
-  const tuneBtn = infoBody.querySelector('.carrier-tune');
-  if (tuneBtn) tuneBtn.addEventListener('click', toggleSideTuner);
-  // The card holds the other tuner, and it follows the same record. See syncTuners().
-  syncTuners(tuner);
-  const slotEl = infoBody.querySelector('.tuner-slot');
-  if (slotEl) {
-    slotEl.appendChild(sideTuner.el);
-    if (typing) sideTuner.focus();
-  }
-  infoBody.querySelectorAll('.carrier-aim').forEach((b) => b.addEventListener('click', () => {
-    const c = carrier && carrier.chapters.find((ch) => ch.id === b.dataset.aim);
-    if (c) aimAtSource(c.source);
-  }));
-  // The flora row only exists while the probe is down, because the plants belong to the patch.
-  infoBody.querySelectorAll('.chip[data-kind]').forEach((b) => b.addEventListener('click', () => inspect(+b.dataset.kind)));
-  infoBody.querySelectorAll('.chip[data-plant]').forEach((b) => b.addEventListener('click', () => {
-    const kind = +b.dataset.plant;
-    inspectPlant(kind);
-    if (probe.mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
-  }));
-  infoEl.hidden = false;
-  hworld.textContent = `${w.seed} · ${w.typeLabel}`;
 }
 
 // ---------------------------------------------------------------- the study card
@@ -2102,11 +1869,13 @@ function renderInfo(w) {
 // card shows one of the four and hides the others.
 const creatureCard = $('#creature');
 const creatureCanvas = $('#ccv'), plantCanvas = $('#pcv'), sourceCanvas = $('#scv'), ruinCanvas = $('#rcv');
+// The text of the card. Over the name of a creature or a plant it states the field guide; see inspect().
+const cardText = creatureCard.querySelector('.ctext');
 const inspector = new Inspector({ card: creatureCard, canvas: creatureCanvas });
 const plantInspector = new PlantInspector({ card: creatureCard, canvas: plantCanvas });
 const sourceInspector = new SourceInspector({ card: creatureCard, canvas: sourceCanvas });
 const ruinInspector = new RuinInspector({ card: creatureCard, canvas: ruinCanvas });   // p2-42
-// What the card shows: 'animal', 'plant', 'source', or 'ruin'. The arrows and the close read it.
+// What the card shows: 'animal', 'plant', 'source', or 'ruin'. The close reads it.
 const cardOpen = () => inspector.open || plantInspector.open || sourceInspector.open || ruinInspector.open;
 function closeCard() {
   inspector.hide(); plantInspector.hide(); sourceInspector.hide(); ruinInspector.hide();
@@ -2133,6 +1902,13 @@ function inspect(kind) {
   inspector.show(current.world.species[kind], current.world.palette, discColor(), 3 + kind);
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'animal';
+  // The open is the find: the creature joins the field guide, and the line over the name counts it.
+  const w = current.world;
+  const isNew = noteAnimal(w.seed, kind);
+  const g = guideOf(w.seed);
+  const of = new Set([...(w.faunaKinds || []), ...g.fauna]).size;
+  if (isNew) deck.found({ type: 'creature', name: w.species[kind].lore.name, n: g.fauna.length, of });
+  cardText.dataset.kicker = `Creature · ${g.fauna.length} of ${of} in your field guide`;
 }
 function inspectPlant(kind) {
   const p = plantOf(kind);
@@ -2147,11 +1923,14 @@ function inspectPlant(kind) {
   plantInspector.show(p, current.world.palette, discColor(), groundVariant);
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'plant';
+  const seed = current.world.seed;
+  if (notePlant(seed, p.lore.name)) deck.found({ type: 'plant', name: p.lore.name });
+  cardText.dataset.kicker = `Plant · ${guideOf(seed).flora.length} in your field guide`;
 }
 
-// The log of the wreck. It opens from the floating button, and it is the only place the page ever
-// shows the log: the reader must stand on the cell and tap the thing itself. The first open is the
-// find, so readSource() runs here and the Carrier row of the sidebar then reads "Found".
+// The log of the wreck. It opens from the study chip, and it is the only place the page ever shows
+// the log: the reader must stand on the cell and tap the thing itself. The first open is the find,
+// so readSource() runs here and chapter 1 of the Story window then reads "Found".
 //
 // The card holds no arrows: a world has one source, so there is nothing to step to. See
 // SourceInspector in ground-source.js for the preview, which turns the wreck on its own axis.
@@ -2177,7 +1956,7 @@ function inspectSource() {
   syncTuners(v && v.tuner);
 }
 
-// The card of the ruin, p2-42. The button reads "Study the ruin" on a marked ruin, and this is where
+// The card of the ruin, p2-42. The study chip reads "Study the ruin" on a marked ruin, and this is where
 // it leads. The reader must stand on the cell and tap the thing itself, as for the wreck, and the
 // first open is the find of the ruin, so readSource() runs here.
 //
@@ -2205,43 +1984,11 @@ function inspectRuin() {
 }
 creatureCard.querySelector('.cclose').addEventListener('click', closeCard);
 creatureCard.addEventListener('click', (e) => { if (e.target === creatureCard) closeCard(); });
-creatureCard.querySelector('.cprev').addEventListener('click', () => cycleInspect(-1));
-creatureCard.querySelector('.cnext').addEventListener('click', () => cycleInspect(1));
-function cycleInspect(dir) {
-  // a world holds one wreck and one ruin, and each card stands alone
-  if (creatureCard.dataset.subject === 'source' || creatureCard.dataset.subject === 'ruin') return;
-  if (creatureCard.dataset.subject === 'plant') return cyclePlant(dir);
-  // On the ground the list also carries the species of the patch: the pull and the niches can
-  // put an animal on the ground that the globe sample never drew, and the arrows must reach it.
-  const kinds = (current?.world.faunaKinds || []).slice();
-  if (probe.mode === 'ground' && ground && ground.fauna) {
-    for (const e of ground.fauna.kinds) if (!kinds.includes(e.kind)) kinds.push(e.kind);
-  }
-  if (!kinds.length) return;
-  const i = kinds.indexOf(+creatureCard.dataset.kind);
-  const kind = kinds[(i + dir + kinds.length) % kinds.length];
-  inspect(kind);
-  // The arrows also point the camera at the nearest animal of the species, behind the card. A
-  // species the patch does not host leaves the camera where it is, and takes the mark off.
-  if (probe.mode === 'ground' && ground) markedKind = ground.focusKind(kind) ? kind : null;
-}
-// The arrows walk the plants of this patch, in the order the worker wrote them: tallest first.
-function cyclePlant(dir) {
-  if (!groundPlants.length) return;
-  const i = groundPlants.findIndex((p) => p.kind === +creatureCard.dataset.kind);
-  const kind = groundPlants[(i + dir + groundPlants.length) % groundPlants.length].kind;
-  inspectPlant(kind);
-  if (probe.mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
-}
 // True while a modal dialog stands open: the about card, the brief, or the lost record. A modal
 // dialog owns the keyboard. On Escape the browser closes the dialog, and the card and the mark
 // behind it must stay. The test reads the page and holds no list, so a new dialog needs no edit.
 const modalOpen = () => !!document.querySelector('dialog:modal');
 
-// Escape closes the study card, but a modal dialog owns the key while it stands open.
-addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && cardOpen() && !modalOpen()) closeCard();
-});
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
@@ -2310,81 +2057,103 @@ canvas.addEventListener('pointermove', (e) => {
   canvas.style.cursor = creatureAt(e.clientX, e.clientY) !== null ? 'pointer' : '';
 });
 
-// ---------------------------------------------------------------- ui
+// ---------------------------------------------------------------- the interface
+// deck.js draws the interface over the planet: the title, the dock, the window, and the chrome. It
+// reads the state of the app through this handle and calls the app through it, and it holds no
+// rule of the story. See docs/ui.md.
 const WORDS = ['Aurora', 'Pebble', 'Nimbus', 'Tadas', 'Juniper', 'Comet', 'Marble', 'Saffron', 'Willow', 'Quasar', 'Pumpkin', 'Zephyr', 'Lumen', 'Basil', 'Orchid', 'Tundra', 'Kepler', 'Mango', 'Fjord', 'Nova'];
-form.addEventListener('submit', (e) => { e.preventDefault(); generate(input.value); input.blur(); });
-diceBtn.addEventListener('click', () => {
-  const w = WORDS[Math.floor(Math.random() * WORDS.length)] + '-' + Math.floor(Math.random() * 900 + 100);
-  input.value = w; generate(w);
-});
-// The body of the sidebar is the one scroll region. On a phone the sheet holds about 390 px of
-// it, and a world with a tall card pushes the probe button under the footer, where the reader
-// cannot see it. So an expand brings the button into view. Measured on a 375 by 667 viewport
-// with `Auralis`: the button stood at y 629 with the footer over it, and the scroll of 214 px
-// brings it to y 415.
-function showProbeBtn() {
-  if (!probeBtn || probeBtn.hidden || panel.classList.contains('collapsed')) return;
-  const body = panel.querySelector('.body');
-  if (!body) return;
-  const b = body.getBoundingClientRect(), p = probeBtn.getBoundingClientRect();
-  if (p.top >= b.top && p.bottom <= b.bottom) return;   // it already shows: do not move the scroll
-  probeBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
-}
-function setCollapsed(on) {
-  panel.classList.toggle('collapsed', on);
-  // The probe overlay reads this: a folded sidebar on a wide screen leaves the whole width, so
-  // the frame starts at the left edge and drops under the strip. See #probe-hud in style.css.
-  document.documentElement.classList.toggle('panel-folded', on);
-  toggleBtn.setAttribute('aria-expanded', String(!on));
-  toggleBtn.setAttribute('aria-label', on ? 'Expand sidebar' : 'Collapse sidebar');
-  if (!on) showProbeBtn();
-}
-toggleBtn.addEventListener('click', () => setCollapsed(!panel.classList.contains('collapsed')));
-// On a phone the sidebar docks at the bottom, where the floating buttons live. The observer
-// writes the height of the panel to a variable, and the phone media query lifts the buttons
-// over the sheet, folded or open. On a wide screen the variable sits unused.
-if (window.ResizeObserver) {
-  new ResizeObserver(() => {
-    document.documentElement.style.setProperty('--panel-h', `${panel.offsetHeight}px`);
-    // The probe overlay starts right of the sidebar, so the frame of issue 31 holds no text
-    // under the panel. A folded panel is narrow and the frame follows it out.
-    document.documentElement.style.setProperty('--panel-w', `${panel.offsetWidth}px`);
-  }).observe(panel);
-}
-panel.querySelector('header').addEventListener('click', (e) => {
-  if (e.target.closest('button')) return;
-  setCollapsed(!panel.classList.contains('collapsed'));
-});
-// On a phone the sheet covers the planet: a touch on the canvas folds it away.
-if (COMPACT) canvas.addEventListener('pointerdown', () => setCollapsed(true));
-shareBtn.addEventListener('click', async () => {
-  if (!current) return;
-  const url = location.origin + location.pathname + viewHash();
-  try { await navigator.clipboard.writeText(url); shareBtn.textContent = 'Copied!'; }
-  catch { shareBtn.textContent = url; }
-  setTimeout(() => (shareBtn.textContent = 'Share link'), 1500);
-});
-function onProbeClick() {
-  if (probe.mode === 'ground') ascend();
-  else if (aiming) stopAim();
-  else startAim();
-}
-probeBtn.addEventListener('click', onProbeClick);
-if (probeIconBtn) probeIconBtn.addEventListener('click', onProbeClick);
-// ---------------------------------------------------------------- music
+const randomName = () => WORDS[Math.floor(Math.random() * WORDS.length)] + '-' + Math.floor(Math.random() * 900 + 100);
 const music = new Music();
-function renderMusic() {
-  const { vol, muted } = music.settings;
-  muteBtn.textContent = muted ? '🔇' : vol < 0.01 ? '🔈' : '🔊';
-  muteBtn.setAttribute('aria-pressed', String(muted));
-  muteBtn.setAttribute('aria-label', muted ? 'Unmute music' : 'Mute music');
-  volInput.value = Math.round(vol * 100);
-  volInput.disabled = muted;
+// The about dialog. It is modal, so the page keys wait while it is open. The Menu window opens it.
+const aboutDlg = $('#about');
+
+// The window holds the controls of the ground while it stands open: the keys then scroll the page
+// and do not fly the probe behind it. A dialog and the dive keep their own hold.
+let deckHolds = false;
+function holdGround(on) {
+  deckHolds = on;
+  if (ground && probe.mode === 'ground' && !probe.dive && !homeRun && !modalOpen()) ground.controls.enabled = !on;
 }
-music.onchange = renderMusic;
-renderMusic();
-muteBtn.addEventListener('click', () => music.setMuted(!music.settings.muted));
-volInput.addEventListener('input', () => music.setVolume(volInput.value / 100));
+
+// A picture of the globe for the Planet page, bigger than the thumb of the list. The camera steps
+// back until the whole globe and its air fit the short side of the canvas, so a portrait phone gets
+// the whole planet too, and the crop is the globe. In orbit only; elsewhere the thumb.
+function snapshot(size = 520) {
+  const saved = current && loadWorlds().find((w) => w.seed === current.world.seed);
+  const thumb = saved ? saved.thumb : '';
+  if (!current || probe.mode !== 'orbit' || busy) return thumb;
+  try {
+    const keep = camera.position.clone(), turn = camera.quaternion.clone();
+    const src = renderer.domElement;
+    const f = (src.height / 2) / Math.tan((camera.fov * Math.PI) / 360);
+    const rMax = Math.min(src.width, src.height) / 2.4;
+    const d = Math.max(3.42, Math.sqrt((f / rMax) ** 2 + 1));
+    camera.position.setLength(d);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    renderer.render(scene, camera);
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const sq = Math.min(Math.min(src.width, src.height), 2.4 * f / Math.sqrt(d * d - 1));
+    c.getContext('2d').drawImage(src, (src.width - sq) / 2, (src.height - sq) / 2, sq, sq, 0, 0, size, size);
+    camera.position.copy(keep); camera.quaternion.copy(turn); camera.updateMatrixWorld();
+    return c.toDataURL('image/jpeg', 0.85);
+  } catch (e) {
+    console.warn('[myworlds] the snapshot failed', e);
+    return thumb;
+  }
+}
+
+const deck = makeDeck({
+  get world() { return current ? current.world : null; },
+  get mode() { return probe.mode; },
+  get dive() { return !!probe.dive; },
+  get busy() { return busy; },
+  get aiming() { return aiming; },
+  get card() { return cardOpen(); },
+  get modal() { return modalOpen(); },
+  get study() { return studyLabel(); },
+  get view() { return carrierView(); },
+  get stage() { return probe.stage; },
+  get plants() { return groundPlants; },
+  get guide() { return guideOf(current ? current.world.seed : ''); },
+  tuner: deckTuner,
+  music: {
+    get on() { return !music.settings.muted; },
+    // on, but the browser has not let the sound start yet: the next press starts it
+    get stalled() { return !music.settings.muted && !!music.ctx && music.ctx.state !== 'running'; },
+    get asked() { return music.asked; },
+    get vol() { return music.settings.vol; },
+    start() { music.setMuted(false); music.unlock(); },
+    toggle() { music.setMuted(!music.settings.muted); },
+    set(v) { music.setVolume(v); },
+  },
+  generate: (name) => generate(name),
+  random: randomName,
+  worlds: savedWorlds,
+  forget: deleteWorld,
+  probe: onProbeClick,
+  aim: startAim,
+  stopAim,
+  openStudy,
+  inspect: (kind) => inspect(kind),
+  inspectPlant(kind) {
+    inspectPlant(kind);
+    if (probe.mode === 'ground' && ground) markedPlant = ground.focusPlant(kind) ? kind : null;
+  },
+  brief: openBrief,
+  lost: openLost,
+  about: () => { if (!aboutDlg.open) aboutDlg.showModal(); },
+  clear: clearCarrier,
+  aimAt(id) {
+    const v = carrierView();
+    const c = v && v.chapters.find((ch) => ch.id === id);
+    if (c) aimAtSource(c.source);
+  },
+  shareUrl: () => location.origin + location.pathname + viewHash(),
+  snapshot,
+  hold: holdGround,
+}, { title: !location.hash });
 
 addEventListener('hashchange', () => {
   const { seed, site: fromHash, view } = parseUrl(location.hash);
@@ -2394,9 +2163,6 @@ addEventListener('hashchange', () => {
   else if (fromHash) { pendingSite = null; pendingView = null; placeCameraOverSite(fromHash); descend(fromHash, view); }
   else { pendingSite = null; pendingView = null; placeCameraAtView(view); }
 });
-// The about dialog. It is modal, so the page keys wait while it is open.
-const aboutDlg = $('#about');
-$('#about-open').addEventListener('click', () => aboutDlg.showModal());
 aboutDlg.addEventListener('click', (e) => { if (e.target === aboutDlg) aboutDlg.close(); });
 aboutDlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') aboutDlg.close(); });
 
@@ -2405,19 +2171,20 @@ const isField = (el) => !!el && ((el.tagName === 'INPUT' && /^(text|search|numbe
   || el.tagName === 'TEXTAREA' || el.isContentEditable);
 addEventListener('keydown', (e) => {
   if (modalOpen()) return;   // a modal dialog owns the keyboard while it is open
-  // A slash typed into a field is a character of that field: the seed input, or the tuner of p2-39.
-  if (e.key === '/' && !isField(document.activeElement)) { e.preventDefault(); input.focus(); }
+  // A slash typed into a field is a character of that field: a name, or the tuner of p2-39. Anywhere
+  // else it opens the Worlds window with the focus in the field of a new name.
+  if (e.key === '/' && !isField(document.activeElement)) { e.preventDefault(); deck.findWorld(); }
   if (e.key !== 'Escape') return;
-  if (!creatureCard.hidden) closeCard();
+  // Escape closes one thing: the card, then the window or the arrival, then the mark, then the aim.
+  if (cardOpen()) closeCard();
+  else if (deck.escape()) return;
   else if (markedKind !== null) { if (ground && ground.fauna) ground.fauna.unmark(); markedKind = null; }
   else if (markedPlant !== null) { if (ground && ground.flora) ground.flora.unmark(); markedPlant = null; }
   else if (markedSource) { if (ground && ground.source) ground.source.unmark(); markedSource = false; }
   else stopAim();
 });
-if (COMPACT) setCollapsed(true);
 
 // ---------------------------------------------------------------- boot
-renderWorlds();
 {
   const fromHash = parseUrl(location.hash);
   const saved = loadWorlds();
@@ -2480,7 +2247,6 @@ function startJump() {
   ground.controls.enabled = false;
   diveEl.style.background = jumpWhite(current.world);
   requestPatch('The stones answer the name');
-  updateProbeBtn();
   return true;
 }
 
@@ -2517,9 +2283,8 @@ function stepJump(s) {
   if (s.event === 'swap') arriveTwin(s.patch);
   else if (s.event === 'landed') {
     jumpVoice = 0; setCarrierLevel();
-    if (ground) { ground.controls.enabled = true; if (ground.source) ground.source.flare(0); }
+    if (ground) { ground.controls.enabled = !deckHolds; if (ground.source) ground.source.flare(0); }
     if (diveLabel) diveLabel.textContent = '';
-    updateProbeBtn();
   }
 }
 const _jumpAim = new THREE.Vector3();
@@ -2774,7 +2539,9 @@ window.__mw = {
   briefCarrier: openBrief,       // opens the brief of the distress signal, as the block does
   aimAtSource,
   tune,                          // p2-38: locks the tuner on its band, for the tests. The reader tunes in the field, p2-39
-  get tuners() { return { card: cardTuner, side: sideTuner }; },   // p2-39: the two tuners
+  get tuners() { return { card: cardTuner, deck: deckTuner }; },   // p2-39: the two tuners
+  get guide() { return current ? guideOf(current.world.seed) : null; },   // the field guide of this world
+  deck,                          // the interface; see deck.js
   landAt,                        // p2-38: a scripted landing, as a promise
   recall,                        // p2-38: a scripted recall, as a promise
   way: wayHooks,                 // chapter 3: see wayHooks

@@ -42,7 +42,7 @@ export const CARRIER_KEY = 'myworlds.carrier.v1';
 //
 // A fix writes about 46 characters of JSON, so one chapter takes about 240 bytes, and 200 seeds of
 // two full chapters take about 100 kB at the very worst, well inside the 5 MB most browsers hold.
-// 200 seeds is over three times the 60 worlds the sidebar keeps, so that bound cannot bite a real
+// 200 seeds is over three times the 60 worlds the Worlds window keeps, so that bound cannot bite a real
 // search. The oldest goes first in both: the oldest fix of a chapter, and the seed with the oldest
 // write.
 export const MAX_FIXES = 4;

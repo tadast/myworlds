@@ -24,7 +24,7 @@
   <meta name="twitter:image" content="https://codeme.lt/myworlds/assets/share.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./style.css">
   <script type="importmap">
     { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
@@ -32,49 +32,6 @@
 </head>
 <body>
   <canvas id="c"></canvas>
-
-  <aside id="panel" aria-label="Sidebar">
-    <header>
-      <h1><span class="logo">✦</span> My Worlds</h1>
-      <span id="hworld" class="hworld"></span>
-      <div class="hbtns">
-        <button id="probe-icon" type="button" class="probe-icon" aria-label="Send a probe to the surface" title="Send a probe to the surface" hidden>🛸</button>
-        <button id="mute" type="button" aria-label="Unmute music" aria-pressed="true" title="Music on/off">🔇</button>
-        <button id="toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Show/hide sidebar">☰</button>
-      </div>
-    </header>
-
-    <div class="body">
-      <section class="sec">
-        <form id="seed-form" autocomplete="off">
-          <input id="seed" type="text" maxlength="40" placeholder="Your name or a word…" enterkeyhint="go" spellcheck="false" aria-label="Seed">
-          <button type="submit" class="go">Generate</button>
-          <button type="button" id="dice" title="Random world" aria-label="Random world">🎲</button>
-        </form>
-        <p class="sub">Every name hides a planet. The same name always finds the same one.</p>
-      </section>
-
-      <section class="sec" id="info" aria-live="polite" hidden>
-        <div class="sechead">
-          <h2>This world</h2>
-          <button type="button" id="share" class="ghost">Share link</button>
-        </div>
-        <div id="info-body"></div>
-        <button type="button" id="probe" class="probe" hidden>Send a probe to the surface</button>
-      </section>
-
-      <section class="sec">
-        <div class="sechead"><h2>Your worlds</h2></div>
-        <div id="worlds"></div>
-      </section>
-    </div>
-
-    <footer>
-      <label class="music" for="vol"><span>Music</span><input id="vol" type="range" min="0" max="100" step="1" aria-label="Music volume"></label>
-      <p class="help" id="help">Drag to spin and tilt · scroll or pinch to zoom · get close to find the wildlife</p>
-      <button type="button" id="about-open" class="about-link">About</button>
-    </footer>
-  </aside>
 
   <section id="creature" hidden aria-live="polite">
     <div class="ccard">
@@ -102,7 +59,6 @@
           <dl class="crows"></dl>
           <section class="cruin-crew" aria-label="The crew at the ruin"></section>
         </div>
-        <div class="cnav"><button type="button" class="ghost cprev">‹ Previous</button><button type="button" class="ghost cnext">Next ›</button></div>
       </div>
     </div>
   </section>
@@ -252,23 +208,24 @@
     </form>
   </dialog>
 
-  <!-- The record of the missing carrier. The Carrier row of the sidebar opens it while the world
-       has heard nothing, so a reader who has never landed still learns why the row is there. It is
-       built the way the brief above is built, and it names no control: it states the incident and
-       what a landing inside the range of the beacon would catch. -->
+  <!-- The record of the missing carrier. Chapter 1 of the Story window offers it while the world
+       has heard nothing, so a reader who has never landed still learns why the search is there. It
+       is built the way the brief above is built, and it names no control: it states the incident
+       and what a landing inside the range of the beacon would catch. It speaks before the find, so
+       it names no wreck: nobody knows yet what sends the signal. See docs/ui.md. -->
   <dialog id="carrier-lost" aria-labelledby="carrier-lost-title">
     <form method="dialog" class="about-card">
       <button type="submit" class="cclose" aria-label="Close">×</button>
       <h2 id="carrier-lost-title">Missing carrier</h2>
-      <p>The registry holds one open incident for this world. A carrier went down here, and no crew
-        came back. Nobody has found the wreck.</p>
-      <p>The hull still transmits. The beacon is weak, and it reaches about a third of the way round
-        the planet, so most of this world hears nothing at all.</p>
+      <p>The registry holds one open incident for this world. A carrier called for help from here,
+        and no crew came back. Nobody knows what became of it.</p>
+      <p>The beacon still transmits. It is weak, and it reaches about a third of the way round the
+        planet, so most of this world hears nothing at all.</p>
       <p>Send a probe to the surface. A landing inside that reach catches the beacon, and the
         instrument reads a bearing to it, never a distance. A landing that hears nothing states a
-        fact of its own: the wreck lies more than a third of the way round from there.</p>
+        fact of its own: the source lies more than a third of the way round from there.</p>
       <p>Each bearing the probe catches stands on the globe as a wedge from the cell it was read
-        from. Land again far to one side, and the second wedge crosses the first over the wreck.</p>
+        from. Land again far to one side, and the second wedge crosses the first over the source.</p>
     </form>
   </dialog>
 
@@ -296,8 +253,8 @@
 
   <!-- The probe overlay of issue 31. It shows while the probe is down: the air, the height, the
        hour of the star, and the uplink that explains where the probe has to stop. probe-hud.js
-       writes the numbers and draws the noise. The frame starts right of the sidebar, so nothing
-       of it hides under the panel. -->
+       writes the numbers and draws the noise. The frame stands under the sound button and over the
+       dock, so nothing of it hides under the interface. -->
   <div id="probe-hud" hidden aria-hidden="true">
     <canvas id="probe-noise"></canvas>
     <div class="hud-frame"></div>
@@ -340,9 +297,33 @@
     <p class="hud-warn" id="hud-warn">Range limit · the relay cannot reach further</p>
   </div>
 
-  <p id="aim" role="status" hidden>Select the area to send a probe</p>
-  <button type="button" id="probe-float" class="floatbtn">Recall the probe</button>
-  <button type="button" id="creature-float" class="floatbtn">Study the creature</button>
+  <!-- The interface over the planet. deck.js renders it: one layer at a time, from the top: the
+       study card or a dialog, the window, the title, the arrival, and the chrome of the planet. The
+       shell stands here; the pages, the title, and the arrival are written into it. data-icon names
+       an icon of icons.js. See docs/ui.md. -->
+  <div id="ui">
+    <button type="button" class="world-chip glass gone" data-act="window:planet" aria-label="The planet"></button>
+    <button type="button" class="objective glass gone" data-act="window:story" aria-label="The story"></button>
+    <div class="aim-bar glass gone" role="status"><span data-icon="cross" data-size="18"></span><span>Tap the planet where the probe should land</span><button type="button" data-act="cancel-aim">Cancel</button></div>
+    <div class="stack">
+      <button type="button" class="ground-goal glass gone" data-act="window:story"></button>
+      <button type="button" class="study-chip gone" data-act="study"></button>
+      <div class="toast glass gone" role="status"></div>
+    </div>
+    <div class="sound glass gone"></div>
+    <section class="arrival glass" hidden aria-live="polite"></section>
+    <section class="window" hidden>
+      <div class="book" role="dialog" aria-modal="true" aria-labelledby="book-title"><div class="book-head"></div><div class="page"></div></div>
+    </section>
+    <nav class="dock glass gone" aria-label="Main">
+      <button type="button" class="tab" data-act="window:worlds"><span data-icon="globe"></span><span>Worlds</span></button>
+      <button type="button" class="tab" data-act="window:story"><span data-icon="signal"></span><span>Story</span></button>
+      <button type="button" class="probe-btn" data-act="probe"><span class="orb"></span><span class="lbl"></span></button>
+      <button type="button" class="tab" data-act="window:planet"><span data-icon="planet"></span><span>Planet</span></button>
+      <button type="button" class="tab" data-act="window:menu"><span data-icon="menu"></span><span>Menu</span></button>
+    </nav>
+    <section class="title" hidden></section>
+  </div>
   <div id="dive" aria-hidden="true"><p id="dive-label"></p></div>
 
   <div id="overlay">

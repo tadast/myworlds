@@ -7,9 +7,16 @@
   --muted: #9aa3c7;
   --accent: #7cc4ff;
   --accent-2: #ffb86b;
+  --warm2: #ff7d54;
   --radius: 18px;
   --gap: max(12px, env(safe-area-inset-left));
   --font: 'Fredoka', ui-rounded, 'SF Pro Rounded', system-ui, -apple-system, sans-serif;
+  /* The window, the cards, and the dialogs set names and prose in a serif and labels in a mono. */
+  --serif: 'Fraunces', Georgia, serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --paper: linear-gradient(180deg, #11162d, #0a0d1d);
+  --edge: rgba(140, 200, 255, 0.16);
+  --veil: rgba(4, 6, 16, 0.62);
 }
 
 * { box-sizing: border-box; }
@@ -34,117 +41,16 @@ body {
   touch-action: none; outline: none;
 }
 
-/* ---------- sidebar
-   One column: header (brand, music, collapse), body (create, this world, your worlds), footer (settings, help).
-   The body is the only scroll region. */
-#panel {
-  position: fixed; top: max(12px, env(safe-area-inset-top)); left: var(--gap); bottom: max(12px, env(safe-area-inset-bottom));
-  width: min(320px, calc(100vw - 24px));
-  background: var(--glass);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
-  z-index: 5;
-  display: flex; flex-direction: column;
-}
-#panel.collapsed { bottom: auto; width: fit-content; max-width: min(440px, calc(100vw - 24px)); }
-#panel.collapsed .body, #panel.collapsed footer { display: none; }
-
-#panel header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 12px 10px 16px; cursor: pointer; user-select: none; -webkit-user-select: none;
-}
-#panel h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.3px; white-space: nowrap; }
-#panel h1 .logo { color: var(--accent-2); margin-right: 2px; }
-.hworld {
-  display: none; flex: 1; min-width: 0; color: var(--muted); font-size: 13px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.hworld::before { content: '· '; }
-#panel.collapsed .hworld { display: block; }
-.hbtns { display: flex; gap: 6px; margin-left: auto; }
-#toggle, #mute, .probe-icon {
-  background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
-  width: 34px; height: 34px; border-radius: 10px; cursor: pointer; font-size: 16px;
-}
-#mute[aria-pressed="true"] { color: var(--muted); }
-/* The probe in the header. It says the same thing as the text button in the card, and it stays
-   in reach while the sidebar is folded away. */
-.probe-icon { line-height: 1; }
-.probe-icon[hidden] { display: none; }
-.probe-icon:hover { border-color: var(--accent); }
-.probe-icon[aria-pressed="true"] { border-color: var(--accent); background: rgba(124, 196, 255, 0.2); }
-
-#panel .body { flex: 1; min-height: 0; overflow: auto; padding: 0 14px; overscroll-behavior: contain; }
-.sec { padding: 4px 0 14px; }
-.sec + .sec { border-top: 1px solid var(--line); padding-top: 12px; }
-.sechead { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 8px; }
-#panel h2 {
-  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 1.2px;
-  text-transform: uppercase; color: var(--muted);
-}
-
-#panel footer { border-top: 1px solid var(--line); padding: 10px 14px max(10px, env(safe-area-inset-bottom)); }
-.music { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
-.music input { flex: 1; min-width: 0; accent-color: var(--accent); cursor: pointer; }
-.music input:disabled { opacity: 0.4; cursor: default; }
-.help { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.4; opacity: 0.8; }
-/* The about link. It is quiet on purpose: small, muted, and under the help line. */
-.about-link {
-  display: block; margin: 6px 0 0; padding: 0; background: none; border: 0;
-  color: var(--muted); font: inherit; font-size: 11px; opacity: 0.6; cursor: pointer;
-}
-.about-link:hover, .about-link:focus-visible { opacity: 1; color: var(--accent); }
-
-/* ---------- create */
-#seed-form { display: flex; gap: 6px; }
-#seed {
-  flex: 1; min-width: 0;
-  background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line); color: var(--text);
-  border-radius: 12px; padding: 10px 12px; font: inherit; font-size: 16px;
-}
-#seed:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124, 196, 255, 0.2); }
-button.go {
-  background: linear-gradient(135deg, #7cc4ff, #6a8bff); color: #08122a; border: 0;
-  border-radius: 12px; padding: 0 14px; font: inherit; font-weight: 600; cursor: pointer;
-}
-button.go:hover { filter: brightness(1.08); }
-#dice {
-  background: var(--glass-2); border: 1px solid var(--line); border-radius: 12px;
-  width: 40px; cursor: pointer; font-size: 18px; padding: 0;
-}
-.sub { margin: 8px 2px 0; color: var(--muted); font-size: 13px; }
-
-/* ---------- this world */
-#info .iname { font-size: 20px; font-weight: 600; }
-#info .itype { color: var(--accent); font-size: 12px; margin-bottom: 8px; letter-spacing: 0.4px; }
-#info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 12px; }
-#info dt { color: var(--muted); }
-#info dd { margin: 0; }
-#info .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+/* A small round button. The decoder of chapter 3 takes it for its sounds. */
 .chip {
   background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
   border-radius: 999px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
 }
 .chip:hover { border-color: var(--accent); color: var(--accent); }
-/* The Carrier row of issue 34: the state of the search, and the button that drops its wedges. The
-   button stands beside the words, so the row keeps the height of every other row. */
-#info .carrier { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-#info .carrier-clear { padding: 0 6px; font-size: 10px; line-height: 15px; color: var(--muted); }
-/* A world that has heard nothing states so as a link, and the link opens the record of the
-   incident. It is a button, because it opens a dialog and goes nowhere. */
-#info .carrier-lost {
-  background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
-  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
-}
-#info .carrier-lost:hover { color: var(--accent-2); }
-
 /* ---------- the tuner, p2-39
-   One form of tuner.js in two places: under the last entry of the log card, and under the Carrier
-   row of the sidebar. A label, a field, the unit, a button, and a line of answer; after the tune,
-   the locked band and no field. The field takes 16 px, so a phone does not zoom in on the focus. */
+   One form of tuner.js in two places: under the last entry of the log card, and in the Now panel of
+   the Story window. A label, a field, the unit, a button, and a line of answer; after the tune, the
+   locked band and no field. The field takes 16 px, so a phone does not zoom in on the focus. */
 .tuner[hidden], .tuner [hidden] { display: none; }
 .tuner-label {
   display: block; margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
@@ -173,56 +79,11 @@ button.go:hover { filter: brightness(1.08); }
 .tuner-answer:empty { margin: 0; }
 .tuner-answer[data-kind="nan"] { color: var(--muted); }
 .tuner-answer[data-kind="lock"] { color: var(--accent); }
-/* In the sidebar the tuner takes a whole line of the grid under the Carrier row. */
-#info .tuner-slot { grid-column: 1 / -1; margin: 2px 0 6px; }
+/* In the Story window the tuner stands in the Now panel, over the line of the objective. */
+#ui .tune-slot .tuner { max-width: 420px; }
 
-/* ---------- your worlds */
-#worlds { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
-#worlds .empty { grid-column: 1 / -1; color: var(--muted); font-size: 13px; margin: 4px 2px; }
-.world {
-  position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
-  background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
-  border-radius: 14px; padding: 8px 6px 7px; cursor: pointer; font: inherit;
-  transition: transform 0.15s ease, border-color 0.15s ease;
-}
-.world:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.3); }
-.world.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 196, 255, 0.25); }
-.world img { width: 56px; height: 56px; border-radius: 50%; background: #0b1024; object-fit: cover; }
-.world .wname { font-size: 12px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.world .wtype { font-size: 10px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.world .del {
-  position: absolute; top: 4px; right: 6px; font-style: normal; color: var(--muted);
-  width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 50%; font-size: 14px;
-  opacity: 0; transition: opacity 0.15s;
-}
-/* The mark of a find, issue 34. It stands opposite the delete button and it never fades, because
-   it is the one thing the reader earned on that world. A world with both finds, the wreck and the
-   ruin, carries two marks, so the width follows the text. p2-38. */
-.world .found {
-  position: absolute; top: 4px; left: 6px; font-style: normal; color: var(--accent-2);
-  min-width: 18px; height: 18px; line-height: 18px; text-align: center; font-size: 11px;
-  text-shadow: 0 0 8px rgba(255, 184, 107, 0.6); pointer-events: none;
-}
-.world:hover .del, .world:focus .del { opacity: 1; }
-.world .del:hover { background: rgba(255, 90, 90, 0.35); color: #fff; }
-@media (pointer: coarse) { .world .del { opacity: 0.7; } }
-
-button.ghost {
-  background: transparent; border: 1px solid var(--line); color: var(--muted);
-  border-radius: 10px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer;
-}
-button.ghost:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.3); }
-
-/* ---------- the probe button and the dive overlay */
-button.probe {
-  display: block; width: 100%; margin-top: 10px; padding: 9px 12px;
-  background: var(--glass-2); border: 1px solid var(--line); color: var(--text);
-  border-radius: 12px; font: inherit; font-size: 13px; cursor: pointer;
-}
-button.probe:hover { border-color: var(--accent); color: var(--accent); }
-button.probe[hidden] { display: none; }
-
-/* The dive fades the screen to the atmosphere colour. The app sets the colour and the opacity.
+/* ---------- the dive and the loading card
+   The dive fades the screen to the atmosphere colour. The app sets the colour and the opacity.
    The label reports what the worker builds while the probe falls. */
 #dive { position: fixed; inset: 0; z-index: 9; opacity: 0; pointer-events: none; display: grid; place-items: end center; }
 #dive-label {
@@ -231,36 +92,6 @@ button.probe[hidden] { display: none; }
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 #dive-label:empty { display: none; }
-
-/* The aim message. It tells the reader to choose the ground the probe lands on. It floats over
-   the scene and it takes no pointer event, because the reader taps the planet under it. */
-#aim {
-  position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 9;
-  margin: 0; padding: 7px 16px; border-radius: 12px;
-  background: rgba(7, 10, 22, 0.55); border: 1px solid var(--line); color: #fff;
-  font-size: 13px; letter-spacing: 0.02em; pointer-events: none;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-}
-#aim[hidden] { display: none; }
-
-/* ---------- the floating probe button
-   It shows at the two ends of the zoom, where the zoom has nothing left to give and the reader
-   who keeps pulling is asking to travel. It sits low and half lit, so it offers the journey
-   without covering the world. visibility carries the fade out and takes the button out of the
-   tab order with it. */
-.floatbtn {
-  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(6px); z-index: 9;
-  margin: 0; padding: 10px 20px; border-radius: 999px; cursor: pointer;
-  background: rgba(7, 10, 22, 0.5); border: 1px solid var(--line); color: #fff;
-  font: inherit; font-size: 13px; letter-spacing: 0.02em;
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-  opacity: 0; visibility: hidden;
-  transition: opacity 0.28s, visibility 0.28s, transform 0.28s, background 0.15s;
-}
-.floatbtn.show { opacity: 0.72; visibility: visible; transform: translateX(-50%) translateY(0); }
-.floatbtn.show:hover, .floatbtn.show:focus-visible { opacity: 1; background: rgba(7, 10, 22, 0.75); }
-@media (prefers-reduced-motion: reduce) { .floatbtn { transition: opacity 0.28s, visibility 0.28s; } }
 
 /* ---------- overlay */
 #overlay {
@@ -283,63 +114,54 @@ button.probe[hidden] { display: none; }
 #overlay-label { font-size: 15px; margin-bottom: 12px; }
 #overlay .track { height: 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
 #overlay-bar { height: 100%; width: 0; background: linear-gradient(90deg, #7cc4ff, #ffb86b); transition: width 0.2s; }
+/* The title screen stands over the first build of the page, and the loading card would cover it. */
+.titled #overlay { visibility: hidden; }
 
-/* ---------- small screens: the sidebar docks at the bottom as a sheet */
-@media (max-width: 600px) {
-  /* The sidebar docks at the bottom here, where the floating buttons live. The buttons ride
-     above the sheet instead of covering it, folded or open. app.js writes --panel-h. */
-  .floatbtn { bottom: calc(var(--panel-h, 0px) + 12px); }
-  #panel {
-    top: auto; left: 0; right: 0; bottom: 0; width: 100%;
-    max-height: 72vh; border-radius: var(--radius) var(--radius) 0 0; border-bottom: 0;
-  }
-  #panel.collapsed { bottom: 0; width: 100%; max-width: none; }
-  #panel header { padding: 10px 12px 8px 16px; }
-  #panel h1 { font-size: 18px; }
-  #worlds { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
-  .world img { width: 44px; height: 44px; }
-  #info dl { grid-template-columns: auto 1fr auto 1fr; }
-  .help { display: none; }
-}
-@media (max-height: 460px) {
-  #info dl { display: none; }
-  .help { display: none; }
-}
-
-/* ---------- creature inspector */
+/* ---------- the study card
+   One card, four subjects, at the size of the window of deck.js: almost the whole screen, a serif
+   for the names and the prose, and a mono for the labels. A creature and a plant take the preview as
+   the left half and the text as the right; the wreck and the ruin keep the layout of a reader. The
+   card takes no arrows, because an arrow would step to a creature the reader has not found yet. */
 #creature {
-  position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 12px;
-  background: rgba(7, 10, 22, 0.45); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 16px;
+  background: var(--veil); backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1);
   opacity: 0; transition: opacity 0.25s;
 }
 #creature.show { opacity: 1; }
 #creature[hidden] { display: none; }
 .ccard {
-  position: relative; display: grid; grid-template-columns: 320px 1fr; gap: 18px;
+  position: relative; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   /* 100vh is the LARGE viewport on a phone: it runs under the address bar, and the last line of a
      card that tall cannot be reached. dvh is the height the reader really has. */
-  width: min(760px, 100%); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow: auto;
-  background: var(--glass); border: 1px solid var(--line); border-radius: 22px; padding: 18px;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  width: min(1180px, 100%); height: min(820px, calc(100vh - 32px)); height: min(820px, calc(100dvh - 32px)); overflow: hidden;
+  background: var(--paper); border: 1px solid var(--edge); border-radius: 28px;
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
 }
 .cclose {
-  position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 10px;
-  background: var(--glass-2); border: 1px solid var(--line); color: var(--text); font-size: 18px; cursor: pointer; z-index: 1;
+  position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; border-radius: 14px;
+  background: rgba(10, 14, 30, 0.7); border: 1px solid var(--line); color: var(--text); font-size: 22px; cursor: pointer; z-index: 3;
 }
-.cview { position: relative; width: 320px; height: 320px; border-radius: 16px; overflow: hidden;
-  background: radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.35)); }
+.cview { position: relative; width: 100%; height: 100%; overflow: hidden;
+  background: radial-gradient(circle at 50% 58%, rgba(124, 196, 255, 0.14), rgba(4, 6, 16, 0.2) 55%, rgba(4, 6, 16, 0.7)); }
 .cview canvas { width: 100%; height: 100%; display: block; }
 /* The card holds one canvas per subject and shows one of them. `display: block` above outranks the
    display the browser gives [hidden], so the rule has to be written here. */
 .cview canvas[hidden] { display: none; }
-.cname { font-size: 22px; font-weight: 600; margin-top: 4px; }
-.clatin { color: var(--accent); font-style: italic; font-size: 13px; margin-bottom: 10px; }
-.ctags { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0 0 10px; font-size: 12px; }
-.ctags dt { color: var(--muted); }
-.ctags dd { margin: 0; }
-.cstory { font-size: 14px; line-height: 1.45; margin: 0 0 12px; color: #dfe4ff; }
-.cnav { display: flex; gap: 8px; }
-.cnav .ghost { padding: 7px 12px; font-size: 13px; }
+.cname { font-family: var(--serif); font-weight: 400; letter-spacing: -0.01em; }
+/* The text of a creature and a plant scrolls inside its half. The line over the name states the
+   kind of the subject and the field guide; app.js writes it into data-kicker. */
+#creature:is([data-subject="animal"], [data-subject="plant"]) .ctext { min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 64px 48px 40px; }
+#creature:is([data-subject="animal"], [data-subject="plant"]) .ctext::before {
+  content: attr(data-kicker); display: block; margin-bottom: 12px;
+  font: 10.5px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: #9fd6ff;
+}
+#creature:is([data-subject="animal"], [data-subject="plant"]) .cname { margin: 0 40px 8px 0; font-size: 46px; line-height: 1.04; }
+.clatin { margin: 0 0 28px; font-family: var(--serif); font-style: italic; font-size: 19px; color: var(--accent-2); }
+.ctags { display: grid; grid-template-columns: 120px minmax(0, 1fr); margin: 0 0 30px; border-top: 1px solid var(--edge); font-size: 16px; }
+.ctags dt, .ctags dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--edge); }
+.ctags dt { padding-top: 15px; font: 10.5px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.cstory { margin: 0 0 12px; font-family: var(--serif); font-weight: 300; font-size: 19px; line-height: 1.65; color: #e9e3f2; }
+.cstory::first-letter { float: left; font-size: 3.3em; line-height: 0.86; padding: 6px 10px 0 0; color: var(--accent-2); font-weight: 400; }
 /* The log of the wreck, issue 34. The card shows one subject at a time, so each subject hides the
    blocks it does not use. A world holds one source, so the log takes no arrows.
 
@@ -352,20 +174,19 @@ button.probe[hidden] { display: none; }
    and the card holds a fixed height. The scroller fades at both ends and carries padding under the
    last entry, so the last line scrolls clear of the fade and is never cut by the edge. */
 #creature[data-subject="source"] .ccard {
-  --side: 264px;
-  display: block; overflow: hidden;
-  /* A page of text needs a quiet ground, so this card is nearer to solid than the other two. */
-  background: rgba(11, 15, 32, 0.93);
-  width: min(920px, 100%);
-  height: min(700px, calc(100vh - 24px)); height: min(700px, calc(100dvh - 24px));
-  padding: 22px 8px 0 calc(var(--side) + 46px);
+  --side: 340px;
+  display: block;
+  padding: 44px 12px 0 calc(var(--side) + 72px);
 }
 #creature[data-subject="source"] .cview {
-  position: absolute; left: 22px; top: 22px; width: var(--side); height: var(--side);
+  position: absolute; left: 36px; top: 36px; width: var(--side); height: var(--side); border-radius: 20px;
 }
 #creature[data-subject="source"] .ctext { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-#creature[data-subject="source"] .cname { font-size: 26px; margin: 2px 44px 0 0; letter-spacing: 0.01em; }
-#creature[data-subject="source"] .clatin { margin: 2px 44px 14px 0; }
+#creature:is([data-subject="source"], [data-subject="ruin"]) .cname { font-size: 42px; line-height: 1.05; margin: 0 56px 4px 0; }
+#creature:is([data-subject="source"], [data-subject="ruin"]) .clatin {
+  margin: 2px 56px 18px 0; font-family: var(--mono); font-style: normal; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+}
+#creature[data-subject="source"] .clatin { color: var(--accent); }
 #creature[data-subject="source"] .clog {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   padding: 14px 22px 44px 22px; margin-left: -4px;
@@ -375,9 +196,9 @@ button.probe[hidden] { display: none; }
 }
 /* The crew, under the wreck: one person to a row, the job on the right. The person who kept the
    log is marked, because the log is written in that voice. */
-.ccrew { color: var(--muted); font-size: 13px; }
+.ccrew { color: var(--muted); font-size: 14px; }
 #creature[data-subject="source"] .ccrew {
-  position: absolute; left: 22px; top: calc(var(--side) + 38px); width: var(--side);
+  position: absolute; left: 36px; top: calc(var(--side) + 56px); width: var(--side);
   display: flex; flex-direction: column; margin: 0;
 }
 .ccrew span { display: flex; justify-content: space-between; gap: 12px; padding: 7px 2px; border-top: 1px solid var(--line); }
@@ -391,7 +212,7 @@ button.probe[hidden] { display: none; }
 .clog-entry { position: relative; margin: 0; padding: 0 0 18px 20px; border-left: 1px solid var(--line); }
 .clog-entry:last-child { border-left-color: transparent; padding-bottom: 0; }
 .clog-entry h3 {
-  position: relative; margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em; line-height: 1;
+  position: relative; margin: 0 0 4px; font: 400 11px var(--mono); letter-spacing: 0.14em; line-height: 1;
   text-transform: uppercase; color: var(--muted);
 }
 .clog-entry h3::before {
@@ -400,7 +221,7 @@ button.probe[hidden] { display: none; }
 }
 .clog-entry.ctitled h3 { color: var(--accent); }
 .clog-entry.ctitled h3::before { background: var(--accent); }
-.clog-entry p { margin: 0; max-width: 62ch; font-size: 14.5px; line-height: 1.6; color: #dfe4ff; }
+.clog-entry p { margin: 0; max-width: 62ch; font-family: var(--serif); font-weight: 300; font-size: 17.5px; line-height: 1.7; color: #ece6d8; }
 /* The note under an ending of the kind `cut`, p2-37. It is a note of the card and not a line of
    the log, so it takes the quiet colour of the day label and italics, and never the accent. It stands
    inside the entry, so it scrolls with the entry and clears the fade at the foot of .clog. */
@@ -410,31 +231,22 @@ button.probe[hidden] { display: none; }
 .clog .tuner { margin: 20px 0 0 20px; padding-top: 14px; border-top: 1px solid var(--line); max-width: 62ch; }
 .clog-entry:has(+ .tuner) { border-left-color: transparent; padding-bottom: 0; }
 #creature[data-subject="source"] .ctags,
-#creature[data-subject="source"] .cstory,
-#creature[data-subject="source"] .cnav { display: none; }
+#creature[data-subject="source"] .cstory { display: none; }
 #creature:not([data-subject="source"]) .clog,
 #creature:not([data-subject="source"]) .ccrew { display: none; }
-/* The card of the ruin, p2-42. It takes the shell of the card of the wreck: the same dark ground,
-   the preview at the left, and the text at the right. The rows are short, so the card takes the
-   height of its text, never less than the preview, and the rows scroll only on a short screen.
+/* The card of the ruin, p2-42. It takes the shell of the card of the wreck: the same ground, the
+   preview at the left, and the text at the right. The rows scroll inside the card.
    --ruin is the colour of chapter 2, made light enough to read on this ground; app.js sets it. */
 #creature[data-subject="ruin"] .ccard {
-  --side: 264px;
-  display: flex; flex-direction: column; overflow: hidden;
-  background: rgba(11, 15, 32, 0.93);
-  width: min(920px, 100%);
-  min-height: calc(var(--side) + 44px);
-  max-height: min(700px, calc(100vh - 24px)); max-height: min(700px, calc(100dvh - 24px));
-  padding: 22px 8px 0 calc(var(--side) + 46px);
+  --side: 340px;
+  display: flex; flex-direction: column;
+  padding: 44px 12px 0 calc(var(--side) + 72px);
 }
 #creature[data-subject="ruin"] .cview {
-  position: absolute; left: 22px; top: 22px; width: var(--side); height: var(--side);
+  position: absolute; left: 36px; top: 36px; width: var(--side); height: var(--side); border-radius: 20px;
 }
 #creature[data-subject="ruin"] .ctext { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-#creature[data-subject="ruin"] .cname { font-size: 26px; margin: 2px 44px 0 0; letter-spacing: 0.01em; }
-#creature[data-subject="ruin"] .clatin {
-  margin: 2px 44px 8px 0; font-style: normal; letter-spacing: 0.03em; color: var(--ruin, var(--accent));
-}
+#creature[data-subject="ruin"] .clatin { margin-bottom: 8px; color: var(--ruin, var(--accent)); }
 #creature[data-subject="ruin"] .cruin {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   padding: 6px 22px 26px 0;
@@ -445,13 +257,13 @@ button.probe[hidden] { display: none; }
 /* A row is a label and one or two sentences, as a page of a survey reads: the label is quiet, as
    the day of an entry of the log is, and the text takes the measure of the log. */
 .crows { margin: 0; }
-.crow { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 14px; padding: 11px 0; border-top: 1px solid var(--line); }
+.crow { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 14px; padding: 14px 0; border-top: 1px solid var(--line); }
 .crow:first-child { border-top: 0; padding-top: 4px; }
 .crow dt {
-  margin: 0; padding-top: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em; line-height: 1.2;
+  margin: 0; padding-top: 4px; font: 400 11px var(--mono); letter-spacing: 0.14em; line-height: 1.2;
   text-transform: uppercase; color: var(--muted);
 }
-.crow dd { margin: 0; max-width: 62ch; font-size: 14.5px; line-height: 1.6; color: #dfe4ff; }
+.crow dd { margin: 0; max-width: 62ch; font-family: var(--serif); font-weight: 300; font-size: 17.5px; line-height: 1.7; color: #ece6d8; }
 .crow dd p { margin: 0; }
 /* The way on: the line of glyphs in the colour of the ruin, the chip beside it, and the sentence
    under it. The chip is a label and not a control, so it takes no pointer. */
@@ -485,35 +297,50 @@ button.probe[hidden] { display: none; }
 .cruin-log .clog-entry.ctitled h3::before { background: var(--ruin, var(--accent)); }
 #creature[data-subject="ruin"] .ctags,
 #creature[data-subject="ruin"] .cstory,
-#creature[data-subject="ruin"] .cnav,
 #creature[data-subject="ruin"] .clog,
 #creature[data-subject="ruin"] .ccrew { display: none; }
 #creature:not([data-subject="ruin"]) .cruin { display: none; }
-/* A short window: the wreck gives its height to the crew. */
+/* A narrow window: the preview of the wreck and the ruin gives width to the text. */
+@media (min-width: 721px) and (max-width: 1000px) {
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .ccard { --side: 260px; padding-left: calc(var(--side) + 56px); }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .cview { left: 28px; }
+  #creature[data-subject="source"] .ccrew { left: 28px; }
+}
+/* A short window: the wreck and the ruin give their height to the text. */
 @media (max-height: 600px) and (min-width: 721px) {
-  #creature[data-subject="source"] .ccard { --side: 200px; }
-  #creature[data-subject="source"] .cview { height: 140px; }
-  #creature[data-subject="source"] .ccrew { top: 176px; }
-  #creature[data-subject="ruin"] .ccard { --side: 200px; }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .ccard { --side: 220px; padding-top: 28px; }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .cview { top: 24px; }
+  #creature[data-subject="source"] .cview { height: 150px; }
+  #creature[data-subject="source"] .ccrew { top: 190px; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctext { padding: 40px 36px 28px; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .cname { font-size: 34px; }
 }
 @media (max-width: 720px) {
-  .ccard { grid-template-columns: 1fr; gap: 12px; padding: 14px; }
-  .cview { width: 100%; height: min(60vw, 300px); }
-  .cname { font-size: 19px; }
-  .cstory { font-size: 13px; }
+  /* The card fills the screen the reader really has. A creature and a plant take the preview as a
+     band across the top and the text under it. */
+  #creature { padding: 0; }
+  .ccard { width: 100%; height: 100vh; height: 100dvh; border: 0; border-radius: 0; }
+  .cclose { top: calc(12px + env(safe-area-inset-top)); right: 12px; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ccard {
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: 42vh minmax(0, 1fr); grid-template-rows: 42dvh minmax(0, 1fr);
+  }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctext { padding: 22px 20px calc(48px + env(safe-area-inset-bottom)); }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .cname { font-size: 32px; margin-right: 0; }
+  .clatin { font-size: 16px; margin-bottom: 18px; }
+  .ctags { grid-template-columns: 100px minmax(0, 1fr); font-size: 15px; }
+  .cstory { font-size: 17px; }
   /* One column. The wreck is a band across the top, the crew runs in a line under the name, and
-     the log takes all the height that is left. The card fills the screen the reader really has. */
+     the log takes all the height that is left. */
   #creature[data-subject="source"] .ccard {
-    display: flex; flex-direction: column; gap: 12px; padding: 14px 6px 0 14px;
-    height: calc(100vh - 24px); height: calc(100dvh - 24px);
+    display: flex; flex-direction: column; gap: 12px; padding: calc(16px + env(safe-area-inset-top)) 6px 0 16px;
   }
   #creature[data-subject="source"] .cview {
     position: relative; left: auto; top: auto; flex: 0 0 auto;
-    width: calc(100% - 8px); height: clamp(96px, 20vh, 170px);
+    width: calc(100% - 8px); height: clamp(110px, 22vh, 190px); border-radius: 16px;
   }
   #creature[data-subject="source"] .ctext { flex: 1 1 auto; height: auto; }
-  #creature[data-subject="source"] .cname { font-size: 21px; margin-right: 8px; }
-  #creature[data-subject="source"] .clatin { margin: 2px 8px 10px 0; }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .cname { font-size: 30px; margin-right: 8px; }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .clatin { margin: 2px 8px 10px 0; }
   #creature[data-subject="source"] .ccrew {
     position: static; width: auto; flex-direction: row; flex-wrap: wrap; gap: 4px 14px;
     margin: 0 8px 4px 0; font-size: 12px;
@@ -521,42 +348,41 @@ button.probe[hidden] { display: none; }
   #creature[data-subject="source"] .ccrew span { display: inline; padding: 0; border: 0; white-space: nowrap; }
   #creature[data-subject="source"] .ccrew i { margin-left: 5px; }
   #creature[data-subject="source"] .clog { padding: 12px 10px 40px 6px; margin-left: 0; }
-  .clog-entry p { font-size: 14px; line-height: 1.55; }
+  .clog-entry p, .crow dd { font-size: 16px; line-height: 1.6; }
   /* One column for the ruin too: the ruin as a band across the top, the name, and the rows, each
      label over its text, so the text takes the whole width of a phone. */
-  #creature[data-subject="ruin"] .ccard {
-    gap: 12px; padding: 14px 6px 0 14px; min-height: 0;
-    max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px);
-  }
+  #creature[data-subject="ruin"] .ccard { gap: 12px; padding: calc(16px + env(safe-area-inset-top)) 6px 0 16px; }
   #creature[data-subject="ruin"] .cview {
     position: relative; left: auto; top: auto; flex: 0 0 auto;
-    width: calc(100% - 8px); height: clamp(110px, 21vh, 180px);
+    width: calc(100% - 8px); height: clamp(110px, 21vh, 180px); border-radius: 16px;
   }
-  #creature[data-subject="ruin"] .cname { font-size: 21px; margin-right: 8px; }
-  #creature[data-subject="ruin"] .clatin { margin: 2px 8px 6px 0; }
+  #creature[data-subject="ruin"] .clatin { margin-bottom: 6px; }
   #creature[data-subject="ruin"] .cruin { padding: 4px 10px 24px 0; }
   .crow { grid-template-columns: minmax(0, 1fr); padding: 9px 0; }
   .crow dt { padding-top: 0; }
-  .crow dd { font-size: 14px; line-height: 1.55; }
 }
 
 /* ---------- about, and the brief of the carrier
-   Two native <dialog> elements of one style. The browser gives the focus trap, the Escape key, and
-   the top layer. The brief of issue 34 takes the same card, so the two read as one app. */
+   Native <dialog> elements of one style. The browser gives the focus trap, the Escape key, and the
+   top layer. They take the ground, the edge, and the type of the window of deck.js, so the dialogs
+   and the window read as one app. */
 #about, #carrier-brief, #carrier-lost, #talk, #home {
-  width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0;
+  width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0;
   background: transparent; border: 0; color: var(--text); overflow: visible;
 }
-#about::backdrop, #carrier-brief::backdrop, #carrier-lost::backdrop, #talk::backdrop, #home::backdrop { background: rgba(7, 10, 22, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+#carrier-brief { width: min(720px, calc(100vw - 32px)); }
+#about::backdrop, #carrier-brief::backdrop, #carrier-lost::backdrop, #talk::backdrop, #home::backdrop {
+  background: var(--veil); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
 #about[open], #carrier-brief[open], #carrier-lost[open], #talk[open], #home[open] { animation: about-in 0.28s ease-out; }
 @keyframes about-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
 .about-card {
-  position: relative; margin: 0; padding: 28px 26px 22px; text-align: center;
+  position: relative; margin: 0; padding: 44px 44px 34px; text-align: left;
   max-height: calc(100dvh - 32px); overflow: auto;
-  background: var(--glass); border: 1px solid var(--line); border-radius: 22px;
-  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  background: linear-gradient(180deg, rgba(17, 22, 45, 0.97), rgba(10, 13, 29, 0.97)); border: 1px solid var(--edge); border-radius: 28px;
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
 }
+#about .about-card { text-align: center; }
 .about-orb {
   width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 50%;
   background: conic-gradient(from 0deg, #7cc4ff, #6fbf5a, #ffb86b, #b783d0, #7cc4ff);
@@ -564,15 +390,16 @@ button.probe[hidden] { display: none; }
   animation: spin 24s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) { #about[open], #carrier-brief[open], #carrier-lost[open], .about-orb { animation: none; } }
-#about h2, #carrier-brief h2, #carrier-lost h2, #home h2 { margin: 0 0 14px; font-size: 24px; font-weight: 600; letter-spacing: 0.3px; }
-#about h2 { margin-bottom: 0; }
+#about h2, #carrier-brief h2, #carrier-lost h2, #home h2 {
+  margin: 0 56px 18px 0; font-family: var(--serif); font-size: 38px; font-weight: 400; line-height: 1.1; letter-spacing: -0.01em;
+}
 /* The about card is centred, because it is four short paragraphs about the app. The brief is a set
-   of instructions, so its body reads left to right under a centred title. */
-#carrier-brief p, #carrier-lost p { text-align: left; }
+   of instructions, so it reads left to right. */
+#about h2 { margin: 0; }
 /* The four steps of the search. */
 .brief-steps {
   margin: 16px 0 0; padding: 0 0 0 22px; text-align: left;
-  color: #dfe4ff; font-size: 14px; line-height: 1.55;
+  color: #dfe4ff; font-size: 16px; line-height: 1.6;
 }
 .brief-steps li { margin-bottom: 8px; }
 /* Chapter 2 of the search, p2-38. The drawings of issue 34 stay, and the marks of the search in
@@ -613,7 +440,7 @@ button.probe[hidden] { display: none; }
   margin: 4px 0 18px; color: var(--accent-2);
   font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase;
 }
-.about-card p { margin: 0 0 12px; color: #dfe4ff; font-size: 14px; line-height: 1.55; }
+.about-card p { margin: 0 0 12px; color: #dfe4ff; font-size: 16px; line-height: 1.6; }
 .about-links {
   display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
   margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line);
@@ -624,21 +451,26 @@ button.probe[hidden] { display: none; }
   transition: border-color 0.15s, color 0.15s;
 }
 .about-links a:hover, .about-links a:focus-visible { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 720px) {
+  #about, #carrier-brief, #carrier-lost, #talk, #home { width: calc(100vw - 16px); }
+  .about-card { padding: 34px 22px 24px; }
+  #about h2, #carrier-brief h2, #carrier-lost h2, #home h2 { font-size: 30px; }
+}
 
 /* ---------- the probe overlay, issue 31
    The instrument of the probe over the ground: the air, the height, the hour of the star, and the
    uplink that says why the probe stops where it does. It takes no pointer event, because every
    gesture on the screen belongs to the ground under it.
 
-   The frame starts right of the sidebar. --panel-w is the width the sidebar holds, and app.js
-   writes it beside --panel-h; on a phone the sidebar docks at the bottom instead, so there the
-   frame keeps the full width and lifts its foot over the sheet. */
+   The frame takes the whole width. Its top stands under the sound button, and its foot over the
+   dock, the objective, and the study chip: deck.js writes the two heights into --ui-top and
+   --ui-bottom on the root element. */
 #probe-hud {
   position: fixed; inset: 0; z-index: 4; pointer-events: none;
   --hud-in: 22px;
-  --hud-left: calc(var(--gap) + var(--panel-w, 320px) + var(--hud-in));
-  --hud-top: var(--hud-in);
-  --hud-bottom: var(--hud-in);
+  --hud-left: var(--hud-in);
+  --hud-top: var(--ui-top, var(--hud-in));
+  --hud-bottom: var(--ui-bottom, var(--hud-in));
   font-size: 11px; letter-spacing: 0.12em;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
 }
@@ -683,7 +515,7 @@ button.probe[hidden] { display: none; }
 .hud-frame::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
 
 /* The overlay stands over a lit sky as often as over a dark one, so the labels carry their own
-   contrast: a lighter grey than the sidebar uses, and a shadow under every line. */
+   contrast: a lighter grey than the window uses, and a shadow under every line. */
 #probe-hud .k {
   display: block; color: rgba(226, 232, 255, 0.72); font-size: 9px;
   letter-spacing: 0.2em; text-transform: uppercase;
@@ -725,7 +557,7 @@ button.probe[hidden] { display: none; }
 /* The carrier block of issue 34, under the top strip on the left. It stands on the left and not
    on the right because the right edge already carries the altitude ladder, and a landscape phone
    leaves no room for the two. The bottom left belongs to the uplink block and the bottom middle to
-   the floating buttons, so this corner is the one free corner of the frame. */
+   the study chip, so this corner is the one free corner of the frame. */
 /* The block is a button, so it drops the styling a browser gives one and keeps the styling of the
    overlay. It is the one part of the overlay that takes a pointer event: #probe-hud holds
    pointer-events: none, so every other gesture still reaches the ground under it, and the press on
@@ -793,7 +625,7 @@ button.probe[hidden] { display: none; }
   50% { border-color: var(--hud-tint); box-shadow: 0 0 22px color-mix(in srgb, var(--hud-tint) 70%, transparent); }
 }
 
-/* the uplink block, inside the bottom left corner of the frame, clear of the floating buttons */
+/* the uplink block, inside the bottom left corner of the frame, clear of the study chip */
 .hud-link {
   position: absolute; left: calc(var(--hud-left) + 16px); bottom: calc(var(--hud-bottom) + 14px);
 }
@@ -814,22 +646,8 @@ button.probe[hidden] { display: none; }
 }
 .hud-warn.show { opacity: 1; }
 
-/* A folded sidebar on a wide screen is a strip along the top, and it holds nothing under it. The
-   frame then takes the whole width and starts under the strip, so the reader keeps the view.
-   app.js writes the class on the root element beside the two panel variables. */
-@media (min-width: 601px) {
-  :root.panel-folded #probe-hud {
-    --hud-left: var(--gap);
-    --hud-top: calc(var(--gap) + var(--panel-h, 56px) + 14px);
-  }
-}
 @media (max-width: 600px) {
-  /* the sidebar docks at the bottom here, so the frame takes the full width and stands over it */
-  #probe-hud {
-    --hud-in: 12px;
-    --hud-left: var(--hud-in);
-    --hud-bottom: calc(var(--panel-h, 0px) + 12px);
-  }
+  #probe-hud { --hud-in: 12px; }
   .hud-ladder { height: 150px; bottom: calc(var(--hud-bottom) + 74px); }
   .hud-warn { white-space: normal; text-align: center; max-width: calc(100vw - 48px); }
 }
@@ -890,11 +708,11 @@ button.probe[hidden] { display: none; }
 /* The talk with a person of the crew at the twin, and the end of the mission. */
 .talk-card { text-align: left; }
 .talk-who { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin: 0 40px 12px 0; }
-.talk-who b { font-size: 22px; font-weight: 600; }
+.talk-who b { font-family: var(--serif); font-size: 30px; font-weight: 400; }
 .talk-role { color: var(--muted); font-size: 13px; }
 .talk-line {
   margin: 0 0 18px; padding: 2px 0 2px 14px; border-left: 2px solid var(--accent-2);
-  font-size: 17px; line-height: 1.5; color: #fff;
+  font-family: var(--serif); font-weight: 300; font-size: 21px; line-height: 1.6; color: #fff;
 }
 .talk-home {
   display: block; width: 100%; padding: 11px 18px; border-radius: 999px; cursor: pointer;
@@ -906,4 +724,421 @@ button.probe[hidden] { display: none; }
 .home-card h2 { margin-bottom: 12px; }
 .home-lost { color: var(--muted); }
 .home-lost:empty { display: none; }
-#info .way-row { color: var(--ruin, var(--accent-2)); }
+
+/* ---------- the interface, deck.js
+   The title, the dock, the window, and the chrome of the planet. #ui takes no pointer event, so a
+   gesture on the planet goes through it; each control takes its own. One layer shows at a time, and
+   deck.js hides the rest. `.gone` fades a control of the chrome out and takes its pointer away. See
+   docs/ui.md. The window and the cards share the type: Fredoka for the controls, the serif for
+   names and prose, and the mono for labels. */
+#ui {
+  position: fixed; inset: 0; z-index: 6; pointer-events: none;
+  --ui-glass: rgba(10, 14, 30, 0.74);
+  --dock-h: 74px; --dock-b: 18px;
+  --safe-t: env(safe-area-inset-top); --safe-b: env(safe-area-inset-bottom);
+}
+#ui [hidden] { display: none !important; }
+#ui button { font: inherit; color: inherit; }
+#ui :is(button, input, a, [role="button"], .title, .window, .arrival, .sound) { pointer-events: auto; }
+#ui .glass {
+  background: var(--ui-glass); border: 1px solid var(--edge);
+  backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+#ui :is(.world-chip, .objective, .aim-bar, .ground-goal, .study-chip, .sound, .dock, .toast) { transition: opacity 0.3s ease, transform 0.3s ease; }
+#ui .gone { opacity: 0 !important; pointer-events: none !important; }
+#ui .gone * { pointer-events: none !important; }
+#ui .mono { font-family: var(--mono); letter-spacing: 0.02em; }
+#ui .kick { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+#ui .ph { display: block; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a); }
+@keyframes ui-blink { 50% { opacity: 0.2; } }
+@keyframes ui-wave { to { transform: translateX(-50%); } }
+
+/* ---------- the title */
+#ui .title {
+  position: absolute; inset: 0; display: flex; align-items: center;
+  background: linear-gradient(100deg, rgba(7, 10, 22, 0.96) 0%, rgba(7, 10, 22, 0.88) 30%, rgba(7, 10, 22, 0.35) 55%, rgba(7, 10, 22, 0) 72%);
+}
+#ui .title .col { width: min(580px, 100%); padding: 48px 56px; display: flex; flex-direction: column; gap: 18px; }
+/* A narrow desktop gives the column more of the screen, so the shade runs further over the planet. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  #ui .title { background: linear-gradient(100deg, rgba(7, 10, 22, 0.97) 0%, rgba(7, 10, 22, 0.9) 48%, rgba(7, 10, 22, 0.45) 72%, rgba(7, 10, 22, 0) 90%); }
+}
+#ui .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--accent-2); font-size: 15px; }
+#ui .title h1 { margin: 0; font-size: clamp(38px, 5.4vw, 64px); line-height: 1.02; font-weight: 600; letter-spacing: -0.01em; }
+#ui .title h1 em { font-style: normal; background: linear-gradient(90deg, #9fd6ff, #ffb86b); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#ui .title p.lede { margin: 0; color: #c5cbe6; font-size: 17px; line-height: 1.45; max-width: 460px; }
+#ui .name-form { display: flex; gap: 8px; align-items: stretch; }
+#ui .name-field {
+  flex: 1; display: flex; align-items: center; min-width: 0; height: 56px; padding: 0 6px 0 16px; border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.16); transition: border-color 0.2s, box-shadow 0.2s;
+}
+#ui .name-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(124, 196, 255, 0.15); }
+/* 16 px and more, so a phone does not zoom in on the focus */
+#ui .name-field input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: #fff; font: 500 19px var(--font); }
+#ui .name-field input::placeholder { color: #7d86ab; }
+#ui .icon-btn { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, 0.08); cursor: pointer; }
+#ui .icon-btn:hover { background: rgba(255, 255, 255, 0.16); }
+#ui .icon-btn.spin .ico { animation: spin 0.5s ease; }
+#ui .go-btn {
+  display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 22px; border: 0; border-radius: 16px; cursor: pointer; white-space: nowrap;
+  font-weight: 600; font-size: 17px; color: #1b1205; background: linear-gradient(180deg, #ffd39a, var(--accent-2)); box-shadow: 0 8px 30px rgba(255, 184, 107, 0.28);
+}
+#ui .go-btn:hover { filter: brightness(1.06); }
+#ui .recent .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+#ui .world-pill {
+  display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px; border-radius: 999px; cursor: pointer; font-size: 14px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+}
+#ui .world-pill:hover { border-color: var(--accent); }
+#ui .world-pill :is(img, .ph) { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+#ui .world-pill i { font-style: normal; color: var(--accent-2); font-size: 11px; }
+#ui .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+#ui .step { padding: 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.07); }
+#ui .step b { display: block; font-weight: 500; font-size: 14px; margin: 6px 0 2px; }
+#ui .step span { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+#ui .step .n { color: var(--accent); }
+#ui .links { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+#ui .links button { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; cursor: pointer; }
+#ui .links button:hover { color: #fff; }
+
+/* ---------- the chrome of the planet: the world chip, the objective, the aim bar, the study chip */
+#ui .world-chip {
+  position: absolute; left: 16px; top: calc(16px + var(--safe-t)); max-width: calc(100vw - 32px);
+  display: flex; align-items: center; gap: 10px; padding: 6px 16px 6px 6px; border-radius: 999px; cursor: pointer; text-align: left;
+}
+#ui .world-chip :is(img, .ph) { flex: none; width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+#ui .world-chip .name { min-width: 0; }
+#ui .world-chip b { display: block; font-weight: 600; font-size: 17px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui .world-chip .name > span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; }
+#ui .objective {
+  position: absolute; right: 78px; top: calc(16px + var(--safe-t)); width: 340px;
+  display: flex; gap: 12px; padding: 12px 14px; border-radius: 18px; cursor: pointer; text-align: left;
+}
+#ui .objective .dot { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--accent-2); background: rgba(255, 184, 107, 0.12); }
+#ui .objective b { display: block; font-weight: 500; font-size: 15px; margin: 2px 0; }
+#ui .objective .line { display: block; color: #c5cbe6; font-size: 13px; line-height: 1.35; }
+#ui .objective .bar { display: flex; gap: 4px; margin-top: 8px; }
+#ui .objective .bar i { flex: 1; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); }
+#ui .objective .bar i.on { background: var(--accent-2); }
+#ui .objective .bar i.open { background: linear-gradient(90deg, var(--accent-2) 40%, rgba(255, 255, 255, 0.12) 40%); }
+#ui .aim-bar {
+  position: absolute; left: 50%; top: calc(18px + var(--safe-t)); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 999px; white-space: nowrap;
+}
+#ui .aim-bar .ico { color: var(--accent); animation: spin 4s linear infinite; }
+#ui .aim-bar button { border: 0; border-radius: 999px; padding: 8px 14px; background: rgba(255, 255, 255, 0.1); cursor: pointer; }
+/* The objective on the ground and the study chip stand over the dock, in one column. The objective
+   wraps, so its whole line shows. */
+#ui .stack {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 34px);
+  width: min(560px, calc(100vw - 24px)); display: flex; flex-direction: column-reverse; align-items: center; gap: 10px;
+}
+#ui .ground-goal {
+  display: flex; align-items: flex-start; gap: 10px; max-width: 100%; padding: 9px 16px 9px 12px; border-radius: 18px; cursor: pointer; text-align: left;
+  font-size: 14px; line-height: 1.4; color: #e2e6f8;
+}
+#ui .ground-goal .ico { flex: none; margin-top: 1px; color: var(--accent-2); }
+#ui .ground-goal .more { margin-left: 2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+#ui .study-chip {
+  display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 10px 18px 10px 12px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  background: #f4f7ff; color: #0b1430; font-weight: 600; font-size: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+#ui .study-chip .ico { color: #2f6fd0; flex: none; }
+#ui .study-chip span { overflow: hidden; text-overflow: ellipsis; }
+/* The toast stands at the top of the column over the dock, clear of the chips at the top. */
+#ui .toast { max-width: 100%; padding: 9px 16px; border-radius: 999px; font-size: 14px; text-align: center; }
+
+/* ---------- the sound button
+   It asks once: until the reader first uses the sound, it is a warm button that says what it does.
+   While the music plays it shows a moving equaliser, and a hover gives the volume. */
+#ui .sound {
+  position: absolute; right: 16px; top: calc(16px + var(--safe-t)); height: 48px; min-width: 48px;
+  display: flex; align-items: center; gap: 10px; padding: 0 4px; border-radius: 999px; font-size: 14px; color: #dfe4f8;
+}
+#ui .sound > button { display: flex; align-items: center; gap: 10px; height: 100%; padding: 0 10px; border: 0; border-radius: 999px; background: none; cursor: pointer; }
+#ui .sound > input { width: 0; margin-right: 10px; opacity: 0; accent-color: var(--accent-2); transition: width 0.25s, opacity 0.25s; }
+#ui .sound.on:hover > input, #ui .sound.on:focus-within > input { width: 96px; opacity: 1; }
+#ui .sound:hover { border-color: rgba(255, 184, 107, 0.5); }
+#ui .sound .eq { display: flex; align-items: flex-end; gap: 3px; height: 18px; }
+#ui .sound .eq i { width: 3px; border-radius: 2px; background: var(--accent-2); animation: ui-eq 1s ease-in-out infinite; }
+#ui .sound .eq i:nth-child(1) { animation-delay: -0.2s; }
+#ui .sound .eq i:nth-child(2) { animation-delay: -0.6s; }
+#ui .sound .eq i:nth-child(3) { animation-delay: -0.4s; }
+#ui .sound .eq i:nth-child(4) { animation-delay: -0.8s; }
+@keyframes ui-eq { 0%, 100% { height: 4px; } 50% { height: 18px; } }
+#ui .sound.off { color: var(--muted); }
+#ui .sound.invite { color: #1b1205; background: linear-gradient(180deg, #ffd39a, var(--accent-2)); border: 0; font-weight: 600; box-shadow: 0 8px 30px rgba(255, 184, 107, 0.3); }
+#ui .sound.invite .ico { animation: ui-tilt 1.6s ease-in-out infinite; }
+@keyframes ui-tilt { 50% { transform: rotate(-12deg) scale(1.1); } }
+
+/* ---------- the dock and the probe button */
+#ui .dock {
+  position: absolute; left: 50%; bottom: calc(var(--dock-b) + var(--safe-b)); transform: translateX(-50%); width: 480px; height: var(--dock-h);
+  display: grid; grid-template-columns: 1fr 1fr 112px 1fr 1fr; align-items: center; padding: 0 6px; border-radius: 26px;
+}
+#ui .dock.open { background: rgba(14, 19, 38, 0.96); }
+#ui .tab {
+  position: relative; height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  border: 0; border-radius: 16px; background: none; cursor: pointer; color: #b9c0de; font-size: 11.5px;
+}
+#ui .tab:hover, #ui .tab.on { color: #fff; background: rgba(255, 255, 255, 0.07); }
+#ui .tab.on { color: var(--accent-2); }
+#ui .tab.on::after { content: ''; position: absolute; bottom: 4px; width: 16px; height: 2px; border-radius: 2px; background: var(--accent-2); }
+#ui .tab .badge { position: absolute; top: 8px; right: calc(50% - 18px); width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 3px rgba(10, 14, 30, 0.9); }
+#ui .probe-btn { position: relative; justify-self: center; margin-top: -40px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 0; background: none; cursor: pointer; }
+#ui .probe-btn .orb {
+  position: relative; width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; color: #2a1405; transition: transform 0.15s;
+  background: radial-gradient(circle at 35% 28%, #ffe2b8, var(--accent-2) 45%, var(--warm2) 100%);
+  box-shadow: 0 0 0 6px rgba(10, 14, 30, 0.92), 0 0 0 7px rgba(255, 184, 107, 0.45), 0 12px 40px rgba(255, 140, 80, 0.45);
+}
+#ui .probe-btn:hover .orb { transform: scale(1.04); }
+#ui .probe-btn:active .orb { transform: scale(0.96); }
+/* A ring leaves the button, slow, to say that it is the thing to press. After "Follow the signal"
+   it leaves fast for a moment. */
+#ui .probe-btn .orb::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(255, 184, 107, 0.7);
+  animation: ui-ping 2.4s ease-out infinite; pointer-events: none;
+}
+@keyframes ui-ping { from { transform: scale(1); opacity: 0.9; } to { transform: scale(1.55); opacity: 0; } }
+#ui .probe-btn.nudge .orb::before { animation-duration: 0.9s; border-width: 3px; }
+#ui .probe-btn .lbl { font-weight: 600; font-size: 12.5px; color: var(--accent-2); white-space: nowrap; }
+#ui .probe-btn:is(.aim, .shut) .orb {
+  background: radial-gradient(circle at 35% 28%, #fff, #dbe9ff 60%, #a9c9f5); color: #10203d;
+  box-shadow: 0 0 0 6px rgba(10, 14, 30, 0.92), 0 0 0 7px rgba(255, 255, 255, 0.35), 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+#ui .probe-btn.aim .orb::before { border-color: rgba(124, 196, 255, 0.8); }
+#ui .probe-btn.shut .orb::before { display: none; }
+#ui .probe-btn:is(.aim, .shut) .lbl { color: #dbe9ff; }
+#ui .probe-btn.recall .orb {
+  background: radial-gradient(circle at 35% 28%, #e6f4ff, #7cc4ff 50%, #3c7fd6); color: #071631;
+  box-shadow: 0 0 0 6px rgba(10, 14, 30, 0.92), 0 0 0 7px rgba(124, 196, 255, 0.5), 0 12px 40px rgba(80, 150, 255, 0.45);
+}
+#ui .probe-btn.recall .orb::before { border-color: rgba(124, 196, 255, 0.7); }
+#ui .probe-btn.recall .lbl { color: #9fd6ff; }
+#ui .probe-btn.off { cursor: default; }
+#ui .probe-btn.off .orb { background: #2a3150; color: #6e7698; box-shadow: 0 0 0 6px rgba(10, 14, 30, 0.92), 0 0 0 7px rgba(255, 255, 255, 0.1); }
+#ui .probe-btn.off .orb::before { display: none; }
+#ui .probe-btn.off .lbl { color: #6e7698; }
+
+/* ---------- the arrival: the distress signal unfolds */
+#ui .arrival {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 24px));
+  padding: 20px 22px 18px; border-radius: 26px; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+}
+#ui .arrival.unfold { animation: ui-unfold 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); transform-origin: 50% 0; }
+@keyframes ui-unfold { from { opacity: 0; transform: translate(-50%, -50%) scaleY(0.25); } 60% { opacity: 1; } }
+#ui .arrival .kick { display: flex; align-items: center; gap: 8px; color: #ffd3a1; }
+#ui .arrival .kick.blue { color: #9fd6ff; }
+#ui .arrival .kick i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); animation: ui-blink 1s steps(2) infinite; }
+#ui .arrival h2 { margin: 10px 0; font-size: 24px; font-weight: 600; line-height: 1.15; }
+#ui .arrival p { margin: 0 0 12px; color: #d5daf0; font-size: 15px; line-height: 1.55; }
+#ui .arrival p b { font-weight: 500; }
+#ui .arrival p.alt { display: flex; gap: 8px; align-items: flex-start; color: var(--muted); font-size: 13.5px; }
+#ui .arrival p.alt .ico { flex: none; margin-top: 1px; color: #a7e3a0; }
+#ui .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+/* The wave of the signal: an SVG twice as wide as its box, which slides by half its width. */
+#ui .wave { position: relative; height: 40px; margin: 0 0 14px; border-radius: 12px; overflow: hidden; background: rgba(255, 184, 107, 0.07); border: 1px solid rgba(255, 184, 107, 0.14); }
+#ui .wave svg { position: absolute; left: 0; top: 0; width: 200%; height: 100%; animation: ui-wave 2.4s linear infinite; }
+#ui .wave::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(10, 14, 30, 0.9), transparent 18%, transparent 82%, rgba(10, 14, 30, 0.9)); }
+
+/* ---------- the buttons of the window and the arrival */
+#ui .btn { display: inline-flex; gap: 8px; align-items: center; padding: 10px 14px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 12px; background: rgba(255, 255, 255, 0.06); cursor: pointer; font-size: 14px; }
+#ui .btn:hover { border-color: var(--accent); }
+#ui .btn.primary { border: 0; font-weight: 600; color: #1b1205; background: linear-gradient(180deg, #ffd39a, var(--accent-2)); }
+#ui .btn.big { padding: 13px 20px; font-size: 16px; border-radius: 14px; }
+#ui .pill { display: inline-flex; gap: 6px; align-items: center; padding: 7px 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 999px; background: rgba(255, 255, 255, 0.05); cursor: pointer; font-size: 13.5px; }
+#ui .pill:hover { border-color: var(--accent); }
+#ui .pill.warm { border-color: rgba(255, 184, 107, 0.4); color: var(--accent-2); }
+
+/* ---------- the window
+   One window, almost the whole screen above the dock. It opens over a veil of the planet, and the
+   middle button of the dock closes it. On the title it stands alone and takes the whole height. */
+#ui .window { position: absolute; inset: 0; background: var(--veil); backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1); animation: ui-fade 0.3s ease; }
+@keyframes ui-fade { from { opacity: 0; } }
+#ui .book {
+  position: absolute; left: 50%; transform: translateX(-50%); top: calc(16px + var(--safe-t)); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 26px);
+  width: min(1180px, calc(100% - 32px)); display: flex; flex-direction: column; overflow: hidden; border-radius: 28px;
+  background: var(--paper); border: 1px solid var(--edge); box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+  animation: ui-open 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#ui .window.solo .book { bottom: calc(16px + var(--safe-b)); }
+@keyframes ui-open { from { opacity: 0; transform: translate(-50%, 18px) scale(0.985); } }
+/* a grain of paper over the ground of the window */
+#ui .book::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.45; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E");
+}
+#ui .book-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 16px 16px 0 28px; }
+#ui .book-head .where { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+#ui .book-head .where :is(img, .ph) { flex: none; width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+#ui .book-head .where span { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui .book-head .where b { color: var(--text); font-weight: 500; }
+#ui .close-btn { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--edge); border-radius: 12px; background: rgba(255, 255, 255, 0.05); cursor: pointer; }
+#ui .close-btn:hover { border-color: var(--accent); }
+#ui .page { position: relative; z-index: 1; flex: 1; overflow: auto; overscroll-behavior: contain; padding: 10px 52px 52px; }
+#ui .page h1 { margin: 6px 0 4px; font-family: var(--serif); font-weight: 400; font-size: clamp(38px, 4.6vw, 58px); letter-spacing: -0.015em; line-height: 1.02; }
+#ui .page h1 em { font-style: italic; color: var(--accent-2); }
+#ui .sub { margin: 0 0 26px; color: var(--muted); font-size: 15px; }
+#ui .h { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 40px 0 14px; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 26px; }
+#ui .h.first { margin-top: 6px; }
+#ui .h .kick { font-style: normal; }
+#ui .note { max-width: 640px; margin: 0 0 14px; color: var(--muted); font-size: 14.5px; line-height: 1.5; }
+
+/* the Planet page */
+#ui .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 34px; align-items: center; margin-top: 8px; }
+#ui .globe-orb { position: relative; flex: none; width: 210px; height: 210px; border-radius: 50%; animation: ui-float 7s ease-in-out infinite; }
+@keyframes ui-float { 50% { transform: translateY(-6px); } }
+#ui .globe-orb :is(img, .ph) {
+  display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0 60px var(--halo, rgba(124, 196, 255, 0.4)), inset -18px -22px 40px rgba(0, 0, 0, 0.45);
+}
+#ui .globe-orb::after { content: ''; position: absolute; inset: -14px; border-radius: 50%; border: 1px dashed rgba(124, 196, 255, 0.25); animation: spin 60s linear infinite; }
+#ui .lede { max-width: 620px; margin: 10px 0 16px; font-family: var(--serif); font-weight: 300; font-size: 19px; line-height: 1.55; color: #dfe3f6; }
+#ui .specs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--edge); }
+#ui .spec { min-width: 0; padding: 16px 16px 16px 0; border-bottom: 1px solid var(--edge); }
+#ui .spec b { display: block; margin-top: 4px; font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1.15; }
+#ui .spec.wide { grid-column: span 2; }
+#ui .spec.wide b { font-size: 20px; }
+#ui .life { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+/* A card of the field guide. A locked card is undiscovered: it names nothing, and a press says
+   where to look. */
+#ui .card {
+  display: flex; flex-direction: column; gap: 10px; min-height: 120px; padding: 14px; text-align: left; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 18px; background: rgba(255, 255, 255, 0.035);
+}
+#ui .card:hover { border-color: rgba(124, 196, 255, 0.5); background: rgba(124, 196, 255, 0.06); }
+#ui .card .ico { color: var(--accent); }
+#ui .card.plant .ico { color: #a7e3a0; }
+#ui .card b { flex: 1; font-weight: 500; font-size: 15.5px; line-height: 1.25; }
+#ui .card span { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); }
+#ui .card.plain { cursor: default; justify-content: center; }
+#ui .card.plain:hover { border-color: rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.035); }
+#ui .card.lock { border-style: dashed; border-color: rgba(255, 255, 255, 0.14); background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0 10px, transparent 10px 20px); }
+#ui .card.lock .ico { color: #59607e; }
+#ui .card.lock b { color: #8c93b3; letter-spacing: 0.06em; }
+#ui .card.lock:hover { border-color: rgba(255, 184, 107, 0.4); background: repeating-linear-gradient(135deg, rgba(255, 184, 107, 0.04) 0 10px, transparent 10px 20px); }
+#ui .meter { display: flex; align-items: center; gap: 12px; margin: -4px 0 16px; }
+#ui .meter .bar { flex: 0 1 240px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+#ui .meter .bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+#ui .meter span { font-size: 12.5px; color: var(--muted); }
+
+/* the Story page */
+#ui .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 46px; align-items: start; }
+#ui .transmission { padding: 18px 20px; border-radius: 20px; background: linear-gradient(135deg, rgba(255, 184, 107, 0.1), rgba(255, 184, 107, 0.02)); border: 1px solid rgba(255, 184, 107, 0.2); }
+#ui .transmission .kick { display: flex; align-items: center; gap: 8px; color: #ffd3a1; }
+#ui .transmission .kick i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); animation: ui-blink 1.4s steps(2) infinite; }
+#ui .transmission .wave { margin: 12px 0 14px; }
+#ui .transmission .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 12px; font-size: 11px; color: #d8b892; }
+#ui .prose { margin: 0; font-family: var(--serif); font-weight: 300; font-size: 18px; line-height: 1.62; color: #ecdfcc; }
+#ui .prose::first-letter { float: left; font-size: 3.3em; line-height: 0.86; padding: 6px 10px 0 0; color: var(--accent-2); font-weight: 400; }
+#ui .now { margin-top: 18px; padding: 18px 20px; border-radius: 20px; background: rgba(124, 196, 255, 0.06); border: 1px solid rgba(124, 196, 255, 0.22); }
+#ui .now h3 { margin: 6px 0; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 26px; }
+#ui .now p { margin: 0 0 14px; color: #d7def5; font-size: 15px; line-height: 1.5; }
+#ui .wander { display: flex; gap: 14px; align-items: flex-start; margin-top: 18px; padding: 16px 18px; border-radius: 20px; background: rgba(167, 227, 160, 0.05); border: 1px solid rgba(167, 227, 160, 0.18); }
+#ui .wander .ico { flex: none; margin-top: 2px; color: #a7e3a0; }
+#ui .wander p { margin: 0 0 10px; color: #d4e5d2; font-size: 14.5px; line-height: 1.5; }
+#ui .entry { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 4px 16px; padding: 20px 0; border-top: 1px solid var(--edge); }
+#ui .entry:first-of-type { border-top: 0; padding-top: 6px; }
+#ui .entry .num { font-family: var(--serif); font-size: 34px; color: var(--muted); line-height: 1; }
+#ui .entry.open .num { color: var(--accent-2); }
+#ui .entry.done .num { color: var(--accent); }
+#ui .entry.closed { opacity: 0.55; }
+#ui .entry h3 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 4px; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 24px; }
+#ui .entry.closed h3 { gap: 8px; font-family: var(--font); font-style: normal; font-size: 17px; font-weight: 500; color: var(--muted); }
+#ui .entry p { margin: 0; font-size: 14.5px; line-height: 1.5; color: #cfd5ee; }
+#ui .entry .st { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+#ui .entry .fixes { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+#ui .entry .acts { margin-top: 12px; }
+#ui .tag { padding: 4px 8px; border: 1px solid var(--edge); border-radius: 999px; font: normal 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+#ui .tag.open { border-color: rgba(255, 184, 107, 0.5); color: var(--accent-2); }
+#ui .tag.done { border-color: rgba(124, 196, 255, 0.45); color: var(--accent); }
+
+/* the Worlds page */
+#ui .worlds-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+#ui .worlds-head .name-form { width: min(460px, 100%); }
+#ui .worlds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 26px; }
+#ui .world-card { position: relative; min-width: 0; padding: 16px 8px 14px; text-align: center; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 18px; background: rgba(255, 255, 255, 0.03); }
+#ui .world-card:hover, #ui .world-card:focus-visible { border-color: rgba(124, 196, 255, 0.5); }
+#ui .world-card.on { border-color: var(--accent-2); background: rgba(255, 184, 107, 0.07); }
+#ui .world-card :is(img, .ph) { display: block; width: 84px; height: 84px; margin: 0 auto 10px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 22px rgba(124, 196, 255, 0.18); }
+#ui .world-card b { display: block; font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui .world-card > span { display: block; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui .world-card i { position: absolute; left: 10px; top: 8px; font-style: normal; font-size: 11px; color: var(--accent-2); }
+#ui .world-card .here { position: absolute; right: 10px; top: 8px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; color: var(--accent-2); }
+#ui .world-card .del { position: absolute; right: 6px; bottom: 6px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 8px; background: rgba(0, 0, 0, 0.35); color: #aab; cursor: pointer; opacity: 0; }
+#ui .world-card:hover .del, #ui .world-card .del:focus-visible { opacity: 1; }
+@media (pointer: coarse) { #ui .world-card .del { opacity: 0.7; } }
+
+/* the Menu page */
+#ui .menu { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 46px; align-items: start; }
+#ui .keys { width: 100%; border-collapse: collapse; font-size: 14px; }
+#ui .keys td { padding: 9px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); vertical-align: top; }
+#ui .keys td:first-child { width: 42%; padding-right: 10px; }
+#ui .keys kbd { padding: 3px 7px; border-radius: 6px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); font: 11.5px var(--mono); }
+#ui .keys .t { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; }
+#ui .range { width: 100%; margin-top: 12px; accent-color: var(--accent-2); }
+#ui .setting { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* ---------- the interface on a phone
+   The dock sits on the bottom edge, the window fills the screen over it, and the objective moves
+   under the world chip. */
+@media (max-width: 760px) {
+  #ui { --dock-h: 70px; --dock-b: 0px; }
+  #ui .title { align-items: flex-end; background: linear-gradient(0deg, rgba(7, 10, 22, 0.98) 0%, rgba(7, 10, 22, 0.92) 52%, rgba(7, 10, 22, 0.4) 72%, rgba(7, 10, 22, 0) 86%); }
+  #ui .title .col { padding: 24px 18px calc(22px + var(--safe-b)); gap: 14px; }
+  #ui .title h1 { font-size: 38px; }
+  #ui .title p.lede { font-size: 15.5px; }
+  #ui .go-btn { padding: 0 16px; }
+  #ui .go-btn .t { display: none; }
+  #ui .steps { gap: 6px; }
+  #ui .step { padding: 9px; }
+  #ui .step span { display: none; }
+  #ui .world-chip { top: calc(10px + var(--safe-t)); left: 10px; max-width: calc(100vw - 84px); padding: 4px 14px 4px 4px; }
+  #ui .world-chip :is(img, .ph) { width: 34px; height: 34px; }
+  #ui .world-chip b { font-size: 15px; }
+  #ui .sound { right: 10px; top: calc(10px + var(--safe-t)); height: 44px; min-width: 44px; padding: 0; }
+  #ui .sound.invite .t, #ui .sound > input { display: none; }
+  #ui .objective { top: calc(62px + var(--safe-t)); left: 10px; right: auto; width: auto; max-width: calc(100vw - 20px); align-items: center; padding: 8px 12px 8px 8px; border-radius: 16px; }
+  #ui .objective .dot { width: 28px; height: 28px; }
+  #ui .objective :is(.kick, .bar) { display: none; }
+  #ui .objective b { font-size: 13.5px; margin: 0; }
+  #ui .objective .line { font-size: 12px; }
+  #ui .dock {
+    left: 0; right: 0; width: auto; transform: none; height: calc(var(--dock-h) + var(--safe-b)); padding-bottom: var(--safe-b);
+    border-radius: 22px 22px 0 0; border-bottom: 0; grid-template-columns: 1fr 1fr 96px 1fr 1fr;
+  }
+  #ui .probe-btn { margin-top: -34px; }
+  #ui .probe-btn .orb { width: 74px; height: 74px; }
+  #ui .aim-bar { top: calc(10px + var(--safe-t)); font-size: 14px; }
+  #ui .arrival { top: auto; bottom: calc(20px + var(--safe-b)); transform: translateX(-50%); max-height: calc(100dvh - 40px); overflow: auto; }
+  #ui .arrival.unfold { animation-name: ui-unfold-up; transform-origin: 50% 100%; }
+  @keyframes ui-unfold-up { from { opacity: 0; transform: translateX(-50%) scaleY(0.25); } 60% { opacity: 1; } }
+  #ui .arrival h2 { font-size: 21px; }
+  #ui .arrival p { font-size: 14.5px; }
+  #ui .book { left: 0; right: 0; width: auto; transform: none; top: 0; bottom: calc(var(--dock-h) + var(--safe-b) - 1px); border: 0; border-radius: 0; animation-name: ui-open-up; }
+  @keyframes ui-open-up { from { opacity: 0; transform: translateY(24px); } }
+  #ui .window.solo .book { bottom: 0; }
+  #ui .book-head { padding: calc(12px + var(--safe-t)) 12px 0 18px; }
+  #ui .page { padding: 6px 18px 64px; }
+  #ui .page h1 { font-size: 38px; }
+  #ui .h { font-size: 22px; margin-top: 30px; }
+  #ui .hero { grid-template-columns: 1fr; gap: 18px; justify-items: center; text-align: center; }
+  #ui .hero .lede { font-size: 17px; }
+  #ui .globe-orb { width: 150px; height: 150px; }
+  #ui .specs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #ui .spec b { font-size: 22px; }
+  #ui .life { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #ui .card { min-height: 108px; }
+  #ui :is(.cols, .menu) { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  #ui .prose { font-size: 16.5px; }
+  #ui .entry { grid-template-columns: 38px minmax(0, 1fr); }
+  #ui .entry .num { font-size: 26px; }
+  #ui .entry h3 { font-size: 21px; }
+  #ui .worlds-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  #ui .world-card { padding: 12px 4px 10px; }
+  #ui .world-card :is(img, .ph) { width: 58px; height: 58px; }
+}
+@media (max-width: 380px) { #ui .steps { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  #ui *, #ui *::before, #ui *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}

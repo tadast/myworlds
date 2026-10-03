@@ -386,9 +386,9 @@ stands there.
   mouth, because the disc keeps them off. Only the patch of the well compiles this program. The
   terrain casts no shadow, so no depth material needs the hole.
 - **The mark.** A tap on the ruin marks it with the ring the wreck takes, on the edge of the flat
-  disc, and the floating button reads "Study the ruin". `onSelectSource()` fires as it does for
-  the wreck. A thing this big takes a grace of its size in the tap: the far wall of the well and a
-  spire over a ridge stand further past the ground than the hull does. The button calls
+  disc, and the study chip over the dock reads "Study the ruin". `onSelectSource()` fires as it
+  does for the wreck. A thing this big takes a grace of its size in the tap: the far wall of the
+  well and a spire over a ridge stand further past the ground than the hull does. The chip calls
   `inspectRuin()` in `app.js`, which opens the card of p2-42; see "The card of the ruin".
 - **The herds.** `Ground` passes the disc with its soft edge to `GroundCover`, which grows no blade
   and no stone on it, and to `GroundFauna`, where a walker that wanders turns away from it with its
@@ -475,9 +475,12 @@ the frequency there, and the landing that tunes takes the first fix of chapter 2
   reach". The first says that the receiver holds the band of the log, that nothing of the crew
   sends on it, and that the search runs as it did for the wreck. The drawings of issue 34 stay, and
   their wedges take the colour of chapter 2.
-- **The Carrier row** reads "Found", then "Tuned", then "1 fix", "3 fixes", and "Found 2 of 2".
-  The Clear chip drops the fixes of the chapter that runs. After both finds the Aim chip offers
-  both sources, "Wreck" and "Ruin". A saved world with both finds carries two marks on its thumb.
+- **The Story window.** Chapter 2 reads "The receiver is not tuned", then "Tuned. Not heard
+  yet", "1 fix on the globe", "3 fixes on the globe", and "Found. The ruin is read." The action
+  "Clear the wedges" drops the fixes of the chapter that runs. After both finds, chapters 1 and 2
+  offer "Find the wreck on the globe" and "Find the ruin on the globe" in orbit. A saved world with
+  both finds carries two marks on its thumb. The Carrier row of the sidebar showed this before the
+  interface of `docs/ui.md`.
 - **The ground.** p2-41 puts the body of the ruin on its cell; see "The ruin on its patch". In
   chapter 2 the needle there points at the ruin and the range falls to its edge. On the cell of the
   wreck in chapter 2 the needle keeps the bearing of the ruin, and the motif of the wreck stays
@@ -533,20 +536,24 @@ the two places cannot drift:
 1. **Under the last entry of the card of the wreck.** `SourceInspector.show()` of
    `ground-source.js` takes the element as its last argument and puts it under the entries, inside
    the scroll of the log, so the number stays in sight while the reader types.
-2. **Under the Carrier row of the sidebar.** A Tune chip in the row opens the form under the row, in
-   orbit and on the ground, so a reader who closed the card can still tune. The form takes a whole
-   line of the grid, because on a phone the grid holds two rows side by side. A second press of the
-   chip, or Escape in the field, closes it.
+2. **In the Now panel of the Story window.** The form stands there while the band waits for it, in
+   orbit and on the ground, so a reader who closed the card can still tune. The objective then
+   says "The log ends on a frequency. Tune the receiver to it." Escape in the field closes the
+   window.
 
 Both places show only on a world with a ruin, and only after the find of the wreck. The card of the
-wreck opens only on its cell, and that first open is the find. After the tune both places show the
-locked band and no field: the card under the last entry, and the sidebar under the row, for good.
-The Tune chip then goes away. A world with no ruin shows neither place. `view().tuner` of
-`chapters.js` says where the tuner stands: it stands for the ruin once the chapter of the ruin is
-open, which is after the find of the wreck (ADR-0001).
+wreck opens only on its cell, and that first open is the find. After the tune the card shows the
+locked band and no field under the last entry, for good. The Now panel shows the answer of the lock
+for a moment and then the next step, and chapter 2 shows the band under its status. A world with no
+ruin shows neither place. `view().tuner` of `chapters.js` says where the tuner stands: it stands for
+the ruin once the chapter of the ruin is open, which is after the find of the wreck (ADR-0001).
 
 Each place keeps its own tuner, so the text in the field and the last answer survive a render of
-the sidebar, and the focus comes back to the field after the render. A new world clears both.
+the window. The window does not render while a field of its page holds the focus, so the reader
+keeps the field in the middle of a number. A new world clears both.
+
+Until the interface of `docs/ui.md`, the second place stood under the Carrier row of the sidebar,
+and a Tune chip opened it. The Story window replaces the row and the chip.
 
 ### The field
 
@@ -555,12 +562,12 @@ the sidebar, and the focus comes back to the field after the render. A new world
   band the reader knows. The field takes 12 characters at most, so the longest number still prints
   as a number.
 - Enter submits, as the Tune button does.
-- The Tune chip puts the focus in the field. The field of the card takes no focus when the card
-  opens: the reader reads the log first, and a phone would raise its keyboard over the log.
+- No field takes the focus on its own. The field of the card takes no focus when the card opens:
+  the reader reads the log first, and a phone would raise its keyboard over the log.
 - While the field holds the focus the ground takes no key. `Ground._onKey()` leaves every key to an
   editable element, so W, A, S, D, the arrows, Space, Q, E, R, F, C, and + and - type into the field
-  and do not move the probe. The `/` key of the page types a slash into a field and does not jump to
-  the seed input.
+  and do not move the probe. The `/` key of the page types a slash into a field and does not open
+  the Worlds window.
 
 ### The answers
 
@@ -596,8 +603,8 @@ A lock of `tune()` of `chapters.js` makes the receiver hold the band of the ruin
   the bearing of the ruin, prints its frequency, takes the colour of chapter 2, and pulses for the
   brief "Unknown signal". The landing takes the first fix of chapter 2 at once, so a reader who
   tunes at the wreck sees the first wedge of the ruin at the end of the ascent.
-- **In orbit** the tune takes no fix. The Carrier row reads "Tuned", and the next landing takes the
-  first fix.
+- **In orbit** the tune takes no fix. Chapter 2 of the Story window reads "Tuned. Not heard yet",
+  and the next landing takes the first fix.
 
 The colour of the carrier block is the colour of the wedges of chapter 2, `carrierColour(world, 2)`,
 lightened until its luminance reaches 0.3, as the drawings of the brief take it. `ProbeHud.setTint()`
@@ -606,8 +613,8 @@ The labels keep their grey, and the rest of the overlay keeps its blue.
 
 ## The card of the ruin
 
-p2-42. The ruin can be read. A tap on the ruin marks it, and the floating button "Study the ruin"
-opens its card. The card opens only on the cell of the ruin, as the card of the wreck opens only on
+p2-42. The ruin can be read. A tap on the ruin marks it, and the study chip "Study the ruin" opens
+its card. The card opens only on the cell of the ruin, as the card of the wreck opens only on
 its cell, because it states the frequency, the day of the beacon, and the maker. The first open is
 the find of chapter 2.
 
@@ -691,15 +698,16 @@ Chapter 3 reads the same script, and the codex of the reader keeps its letters o
 
 - **The chapter must be open.** The chapters open in strict order, so the chapter of the ruin opens
   when the wreck is found. A reader can land on the cell of the ruin before that, and the patch
-  shows the ruin, but a tap gives the line "Silent · nothing to read yet" on the floating button,
-  no card opens, and no find is recorded. See `docs/adr/0001-chapters-open-in-strict-order.md`.
+  shows the ruin, but a tap gives the line "Silent · nothing to read yet" on the study chip, no
+  card opens, and no find is recorded. See `docs/adr/0001-chapters-open-in-strict-order.md`.
   Until 2026-09-29 a find by chance counted and tuned the world; a record of that build keeps its
   find, and the chapter of the ruin shows as done when the wreck is found.
 - **The first open is the find.** The store marks the ruin found and drops the fixes of chapter 2,
   and a clear of the fixes keeps the find. The find holds the band of the ruin, because the card
-  states it, so a reader who reached the ruin with no tune does not see the Tune chip again.
-- The group of the carrier is built again from the view. After both finds the Carrier row reads
-  "Found 2 of 2" and offers "Wreck" and "Ruin", and the thumb of the saved world carries two marks.
+  states it, so a reader who reached the ruin with no tune does not see the tuner again.
+- The group of the carrier is built again from the view. Chapter 2 of the Story window reads
+  "Found. The ruin is read.", and in orbit chapters 1 and 2 offer "Find the wreck on the globe" and
+  "Find the ruin on the globe". The thumb of the saved world carries two marks.
 - `setCarrierLevel()` sets the buses of the motifs again, so after the recall the motif of the ruin
   plays in the song of the world at 0.6. See "The voice". p2-44.
 

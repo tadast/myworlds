@@ -19,8 +19,8 @@
 // keeps the progress by seed in localStorage.
 //
 // The page asks the view of the progress every question of the story: the search the receiver
-// follows, the sources that are found, what the tuner shows, what the Carrier row says, and how loud
-// each motif plays. After each change of the progress the page shows one new view, so no rule of the
+// follows, the sources that are found, what the tuner shows, the state of the search, and how loud
+// each motif plays. story.js turns the view into the words of the Story window. After each change of the progress the page shows one new view, so no rule of the
 // story stands in the page.
 //
 //   chaptersOf(world)   the chapters of a world, in order
@@ -29,7 +29,7 @@
 //   motifLevel()        the level of the motif of one kind of source, from a view
 //   marksOf()           the marks of the finds on the thumbs of the saved worlds
 //   briefWords()        the title and the hint of a brief
-//   CLOSED_LINE         the line of the floating button over the source of a closed search
+//   CLOSED_LINE         the line of the study chip over the source of a closed search
 //
 // Chapter 3, the way on, is not a search: the reader reads a name on the card of the ruin, sends it,
 // and the ruin carries the probe to the twin. The arrival is its find. See
@@ -41,7 +41,7 @@ import { tuneAnswer } from './tuner.js';
 import { homeOf } from './way-types.js';
 import { readProgress, readAllProgress, writeProgress, MAX_FIXES, BRIEF_STAGES } from './carrier-store.js';
 
-// The floating button over the source of a closed search. The card of the way on already says "The
+// The study chip over the source of a closed search. The card of the way on already says "The
 // probe cannot read this yet", so this line takes other words.
 export const CLOSED_LINE = 'Silent · nothing to read yet';
 
@@ -206,7 +206,7 @@ class Progress {
   //             `band` is the band of the tuner after the lock, and null before it. So the page
   //             never holds the band before the reader types it. See tuner.js.
   //   finds     the count of searches that are done, of `of` searches
-  //   row       the Carrier row of the sidebar, or null; see rowOf()
+  //   row       the Carrier row: the state of the search in a few words, or null; see rowOf()
   view() {
     const states = this._states();
     const chapters = this.chapters.map((c, i) => {
@@ -245,7 +245,7 @@ class Progress {
   //   read    the reader opened the card of the twin, which holds the third log
   //   home    the reader took the crew home. The mission is over
   //   crew    the third log holds a person whose end is `home`, so the tent has somebody to take
-  //   text    the words of the Way row of the sidebar
+  //   text    the status of chapter 3 in the Story window
   _way(states) {
     const i = this.ids.indexOf('way');
     if (i < 0) return null;
@@ -465,16 +465,17 @@ export function motifLevel(v, kind, here = null) {
 }
 
 // ---------------------------------------------------------------- the Carrier row
-// The row of the sidebar follows the search the receiver follows, so the story of a world reads, in
-// order: "Not heard", "1 fix", "3 fixes", "Found", then after the tune "Tuned", "1 fix", "3 fixes",
-// and "Found 2 of 2". The count takes the fixes of that search only.
+// The row states the search the receiver follows, so the story of a world reads, in order: "Not
+// heard", "1 fix", "3 fixes", "Found", then after the tune "Tuned", "1 fix", "3 fixes", and "Found 2
+// of 2". The count takes the fixes of that search only. The Story window offers the record of the
+// incident while `lost` holds; story.js writes the words of each chapter. See docs/ui.md.
 //
 //   text   the words of the row
 //   n      the fixes of the search the receiver follows
-//   lost   the words are a link to the record of the missing carrier: the first search, no fix yet
-//   clear  the Clear chip, while the search holds a fix
-//   tune   the Tune chip: a band waits for the tuner
-//   aims   an Aim chip for each found source: "Aim" for one, and the name of each for more
+//   lost   the record of the missing carrier has something to tell: the first search, no fix yet
+//   clear  the search holds a fix, so its wedges can go
+//   tune   a band waits for the tuner
+//   aims   one entry for each found source: "Aim" for one, and the name of each for more
 function rowOf(v) {
   if (!v.follow) return null;
   const c = v.chapters[v.follow.index];

@@ -13,7 +13,7 @@ The globe draws every moving thing at globe scale. The planet radius is 1 unit, 
 3. **Patch extent.** A fixed square patch 1.5 km across with a fog edge in the atmosphere colour. Fog starts at 60% of the patch radius. Streamed tiles were deferred.
 4. **Frame budget.** Device tiers set counts and the grid step. One runtime knob, the LOD distance, follows a rolling frame time toward the display refresh rate capped at 60. Shadows stay a device-tier decision. Far flora are 2-triangle cards baked per kind and palette at patch load. Far fauna are coarse meshes, because a card flips on a moving animal.
 5. **Population.** The unit is the group. Each species gets a sociality gene: solitary, pair, or herd of N. A solitary animal is a group of one. A group anchor runs the existing oscillator steering. Members hold a formation around the anchor with a short leash. Later herd behaviour attaches to the anchor. Budget: about 300 creatures on HIGH and 100 on LOW, in 10 to 30 groups. The species pulled to in decision 2 is always present. Other species appear when the patch biome matches their niche.
-6. **Descent and return.** The button "Send a probe to the surface" starts the aim, and a tap on the planet then starts the descent. Changed by issue 20; a continued zoom past the minimum used to start the descent on its own. Zooming out past the patch ceiling, or "Recall the probe", starts the ascent. The worker generates the patch during the dive. The dive lasts as long as generation with a floor of 1.2 s, and the patch fades in from the fog colour. The globe scene stays in memory and paused. On the ground the globe is not drawn. A sky dome and fog take the atmosphere colour. The sun sits where the globe light falls at the site. Moons and rings are drawn far away in the sky. Clouds are a few flat sprites near the ceiling.
+6. **Descent and return.** The probe button in the middle of the dock, "Send probe", starts the aim, and a tap on the planet then starts the descent. Changed by issue 20; a continued zoom past the minimum used to start the descent on its own. The same button, "Recall probe", starts the ascent. Changed after issue 23; a zoom out past the patch ceiling used to start it. The worker generates the patch during the dive. The dive lasts as long as generation with a floor of 1.2 s, and the patch fades in from the fog colour. The globe scene stays in memory and paused. On the ground the globe is not drawn. A sky dome and fog take the atmosphere colour. The sun sits where the globe light falls at the site. Moons and rings are drawn far away in the sky. Clouds are a few flat sprites near the ceiling.
 10. **Sky continuity, 2026-09-09.** `ground-sky.js` owns the sky. The app turns the globe sun, the moon orbits, and the ring plane into the frame of the site, because only the app knows `planet.rotation.y`. It passes them to `Ground.load(result, { sunDir, view })`.
     - **East and the right hand.** A positive `planet.rotation.y` takes +x toward -z, and lon counts from +x toward +z. East is therefore the direction of falling lon. With that east, the frame x east, y up, z south is right-handed and the sky is not mirrored.
     - **The dome carries no tone mapping.** The renderer applies the fog after the tone mapping and after the colour space, so far terrain ends at the plain fog colour. A tone-mapped dome lands on another colour and the horizon then shows a hard step. The dome takes `toneMapped: false` and the fog takes the horizon colour, so the two meet at one value. The sun tint also fades out at the horizon, because the fog cannot know about the sun.
@@ -192,15 +192,19 @@ reader who keeps pulling is asking for something the zoom cannot do, so the offe
 when it answers a question the reader is already asking, and it covers no view that the reader is
 still moving. It hides while the reader aims, because the aim banner already holds the screen.
 
-**The tap marks, and the button opens the card.** The card used to open on a second tap on the
+The sidebar and this button are gone since the interface of `docs/ui.md`. The zoom still stops at
+the limit, and the probe button in the middle of the dock sends and recalls the probe.
+
+**The tap marks, and the study chip opens the card.** The card used to open on a second tap on the
 same animal within 0.45 s, and the gesture was hard to find. One tap now marks the animal: a ring
-in the accent of the palette lies on the ground under it and follows it, and a floating button at
-the foot of the screen offers the card — "Study the ‹name›". The button takes the spot of the
-recall button while a mark is on, because the two share one place and the mark is the fresher ask.
-The arrows of the card walk the species list, and on the ground they also point the view at the
-nearest animal of the next species, with the same glide or turn the tap uses. A species the patch
-does not host leaves the camera in place and takes the mark off. A tap on the ground, Escape, or
-the recall of the probe takes the mark off too.
+in the accent of the palette lies on the ground under it and follows it. The study chip over the
+dock offers the card: "Study this creature" before the find, and "Study the ‹name›" after it. A tap
+on the ground, Escape, or the recall of the probe takes the mark off.
+
+The first build put a floating button at the foot of the screen, in the spot of the recall button,
+and the arrows of the card walked the species list. The interface of `docs/ui.md` replaced the
+button with the study chip. It removed the arrows, because an arrow would step to a creature the
+reader has not found yet.
 
 **The reader walks, and moving takes the first gesture.** Added with issue 23. Issue 06 gave the
 ground the gesture map of the globe: one finger and the left button turned the view, and the pan sat
@@ -323,7 +327,7 @@ glide to a thing, an animal or a plant, ends between `GLIDE_NEAR` and `GLIDE_FAR
 units. A tap on bare ground keeps the old rule and travels, because there the distance is the whole
 point of the gesture.
 
-**The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)`. A tap asks `pickCreature` first. A hit marks the animal with a ring, glides to `hit.point`, and reports the species through `onSelect`; the app then offers the card on the floating button. A tap on the ground takes the mark off through `onDeselect`. Without issue 09 `pickCreature` is null and every tap is a ground tap.
+**The seam for the fauna.** Issue 09 sets `ground.pickCreature(ndcX, ndcY, event)`. A tap asks `pickCreature` first. A hit marks the animal with a ring, glides to `hit.point`, and reports the species through `onSelect`; the app then offers the card on the study chip. A tap on the ground takes the mark off through `onDeselect`. Without issue 09 `pickCreature` is null and every tap is a ground tap.
 
 **A tap on a flyer turns the view, it does not walk it.** Added with issue 17. The glide of issue 06
 moves the target, and the target rides the ground, so a glide to a flyer aims the view at the ground
@@ -424,9 +428,9 @@ At the pixel count a phone really asks for, 589 by 1,090, the same LOW site read
 
 **The worker is not the limit.** A LOW patch is a grid of 376 by 376 against 751 by 751 on HIGH, so it costs about a third of the time. In Chrome on this machine a LOW patch takes 74 to 407 ms, and outside the browser, in Node with a stub for `self`, the median is 281 ms against 930 ms on HIGH. The floor of the dive is 1,200 ms, so the build hides inside it with room to spare and the rock octave keeps its full reach. The three noise octaves cost about 45 ms each of the 281 ms; a cut of the rock octave to a circle of 500 m saves 27 ms, which is not worth a ring in the terrain where the octave stops.
 
-**The overlay moved to the top right.** The sidebar owns the left of a wide screen from the top to the foot, and on a screen under 600 px it docks at the foot as a sheet. The overlay of `?perf` draws over the page, so at the lower left it covered the probe button of the sheet: measured on a viewport of 375 by 667, the old box stood at y 488 to 659 and the button at y 560 to 595. The top right is free in both layouts.
+**The overlay moved to the top right.** The sidebar owns the left of a wide screen from the top to the foot, and on a screen under 600 px it docks at the foot as a sheet. The overlay of `?perf` draws over the page, so at the lower left it covered the probe button of the sheet: measured on a viewport of 375 by 667, the old box stood at y 488 to 659 and the button at y 560 to 595. The top right is free in both layouts. The sidebar is gone since the interface of `docs/ui.md`, and the dock and the window replace it. The overlay now stands at the top left, under the world chip, clear of the sound button and the objective.
 
-**The sheet hid the probe button as well.** The body of the sidebar is the one scroll region, and on a viewport of 375 by 667 it holds 386 px of a scroll height of 1,496 px. A world with a tall card then puts the probe button at y 629, under the footer at y 626 to 667, and the reader who opens the sheet sees no button at all. So an expand of the sheet, and a change of what the button says, bring it into view. The scroll only moves while the button stands outside the body, so the reader who scrolled somewhere else keeps that place, and a wide screen where the button already shows never moves.
+**The sheet hid the probe button as well.** The body of the sidebar is the one scroll region, and on a viewport of 375 by 667 it holds 386 px of a scroll height of 1,496 px. A world with a tall card then puts the probe button at y 629, under the footer at y 626 to 667, and the reader who opens the sheet sees no button at all. So an expand of the sheet, and a change of what the button says, bring it into view. The scroll only moves while the button stands outside the body, so the reader who scrolled somewhere else keeps that place, and a wide screen where the button already shows never moves. The sheet is gone since the interface of `docs/ui.md`: the probe button now stands raised in the middle of the dock, which never scrolls.
 
 ### What pops, and what the far view costs
 
@@ -622,7 +626,7 @@ paints `MAX_WEDGES` wedges and no more, so the store keeps the same four and a f
 the oldest fix of that seed. The first build kept 64, and a reader who landed eight times then
 stood before eight wide wedges with no cross in them. A fix writes about 46 characters of JSON, so
 one seed takes about 240 bytes and 200 seeds take about 50 kB at the very worst. That stands well
-inside the 5 MB most browsers hold, and 200 seeds is over three times the 60 worlds the sidebar
+inside the 5 MB most browsers hold, and 200 seeds is over three times the 60 saved worlds the page
 keeps, so that bound cannot bite a real search.
 
 **The pulse and the brief, in `probe-hud.js`, `style.css`, and `app.js`.** Risk 4 asks for one flash
@@ -655,10 +659,11 @@ the camera, so both stay a few pixels wide from the home zoom.
 
 Neither mesh answers a ray. `pickDirs()` in `site.js` takes the sphere and not the scene, so nothing
 here can catch a tap today; the empty raycast states the rule all the same. The find drops the
-fixes with it (`read()` of `chapters.js`), so a found world stores no new fix and paints no wedge, and the Carrier row of
-the sidebar gains an **Aim** chip in orbit: it turns the camera onto the cell of the source with
-`placeCameraOverSite()` and starts the aim, so the reader stands in the state a tap on that cell
-gives and the next tap sends the probe.
+fixes with it (`read()` of `chapters.js`), so a found world stores no new fix and paints no wedge.
+Chapter 1 of the Story window then offers "Find the wreck on the globe" in orbit. It closes the
+window, turns the camera onto the cell of the source with `placeCameraOverSite()`, and starts the
+aim. So the reader stands in the state a tap on that cell gives, and the next tap sends the probe.
+The Aim chip of the Carrier row of the sidebar did this before the interface of `docs/ui.md`.
 
 ## Phases
 
