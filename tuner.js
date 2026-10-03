@@ -5,7 +5,7 @@
 // only a reader who read the number can start that search.
 //
 // One function builds the form, and the page stands it in two places: under the last entry of the
-// card of the wreck, and in the Carrier row of the sidebar. So the two places cannot drift.
+// card of the wreck, and in the Now panel of the Story window. So the two places cannot drift.
 //
 // The form gives the typed text to the page, and tune() of chapters.js compares it with the band
 // and gives back one of five answers, from tuneAnswer() here. The form never holds the band before
@@ -54,17 +54,17 @@ let uid = 0;
 
 // One tuner: a label, a field, the unit, a button, and a line of answer, and a locked view for
 // after the tune. The page calls this once for each place and keeps the result, so the text in the
-// field and the last answer outlive a render of the sidebar.
+// field and the last answer outlive a render of the window.
 //
 //   onTune(text)   the reader sent a text. The page gives back the answer, `{ kind, text }`; on a
 //                  lock it tunes the world and calls set() again before it returns.
-//   onEscape()     Escape in the field. Only the sidebar gives it: there it closes the form. The
-//                  card gives none, so Escape goes on to the page and closes the card.
+//
+// Escape in the field goes on to the page, and it closes the card or the window that holds the form.
 //
 // set(tuner) shows the tuner of the view of chapters.js, `{ seed, held, band }`, or null. A new seed
 // clears the field and the answer, so a second world never shows the answer of the first. The page
 // hides the root element on a world that takes no tuner.
-export function makeTuner({ onTune, onEscape } = {}) {
+export function makeTuner({ onTune } = {}) {
   const id = `tuner-${++uid}`;
   const el = document.createElement('div');
   el.className = 'tuner';
@@ -99,13 +99,6 @@ export function makeTuner({ onTune, onEscape } = {}) {
     answer.textContent = a.text;
     answer.dataset.kind = a.kind;
   });
-  if (onEscape) {
-    field.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();   // the page would take the key for the card or the aim
-      onEscape();
-    });
-  }
 
   function set(next) {
     if (!next || next.seed !== seed) {

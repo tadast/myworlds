@@ -1331,8 +1331,8 @@ import { Lore } from './lore.js';
   // kin always walks in a herd, because the twin holds a herd of them.
   //
   // `maker` is world.ruin.maker. generate.js pushes the kin onto world.species and marks it `kin`,
-  // so the ground draws it by its id, and the page keeps it off the sidebar until the reader has
-  // stood at the twin.
+  // so the ground draws it by its id. The field guide shows it only after the reader studies it at
+  // the twin, because the globe never draws it.
   const KIN_LOCO = { 1: 'monopod', 2: 'biped', 3: 'tripod', 4: 'quad', 6: 'hexapod' };
   function rollKin(rng, type, world, P, maker) {
     const w = worldFacts(type, world);

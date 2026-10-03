@@ -554,6 +554,9 @@ function silentWav() {
 export class Music {
   constructor() {
     this.settings = loadSettings();
+    // The reader has used the sound control once: the settings stand in the store. Until then the
+    // sound button of the planet invites the reader to turn the music on. See deck.js.
+    try { this.asked = localStorage.getItem(STORE_KEY) !== null; } catch { this.asked = false; }
     this.ctx = null; this.master = null; this.comp = null; this.synth = null;
     this.song = null; this.pending = null;
     this.carrier = 0; // the level of the source, 0 to 1. Kept while no song plays.
@@ -613,7 +616,7 @@ export class Music {
     else { this._media(true); this.ctx.resume().then(() => this._startTimer()).catch(() => {}); }
   }
   _gain() { const v = this.settings.vol; return v * v * 0.9; }
-  _save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(this.settings)); } catch { /* ignore */ } this.onchange?.(this.settings); }
+  _save() { this.asked = true; try { localStorage.setItem(STORE_KEY, JSON.stringify(this.settings)); } catch { /* ignore */ } this.onchange?.(this.settings); }
 
   // ---------------------------------------------------------------- public controls
   get playing() { return !!this.ctx && this.ctx.state === 'running' && !this.settings.muted && !!this.song; }

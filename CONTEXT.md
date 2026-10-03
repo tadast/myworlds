@@ -31,7 +31,7 @@ The band the ruin sends on, in MHz with three decimals, from 3.000 to 29.999. Th
 _Avoid_: channel, signal
 
 **Tuner**:
-The field the reader types the frequency into: under the last entry of the card of the wreck, and under the Carrier row of the sidebar. A lock tunes the world, and the store keeps `tuned`. `tuner.js` holds it.
+The field the reader types the frequency into: under the last entry of the card of the wreck, and in the Now panel of the Story window. A lock tunes the world, and the store keeps `tuned`. `tuner.js` holds it.
 _Avoid_: dial, unlock
 
 ### The story
@@ -117,6 +117,38 @@ _Avoid_: tile, chunk, ground patch
 **Keep-out**:
 The discs of a patch where no plant grows and no animal walks: the phenomenon, the wreck, the ruin with its soft edge, and each part of the camp. The patch call masks them and carries them as `patch.keepOut`, and `patch-terrain.js` gives them to the ground.
 _Avoid_: footprint, blocked area, exclusion zone
+
+### The interface
+
+`docs/ui.md` holds the rules of the interface.
+
+**Dock**:
+The bar at the foot of the screen: the tabs Worlds, Story, Planet, and Menu, and the probe button raised in its middle. It is the only navigation.
+_Avoid_: toolbar, nav bar, sidebar (the sidebar is gone)
+
+**Probe button**:
+The raised button in the middle of the dock. It sends the probe in orbit, cancels the aim, recalls the probe on the ground, and closes the window.
+_Avoid_: CTA, orb
+
+**Window**:
+The one page that a tab of the dock opens over the planet: Worlds, Story, Planet, or Menu. One window stands at a time, and a card or a dialog hides it until it closes.
+_Avoid_: deck, modal, sheet, panel
+
+**Objective**:
+The next step of the reader, from `storyOf()` of `story.js`: a chapter, a title, and one line. It stands at the top right in orbit and over the dock on the ground.
+_Avoid_: quest, mission, task
+
+**Arrival**:
+The card that follows a new world: the distress signal of a world with a story and no fix, "Welcome back" on a world with progress, or one card for a world with no story.
+_Avoid_: intro, splash
+
+**Study chip**:
+The white button over the dock that offers the card of the thing marked on the ground: a creature, a plant, the source, or a person of the crew.
+_Avoid_: floating button, float
+
+**Field guide**:
+The creatures and the plants the reader has studied on one world. The first open of a card adds it. `field-guide.js` keeps it in `myworlds.guide.v1`.
+_Avoid_: bestiary, codex (the codex is the letters of the script), collection
 
 ### The device
 

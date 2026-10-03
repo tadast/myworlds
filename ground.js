@@ -433,7 +433,7 @@ export class Ground {
     this._vz = 0;
     // The seam for issue 09. It sets pickCreature to a function that returns the creature under
     // the pointer, { point, kind, scale, dist, member } or null. One tap on a creature marks it
-    // and glides to it; the app then offers the card of the marked animal on the floating button.
+    // and glides to it; the app then offers the card of the marked animal on the study chip.
     // A tap on the ground takes the mark off and glides there.
     this.pickCreature = null;    // (ndcX, ndcY, event) => { point, kind, scale, dist, member } | null
     // The same seam for the plants, issue 24. It is set in load(), beside the flora.
@@ -458,7 +458,7 @@ export class Ground {
     canvas.addEventListener('pointercancel', this._bound.up, { passive: true });
     canvas.addEventListener('wheel', this._bound.wheel, { passive: true });
     // The keys go on the window, not on the canvas: the canvas takes no focus, and the reader who
-    // just pressed a button in the sidebar must still be able to walk.
+    // just pressed a button of the interface must still be able to walk.
     addEventListener('keydown', this._bound.keydown);
     addEventListener('keyup', this._bound.keyup);
     addEventListener('blur', this._bound.blur);
@@ -585,7 +585,7 @@ export class Ground {
     this.content.add(this.fauna.group);
 
     // Fill the seam of issue 06: a tap on an animal marks it and glides to it. The app hears of
-    // the mark through onSelect and offers the card of that animal on the floating button.
+    // the mark through onSelect and offers the card of that animal on the study chip.
     this.pickCreature = (nx, ny, e) => {
       const r = this.canvas.getBoundingClientRect();
       const px = (nx + 1) / 2 * r.width, py = (1 - ny) / 2 * r.height;
@@ -1417,8 +1417,8 @@ export class Ground {
   }
 
   // ---------------------------------------------------------------- the walk, issue 23
-  // A key goes in by its job, so W and the up arrow are one thing. The reader who types a seed in
-  // the sidebar must not walk, so an editable element takes every key. A keyup always comes off,
+  // A key goes in by its job, so W and the up arrow are one thing. The reader who types a name or a
+  // frequency into a window must not walk, so an editable element takes every key. A keyup always comes off,
   // even while the controls are off, or a key held through the dive would stay down for ever.
   _onKey(e, down) {
     const job = KEY_JOB[e.code];
@@ -1749,7 +1749,7 @@ export class Ground {
 
   // ---------------------------------------------------------------- the pointer
   // A tap glides. A drag does not, so a turn, a pan, and a pinch stay free of the glide. The
-  // handlers never call preventDefault, so the sheet of the sidebar still folds on a tap.
+  // handlers never call preventDefault, so the page still hears every tap.
   _onDown(e) {
     this._pointers++;
     if (e.pointerType === 'touch') {
@@ -1840,8 +1840,8 @@ export class Ground {
     const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
     // One tap on an animal marks it and glides to it, so every tap moves the view and the reader
     // keeps walking. The card does not open here: a card that opens on a tap covers the screen
-    // the reader is trying to cross. The app offers it on the floating button instead, and the
-    // ring under the animal says which animal the button means. A tap on the ground takes the
+    // the reader is trying to cross. The app offers it on the study chip instead, and the
+    // ring under the animal says which animal the chip means. A tap on the ground takes the
     // mark off.
     const hit = this.groundAtPointer(nx, ny);
     let creature = this.pickCreature ? this.pickCreature(nx, ny, e) : null;   // the seam of issue 09

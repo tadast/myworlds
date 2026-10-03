@@ -183,11 +183,16 @@ The plants use the controls the animals use, and only on the ground:
   caught an animal level with the camera, and the edge test now catches one out to the side.
 - **A ring lies on the ground around it**, in the accent colour the animal ring and the site square
   both take. A plant does not move, so the ring is placed once and never stepped.
-- **The floating button offers the card**: "Study the ‹name›". Only one thing is marked at a time,
-  so the button always names what the ring is under.
-- **The arrows of the card walk the plants of the patch**, tallest first, and point the view at the
-  nearest plant of the kind.
-- **The sidebar grows a Flora row** while the probe is down, beside the Fauna row.
+- **The study chip over the dock offers the card**: "Study this plant" before the find, and "Study
+  the ‹name›" after it. Only one thing is marked at a time, so the chip always offers the card of
+  what the ring is under.
+- **The card has no arrows.** The arrows of the first card walked the plants of the patch, tallest
+  first. The interface of `docs/ui.md` removed them, because an arrow would step to a plant the
+  reader has not found yet.
+- **The field guide of the Planet window lists the plants of the patch** while the probe is down.
+  A plant the reader has not studied shows as a locked card that says "Undiscovered". The guide
+  keeps a plant by the name its card showed, because the name of a plant reads the biome of its
+  patch. The field guide replaces the Flora row of the sidebar.
 
 ## The preview
 
