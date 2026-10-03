@@ -1,56 +1,63 @@
-// PROTOTYPE — concept A, "Flight deck". A flat hub: one persistent dock, every function one tap away,
-// the probe as the raised button in the middle of the dock. See NOTES.md.
+// PROTOTYPE — concept A, "Flight deck", round 2. The dock is the only navigation. Its four tabs open
+// one window, almost the whole screen, and the probe is the raised button in the middle of the dock.
+// One layer shows at a time: the title, the arrival, the window, or a card of the app. See NOTES.md.
 import { icon } from './icons.js';
 import { esc, CONTROLS } from './bridge.js';
 
 export const meta = {
   name: 'Flight deck',
   map: `
-  <h3>A — Flight deck</h3>
-  <p>A game HUD. One dock holds everything, and the probe is the big raised button in its middle: the thumb finds it without looking. Flat topology: every function is one tap from the planet.</p>
+  <h3>A — Flight deck (round 2)</h3>
+  <p>A game HUD. One dock holds everything, and the probe is the big raised button in its middle. The four tabs open one window that fills the screen above the dock; the tabs stay, so they switch pages, and the middle button closes the window.</p>
   <h4>Topology</h4>
-  <pre>Title ──name / dice / continue──▶ Planet
-                                   │
+  <pre>Title ──name / dice / continue──▶ Distress signal ──▶ Planet
+                                                       │
    dock:  [Worlds] [Story] (● PROBE) [Planet] [Menu]
-              │       │        │         │       │
-            sheet   sheet   aim ▸ land  sheet   sheet
-                             recall ◂ ground
-   one sheet at a time · right panel on desktop · bottom sheet on phone</pre>
-  <h4>Hierarchy</h4>
+              └───────┴───────┬─────────┴───────┘
+                     one window, four pages
+                     the middle button: ✕ close
+   in orbit: ● Send probe ▸ aim ▸ land     on the ground: ● Recall</pre>
+  <h4>Layers — one at a time</h4>
   <ol>
-    <li><b>Probe</b> — the one warm colour on screen. Send in orbit, Recall on the ground.</li>
-    <li><b>Objective</b> — the next step of the story, top right (orbit) or over the dock (ground).</li>
-    <li><b>Where am I</b> — the world chip, top left.</li>
-    <li><b>Everything else</b> — behind the four dock tabs.</li>
+    <li>A card or a dialog of the app (study, brief, log, about)</li>
+    <li>The window (Worlds, Story, Planet, Menu)</li>
+    <li>The title screen</li>
+    <li>The arrival: the distress signal, or welcome back</li>
+    <li>The planet: world chip, objective, study chip, dock</li>
   </ol>
-  <h4>Trade-off</h4>
-  <p>Fastest to use and to learn. Least cinematic: the dock is always there, so the planet never has the screen to itself.</p>`,
+  <p>A card opened from the window hides the window, and the window comes back when the card closes.</p>
+  <h4>Story without spoilers</h4>
+  <p>A locked chapter shows only "Locked". The page always offers the other way to play: meet the creatures, land and look.</p>`,
 };
 
 const CSS = `
 .A { position: absolute; inset: 0; font-family: Fredoka, ui-rounded, system-ui, sans-serif; color: #eef1ff;
   --glass: rgba(10, 14, 30, 0.74); --line: rgba(140, 200, 255, 0.16); --muted: #9aa3c7; --accent: #7cc4ff;
-  --warm: #ffb86b; --warm2: #ff7d54; --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
-  --dock-h: 74px; --dock-b: 18px; --safe-b: env(safe-area-inset-bottom); }
+  --warm: #ffb86b; --warm2: #ff7d54; --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace; --serif: Fraunces, Georgia, serif;
+  --dock-h: 74px; --dock-b: 18px; --safe-b: env(safe-area-inset-bottom); --safe-t: env(safe-area-inset-top); }
 .A * { box-sizing: border-box; }
 .A [hidden] { display: none !important; }
 .A button { font: inherit; color: inherit; }
 .A .pe { pointer-events: auto; }
 .A .glass { background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); }
-.A .fade { transition: opacity .35s ease, transform .35s ease; }
-.A .gone { opacity: 0 !important; pointer-events: none !important; transform: translateY(8px); }
+.A .fade { transition: opacity .3s ease, transform .3s ease; }
+.A .gone { opacity: 0 !important; pointer-events: none !important; }
 .A .mono { font-family: var(--mono); letter-spacing: .02em; }
 .A .kick { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.A .serif { font-family: var(--serif); }
+@keyframes a-spin { to { transform: rotate(360deg); } }
+@keyframes a-blink { 50% { opacity: .2; } }
+@keyframes a-wave { to { transform: translateX(-50%); } }
 
 /* ---------- title */
 .a-title { position: absolute; inset: 0; pointer-events: auto; display: flex; align-items: center;
   background: linear-gradient(100deg, rgba(7,10,22,.96) 0%, rgba(7,10,22,.88) 30%, rgba(7,10,22,.35) 55%, rgba(7,10,22,0) 72%); }
-.a-title .col { width: min(560px, 100%); padding: 48px 56px; display: flex; flex-direction: column; gap: 18px; }
-.a-title .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: .02em; color: var(--warm); font-size: 15px; }
+.a-title .col { width: min(580px, 100%); padding: 48px 56px; display: flex; flex-direction: column; gap: 18px; }
+.a-title .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--warm); font-size: 15px; }
 .a-title h1 { margin: 0; font-size: clamp(38px, 5.4vw, 64px); line-height: 1.02; font-weight: 600; letter-spacing: -.01em; }
 .a-title h1 em { font-style: normal; background: linear-gradient(90deg, #9fd6ff, #ffb86b); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.a-title p.lede { margin: 0; color: #c5cbe6; font-size: 17px; line-height: 1.45; max-width: 440px; }
-.a-form { display: flex; gap: 8px; align-items: stretch; margin-top: 6px; }
+.a-title p.lede { margin: 0; color: #c5cbe6; font-size: 17px; line-height: 1.45; max-width: 460px; }
+.a-form { display: flex; gap: 8px; align-items: stretch; }
 .a-field { flex: 1; display: flex; align-items: center; min-width: 0; border-radius: 16px; padding: 0 6px 0 16px; height: 56px;
   background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.16); transition: border-color .2s, box-shadow .2s; }
 .a-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(124,196,255,.15); }
@@ -58,77 +65,43 @@ const CSS = `
 .a-field input::placeholder { color: #7d86ab; }
 .a-icobtn { width: 44px; height: 44px; border-radius: 12px; border: 0; background: rgba(255,255,255,.08); display: grid; place-items: center; cursor: pointer; flex: none; }
 .a-icobtn:hover { background: rgba(255,255,255,.16); }
-.a-icobtn.spin .ico { animation: a-roll .5s ease; }
-@keyframes a-roll { to { transform: rotate(360deg); } }
+.a-icobtn.spin .ico { animation: a-spin .5s ease; }
 .a-go { height: 56px; padding: 0 22px; border-radius: 16px; border: 0; cursor: pointer; font-weight: 600; font-size: 17px; color: #1b1205 !important;
-  background: linear-gradient(180deg, #ffd39a, var(--warm)); display: flex; align-items: center; gap: 8px; box-shadow: 0 8px 30px rgba(255,184,107,.28); }
+  background: linear-gradient(180deg, #ffd39a, var(--warm)); display: flex; align-items: center; gap: 8px; box-shadow: 0 8px 30px rgba(255,184,107,.28); white-space: nowrap; }
 .a-go:hover { filter: brightness(1.06); }
-.a-recent { display: flex; flex-direction: column; gap: 8px; }
-.a-recent .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.a-recent .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .a-wchip { display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px; border-radius: 999px; cursor: pointer;
   background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); font-size: 14px; }
 .a-wchip:hover { border-color: var(--accent); }
 .a-wchip img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #111a33; }
 .a-wchip i { font-style: normal; color: var(--warm); font-size: 11px; }
-.a-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
+.a-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .a-step { padding: 12px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
 .a-step b { display: block; font-weight: 500; font-size: 14px; margin: 6px 0 2px; }
 .a-step span { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
 .a-step .n { color: var(--accent); }
-.a-links { display: flex; gap: 18px; color: var(--muted); font-size: 14px; }
+.a-links { display: flex; gap: 18px; color: var(--muted); font-size: 14px; flex-wrap: wrap; }
 .a-links button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .a-links button:hover { color: #fff; }
 
-/* ---------- top: the world chip and the objective */
-.a-world { text-align: left; position: absolute; left: 16px; top: 16px; display: flex; align-items: center; gap: 10px; padding: 6px 16px 6px 6px; border-radius: 999px; cursor: pointer; max-width: calc(100vw - 32px); }
+/* ---------- the planet: world chip, objective, aim, study chip */
+.a-world { position: absolute; left: 16px; top: calc(16px + var(--safe-t)); display: flex; align-items: center; gap: 10px; padding: 6px 16px 6px 6px; border-radius: 999px; cursor: pointer; text-align: left; max-width: calc(100vw - 32px); }
 .a-world img, .a-world .ph { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a); flex: none; }
 .a-world b { display: block; font-weight: 600; font-size: 17px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .a-world span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.a-obj { position: absolute; right: 16px; top: 16px; width: 340px; padding: 12px 14px 12px 14px; border-radius: 18px; cursor: pointer; text-align: left; display: flex; gap: 12px; }
+.a-obj { position: absolute; right: 16px; top: calc(16px + var(--safe-t)); width: 340px; padding: 12px 14px; border-radius: 18px; cursor: pointer; text-align: left; display: flex; gap: 12px; }
 .a-obj .dot { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; color: var(--warm); background: rgba(255,184,107,.12); }
-.a-obj b { display: block; font-weight: 500; font-size: 15px; margin: 2px 0 2px; }
+.a-obj b { display: block; font-weight: 500; font-size: 15px; margin: 2px 0; }
 .a-obj p { margin: 0; color: #c5cbe6; font-size: 13px; line-height: 1.35; }
 .a-obj .bar { display: flex; gap: 4px; margin-top: 8px; }
 .a-obj .bar i { height: 3px; flex: 1; border-radius: 2px; background: rgba(255,255,255,.12); }
 .a-obj .bar i.on { background: var(--warm); }
 .a-obj .bar i.open { background: linear-gradient(90deg, var(--warm) 40%, rgba(255,255,255,.12) 40%); }
-
-/* ---------- the dock */
-.a-dock { position: absolute; left: 50%; bottom: calc(var(--dock-b) + var(--safe-b)); transform: translateX(-50%); width: 480px; height: var(--dock-h);
-  border-radius: 26px; display: grid; grid-template-columns: 1fr 1fr 112px 1fr 1fr; align-items: center; padding: 0 6px; }
-.a-tab { height: 60px; border: 0; background: none; border-radius: 16px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  color: #b9c0de; font-size: 11.5px; position: relative; }
-.a-tab:hover, .a-tab.on { color: #fff; background: rgba(255,255,255,.06); }
-.a-tab.on::after { content: ''; position: absolute; bottom: 4px; width: 16px; height: 2px; border-radius: 2px; background: var(--accent); }
-.a-tab .badge { position: absolute; top: 8px; right: calc(50% - 18px); width: 8px; height: 8px; border-radius: 50%; background: var(--warm); box-shadow: 0 0 0 3px rgba(10,14,30,.9); }
-.a-probe { position: relative; justify-self: center; margin-top: -40px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 0; background: none; cursor: pointer; }
-.a-probe .orb { width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; color: #2a1405;
-  background: radial-gradient(circle at 35% 28%, #ffe2b8, var(--warm) 45%, var(--warm2) 100%);
-  box-shadow: 0 0 0 6px rgba(10,14,30,.9), 0 0 0 7px rgba(255,184,107,.45), 0 12px 40px rgba(255,140,80,.45); transition: transform .15s, filter .2s; }
-.a-probe:hover .orb { transform: scale(1.04); }
-.a-probe:active .orb { transform: scale(.96); }
-.a-probe .orb::before { content: ''; position: absolute; top: 0; left: 50%; width: 84px; height: 84px; margin-left: -42px; border-radius: 50%;
-  border: 2px solid rgba(255,184,107,.7); animation: a-ping 2.4s ease-out infinite; pointer-events: none; }
-@keyframes a-ping { from { transform: scale(1); opacity: .9; } to { transform: scale(1.55); opacity: 0; } }
-.a-probe .lbl { font-weight: 600; font-size: 12.5px; color: var(--warm); white-space: nowrap; letter-spacing: .01em; }
-.a-probe.aim .orb { background: radial-gradient(circle at 35% 28%, #fff, #dbe9ff 60%, #a9c9f5); color: #10203d; }
-.a-probe.aim .orb::before { border-color: rgba(124,196,255,.8); }
-.a-probe.aim .lbl { color: #cfe6ff; }
-.a-probe.recall .orb { background: radial-gradient(circle at 35% 28%, #e6f4ff, #7cc4ff 50%, #3c7fd6); color: #071631; box-shadow: 0 0 0 6px rgba(10,14,30,.9), 0 0 0 7px rgba(124,196,255,.5), 0 12px 40px rgba(80,150,255,.45); }
-.a-probe.recall .orb::before { border-color: rgba(124,196,255,.7); }
-.a-probe.recall .lbl { color: #9fd6ff; }
-.a-probe.off { cursor: default; }
-.a-probe.off .orb { background: #2a3150; color: #6e7698; box-shadow: 0 0 0 6px rgba(10,14,30,.9), 0 0 0 7px rgba(255,255,255,.1); }
-.a-probe.off .orb::before { display: none; }
-.a-probe.off .lbl { color: #6e7698; }
-.a-probe.busy .orb::after { content: ''; position: absolute; width: 96px; height: 96px; border-radius: 50%; border: 2px solid transparent; border-top-color: #fff; animation: a-roll 1s linear infinite; }
-
-/* ---------- aim bar, objective strip, context chip */
-.a-aim { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 999px; white-space: nowrap; }
-.a-aim .ico { color: var(--accent); animation: a-roll 4s linear infinite; }
+.a-aim { position: absolute; left: 50%; top: calc(18px + var(--safe-t)); transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 999px; white-space: nowrap; }
+.a-aim .ico { color: var(--accent); animation: a-spin 4s linear infinite; }
 .a-aim button { border: 0; border-radius: 999px; padding: 8px 14px; background: rgba(255,255,255,.1); cursor: pointer; }
 .a-gobj { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 34px); max-width: min(520px, calc(100vw - 32px));
-  display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 13px; color: #d7dcf3; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 13px; color: #d7dcf3; cursor: pointer; white-space: nowrap; overflow: hidden; }
 .a-gobj .ico { color: var(--warm); flex: none; }
 .a-gobj span { overflow: hidden; text-overflow: ellipsis; }
 .a-ctx { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 78px);
@@ -136,83 +109,175 @@ const CSS = `
   background: #f4f7ff; color: #0b1430 !important; font-weight: 600; font-size: 15px; box-shadow: 0 10px 30px rgba(0,0,0,.35); max-width: calc(100vw - 32px); }
 .a-ctx .ico { color: #2f6fd0; }
 .a-ctx span { overflow: hidden; text-overflow: ellipsis; }
+.a-toast { position: absolute; left: 50%; top: calc(20px + var(--safe-t)); transform: translateX(-50%); padding: 9px 16px; border-radius: 999px; font-size: 14px; z-index: 5; }
 
-/* ---------- the sheet */
-.a-sheet { position: absolute; right: 16px; top: 16px; bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 14px); width: 400px; border-radius: 24px; display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: 0 30px 80px rgba(0,0,0,.5); }
-.a-sheet header { display: flex; align-items: center; gap: 10px; padding: 16px 16px 10px 20px; }
-.a-sheet header h2 { margin: 0; font-size: 20px; font-weight: 600; flex: 1; }
-.a-sheet header .x { width: 36px; height: 36px; border-radius: 12px; border: 0; background: rgba(255,255,255,.07); cursor: pointer; display: grid; place-items: center; }
-.a-sheet .body { flex: 1; overflow: auto; padding: 4px 20px 22px; overscroll-behavior: contain; }
-.a-sheet .handle { display: none; }
-.a-sec { margin: 18px 0 8px; }
-.a-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.a-fact { padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); min-width: 0; }
-.a-fact.wide { grid-column: 1 / -1; }
-.a-fact .kick { font-size: 9.5px; }
-.a-fact b { display: block; font-weight: 500; font-size: 17px; margin-top: 3px; }
-.a-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.a-chip { border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05); border-radius: 999px; padding: 7px 12px; cursor: pointer; font-size: 13.5px; display: inline-flex; gap: 6px; align-items: center; }
-.a-chip:hover { border-color: var(--accent); }
-.a-chip.warm { border-color: rgba(255,184,107,.4); color: var(--warm); }
-.a-note { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 6px 0 0; }
-.a-head { display: flex; gap: 12px; align-items: center; }
-.a-head img, .a-head .ph { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a); }
-.a-head b { font-size: 22px; font-weight: 600; display: block; }
+/* ---------- the dock */
+.a-dock { position: absolute; left: 50%; bottom: calc(var(--dock-b) + var(--safe-b)); transform: translateX(-50%); width: 480px; height: var(--dock-h);
+  border-radius: 26px; display: grid; grid-template-columns: 1fr 1fr 112px 1fr 1fr; align-items: center; padding: 0 6px; }
+.a-dock.deck { background: rgba(14, 19, 38, .96); }
+.a-tab { height: 60px; border: 0; background: none; border-radius: 16px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  color: #b9c0de; font-size: 11.5px; position: relative; }
+.a-tab:hover, .a-tab.on { color: #fff; background: rgba(255,255,255,.07); }
+.a-tab.on { color: var(--warm); }
+.a-tab.on::after { content: ''; position: absolute; bottom: 4px; width: 16px; height: 2px; border-radius: 2px; background: var(--warm); }
+.a-tab .badge { position: absolute; top: 8px; right: calc(50% - 18px); width: 8px; height: 8px; border-radius: 50%; background: var(--warm); box-shadow: 0 0 0 3px rgba(10,14,30,.9); }
+.a-probe { position: relative; justify-self: center; margin-top: -40px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 0; background: none; cursor: pointer; }
+.a-probe .orb { position: relative; width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; color: #2a1405;
+  background: radial-gradient(circle at 35% 28%, #ffe2b8, var(--warm) 45%, var(--warm2) 100%);
+  box-shadow: 0 0 0 6px rgba(10,14,30,.92), 0 0 0 7px rgba(255,184,107,.45), 0 12px 40px rgba(255,140,80,.45); transition: transform .15s; }
+.a-probe:hover .orb { transform: scale(1.04); }
+.a-probe:active .orb { transform: scale(.96); }
+.a-probe .orb::before { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(255,184,107,.7); animation: a-ping 2.4s ease-out infinite; pointer-events: none; }
+@keyframes a-ping { from { transform: scale(1); opacity: .9; } to { transform: scale(1.55); opacity: 0; } }
+.a-probe.nudge .orb::before { animation-duration: .9s; border-width: 3px; }
+.a-probe .lbl { font-weight: 600; font-size: 12.5px; color: var(--warm); white-space: nowrap; }
+.a-probe.aim .orb, .a-probe.shut .orb { background: radial-gradient(circle at 35% 28%, #fff, #dbe9ff 60%, #a9c9f5); color: #10203d; box-shadow: 0 0 0 6px rgba(10,14,30,.92), 0 0 0 7px rgba(255,255,255,.35), 0 12px 40px rgba(0,0,0,.4); }
+.a-probe.aim .orb::before { border-color: rgba(124,196,255,.8); }
+.a-probe.shut .orb::before { display: none; }
+.a-probe.aim .lbl, .a-probe.shut .lbl { color: #dbe9ff; }
+.a-probe.recall .orb { background: radial-gradient(circle at 35% 28%, #e6f4ff, #7cc4ff 50%, #3c7fd6); color: #071631; box-shadow: 0 0 0 6px rgba(10,14,30,.92), 0 0 0 7px rgba(124,196,255,.5), 0 12px 40px rgba(80,150,255,.45); }
+.a-probe.recall .orb::before { border-color: rgba(124,196,255,.7); }
+.a-probe.recall .lbl { color: #9fd6ff; }
+.a-probe.off { cursor: default; }
+.a-probe.off .orb { background: #2a3150; color: #6e7698; box-shadow: 0 0 0 6px rgba(10,14,30,.92), 0 0 0 7px rgba(255,255,255,.1); }
+.a-probe.off .orb::before { display: none; }
+.a-probe.off .lbl { color: #6e7698; }
+.a-probe.busy .orb::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid transparent; border-top-color: #fff; animation: a-spin 1s linear infinite; }
+
+/* ---------- the arrival: the signal unfolds */
+.a-arrive { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 24px)); border-radius: 26px; padding: 20px 22px 18px;
+  box-shadow: 0 30px 90px rgba(0,0,0,.6); }
+.a-arrive.unfold { animation: a-unfold .8s cubic-bezier(.2,.8,.2,1); transform-origin: 50% 0; }
+@keyframes a-unfold { from { opacity: 0; transform: translate(-50%, -50%) scaleY(.25); } 60% { opacity: 1; } }
+.a-arrive .kick { display: flex; align-items: center; gap: 8px; color: #ffd3a1; }
+.a-arrive .kick i { width: 8px; height: 8px; border-radius: 50%; background: var(--warm); animation: a-blink 1s steps(2) infinite; flex: none; }
+.a-arrive h2 { margin: 10px 0 10px; font-size: 24px; font-weight: 600; line-height: 1.15; }
+.a-arrive p { margin: 0 0 12px; color: #d5daf0; font-size: 15px; line-height: 1.55; }
+.a-arrive p.alt { color: var(--muted); font-size: 13.5px; display: flex; gap: 8px; align-items: flex-start; }
+.a-arrive p.alt .ico { flex: none; color: #a7e3a0; margin-top: 1px; }
+.a-arrive .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.a-wv { position: relative; height: 40px; margin: 0 0 14px; border-radius: 12px; overflow: hidden; background: rgba(255,184,107,.07); border: 1px solid rgba(255,184,107,.14); }
+.a-wv svg { position: absolute; left: 0; top: 0; height: 100%; width: 200%; animation: a-wave 2.4s linear infinite; }
+.a-wv::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(10,14,30,.9), transparent 18%, transparent 82%, rgba(10,14,30,.9)); }
+
+/* ---------- buttons shared by the window and the cards */
 .a-btn { border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); border-radius: 12px; padding: 10px 14px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; font-size: 14px; }
 .a-btn:hover { border-color: var(--accent); }
 .a-btn.primary { background: linear-gradient(180deg, #ffd39a, var(--warm)); color: #1b1205 !important; border: 0; font-weight: 600; }
-.a-tx { position: relative; padding: 14px 14px 14px 16px; border-radius: 16px; background: linear-gradient(135deg, rgba(255,184,107,.12), rgba(255,184,107,.03)); border: 1px solid rgba(255,184,107,.22); }
-.a-tx p { margin: 6px 0 10px; font-size: 14.5px; line-height: 1.5; color: #e9ddcd; }
-.a-tx .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: #d8b892; }
-.a-tl { list-style: none; margin: 0; padding: 0; position: relative; }
-.a-tl::before { content: ''; position: absolute; left: 15px; top: 18px; bottom: 18px; width: 2px; background: rgba(255,255,255,.08); }
-.a-tl li { position: relative; padding: 0 0 18px 46px; }
-.a-tl .node { position: absolute; left: 0; top: 0; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: #151b36; border: 1px solid rgba(255,255,255,.12); color: var(--muted); }
-.a-tl li.done .node { background: rgba(124,196,255,.15); border-color: rgba(124,196,255,.5); color: var(--accent); }
-.a-tl li.open .node { background: var(--warm); border-color: var(--warm); color: #2a1405; box-shadow: 0 0 0 5px rgba(255,184,107,.15); }
-.a-tl li.closed { opacity: .55; }
-.a-tl h3 { margin: 4px 0 2px; font-size: 16px; font-weight: 500; }
-.a-tl .goal { margin: 0; color: #c5cbe6; font-size: 13.5px; line-height: 1.4; }
-.a-tl .st { margin-top: 6px; font-size: 11.5px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
-.a-tl .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.a-tune { display: flex; gap: 6px; margin-top: 10px; }
-.a-tune input { flex: 1; min-width: 0; height: 40px; border-radius: 10px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.25); color: #fff; padding: 0 10px; font: 15px var(--mono); }
+.a-btn.big { padding: 13px 20px; font-size: 16px; border-radius: 14px; }
+.a-chip { border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05); border-radius: 999px; padding: 7px 12px; cursor: pointer; font-size: 13.5px; display: inline-flex; gap: 6px; align-items: center; }
+.a-chip:hover { border-color: var(--accent); }
+.a-chip.warm { border-color: rgba(255,184,107,.4); color: var(--warm); }
+
+/* ---------- the window */
+.a-deck { position: absolute; inset: 0; pointer-events: auto; background: rgba(4, 6, 16, .62); backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1); animation: a-fadein .3s ease; }
+@keyframes a-fadein { from { opacity: 0; } }
+.a-book { position: absolute; left: 50%; transform: translateX(-50%); top: calc(16px + var(--safe-t)); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 26px); width: min(1180px, calc(100% - 32px));
+  border-radius: 28px; overflow: hidden; display: flex; flex-direction: column; background: linear-gradient(180deg, #11162d, #0a0d1d); border: 1px solid var(--line);
+  box-shadow: 0 40px 120px rgba(0,0,0,.6); animation: a-open .4s cubic-bezier(.2,.8,.2,1); }
+.a-deck.solo .a-book { bottom: calc(16px + var(--safe-b)); }
+@keyframes a-open { from { opacity: 0; transform: translate(-50%, 18px) scale(.985); } }
+.a-book::after { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .45; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E"); }
+.a-bhead { display: flex; align-items: center; gap: 12px; padding: 16px 16px 0 28px; flex: none; }
+.a-bhead .where { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.a-bhead .where img, .a-bhead .where .ph { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a); flex: none; }
+.a-bhead .where span { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-bhead .where b { color: #eef1ff; font-weight: 500; }
+.a-x { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.05); cursor: pointer; display: grid; place-items: center; flex: none; }
+.a-x:hover { border-color: var(--accent); }
+.a-page { flex: 1; overflow: auto; padding: 10px 52px 52px; overscroll-behavior: contain; position: relative; z-index: 1; }
+.a-page h1 { margin: 6px 0 4px; font-family: var(--serif); font-weight: 400; font-size: clamp(38px, 4.6vw, 58px); letter-spacing: -.015em; line-height: 1.02; }
+.a-page h1 em { font-style: italic; color: var(--warm); }
+.a-sub { margin: 0 0 26px; color: var(--muted); font-size: 15px; }
+.a-h { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 26px; margin: 40px 0 14px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.a-h .kick { font-style: normal; }
+.a-note { color: var(--muted); font-size: 14.5px; line-height: 1.5; margin: 0 0 14px; max-width: 640px; }
+
+/* planet page */
+.a-hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 34px; align-items: center; margin-top: 8px; }
+.a-orb { position: relative; width: 210px; height: 210px; border-radius: 50%; flex: none; animation: a-float 7s ease-in-out infinite; }
+@keyframes a-float { 50% { transform: translateY(-6px); } }
+.a-orb img, .a-orb .ph { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 0 60px var(--halo, rgba(124,196,255,.4)), inset -18px -22px 40px rgba(0,0,0,.45); }
+.a-orb::after { content: ''; position: absolute; inset: -14px; border-radius: 50%; border: 1px dashed rgba(124,196,255,.25); animation: a-spin 60s linear infinite; }
+.a-lede { font-family: var(--serif); font-weight: 300; font-size: 19px; line-height: 1.55; color: #dfe3f6; margin: 10px 0 16px; max-width: 620px; }
+.a-specs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.a-spec { padding: 16px 16px 16px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.a-spec b { display: block; font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1.15; margin-top: 4px; }
+.a-spec.wide { grid-column: span 2; }
+.a-spec.wide b { font-size: 20px; }
+.a-life { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.a-card { text-align: left; padding: 14px; border-radius: 18px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.035); cursor: pointer; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+.a-card:hover { border-color: rgba(124,196,255,.5); background: rgba(124,196,255,.06); }
+.a-card .ico { color: var(--accent); }
+.a-card.plant .ico { color: #a7e3a0; }
+.a-card b { font-weight: 500; font-size: 15.5px; line-height: 1.25; flex: 1; }
+.a-card span { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.a-card.plain { cursor: default; justify-content: center; }
+.a-card.plain:hover { border-color: rgba(255,255,255,.08); background: rgba(255,255,255,.035); }
+
+/* story page */
+.a-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 46px; align-items: start; }
+.a-tx { border-radius: 20px; padding: 18px 20px; background: linear-gradient(135deg, rgba(255,184,107,.1), rgba(255,184,107,.02)); border: 1px solid rgba(255,184,107,.2); }
+.a-tx .kick { color: #ffd3a1; display: flex; align-items: center; gap: 8px; }
+.a-tx .kick i { width: 7px; height: 7px; border-radius: 50%; background: var(--warm); animation: a-blink 1.4s steps(2) infinite; }
+.a-tx .a-wv { margin: 12px 0 14px; }
+.a-prose { font-family: var(--serif); font-weight: 300; font-size: 18px; line-height: 1.62; color: #ecdfcc; margin: 0; }
+.a-prose::first-letter { float: left; font-size: 3.3em; line-height: .86; padding: 6px 10px 0 0; color: var(--warm); font-weight: 400; }
+.a-tx .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: #d8b892; margin-top: 12px; }
+.a-now { margin-top: 18px; border-radius: 20px; padding: 18px 20px; background: rgba(124,196,255,.06); border: 1px solid rgba(124,196,255,.22); }
+.a-now h3 { margin: 6px 0 6px; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 26px; }
+.a-now p { margin: 0 0 14px; color: #d7def5; font-size: 15px; line-height: 1.5; }
+.a-wander { margin-top: 18px; display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 20px; background: rgba(167,227,160,.05); border: 1px solid rgba(167,227,160,.18); }
+.a-wander .ico { color: #a7e3a0; flex: none; margin-top: 2px; }
+.a-wander p { margin: 0 0 10px; color: #d4e5d2; font-size: 14.5px; line-height: 1.5; }
+.a-entry { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 4px 16px; padding: 20px 0; border-top: 1px solid var(--line); }
+.a-entry:first-of-type { border-top: 0; padding-top: 6px; }
+.a-entry .num { font-family: var(--serif); font-size: 34px; color: var(--muted); line-height: 1; }
+.a-entry.open .num { color: var(--warm); }
+.a-entry.done .num { color: var(--accent); }
+.a-entry.closed { opacity: .55; }
+.a-entry h3 { margin: 0 0 4px; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 24px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.a-entry.closed h3 { font-style: normal; font-family: Fredoka, sans-serif; font-size: 17px; font-weight: 500; color: var(--muted); gap: 8px; }
+.a-tag { font-family: var(--mono); font-style: normal; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.a-tag.open { border-color: rgba(255,184,107,.5); color: var(--warm); }
+.a-tag.done { border-color: rgba(124,196,255,.45); color: var(--accent); }
+.a-entry p { margin: 0; font-size: 14.5px; line-height: 1.5; color: #cfd5ee; }
+.a-entry .st { margin-top: 6px; font-size: 11.5px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+.a-entry .fixes { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--muted); }
+.a-entry .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.a-tune { display: flex; gap: 6px; max-width: 380px; }
+.a-tune input { flex: 1; min-width: 0; height: 44px; border-radius: 12px; border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.25); color: #fff; padding: 0 12px; font: 16px var(--mono); }
 .a-tune input:focus { outline: 0; border-color: var(--accent); }
-.a-tune-ans { font-size: 12.5px; color: var(--muted); margin-top: 6px; min-height: 1em; }
+.a-tune-ans { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 1em; }
 .a-tune-ans[data-kind="near"] { color: var(--warm); }
 .a-tune-ans[data-kind="lock"] { color: #8ff0b5; }
-.a-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.a-wcard { position: relative; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03); border-radius: 16px; padding: 10px 6px 10px; cursor: pointer; text-align: center; min-width: 0; }
-.a-wcard:hover { border-color: rgba(124,196,255,.5); }
-.a-wcard.on { border-color: var(--accent); background: rgba(124,196,255,.08); }
-.a-wcard img, .a-wcard .ph { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto 6px; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a); box-shadow: 0 0 18px rgba(124,196,255,.15); }
-.a-wcard b { display: block; font-weight: 500; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.a-wcard span { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.a-wcard i { position: absolute; left: 8px; top: 6px; font-style: normal; font-size: 11px; color: var(--warm); }
-.a-wcard .del { position: absolute; right: 4px; top: 4px; width: 22px; height: 22px; border-radius: 8px; border: 0; background: rgba(0,0,0,.35); color: #aab; cursor: pointer; display: grid; place-items: center; opacity: 0; }
-.a-wcard:hover .del { opacity: 1; }
-.a-keys { width: 100%; border-collapse: collapse; font-size: 13px; }
-.a-keys td { padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.06); vertical-align: top; }
-.a-keys td:first-child { width: 42%; padding-right: 10px; }
-.a-keys kbd { font: 11px var(--mono); padding: 3px 6px; border-radius: 6px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }
-.a-keys .t { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
-.a-range { width: 100%; accent-color: var(--warm); }
-.a-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
-/* ---------- the arrival */
-.a-arrive { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 28px)); border-radius: 24px; padding: 20px 22px 18px;
-  box-shadow: 0 30px 90px rgba(0,0,0,.6); animation: a-in .6s cubic-bezier(.2,.8,.2,1); }
-@keyframes a-in { from { opacity: 0; transform: translate(-50%, -44%) scale(.97); } }
-.a-arrive .kick { display: flex; align-items: center; gap: 8px; color: var(--warm); }
-.a-arrive .kick i { width: 8px; height: 8px; border-radius: 50%; background: var(--warm); animation: a-blink 1s steps(2) infinite; }
-@keyframes a-blink { 50% { opacity: .2; } }
-.a-arrive h2 { margin: 10px 0 8px; font-size: 24px; font-weight: 600; line-height: 1.15; }
-.a-arrive p { margin: 0 0 12px; color: #d5daf0; font-size: 15px; line-height: 1.5; }
-.a-arrive .meta { display: flex; gap: 6px 16px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-bottom: 16px; }
-.a-arrive .meta b { color: #eef1ff; font-weight: 500; }
-.a-arrive .acts { display: flex; gap: 8px; }
-.a-toast { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); padding: 9px 16px; border-radius: 999px; font-size: 14px; }
+/* worlds page */
+.a-whead { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.a-whead .a-form { width: min(460px, 100%); }
+.a-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 26px; }
+.a-wcard { position: relative; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03); border-radius: 18px; padding: 16px 8px 14px; cursor: pointer; text-align: center; min-width: 0; }
+.a-wcard:hover { border-color: rgba(124,196,255,.5); }
+.a-wcard.on { border-color: var(--warm); background: rgba(255,184,107,.07); }
+.a-wcard img, .a-wcard .ph { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto 10px; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a); box-shadow: 0 0 22px rgba(124,196,255,.18); }
+.a-wcard b { display: block; font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-wcard span { display: block; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-wcard i { position: absolute; left: 10px; top: 8px; font-style: normal; font-size: 11px; color: var(--warm); }
+.a-wcard .here { position: absolute; right: 10px; top: 8px; font-family: var(--mono); font-size: 9px; letter-spacing: .14em; color: var(--warm); }
+.a-wcard .del { position: absolute; right: 6px; bottom: 6px; width: 24px; height: 24px; border-radius: 8px; border: 0; background: rgba(0,0,0,.35); color: #aab; cursor: pointer; display: grid; place-items: center; opacity: 0; }
+.a-wcard:hover .del { opacity: 1; }
+
+/* menu page */
+.a-menu { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 46px; align-items: start; }
+.a-keys { width: 100%; border-collapse: collapse; font-size: 14px; }
+.a-keys td { padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.06); vertical-align: top; }
+.a-keys td:first-child { width: 42%; padding-right: 10px; }
+.a-keys kbd { font: 11.5px var(--mono); padding: 3px 7px; border-radius: 6px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }
+.a-keys .t { display: block; color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+.a-range { width: 100%; accent-color: var(--warm); margin-top: 12px; }
+.a-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
 /* ---------- phone */
 @media (max-width: 760px) {
@@ -226,10 +291,10 @@ const CSS = `
   .a-steps { gap: 6px; }
   .a-step { padding: 9px; }
   .a-step span { display: none; }
-  .a-world { top: calc(10px + env(safe-area-inset-top)); left: 10px; padding: 4px 14px 4px 4px; }
+  .a-world { top: calc(10px + var(--safe-t)); left: 10px; padding: 4px 14px 4px 4px; }
   .a-world img, .a-world .ph { width: 34px; height: 34px; }
   .a-world b { font-size: 15px; }
-  .a-obj { top: calc(62px + env(safe-area-inset-top)); left: 10px; right: auto; width: auto; max-width: calc(100vw - 20px); padding: 8px 12px 8px 8px; border-radius: 16px; align-items: center; }
+  .a-obj { top: calc(62px + var(--safe-t)); left: 10px; right: auto; width: auto; max-width: calc(100vw - 20px); padding: 8px 12px 8px 8px; border-radius: 16px; align-items: center; }
   .a-obj .dot { width: 28px; height: 28px; }
   .a-obj .kick, .a-obj .bar { display: none; }
   .a-obj b { font-size: 13.5px; margin: 0; }
@@ -237,20 +302,53 @@ const CSS = `
   .a-dock { left: 0; right: 0; width: auto; transform: none; border-radius: 22px 22px 0 0; height: calc(var(--dock-h) + var(--safe-b)); padding-bottom: var(--safe-b); border-bottom: 0; grid-template-columns: 1fr 1fr 96px 1fr 1fr; }
   .a-probe { margin-top: -34px; }
   .a-probe .orb { width: 74px; height: 74px; }
-  .a-probe .orb::before { width: 74px; height: 74px; margin-left: -37px; }
-  .a-sheet { left: 0; right: 0; top: auto; width: auto; bottom: calc(var(--dock-h) + var(--safe-b) - 1px); max-height: 74dvh; height: 74dvh; border-radius: 24px 24px 0 0; border-bottom: 0;
-    box-shadow: 0 -20px 60px rgba(0,0,0,.45); animation: a-up .3s cubic-bezier(.2,.8,.2,1); }
-  @keyframes a-up { from { transform: translateY(40px); opacity: 0; } }
-  .a-sheet .body { padding-bottom: 60px; }
-  .a-sheet .handle { display: block; width: 40px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); margin: 8px auto 0; }
-  .a-sheet header { padding-top: 8px; }
+  .a-aim { top: calc(10px + var(--safe-t)); font-size: 14px; }
+  .a-arrive { top: auto; bottom: calc(20px + var(--safe-b)); transform: translateX(-50%); max-height: calc(100dvh - 40px); overflow: auto; }
+  .a-arrive.unfold { animation: a-unfold2 .8s cubic-bezier(.2,.8,.2,1); transform-origin: 50% 100%; }
+  @keyframes a-unfold2 { from { opacity: 0; transform: translateX(-50%) scaleY(.25); } 60% { opacity: 1; } }
+  .a-arrive h2 { font-size: 21px; }
+  .a-arrive p { font-size: 14.5px; }
+  .a-book { left: 0; right: 0; width: auto; transform: none; top: 0; bottom: calc(var(--dock-h) + var(--safe-b) - 1px); border-radius: 0; border: 0; animation: a-open2 .35s cubic-bezier(.2,.8,.2,1); }
+  @keyframes a-open2 { from { opacity: 0; transform: translateY(24px); } }
+  .a-deck.solo .a-book { bottom: 0; }
+  .a-bhead { padding: calc(12px + var(--safe-t)) 12px 0 18px; }
+  .a-page { padding: 6px 18px 64px; }
+  .a-page h1 { font-size: 38px; }
+  .a-h { font-size: 22px; margin-top: 30px; }
+  .a-hero { grid-template-columns: 1fr; gap: 18px; justify-items: center; text-align: center; }
+  .a-hero .a-lede { font-size: 17px; }
+  .a-orb { width: 150px; height: 150px; }
+  .a-specs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .a-spec b { font-size: 22px; }
+  .a-life { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .a-card { min-height: 108px; }
+  .a-cols, .a-menu { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  .a-prose { font-size: 16.5px; }
+  .a-entry { grid-template-columns: 38px minmax(0, 1fr); }
+  .a-entry .num { font-size: 26px; }
+  .a-entry h3 { font-size: 21px; }
+  .a-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .a-wcard { padding: 12px 4px 10px; }
+  .a-wcard img, .a-wcard .ph { width: 58px; height: 58px; }
   .a-wcard .del { opacity: .7; }
-  .a-aim { top: calc(10px + env(safe-area-inset-top)); font-size: 14px; }
-  .a-arrive { top: auto; bottom: calc(var(--dock-h) + var(--safe-b) + 16px); transform: translateX(-50%); animation: a-in2 .6s cubic-bezier(.2,.8,.2,1); }
-  @keyframes a-in2 { from { opacity: 0; transform: translate(-50%, 20px); } }
 }
 @media (max-width: 380px) { .a-steps { display: none; } }
 `;
+
+const ROMAN = ['', 'I', 'II', 'III', 'IV'];
+const an = (word) => (/^[aeiou]/i.test(word) ? 'An' : 'A');
+const WAVE = (() => {
+  const w = 800, h = 40;
+  let d = `M0 ${h / 2}`;
+  for (let i = 0; i <= 192; i++) {
+    const x = (i / 192) * w;
+    const y = h / 2 + Math.sin((i / 8) * Math.PI * 2) * 13 * (0.35 + 0.65 * Math.abs(Math.sin(i * 0.37) * Math.cos(i * 0.11)));
+    d += ` L${x.toFixed(1)} ${y.toFixed(1)}`;
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="#ffb86b" stroke-width="1.6"/></svg>`;
+})();
+const HALO = { terran: 'rgba(110,190,255,.5)', ocean: 'rgba(80,160,255,.55)', desert: 'rgba(255,190,110,.5)', ice: 'rgba(200,235,255,.55)', lava: 'rgba(255,110,70,.6)', gas: 'rgba(255,200,140,.45)', exotic: 'rgba(200,120,255,.55)' };
+const PAGES = { worlds: 'Your worlds', story: 'Story', planet: 'Planet', menu: 'Menu' };
 
 export function mount(root, B, { showStart }) {
   const style = document.createElement('style');
@@ -259,34 +357,50 @@ export function mount(root, B, { showStart }) {
 
   root.innerHTML = `
   <div class="A">
-    <button type="button" class="a-world glass pe fade gone" data-act="sheet:planet"></button>
-    <button type="button" class="a-obj glass pe fade gone" data-act="sheet:story"></button>
+    <button type="button" class="a-world glass pe fade gone" data-act="deck:planet"></button>
+    <button type="button" class="a-obj glass pe fade gone" data-act="deck:story"></button>
     <div class="a-aim glass pe fade gone">${icon('cross', 18)}<span>Tap the planet where the probe should land</span><button type="button" data-act="cancel-aim">Cancel</button></div>
-    <button type="button" class="a-gobj glass pe fade gone" data-act="sheet:story"></button>
+    <button type="button" class="a-gobj glass pe fade gone" data-act="deck:story"></button>
     <button type="button" class="a-ctx pe fade gone" data-act="study"></button>
-    <aside class="a-sheet glass pe fade gone" aria-live="polite"><div class="handle"></div><header><h2></h2><button type="button" class="x" data-act="close" aria-label="Close">${icon('close', 18)}</button></header><div class="body"></div></aside>
+    <section class="a-arrive glass pe" hidden></section>
+    <section class="a-deck" hidden><div class="a-book" role="dialog" aria-modal="true"><div class="a-bhead"></div><div class="a-page"></div></div></section>
     <nav class="a-dock glass pe fade gone">
-      <button type="button" class="a-tab" data-act="sheet:worlds">${icon('globe')}<span>Worlds</span></button>
-      <button type="button" class="a-tab" data-act="sheet:story">${icon('signal')}<span>Story</span></button>
-      <button type="button" class="a-probe" data-act="probe"><span class="orb">${icon('down', 30, 2.2)}</span><span class="lbl">Send probe</span></button>
-      <button type="button" class="a-tab" data-act="sheet:planet">${icon('planet')}<span>Planet</span></button>
-      <button type="button" class="a-tab" data-act="sheet:menu">${icon('menu')}<span>Menu</span></button>
+      <button type="button" class="a-tab" data-act="deck:worlds">${icon('globe')}<span>Worlds</span></button>
+      <button type="button" class="a-tab" data-act="deck:story">${icon('signal')}<span>Story</span></button>
+      <button type="button" class="a-probe" data-act="probe"><span class="orb"></span><span class="lbl"></span></button>
+      <button type="button" class="a-tab" data-act="deck:planet">${icon('planet')}<span>Planet</span></button>
+      <button type="button" class="a-tab" data-act="deck:menu">${icon('menu')}<span>Menu</span></button>
     </nav>
-    <div class="a-arrive glass pe" hidden></div>
     <div class="a-toast glass fade gone"></div>
-    <section class="a-title" ${showStart ? '' : 'hidden'}></section>
+    <section class="a-title" hidden></section>
   </div>`;
 
   const $ = (s) => root.querySelector(s);
-  const el = { world: $('.a-world'), obj: $('.a-obj'), aim: $('.a-aim'), gobj: $('.a-gobj'), ctx: $('.a-ctx'), sheet: $('.a-sheet'), dock: $('.a-dock'),
-    probe: $('.a-probe'), arrive: $('.a-arrive'), toast: $('.a-toast'), title: $('.a-title') };
+  const el = { world: $('.a-world'), obj: $('.a-obj'), aim: $('.a-aim'), gobj: $('.a-gobj'), ctx: $('.a-ctx'), arrive: $('.a-arrive'),
+    deck: $('.a-deck'), bhead: $('.a-bhead'), page: $('.a-page'), dock: $('.a-dock'), probe: $('.a-probe'), toast: $('.a-toast'), title: $('.a-title') };
   const show = (e, on) => e.classList.toggle('gone', !on);
   let S = { loading: true };
-  let sheet = null;              // worlds, story, planet, menu
+  let deck = null;               // the page of the window: worlds, story, planet, menu, or null
   let titleOn = showStart;
-  let seenStory = '';            // the story key the reader has seen in the Story sheet
+  let arrival = false;           // the arrival card stands
   let arrivalFor = showStart ? null : 'pending';
+  let appWait = 0;               // a card of the app was asked for: the window steps aside until it opens
+  let seenStory = '';
   let lastSeed = null;
+  let nudgeUntil = 0;
+  let heroShot = null;           // the picture of the globe the Planet page opened with
+
+  // The one layer that shows. A card or a dialog of the app wins, then the window, the title, and
+  // the arrival. The chrome of the planet shows only when none of them does.
+  function layer() {
+    if (S.card || S.dialog || performance.now() < appWait) return 'app';
+    if (deck) return 'deck';
+    if (titleOn) return 'title';
+    if (arrival) return 'arrival';
+    return 'none';
+  }
+  const askApp = (fn) => { appWait = performance.now() + 700; render(); fn(); setTimeout(render, 720); };
+  const thumb = (src) => (src ? `<img alt="" src="${src}">` : '<span class="ph"></span>');
 
   // ------------------------------------------------------------ title
   function renderTitle() {
@@ -305,187 +419,222 @@ export function mount(root, B, { showStart }) {
           <button type="button" class="a-wchip" data-act="world:${esc(w.seed)}">${w.thumb ? `<img alt="" src="${w.thumb}">` : '<img alt="">'}${esc(w.seed)}${w.marks ? `<i>${esc(w.marks)}</i>` : ''}</button>`).join('')}</div></div>` : ''}
         <div class="a-steps">
           <div class="a-step"><span class="n">${icon('star', 18)}</span><b>Name it</b><span>Any word is a seed. Or roll the dice.</span></div>
-          <div class="a-step"><span class="n">${icon('planet', 18)}</span><b>Orbit it</b><span>Drag to spin. Zoom in to find the life.</span></div>
-          <div class="a-step"><span class="n">${icon('down', 18)}</span><b>Land on it</b><span>Send the probe, and answer the signals.</span></div>
+          <div class="a-step"><span class="n">${icon('paw', 18)}</span><b>Meet it</b><span>Zoom in close to watch its creatures.</span></div>
+          <div class="a-step"><span class="n">${icon('down', 18)}</span><b>Land on it</b><span>Follow a signal, or just wander.</span></div>
         </div>
-        <div class="a-links"><button type="button" data-act="sheet:menu">${icon('pad', 18)}Controls</button><button type="button" data-act="about">${icon('info', 18)}About</button><button type="button" data-act="sound">${icon(B.music.on ? 'sound' : 'mute', 18)}Sound ${B.music.on ? 'on' : 'off'}</button></div>
+        <div class="a-links"><button type="button" data-act="deck:menu">${icon('pad', 18)}Controls</button><button type="button" data-act="about">${icon('info', 18)}About</button><button type="button" data-act="sound">${icon(B.music.on ? 'sound' : 'mute', 18)}Sound ${B.music.on ? 'on' : 'off'}</button></div>
       </div>`;
   }
-  function leaveTitle() {
-    B.loader(true);
-    titleOn = false;
-    el.title.hidden = true;
-    render();
-  }
 
-  // ------------------------------------------------------------ sheets
-  const facts = (w) => `<div class="a-facts">${w.facts.map((f) => `<div class="a-fact ${f.k === 'star' || f.k === 'moons' || f.k === 'activity' ? 'wide' : ''}"><span class="kick">${esc(f.label)}</span><b>${esc(f.value)}</b></div>`).join('')}</div>`;
-  const thumb = (src) => (src ? `<img alt="" src="${src}">` : '<span class="ph"></span>');
-  function sheetPlanet() {
+  // ------------------------------------------------------------ the window
+  function pagePlanet() {
     const w = B.world();
     const ground = S.mode === 'ground';
+    const shot = heroShot && heroShot.seed === w.seed ? heroShot.src : w.thumb;
+    const f = (k) => (w.facts.find((x) => x.k === k) || {}).value;
+    const kind = `${w.typeLabel.toLowerCase().replace(/ world$/, '')} world`;
+    const star = String(f('star') || '');
+    const sun = !star ? '' : /^binary/i.test(star) ? ', under two suns' : `, under ${an(star).toLowerCase()} ${star.split(',')[0]}`;
+    const lede = w.gas
+      ? `A gas giant ${f('radius')} in radius. It has no ground: the clouds thicken into storms all the way down. A day lasts ${f('day')}.`
+      : `${an(kind)} ${kind} ${f('radius')} in radius. A day lasts ${f('day')}, and the air holds ${f('temp')} on average${sun}.`;
     const life = `
-      <div class="a-sec kick">Creatures</div>
-      <div class="a-chips">${w.fauna.length ? w.fauna.map((f) => `<button type="button" class="a-chip" data-act="fauna:${f.kind}">${icon('paw', 15)}${esc(f.name)}</button>`).join('') : '<span class="a-note">None seen.</span>'}</div>
-      <div class="a-sec kick">Plants ${ground ? 'here' : ''}</div>
-      ${ground && w.flora.length ? `<div class="a-chips">${w.flora.map((p) => `<button type="button" class="a-chip" data-act="plant:${p.kind}">${icon('leaf', 15)}${esc(p.name)}</button>`).join('')}</div>`
-        : `<p class="a-note">${w.gas ? 'A gas giant grows no plants.' : 'Plants live on the ground. Land the probe to study them.'}</p>`}`;
+      <h2 class="a-h" id="a-life">Life <span class="kick">${w.fauna.length} creatures${ground ? ` · ${w.flora.length} plants here` : ''}</span></h2>
+      <p class="a-note">No story needed. Zoom in close from orbit to watch them move, or land the probe and walk among them. Tap one on the ground to study it.</p>
+      <div class="a-life">
+        ${w.fauna.map((c) => `<button type="button" class="a-card" data-act="fauna:${c.kind}">${icon('paw', 24)}<b>${esc(c.name)}</b><span>Creature · study ${icon('arrow', 13, 2)}</span></button>`).join('') || '<div class="a-card plain"><span>No creatures seen yet.</span></div>'}
+        ${ground ? w.flora.map((p) => `<button type="button" class="a-card plant" data-act="plant:${p.kind}">${icon('leaf', 24)}<b>${esc(p.name)}</b><span>Plant here · study ${icon('arrow', 13, 2)}</span></button>`).join('')
+          : w.gas ? '' : `<button type="button" class="a-card plant" data-act="land">${icon('leaf', 24)}<b>The plants</b><span>They live on the ground. Land the probe to meet them ${icon('arrow', 13, 2)}</span></button>`}
+      </div>`;
     return `
-      <div class="a-head">${thumb(w.thumb)}<div><b>${esc(w.seed)}</b><span class="kick">${esc(w.designation)} · ${esc(w.typeLabel)}</span></div></div>
+      <header class="a-hero">
+        <div class="a-orb" style="--halo:${HALO[w.type] || HALO.terran}">${thumb(shot)}</div>
+        <div><span class="kick">${esc(w.designation)} · ${esc(w.typeLabel)}</span>
+          <h1>${esc(w.seed)}</h1>
+          <p class="a-lede">${esc(lede)}</p>
+          <button type="button" class="a-chip" data-act="share">${icon('share', 15)}Copy a link to ${esc(w.seed)}</button></div>
+      </header>
       ${ground ? life : ''}
-      <div class="a-sec kick">Facts</div>${facts(w)}
-      ${ground ? '' : life}
-      <div class="a-sec"><button type="button" class="a-btn" data-act="share">${icon('share', 16)}Copy a link to ${esc(w.seed)}</button></div>`;
+      <h2 class="a-h">At a glance</h2>
+      <div class="a-specs">${w.facts.map((x) => `<div class="a-spec ${['star', 'moons', 'activity'].includes(x.k) ? 'wide' : ''}"><span class="kick">${esc(x.label)}</span><b>${esc(x.value)}</b></div>`).join('')}</div>
+      ${ground ? '' : life}`;
   }
-  function sheetStory() {
-    const st = B.story();
+  function pageStory() {
+    const st = B.story(), w = B.world();
+    const wander = `<div class="a-wander">${icon('paw', 22)}<div><p>The story can wait. Every creature of ${esc(w.seed)} is on the Planet page, and the probe can land anywhere just to look around.</p>
+      <button type="button" class="a-chip" data-act="deck:planet:life">Meet the creatures ${icon('arrow', 14, 2)}</button></div></div>`;
     if (!st.has) {
-      return `<div class="a-tx" style="background:rgba(124,196,255,.06);border-color:rgba(124,196,255,.18)"><span class="kick">${esc(st.objective.kicker)}</span><p style="color:#d5daf0">${esc(st.objective.line)}</p></div>
-        <p class="a-note">No signal reaches us from this world. There is no story to follow here — only a world to explore.</p>`;
+      return `<span class="kick">Story</span><h1>${esc(st.objective.title)}</h1><p class="a-sub">${esc(st.objective.kicker)} · ${esc(w.designation)}</p>
+        <div class="a-cols"><div>
+          <p class="a-prose">${esc(w.gas ? 'A world of gas and storm. No signal reaches us from here, and there is no ground to land on. Watch it turn, and look for what swims in its sky.' : 'No signal reaches us from this world, and no record names it. Nobody has walked here before. This one has no mystery to solve: send the probe down and see what lives here.')}</p>
+        </div><div>${wander}</div></div>`;
     }
-    const nodeIcon = (s) => (s === 'done' ? icon('check', 16, 2.4) : s === 'open' ? icon('signal', 16) : icon('lock', 15));
-    return `
-      <div class="a-tx"><span class="kick" style="color:#ffb86b">Received ${esc(st.intro.years)} years ago</span>
-        <p>${esc(st.intro.text)}</p>
-        <div class="meta mono"><span>BAND ${esc(st.intro.band)}</span><span>CARRIER ${esc(st.intro.ship)}</span><span>CREW ${esc(st.intro.crew)}</span></div></div>
-      <div class="a-sec kick">Chapters · ${st.done} of ${st.of} done</div>
-      <ol class="a-tl">${st.chapters.map((c) => `
-        <li class="${c.state}">
-          <span class="node">${nodeIcon(c.state)}</span>
-          <span class="kick">Chapter ${c.n}</span>
-          <h3>${esc(c.title)}</h3>
-          <p class="goal">${esc(c.goal)}</p>
-          <div class="st mono"><span>${esc(c.status)}</span>${c.band ? `<span>${esc(c.band)}</span>` : ''}</div>
-          ${c.state === 'open' && st.objective.chapter === c.id ? `<p class="goal" style="margin-top:8px;color:#ffd3a1">${icon('arrow', 14)} ${esc(st.objective.line)}</p>` : ''}
-          ${c.tune ? `<form class="a-tune" data-form="tune"><input name="f" inputmode="decimal" placeholder="Frequency, MHz" autocomplete="off" aria-label="Frequency in MHz"><button type="submit" class="a-btn primary">Tune</button></form><div class="a-tune-ans"></div>` : ''}
-          ${c.actions.length ? `<div class="acts">${c.actions.filter((a) => !(a.orbitOnly && S.mode !== 'orbit')).map((a) => `<button type="button" class="a-chip ${a.id === 'aim' ? 'warm' : ''}" data-act="${a.id}${a.chapter ? ':' + a.chapter : ''}">${esc(a.label)}</button>`).join('')}</div>` : ''}
-        </li>`).join('')}</ol>`;
+    const o = st.objective;
+    const cur = st.chapters.find((c) => c.id === o.chapter) || {};
+    let cta = '';
+    if (cur.tune) cta = `<form class="a-tune" data-form="tune"><input name="f" inputmode="decimal" placeholder="Frequency, MHz" autocomplete="off" aria-label="Frequency in MHz"><button type="submit" class="a-btn primary">Tune</button></form><div class="a-tune-ans"></div>`;
+    else if (cur.state === 'open' && S.mode === 'orbit' && !S.gas) cta = `<button type="button" class="a-btn primary big" data-act="land">${icon('down', 18, 2.2)}Send the probe</button>`;
+    else if (S.mode === 'ground') cta = `<button type="button" class="a-btn big" data-act="close">${icon('target', 18)}Back to the probe</button>`;
+    const entries = st.chapters.map((c) => c.locked ? `
+      <div class="a-entry closed"><div class="num">${ROMAN[c.n]}</div><div><h3>${icon('lock', 16)} Locked</h3><p>${esc(c.goal)}</p></div></div>` : `
+      <div class="a-entry ${c.state}"><div class="num">${ROMAN[c.n]}</div><div>
+        <h3>${esc(c.title)} <span class="a-tag ${c.state}">${c.state === 'done' ? 'Done' : 'Now'}</span></h3>
+        <p>${esc(c.goal)}</p>
+        <div class="st mono"><span>${esc(c.status)}</span>${c.band ? `<span>${esc(c.band)}</span>` : ''}</div>
+        ${c.fixes.length ? `<div class="fixes mono">${c.fixes.map((x, i) => `<span>Landing ${i + 1} · ${String(Math.round(x.brg) % 360).padStart(3, '0')}° ±${Math.round(x.err)}° · ${Math.abs(x.lat).toFixed(1)}${x.lat < 0 ? 'S' : 'N'} ${Math.abs(x.lon).toFixed(1)}${x.lon < 0 ? 'W' : 'E'}</span>`).join('')}</div>` : ''}
+        ${c.actions.length ? `<div class="acts">${c.actions.filter((a) => !(a.orbitOnly && S.mode !== 'orbit')).map((a) => `<button type="button" class="a-chip ${a.id === 'aim' ? 'warm' : ''}" data-act="${a.id}${a.chapter ? ':' + a.chapter : ''}">${esc(a.label)}</button>`).join('')}</div>` : ''}
+      </div></div>`).join('');
+    return `<span class="kick">Story · ${st.done} of ${st.of} chapters</span><h1>The signal from <em>${esc(w.seed)}</em></h1><p class="a-sub">${esc(w.designation)} · ${esc(w.typeLabel)}</p>
+      <div class="a-cols">
+        <div>
+          <div class="a-tx"><span class="kick"><i></i>Received ${esc(st.intro.years)} years ago · ${esc(st.intro.band)}</span><div class="a-wv">${WAVE}</div>
+            <p class="a-prose">${esc(st.intro.text)}</p>
+            <div class="meta mono"><span>CARRIER ${esc(st.intro.ship)}</span><span>CREW ${esc(st.intro.crew)}</span></div></div>
+          <div class="a-now"><span class="kick">${esc(o.kicker)}</span><h3>${esc(o.title)}</h3><p>${esc(o.line)}</p>${cta}</div>
+          ${wander}
+        </div>
+        <div><h2 class="a-h" style="margin-top:6px">Chapters</h2>${entries}</div>
+      </div>`;
   }
-  function sheetWorlds() {
+  function pageWorlds() {
     const ws = B.worlds();
-    return `
-      <form class="a-form" data-form="go" style="margin:0 0 6px">
-        <label class="a-field" style="height:48px"><input name="seed" maxlength="40" autocomplete="off" spellcheck="false" enterkeyhint="go" placeholder="A new name…" aria-label="A name">
-          <button type="button" class="a-icobtn" data-act="dice" title="Roll a random world" style="width:38px;height:38px">${icon('dice', 18)}</button></label>
-        <button type="submit" class="a-go" style="height:48px;padding:0 14px">${icon('arrow', 18, 2.2)}</button>
-      </form>
-      <div class="a-sec kick">${ws.length} ${ws.length === 1 ? 'world' : 'worlds'} charted</div>
+    return `<div class="a-whead"><div><span class="kick">${ws.length} ${ws.length === 1 ? 'world' : 'worlds'} charted</span><h1>Your worlds</h1></div>
+        <form class="a-form" data-form="go">
+          <label class="a-field"><input name="seed" maxlength="40" autocomplete="off" spellcheck="false" enterkeyhint="go" placeholder="A new name…" aria-label="A name">
+            <button type="button" class="a-icobtn" data-act="dice" title="Roll a random world" aria-label="Roll a random world">${icon('dice', 20)}</button></label>
+          <button type="submit" class="a-go"><span class="t">Find it</span>${icon('arrow', 20, 2.2)}</button>
+        </form></div>
       <div class="a-grid">${ws.map((w) => `
         <div class="a-wcard ${w.active ? 'on' : ''}" role="button" tabindex="0" data-act="world:${esc(w.seed)}">
-          ${thumb(w.thumb)}<b>${esc(w.seed)}</b><span>${esc(w.typeLabel)}</span>${w.marks ? `<i title="Chapters done">${esc(w.marks)}</i>` : ''}
+          ${thumb(w.thumb)}<b>${esc(w.seed)}</b><span>${esc(w.typeLabel)}</span>${w.marks ? `<i title="Chapters done">${esc(w.marks)}</i>` : ''}${w.active ? '<span class="here">HERE</span>' : ''}
           <button type="button" class="del" data-act="forget:${esc(w.seed)}" title="Forget this world" aria-label="Forget ${esc(w.seed)}">${icon('close', 12)}</button>
         </div>`).join('')}</div>`;
   }
-  function sheetMenu() {
+  function pageMenu() {
     const row = ([d, t, touch]) => `<tr><td><kbd>${esc(d)}</kbd>${touch ? `<span class="t">${esc(touch)}</span>` : ''}</td><td>${esc(t)}</td></tr>`;
-    return `
-      <div class="a-sec kick">Sound</div>
-      <div class="a-row"><span>Music of this world</span><button type="button" class="a-btn" data-act="sound">${icon(B.music.on ? 'sound' : 'mute', 16)}${B.music.on ? 'On' : 'Off'}</button></div>
-      <input class="a-range" type="range" min="0" max="100" value="${Math.round(B.music.vol * 100)}" data-input="vol" aria-label="Volume" ${B.music.on ? '' : 'disabled'}>
-      <div class="a-sec kick">Controls · in orbit</div>
-      <table class="a-keys">${CONTROLS.orbit.map(row).join('')}</table>
-      <div class="a-sec kick">Controls · on the ground</div>
-      <table class="a-keys">${CONTROLS.ground.map(row).join('')}</table>
-      <div class="a-sec" style="display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="a-btn" data-act="about">${icon('info', 16)}About My Worlds</button>
-        <button type="button" class="a-btn" data-act="title">${icon('star', 16)}Title screen</button>
+    return `<span class="kick">Settings</span><h1>Menu</h1><p class="a-sub">Sound, and how to explore</p>
+      <div class="a-menu">
+        <div>
+          <h2 class="a-h" style="margin-top:0">Sound</h2>
+          <div class="a-row"><span>The music of each world</span><button type="button" class="a-btn" data-act="sound">${icon(B.music.on ? 'sound' : 'mute', 16)}${B.music.on ? 'On' : 'Off'}</button></div>
+          <input class="a-range" type="range" min="0" max="100" value="${Math.round(B.music.vol * 100)}" data-input="vol" aria-label="Volume" ${B.music.on ? '' : 'disabled'}>
+          <h2 class="a-h">More</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="a-btn" data-act="about">${icon('info', 16)}About My Worlds</button>
+            ${titleOn ? '' : `<button type="button" class="a-btn" data-act="title">${icon('star', 16)}Title screen</button>`}
+          </div>
+        </div>
+        <div>
+          <h2 class="a-h" style="margin-top:0">In orbit</h2><table class="a-keys">${CONTROLS.orbit.map(row).join('')}</table>
+          <h2 class="a-h">On the ground</h2><table class="a-keys">${CONTROLS.ground.map(row).join('')}</table>
+        </div>
       </div>`;
   }
-  const TITLES = { worlds: 'Your worlds', story: 'Story', planet: 'Planet', menu: 'Menu' };
-  function renderSheet() {
-    if (!sheet) return;
-    const body = el.sheet.querySelector('.body');
-    if (body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;   // the reader is typing
-    el.sheet.querySelector('h2').textContent = TITLES[sheet];
-    const top = body.scrollTop;
-    body.innerHTML = sheet === 'planet' ? sheetPlanet() : sheet === 'story' ? sheetStory() : sheet === 'worlds' ? sheetWorlds() : sheetMenu();
-    body.scrollTop = top;
-    if (sheet === 'story') seenStory = S.storyKey;
+  function renderDeck(anchor) {
+    if (!deck) return;
+    if (el.page.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;   // the reader is typing
+    const ready = !S.loading;
+    const w = ready && !titleOn ? B.world() : null;
+    el.bhead.innerHTML = `<div class="where">${w ? `${thumb(w.thumb)}<span><b>${esc(w.seed)}</b> · ${esc(PAGES[deck])}</span>` : `<span><b>My Worlds</b> · ${esc(PAGES[deck])}</span>`}</div>
+      <button type="button" class="a-x" data-act="close" aria-label="Close">${icon('close', 18)}</button>`;
+    const same = el.deck.dataset.page === deck;
+    const top = same ? el.page.scrollTop : 0;
+    el.page.innerHTML = !ready ? '' : deck === 'planet' ? pagePlanet() : deck === 'story' ? pageStory() : deck === 'worlds' ? pageWorlds() : pageMenu();
+    el.deck.dataset.page = deck;
+    el.page.scrollTop = top;
+    if (anchor) { const a = el.page.querySelector(`#a-${anchor}`); if (a) el.page.scrollTop = a.offsetTop - 16; }
+    if (deck === 'story') seenStory = S.storyKey;
   }
-  function openSheet(name) {
-    sheet = sheet === name ? null : name;
-    if (titleOn && sheet) leaveTitle();
-    if (sheet) { B.cancelAim(); el.sheet.querySelector('.body').scrollTop = 0; }
-    renderSheet();
+  function openDeck(page, anchor) {
+    if (page === deck && !anchor) { deck = null; render(); return; }
+    deck = page;
+    B.cancelAim();
+    if (page === 'planet' && !S.loading && !titleOn) heroShot = { seed: S.seed, src: B.snapshot() };
+    renderDeck(anchor);
     render();
   }
 
   // ------------------------------------------------------------ the arrival
   function renderArrival() {
-    const st = B.story();
-    const w = B.world();
-    let h;
+    const st = B.story(), w = B.world();
+    const wander = `<p class="alt">${icon('paw', 16)}<span>Or just explore: zoom in to watch the creatures, and land the probe to walk among them.</span></p>`;
+    let h, unfold = false;
     if (st.has && st.done === 0 && st.chapters[0].fixes.length === 0) {
-      h = `<div class="kick"><i></i>Incoming record · ${esc(st.intro.years)} years old</div>
-        <h2>Distress signal from ${esc(w.designation)}</h2>
-        <p>${esc(st.intro.text)}</p>
-        <div class="meta mono"><span>BAND <b>${esc(st.intro.band)}</b></span><span>CARRIER <b>${esc(st.intro.ship)}</b></span><span>CREW <b>${esc(st.intro.crew)}</b></span></div>
-        <div class="acts"><button type="button" class="a-btn primary" data-act="arrive-ok">${icon('signal', 16)}Start the search</button><button type="button" class="a-btn" data-act="arrive-close">Later</button></div>`;
+      unfold = true;
+      h = `<div class="kick"><i></i>Incoming · ${esc(st.intro.years)} years old · ${esc(st.intro.band)}</div>
+        <h2>A distress signal from ${esc(w.designation)}</h2>
+        <div class="a-wv">${WAVE}</div>
+        <p>${esc(st.intro.text)}</p>${wander}
+        <div class="acts"><button type="button" class="a-btn primary" data-act="arrive-signal">${icon('signal', 16)}Follow the signal</button><button type="button" class="a-btn" data-act="arrive-close">Just explore</button></div>`;
     } else if (st.has) {
-      h = `<div class="kick" style="color:#7cc4ff">Welcome back · ${st.done} of ${st.of} chapters done</div>
+      h = `<div class="kick" style="color:#9fd6ff">Welcome back · ${st.done} of ${st.of} chapters</div>
         <h2>${esc(w.seed)}</h2><p><b style="font-weight:500">${esc(st.objective.title)}.</b> ${esc(st.objective.line)}</p>
-        <div class="acts"><button type="button" class="a-btn primary" data-act="arrive-close">Continue</button><button type="button" class="a-btn" data-act="arrive-story">Open the story</button></div>`;
+        <div class="acts"><button type="button" class="a-btn primary" data-act="arrive-close">Continue</button><button type="button" class="a-btn" data-act="deck:story">Open the story</button></div>`;
     } else {
-      h = `<div class="kick" style="color:#7cc4ff">${esc(st.objective.kicker)} · ${esc(w.designation)}</div>
-        <h2>${esc(w.seed)} · ${esc(w.typeLabel)}</h2><p>${esc(st.objective.line)}</p>
-        <div class="acts"><button type="button" class="a-btn primary" data-act="arrive-close">Explore</button></div>`;
+      h = `<div class="kick" style="color:#9fd6ff">${esc(st.objective.kicker)} · ${esc(w.designation)}</div>
+        <h2>${esc(w.seed)} · ${esc(w.typeLabel)}</h2><p>${esc(w.gas ? 'No signal reaches us from here, and there is no ground. Zoom in to find what swims in its sky.' : 'No signal reaches us from here, and nobody has walked here. Zoom in to meet the creatures, and land the probe anywhere to look around.')}</p>
+        <div class="acts"><button type="button" class="a-btn primary" data-act="arrive-close">Explore</button><button type="button" class="a-btn" data-act="deck:planet:life">Meet the creatures</button></div>`;
     }
     el.arrive.innerHTML = h;
-    el.arrive.hidden = false;
+    el.arrive.classList.toggle('unfold', unfold);
+    arrival = true;
   }
 
   // ------------------------------------------------------------ the frame
   function render() {
     const s = S;
     const ready = !s.loading && !s.busy;
-    const quiet = titleOn || !ready || s.dive || s.card || s.dialog || s.mode === 'descending' || s.mode === 'ascending';
-    const ground = s.mode === 'ground';
+    const L = layer();
+    const moving = s.dive || s.mode === 'descending' || s.mode === 'ascending';
     if (!titleOn && ready && arrivalFor === 'pending') {
       arrivalFor = s.seed;
       setTimeout(() => { if (arrivalFor === s.seed && !S.busy && !titleOn) { renderArrival(); render(); } }, 900);
     }
-    const arriving = !el.arrive.hidden;
-    if (arriving && (s.card || s.dialog || titleOn)) el.arrive.hidden = true;
-
-    show(el.dock, !quiet);
-    show(el.world, !quiet && !ground && !s.aiming);
-    const st = ready ? B.story() : null;
-    // the dock
+    el.title.hidden = L !== 'title';
+    el.deck.hidden = L !== 'deck';
+    el.deck.classList.toggle('solo', titleOn);
+    el.arrive.hidden = L !== 'arrival';
+    const base = L === 'none' && ready && !moving;
+    const ground = s.mode === 'ground';
+    // the dock: the planet's, or the window's
+    show(el.dock, ready && (base || (L === 'deck' && !titleOn)));
+    el.dock.classList.toggle('deck', L === 'deck');
     const p = el.probe;
     p.className = 'a-probe';
     let lbl = 'Send probe', ic = 'down';
-    if (s.gas) { p.classList.add('off'); lbl = 'No surface'; ic = 'lock'; }
+    if (L === 'deck') { p.classList.add('shut'); lbl = 'Close'; ic = 'close'; }
+    else if (s.gas) { p.classList.add('off'); lbl = 'No surface'; ic = 'lock'; }
     else if (s.aiming) { p.classList.add('aim'); lbl = 'Cancel'; ic = 'close'; }
     else if (ground) { p.classList.add('recall'); lbl = 'Recall probe'; ic = 'up'; }
     else if (s.mode !== 'orbit') { p.classList.add('off', 'busy'); lbl = s.mode === 'descending' ? 'Landing…' : 'Climbing…'; }
+    if (performance.now() < nudgeUntil && L !== 'deck') p.classList.add('nudge');
     p.querySelector('.lbl').textContent = lbl;
     p.querySelector('.orb').innerHTML = icon(ic, 30, 2.2);
-    root.querySelectorAll('.a-tab').forEach((t) => t.classList.toggle('on', t.dataset.act === `sheet:${sheet}`));
-    const storyTab = root.querySelector('[data-act="sheet:story"].a-tab');
-    const badge = st && st.has && s.storyKey !== seenStory && sheet !== 'story';
-    let b = storyTab.querySelector('.badge');
+    root.querySelectorAll('.a-tab').forEach((t) => t.classList.toggle('on', L === 'deck' && t.dataset.act === `deck:${deck}`));
+    const st = ready ? B.story() : null;
+    const storyTab = root.querySelector('.a-tab[data-act="deck:story"]');
+    const badge = st && st.has && s.storyKey !== seenStory && deck !== 'story';
+    const b = storyTab.querySelector('.badge');
     if (badge && !b) storyTab.insertAdjacentHTML('beforeend', '<i class="badge"></i>');
     if (!badge && b) b.remove();
-    // the objective
-    if (st && !quiet) {
+    // the chrome of the planet
+    if (st && base) {
       const o = st.objective;
       const bar = st.has ? `<div class="bar">${st.chapters.map((c) => `<i class="${c.state === 'done' ? 'on' : c.state === 'open' ? 'open' : ''}"></i>`).join('')}</div>` : '';
-      el.obj.innerHTML = `<span class="dot">${icon(st.has ? 'signal' : s.gas ? 'wave' : 'star', 18)}</span><span><span class="kick">${esc(o.kicker)}</span><b>${esc(o.title)}</b><p>${esc(o.line)}</p>${bar}</span>`;
+      el.obj.innerHTML = `<span class="dot">${icon(st.has ? 'signal' : s.gas ? 'wave' : 'paw', 18)}</span><span><span class="kick">${esc(o.kicker)}</span><b>${esc(o.title)}</b><p>${esc(o.line)}</p>${bar}</span>`;
       el.gobj.innerHTML = `${icon('signal', 15)}<span>${esc(o.line)}</span>`;
+      const w = B.world();
+      el.world.innerHTML = `${thumb(w.thumb)}<span style="min-width:0"><b>${esc(w.seed)}</b><span>${esc(w.typeLabel)} · ${esc(w.designation)}</span></span>`;
     }
-    const phone = innerWidth <= 760;
-    show(el.obj, !quiet && !ground && !s.aiming && !(sheet && !phone) && !(phone && sheet) && !arriving);
-    show(el.gobj, !quiet && ground && !sheet && !!(st && st.has));
-    show(el.aim, !quiet && s.aiming);
-    // the context action
+    show(el.world, base && !ground && !s.aiming);
+    show(el.obj, base && !ground && !s.aiming);
+    show(el.gobj, base && ground && !!(st && st.has));
+    show(el.aim, base && s.aiming);
     if (s.ctx) el.ctx.innerHTML = `${icon('target', 18, 2)}<span>${esc(s.ctx)}</span>${icon('arrow', 16, 2.2)}`;
-    show(el.ctx, !quiet && ground && !!s.ctx && !sheet);
-    // the sheet
-    show(el.sheet, !!sheet && !quiet);
-    el.world.innerHTML = ready ? (() => { const w = B.world(); return `${thumb(w.thumb)}<span style="min-width:0"><b>${esc(w.seed)}</b><span>${esc(w.typeLabel)} · ${esc(w.designation)}</span></span>`; })() : '';
-    // room for the dock under the probe overlay
-    const dockTop = phone ? 70 + 8 : 18 + 74 + 14;
-    B.hudInsets({ top: phone ? 60 : 22, bottom: dockTop + 40, left: phone ? 12 : 22, right: phone ? 12 : 22 });
+    show(el.ctx, base && ground && !!s.ctx);
+    // the probe overlay makes room for the dock
+    const phone = innerWidth <= 760;
+    B.hudInsets({ top: phone ? 60 : 22, bottom: (phone ? 78 : 106) + 40, left: phone ? 12 : 22, right: phone ? 12 : 22 });
   }
 
   // ------------------------------------------------------------ input
@@ -501,55 +650,50 @@ export function mount(root, B, { showStart }) {
     }, 38);
   }
   function go(name) {
+    B.loader(true);
     if (!B.go(name)) return;
     S = { ...S, busy: true };
-    sheet = null;
-    el.arrive.hidden = true;
+    deck = null; arrival = false; titleOn = false;
     arrivalFor = 'pending';
-    if (titleOn) leaveTitle();
-    renderSheet(); render();
+    render();
   }
-  function toast(t) {
-    el.toast.textContent = t;
-    show(el.toast, true);
-    clearTimeout(toast.t);
-    toast.t = setTimeout(() => show(el.toast, false), 1600);
-  }
+  function toast(t) { el.toast.textContent = t; show(el.toast, true); clearTimeout(toast.t); toast.t = setTimeout(() => show(el.toast, false), 1800); }
+  function land() { deck = null; arrival = false; render(); if (S.mode === 'orbit' && !S.gas && !S.aiming) B.aim(); }
 
   root.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act]');
     if (!t || !root.contains(t)) return;
-    const [act, arg] = t.dataset.act.split(/:(.*)/s);
-    e.preventDefault();
-    if (act === 'sheet') openSheet(arg);
-    else if (act === 'close') openSheet(sheet);
+    const [act, arg, sub] = t.dataset.act.split(':');
+    if (act === 'forget') { e.stopPropagation(); B.forget(t.dataset.act.slice(7)); renderDeck(); return; }
+    if (act === 'deck') { arrival = false; openDeck(arg, sub); return; }
+    if (act === 'close') { deck = null; }
     else if (act === 'probe') {
-      if (S.gas || (S.mode !== 'orbit' && S.mode !== 'ground')) return;
-      sheet = null; el.arrive.hidden = true; renderSheet();
-      B.probe();
+      if (deck) deck = null;
+      else if (S.gas || (S.mode !== 'orbit' && S.mode !== 'ground')) return;
+      else B.probe();
     }
+    else if (act === 'land') land();
     else if (act === 'cancel-aim') B.cancelAim();
     else if (act === 'study') B.study();
     else if (act === 'dice') {
       const input = t.closest('form').querySelector('input');
       t.classList.add('spin'); setTimeout(() => t.classList.remove('spin'), 500);
       scramble(input, B.randomName(), () => go(input.value));
+      return;
     }
-    else if (act === 'world') { if (e.target.closest('.del')) return; go(arg); }
-    else if (act === 'forget') { e.stopPropagation(); B.forget(arg); renderSheet(); }
-    else if (act === 'fauna') B.inspect(+arg);
-    else if (act === 'plant') B.inspectPlant(+arg);
-    else if (act === 'brief') B.brief();
-    else if (act === 'lost') B.lost();
-    else if (act === 'clear') { B.clear(); setTimeout(renderSheet, 60); }
-    else if (act === 'aim') { openSheet(sheet); B.aimAt(arg); }
-    else if (act === 'about') B.about();
+    else if (act === 'world') { if (e.target.closest('.del')) return; go(t.dataset.act.slice(6)); return; }
+    else if (act === 'fauna') askApp(() => B.inspect(+arg));
+    else if (act === 'plant') askApp(() => B.inspectPlant(+arg));
+    else if (act === 'brief') askApp(() => B.brief());
+    else if (act === 'lost') askApp(() => B.lost());
+    else if (act === 'about') askApp(() => B.about());
+    else if (act === 'clear') { B.clear(); setTimeout(renderDeck, 60); }
+    else if (act === 'aim') { deck = null; render(); B.aimAt(arg); }
     else if (act === 'share') B.share().then((ok) => toast(ok ? 'Link copied' : B.shareUrl()));
-    else if (act === 'sound') { B.music.toggle(); setTimeout(() => { if (titleOn) renderTitle(); renderSheet(); }, 30); }
-    else if (act === 'title') { B.loader(false); sheet = null; titleOn = true; renderTitle(); el.title.hidden = false; render(); }
-    else if (act === 'arrive-ok') { el.arrive.hidden = true; render(); }
-    else if (act === 'arrive-close') { el.arrive.hidden = true; render(); }
-    else if (act === 'arrive-story') { el.arrive.hidden = true; openSheet('story'); }
+    else if (act === 'sound') { B.music.toggle(); setTimeout(() => { if (titleOn) renderTitle(); renderDeck(); }, 30); }
+    else if (act === 'title') { B.loader(false); deck = null; titleOn = true; renderTitle(); }
+    else if (act === 'arrive-signal') { arrival = false; nudgeUntil = performance.now() + 4000; setTimeout(render, 4100); }
+    else if (act === 'arrive-close') { arrival = false; }
     render();
   });
   root.addEventListener('submit', (e) => {
@@ -560,32 +704,28 @@ export function mount(root, B, { showStart }) {
       const a = B.tune(f.querySelector('input').value);
       const ans = f.nextElementSibling;
       ans.textContent = a.text; ans.dataset.kind = a.kind;
-      if (a.kind === 'lock') { f.querySelector('input').blur(); setTimeout(renderSheet, 900); }
+      if (a.kind === 'lock') { f.querySelector('input').blur(); setTimeout(renderDeck, 1200); }
     }
   });
   root.addEventListener('input', (e) => { if (e.target.dataset.input === 'vol') B.music.set(e.target.value / 100); });
-  const esc2 = (e) => {
+  const onKey = (e) => {
     if (e.key !== 'Escape') return;
-    if (sheet) { openSheet(sheet); }
-    else if (!el.arrive.hidden) { el.arrive.hidden = true; render(); }
+    if (deck) { deck = null; render(); }
+    else if (arrival) { arrival = false; render(); }
   };
-  addEventListener('keydown', esc2);
-  B.onFrameKey(esc2);
+  addEventListener('keydown', onKey);
+  B.onFrameKey(onKey);
   addEventListener('resize', render);
 
-  B.ready.then(() => {
-    // a tap on the planet on a phone puts the sheet away, so the planet is the reader's again
-    B.doc.addEventListener('pointerdown', () => { if (sheet && innerWidth <= 760) { sheet = null; render(); } }, true);
-    if (titleOn) renderTitle();
-  });
+  B.ready.then(() => { if (titleOn) renderTitle(); render(); });
   B.subscribe((s) => {
-    const seedChanged = s.seed && s.seed !== lastSeed;
-    if (seedChanged && lastSeed !== null && arrivalFor !== 'pending') arrivalFor = 'pending';
+    if (s.seed && lastSeed !== null && s.seed !== lastSeed && arrivalFor !== 'pending') arrivalFor = 'pending';
     if (s.seed) lastSeed = s.seed;
     S = s;
-    if (s.aiming && sheet) sheet = null;
-    renderSheet();
+    if (s.card || s.dialog) appWait = 0;
+    if (deck && !(s.card || s.dialog)) renderDeck();
     render();
   });
   if (titleOn) { B.loader(false); renderTitle(); }
+  render();
 }

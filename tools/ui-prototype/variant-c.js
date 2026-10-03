@@ -437,12 +437,12 @@ export function mount(root, B, { showStart }) {
       h += `<h2>Signals</h2><p style="color:#c5cdef;margin:6px 0 0">${esc(w.gas ? 'The storms hiss on every band. Nothing here calls for help.' : 'Static on every band. Nothing on this world calls out. Land anywhere, and meet what lives here.')}</p>`;
     } else {
       // the dial: the three bands as marks over 3 to 30 MHz, and the distress band at the right end
-      const pos = (c) => (c.id === 'wreck' ? 96 : c.id === 'ruin' ? (c.band[0] === '—' ? 50 : 4 + ((parseFloat(c.band) - 3) / 27) * 84) : 70);
+      const pos = (c) => (c.id === 'wreck' ? 96 : c.id === 'ruin' ? (!c.band || c.band[0] === '—' ? 50 : 4 + ((parseFloat(c.band) - 3) / 27) * 84) : 70);
       h += `<h2>Signals of ${esc(w.seed)}</h2><span class="k">${st.done} of ${st.of} found</span>
         <div class="c-quote">${esc(st.intro.text)}</div>
         <div class="c-dial">${st.chapters.map((c) => `<i class="${c.state === 'closed' ? 'lock' : c.state === 'open' ? 'q' : 'on'}" style="left:${pos(c)}%" title="${esc(c.title)}"></i>`).join('')}</div>
         ${st.chapters.map((c) => `<div class="c-ch ${c.state}">
-          <div class="fq">${c.id === 'way' ? 'a name' : esc(c.band)}</div>
+          <div class="fq">${c.locked ? '— — —' : c.id === 'way' ? 'a name' : esc(c.band)}</div>
           <div><h3>${c.state === 'done' ? icon('check', 16, 2.4) : c.state === 'closed' ? icon('lock', 15) : icon('signal', 16)}${esc(c.title)}</h3>
             <p>${esc(c.goal)} <span style="color:#9aa6cc">${esc(c.status)}</span></p>
             ${c.state === 'open' && st.objective.chapter === c.id ? `<p class="nx">→ ${esc(st.objective.line)}</p>` : ''}

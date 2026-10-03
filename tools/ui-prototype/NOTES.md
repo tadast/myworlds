@@ -39,4 +39,15 @@ that world, as the app does.
 
 ## Verdict
 
-_To fill in: which concept, and which parts to take from the others._
+Round 1 (2026-10-03): A wins, with the distress-signal animation of C and the windows of B.
+
+Round 2 changed A:
+
+- The four tabs of the dock open one window that fills the screen above the dock. The middle button of
+  the dock closes it. The window takes the layout and the type of the journal of B.
+- One layer shows at a time: a card or a dialog of the app, then the window, the title, and the arrival.
+  A card opened from the window hides the window, and the window comes back when the card closes.
+- The arrival of a new world with a wreck is the distress signal of C: it unfolds, and the wave moves.
+- A locked chapter shows "Locked" and nothing else. The story model in `bridge.js` drops its title, its
+  goal, and its band, so no concept can spoil the ruin.
+- Every story surface also offers the other way to play: meet the creatures, land and look around.

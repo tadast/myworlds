@@ -329,7 +329,7 @@ export function mount(root, B, { showStart }) {
       <div class="b-entry ${c.state}">
         <div class="num">${ROMAN[c.n]}</div>
         <div>
-          <h3>${esc(c.title)} ${tag(c.state)}</h3>
+          <h3>${c.locked ? 'Locked' : `${esc(c.title)} ${tag(c.state)}`}</h3>
           <p>${esc(c.goal)} <span style="color:#b0a796">${esc(c.status)}${c.band ? ' · ' + esc(c.band) : ''}</span></p>
           ${c.state === 'open' && st.objective.chapter === c.id ? `<div class="next">→ ${esc(st.objective.line)}</div>` : ''}
           ${c.fixes.length ? `<div class="fixes">${c.fixes.map((f, i) => `<span>Landing ${i + 1} · bearing ${String(Math.round(f.brg) % 360).padStart(3, '0')}° ± ${Math.round(f.err)}° · ${Math.abs(f.lat).toFixed(1)}° ${f.lat < 0 ? 'S' : 'N'}, ${Math.abs(f.lon).toFixed(1)}° ${f.lon < 0 ? 'W' : 'E'}</span>`).join('')}</div>` : ''}

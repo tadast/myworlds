@@ -49,6 +49,7 @@ export function makeBridge(frame, { seed, showStart }) {
   let resolveReady;
   const ready = new Promise((r) => (resolveReady = r));
 
+  const shots = new Map();
   const saved = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; } };
   const first = seed || (saved().length ? saved()[saved().length - 1].seed : 'Auralis');
   frame.src = `../index.html#${encodeURIComponent(first)}`;
@@ -209,6 +210,14 @@ export function makeBridge(frame, { seed, showStart }) {
         fixes: [], actions: actions(way),
       });
     }
+    // A closed chapter tells nothing of itself: no title, no goal, no band. The reader learns of the
+    // ruin when the log of the wreck names it, not from a list of chapters.
+    for (let i = 0; i < chapters.length; i++) {
+      const ch = chapters[i];
+      if (ch.state !== 'closed') continue;
+      chapters[i] = { id: ch.id, n: ch.n, state: 'closed', locked: true, title: 'Locked',
+        goal: `Opens when chapter ${ch.n - 1} ends.`, status: '', band: null, fixes: [], actions: [] };
+    }
     // the objective: the first chapter that is not done
     const open = chapters.find((ch) => ch.state === 'open');
     let objective;
@@ -286,6 +295,31 @@ export function makeBridge(frame, { seed, showStart }) {
     shareUrl: () => `https://codeme.lt/myworlds/#${encodeURIComponent(api.seed())}`,
     async share() {
       try { await navigator.clipboard.writeText(api.shareUrl()); return true; } catch { return false; }
+    },
+    // A picture of the globe as the reader sees it, bigger than the thumb of the list, taken from
+    // the distance the thumb takes. In orbit only; elsewhere the last picture of this world, or the thumb.
+    snapshot(size = 520) {
+      const seedNow = api.seed();
+      if (mw && mw.mode === 'orbit' && !state().busy) {
+        try {
+          // The camera steps back until the whole globe and its air fit the short side of the
+          // canvas, so a portrait phone gets the whole planet too. Then the crop is the globe.
+          const cam = mw.camera, keep = cam.position.clone();
+          const src = mw.renderer.domElement;
+          const f = (src.height / 2) / Math.tan((cam.fov * Math.PI) / 360);
+          const rMax = Math.min(src.width, src.height) / 2.4;
+          const d = Math.max(3.42, Math.sqrt((f / rMax) ** 2 + 1));
+          cam.position.setLength(d); cam.updateMatrixWorld();
+          mw.renderer.render(mw.scene, cam);
+          const c = document.createElement('canvas');
+          c.width = c.height = size;
+          const sq = Math.min(Math.min(src.width, src.height), 2.4 * f / Math.sqrt(d * d - 1));
+          c.getContext('2d').drawImage(src, (src.width - sq) / 2, (src.height - sq) / 2, sq, sq, 0, 0, size, size);
+          cam.position.copy(keep); cam.updateMatrixWorld();
+          shots.set(seedNow, c.toDataURL('image/jpeg', 0.85));
+        } catch { /* prototype: fall back to the thumb */ }
+      }
+      return shots.get(seedNow) || world().thumb;
     },
     // the loading card of the app hides while a start screen stands over it
     loader(on) { if (doc) doc.documentElement.classList.toggle('proto-noloader', !on); else api._loader = on; },
