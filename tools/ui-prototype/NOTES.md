@@ -51,3 +51,16 @@ Round 2 changed A:
 - A locked chapter shows "Locked" and nothing else. The story model in `bridge.js` drops its title, its
   goal, and its band, so no concept can spoil the ruin.
 - Every story surface also offers the other way to play: meet the creatures, land and look around.
+
+Round 3 changed A, and through `bridge.js` the cards of all three:
+
+- The objective over the dock wraps, so its whole line shows. A tap opens the Story window.
+- Chapter 1 names no wreck: the reader knows only that a carrier called for help. The incident record
+  takes new words in the prototype; `index.html` still says "wreck" there and must change with the real build.
+- The field guide: a creature or a plant is undiscovered until the reader finds it on the planet and opens
+  its card. The Life section shows locked cards, the study chip says "Study this creature" before the find,
+  and a toast announces each find after its card closes. `myworlds.proto.found.v1` keeps the guide.
+- The cards and the dialogs of the app take the size and the type of the windows. The arrows of the card
+  go, because they would step to an undiscovered creature.
+- A sound button stands on the planet, top right. It invites the reader until the first use, shows a
+  moving equaliser while the music plays, and holds a volume slider on hover.

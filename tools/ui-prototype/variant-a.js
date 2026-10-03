@@ -89,7 +89,7 @@ const CSS = `
 .a-world img, .a-world .ph { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: radial-gradient(circle at 35% 30%, #4b7fd0, #0d1a3a); flex: none; }
 .a-world b { display: block; font-weight: 600; font-size: 17px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .a-world span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.a-obj { position: absolute; right: 16px; top: calc(16px + var(--safe-t)); width: 340px; padding: 12px 14px; border-radius: 18px; cursor: pointer; text-align: left; display: flex; gap: 12px; }
+.a-obj { position: absolute; right: 78px; top: calc(16px + var(--safe-t)); width: 340px; padding: 12px 14px; border-radius: 18px; cursor: pointer; text-align: left; display: flex; gap: 12px; }
 .a-obj .dot { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; color: var(--warm); background: rgba(255,184,107,.12); }
 .a-obj b { display: block; font-weight: 500; font-size: 15px; margin: 2px 0; }
 .a-obj p { margin: 0; color: #c5cbe6; font-size: 13px; line-height: 1.35; }
@@ -100,15 +100,31 @@ const CSS = `
 .a-aim { position: absolute; left: 50%; top: calc(18px + var(--safe-t)); transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 999px; white-space: nowrap; }
 .a-aim .ico { color: var(--accent); animation: a-spin 4s linear infinite; }
 .a-aim button { border: 0; border-radius: 999px; padding: 8px 14px; background: rgba(255,255,255,.1); cursor: pointer; }
-.a-gobj { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 34px); max-width: min(520px, calc(100vw - 32px));
-  display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 13px; color: #d7dcf3; cursor: pointer; white-space: nowrap; overflow: hidden; }
-.a-gobj .ico { color: var(--warm); flex: none; }
-.a-gobj span { overflow: hidden; text-overflow: ellipsis; }
-.a-ctx { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 78px);
-  display: flex; align-items: center; gap: 10px; padding: 10px 18px 10px 12px; border-radius: 999px; border: 0; cursor: pointer; white-space: nowrap;
+.a-stack { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-b) + var(--safe-b) + var(--dock-h) + 34px); width: min(560px, calc(100vw - 24px));
+  display: flex; flex-direction: column-reverse; align-items: center; gap: 10px; pointer-events: none; }
+.a-gobj { display: flex; align-items: flex-start; gap: 10px; padding: 9px 16px 9px 12px; border-radius: 18px; font-size: 14px; line-height: 1.4; color: #e2e6f8; cursor: pointer; text-align: left; max-width: 100%; }
+.a-gobj .ico { color: var(--warm); flex: none; margin-top: 1px; }
+.a-gobj .more { color: var(--muted); font-size: 12px; white-space: nowrap; margin-left: 2px; }
+.a-ctx { display: flex; align-items: center; gap: 10px; padding: 10px 18px 10px 12px; border-radius: 999px; border: 0; cursor: pointer; white-space: nowrap;
   background: #f4f7ff; color: #0b1430 !important; font-weight: 600; font-size: 15px; box-shadow: 0 10px 30px rgba(0,0,0,.35); max-width: calc(100vw - 32px); }
 .a-ctx .ico { color: #2f6fd0; }
 .a-ctx span { overflow: hidden; text-overflow: ellipsis; }
+.a-snd { position: absolute; right: 16px; top: calc(16px + var(--safe-t)); height: 48px; min-width: 48px; border-radius: 999px; display: flex; align-items: center; gap: 10px;
+  padding: 0 4px; font-size: 14px; color: #dfe4f8; }
+.a-snd > button { all: unset; cursor: pointer; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 999px; }
+.a-snd > input { margin-right: 10px; }
+.a-snd:hover { border-color: rgba(255,184,107,.5); }
+.a-snd .eq { display: flex; align-items: flex-end; gap: 3px; height: 18px; }
+.a-snd .eq i { width: 3px; border-radius: 2px; background: var(--warm); animation: a-eq 1s ease-in-out infinite; }
+.a-snd .eq i:nth-child(1) { animation-delay: -.2s; } .a-snd .eq i:nth-child(2) { animation-delay: -.6s; }
+.a-snd .eq i:nth-child(3) { animation-delay: -.4s; } .a-snd .eq i:nth-child(4) { animation-delay: -.8s; }
+@keyframes a-eq { 0%, 100% { height: 4px; } 50% { height: 18px; } }
+.a-snd.off { color: var(--muted); }
+.a-snd.invite { color: #1b1205; background: linear-gradient(180deg, #ffd39a, var(--warm)); border: 0; font-weight: 600; box-shadow: 0 8px 30px rgba(255,184,107,.3); }
+.a-snd.invite .ico { animation: a-tilt 1.6s ease-in-out infinite; }
+@keyframes a-tilt { 50% { transform: rotate(-12deg) scale(1.1); } }
+.a-snd input { width: 0; opacity: 0; transition: width .25s, opacity .25s; accent-color: var(--warm); }
+.a-snd.on:hover input { width: 96px; opacity: 1; }
 .a-toast { position: absolute; left: 50%; top: calc(20px + var(--safe-t)); transform: translateX(-50%); padding: 9px 16px; border-radius: 999px; font-size: 14px; z-index: 5; }
 
 /* ---------- the dock */
@@ -216,6 +232,15 @@ const CSS = `
 .a-card span { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
 .a-card.plain { cursor: default; justify-content: center; }
 .a-card.plain:hover { border-color: rgba(255,255,255,.08); background: rgba(255,255,255,.035); }
+.a-card.lock { border-style: dashed; border-color: rgba(255,255,255,.14); background: repeating-linear-gradient(135deg, rgba(255,255,255,.02) 0 10px, transparent 10px 20px); }
+.a-card.lock .ico { color: #59607e; }
+.a-card.lock b { color: #8c93b3; letter-spacing: .06em; }
+.a-card.lock:hover { border-color: rgba(255,184,107,.4); background: repeating-linear-gradient(135deg, rgba(255,184,107,.04) 0 10px, transparent 10px 20px); }
+.a-card.new { border-color: rgba(255,184,107,.55); box-shadow: 0 0 0 3px rgba(255,184,107,.12); }
+.a-meter { display: flex; align-items: center; gap: 12px; margin: -4px 0 16px; }
+.a-meter .bar { flex: 0 1 240px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+.a-meter .bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--warm)); }
+.a-meter span { font-size: 12.5px; color: var(--muted); }
 
 /* story page */
 .a-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 46px; align-items: start; }
@@ -291,7 +316,10 @@ const CSS = `
   .a-steps { gap: 6px; }
   .a-step { padding: 9px; }
   .a-step span { display: none; }
-  .a-world { top: calc(10px + var(--safe-t)); left: 10px; padding: 4px 14px 4px 4px; }
+  .a-world { top: calc(10px + var(--safe-t)); left: 10px; padding: 4px 14px 4px 4px; max-width: calc(100vw - 84px); }
+  .a-snd { right: 10px; top: calc(10px + var(--safe-t)); height: 44px; min-width: 44px; padding: 0 12px; }
+  .a-snd.invite .t { display: none; }
+  .a-snd input { display: none; }
   .a-world img, .a-world .ph { width: 34px; height: 34px; }
   .a-world b { font-size: 15px; }
   .a-obj { top: calc(62px + var(--safe-t)); left: 10px; right: auto; width: auto; max-width: calc(100vw - 20px); padding: 8px 12px 8px 8px; border-radius: 16px; align-items: center; }
@@ -360,8 +388,11 @@ export function mount(root, B, { showStart }) {
     <button type="button" class="a-world glass pe fade gone" data-act="deck:planet"></button>
     <button type="button" class="a-obj glass pe fade gone" data-act="deck:story"></button>
     <div class="a-aim glass pe fade gone">${icon('cross', 18)}<span>Tap the planet where the probe should land</span><button type="button" data-act="cancel-aim">Cancel</button></div>
-    <button type="button" class="a-gobj glass pe fade gone" data-act="deck:story"></button>
-    <button type="button" class="a-ctx pe fade gone" data-act="study"></button>
+    <div class="a-stack">
+      <button type="button" class="a-gobj glass pe fade gone" data-act="deck:story"></button>
+      <button type="button" class="a-ctx pe fade gone" data-act="study"></button>
+    </div>
+    <div class="a-snd glass pe fade gone"></div>
     <section class="a-arrive glass pe" hidden></section>
     <section class="a-deck" hidden><div class="a-book" role="dialog" aria-modal="true"><div class="a-bhead"></div><div class="a-page"></div></div></section>
     <nav class="a-dock glass pe fade gone">
@@ -376,7 +407,7 @@ export function mount(root, B, { showStart }) {
   </div>`;
 
   const $ = (s) => root.querySelector(s);
-  const el = { world: $('.a-world'), obj: $('.a-obj'), aim: $('.a-aim'), gobj: $('.a-gobj'), ctx: $('.a-ctx'), arrive: $('.a-arrive'),
+  const el = { snd: $('.a-snd'), world: $('.a-world'), obj: $('.a-obj'), aim: $('.a-aim'), gobj: $('.a-gobj'), ctx: $('.a-ctx'), arrive: $('.a-arrive'),
     deck: $('.a-deck'), bhead: $('.a-bhead'), page: $('.a-page'), dock: $('.a-dock'), probe: $('.a-probe'), toast: $('.a-toast'), title: $('.a-title') };
   const show = (e, on) => e.classList.toggle('gone', !on);
   let S = { loading: true };
@@ -388,7 +419,10 @@ export function mount(root, B, { showStart }) {
   let seenStory = '';
   let lastSeed = null;
   let nudgeUntil = 0;
-  let heroShot = null;           // the picture of the globe the Planet page opened with
+  let heroShot = null;
+  let seenFound = -1;            // the size of the field guide the Planet page last showed
+  let soundAsked = false;        // the reader has used the sound button once
+  try { soundAsked = localStorage.getItem('myworlds.proto.sound') === '1'; } catch { /* prototype */ }           // the picture of the globe the Planet page opened with
 
   // The one layer that shows. A card or a dialog of the app wins, then the window, the title, and
   // the arrival. The chrome of the planet shows only when none of them does.
@@ -438,13 +472,22 @@ export function mount(root, B, { showStart }) {
     const lede = w.gas
       ? `A gas giant ${f('radius')} in radius. It has no ground: the clouds thicken into storms all the way down. A day lasts ${f('day')}.`
       : `${an(kind)} ${kind} ${f('radius')} in radius. A day lasts ${f('day')}, and the air holds ${f('temp')} on average${sun}.`;
+    const known = w.fauna.filter((c) => c.found).length;
+    const lock = (what, hint, i) => `<button type="button" class="a-card lock" data-act="hint:${what}" style="animation-delay:${i * 40}ms">${icon(what === 'plant' ? 'leaf' : 'paw', 24)}<b>Undiscovered</b><span>${hint}</span></button>`;
+    const plantsHere = ground ? w.flora.map((p, i) => p.found
+      ? `<button type="button" class="a-card plant" data-act="plant:${p.kind}">${icon('leaf', 24)}<b>${esc(p.name)}</b><span>Plant here · study ${icon('arrow', 13, 2)}</span></button>`
+      : lock('plant', 'Tap it on the ground to study it', i)).join('') || `<div class="a-card plant plain">${icon('leaf', 24)}<b>Nothing grows here</b><span>Land on another cell to find plants</span></div>` : '';
+    const plantsKnown = !ground ? w.floraKnown.map((p) => `<div class="a-card plant plain">${icon('leaf', 24)}<b>${esc(p.name)}</b><span>Found on a landing · study it on the ground</span></div>`).join('') : '';
     const life = `
-      <h2 class="a-h" id="a-life">Life <span class="kick">${w.fauna.length} creatures${ground ? ` · ${w.flora.length} plants here` : ''}</span></h2>
-      <p class="a-note">No story needed. Zoom in close from orbit to watch them move, or land the probe and walk among them. Tap one on the ground to study it.</p>
+      <h2 class="a-h" id="a-life">Field guide <span class="kick">${known} of ${w.fauna.length} creatures${ground && w.flora.length ? ` · ${w.flora.filter((p) => p.found).length} of ${w.flora.length} plants here` : ground ? '' : w.floraKnown.length ? ` · ${w.floraKnown.length} plants` : ''}</span></h2>
+      <div class="a-meter"><div class="bar"><i style="width:${w.fauna.length ? Math.round((known / w.fauna.length) * 100) : 0}%"></i></div><span>${known === w.fauna.length && known ? 'Every creature of this world is in your guide.' : 'Find a creature on the planet and study it, and it joins your guide.'}</span></div>
+      <p class="a-note">No story needed. Zoom in close from orbit and tap a creature, or land the probe and tap what moves and what grows around it.</p>
       <div class="a-life">
-        ${w.fauna.map((c) => `<button type="button" class="a-card" data-act="fauna:${c.kind}">${icon('paw', 24)}<b>${esc(c.name)}</b><span>Creature · study ${icon('arrow', 13, 2)}</span></button>`).join('') || '<div class="a-card plain"><span>No creatures seen yet.</span></div>'}
-        ${ground ? w.flora.map((p) => `<button type="button" class="a-card plant" data-act="plant:${p.kind}">${icon('leaf', 24)}<b>${esc(p.name)}</b><span>Plant here · study ${icon('arrow', 13, 2)}</span></button>`).join('')
-          : w.gas ? '' : `<button type="button" class="a-card plant" data-act="land">${icon('leaf', 24)}<b>The plants</b><span>They live on the ground. Land the probe to meet them ${icon('arrow', 13, 2)}</span></button>`}
+        ${w.fauna.map((c, i) => c.found
+          ? `<button type="button" class="a-card" data-act="fauna:${c.kind}">${icon('paw', 24)}<b>${esc(c.name)}</b><span>Creature · study ${icon('arrow', 13, 2)}</span></button>`
+          : lock('creature', ground ? 'Find it here, or zoom in from orbit' : 'Zoom in close and tap it', i)).join('') || '<div class="a-card plain"><span>No creatures live here.</span></div>'}
+        ${plantsHere}${plantsKnown}
+        ${!ground && !w.gas ? `<button type="button" class="a-card plant" data-act="land">${icon('down', 24)}<b>${w.floraKnown.length ? 'More plants' : 'The plants'}</b><span>They live on the ground. Land the probe to meet them ${icon('arrow', 13, 2)}</span></button>` : ''}
       </div>`;
     return `
       <header class="a-hero">
@@ -544,6 +587,7 @@ export function mount(root, B, { showStart }) {
     el.page.scrollTop = top;
     if (anchor) { const a = el.page.querySelector(`#a-${anchor}`); if (a) el.page.scrollTop = a.offsetTop - 16; }
     if (deck === 'story') seenStory = S.storyKey;
+    if (deck === 'planet') seenFound = S.found;
   }
   function openDeck(page, anchor) {
     if (page === deck && !anchor) { deck = null; render(); return; }
@@ -590,6 +634,7 @@ export function mount(root, B, { showStart }) {
       arrivalFor = s.seed;
       setTimeout(() => { if (arrivalFor === s.seed && !S.busy && !titleOn) { renderArrival(); render(); } }, 900);
     }
+    if (L !== 'none') show(el.toast, false);
     el.title.hidden = L !== 'title';
     el.deck.hidden = L !== 'deck';
     el.deck.classList.toggle('solo', titleOn);
@@ -617,12 +662,28 @@ export function mount(root, B, { showStart }) {
     const b = storyTab.querySelector('.badge');
     if (badge && !b) storyTab.insertAdjacentHTML('beforeend', '<i class="badge"></i>');
     if (!badge && b) b.remove();
+    const planetTab = root.querySelector('.a-tab[data-act="deck:planet"]');
+    const pBadge = seenFound >= 0 && s.found > seenFound && deck !== 'planet';
+    const pb = planetTab.querySelector('.badge');
+    if (pBadge && !pb) planetTab.insertAdjacentHTML('beforeend', '<i class="badge"></i>');
+    if (!pBadge && pb) pb.remove();
+    // the sound of the world, on the planet itself
+    const on = ready && B.music.on && !B.music.stalled;
+    el.snd.className = `a-snd glass pe fade ${on ? 'on' : soundAsked ? 'off' : 'invite'}`;
+    el.snd.title = on ? 'Music on · click to silence' : 'Turn on the music of this world';
+    const sndKey = `${on}|${soundAsked}`;
+    if (el.snd.dataset.k !== sndKey) {
+      el.snd.dataset.k = sndKey;
+      el.snd.innerHTML = `<button type="button" data-act="sound" aria-label="${on ? 'Silence the music' : 'Play the music'}">${on ? '<span class="eq"><i></i><i></i><i></i><i></i></span>'
+        : soundAsked ? icon('mute', 20) : `${icon('sound', 20)}<span class="t">Turn on the music</span>`}</button>${on ? `<input type="range" min="0" max="100" value="${Math.round(B.music.vol * 100)}" data-input="vol" aria-label="Volume">` : ''}`;
+    }
+    show(el.snd, base);
     // the chrome of the planet
     if (st && base) {
       const o = st.objective;
       const bar = st.has ? `<div class="bar">${st.chapters.map((c) => `<i class="${c.state === 'done' ? 'on' : c.state === 'open' ? 'open' : ''}"></i>`).join('')}</div>` : '';
       el.obj.innerHTML = `<span class="dot">${icon(st.has ? 'signal' : s.gas ? 'wave' : 'paw', 18)}</span><span><span class="kick">${esc(o.kicker)}</span><b>${esc(o.title)}</b><p>${esc(o.line)}</p>${bar}</span>`;
-      el.gobj.innerHTML = `${icon('signal', 15)}<span>${esc(o.line)}</span>`;
+      el.gobj.innerHTML = `${icon('signal', 16)}<span>${esc(o.line)} <span class="more">Story ›</span></span>`;
       const w = B.world();
       el.world.innerHTML = `${thumb(w.thumb)}<span style="min-width:0"><b>${esc(w.seed)}</b><span>${esc(w.typeLabel)} · ${esc(w.designation)}</span></span>`;
     }
@@ -634,7 +695,9 @@ export function mount(root, B, { showStart }) {
     show(el.ctx, base && ground && !!s.ctx);
     // the probe overlay makes room for the dock
     const phone = innerWidth <= 760;
-    B.hudInsets({ top: phone ? 60 : 22, bottom: (phone ? 78 : 106) + 40, left: phone ? 12 : 22, right: phone ? 12 : 22 });
+    // The objective and the study chip stand over the dock, so the overlay lifts its foot over them.
+    const over = (!el.gobj.classList.contains('gone') ? el.gobj.offsetHeight + 10 : 0) + (!el.ctx.classList.contains('gone') ? 54 : 0);
+    B.hudInsets({ top: phone ? 62 : 76, bottom: (phone ? 78 : 106) + 30 + over, left: phone ? 12 : 22, right: phone ? 12 : 22 });
   }
 
   // ------------------------------------------------------------ input
@@ -657,7 +720,7 @@ export function mount(root, B, { showStart }) {
     arrivalFor = 'pending';
     render();
   }
-  function toast(t) { el.toast.textContent = t; show(el.toast, true); clearTimeout(toast.t); toast.t = setTimeout(() => show(el.toast, false), 1800); }
+  function toast(t, ms = 2200) { el.toast.textContent = t; show(el.toast, true); clearTimeout(toast.t); toast.t = setTimeout(() => show(el.toast, false), ms); }
   function land() { deck = null; arrival = false; render(); if (S.mode === 'orbit' && !S.gas && !S.aiming) B.aim(); }
 
   root.addEventListener('click', (e) => {
@@ -690,7 +753,13 @@ export function mount(root, B, { showStart }) {
     else if (act === 'clear') { B.clear(); setTimeout(renderDeck, 60); }
     else if (act === 'aim') { deck = null; render(); B.aimAt(arg); }
     else if (act === 'share') B.share().then((ok) => toast(ok ? 'Link copied' : B.shareUrl()));
-    else if (act === 'sound') { B.music.toggle(); setTimeout(() => { if (titleOn) renderTitle(); renderDeck(); }, 30); }
+    else if (act === 'sound') {
+      soundAsked = true;
+      try { localStorage.setItem('myworlds.proto.sound', '1'); } catch { /* prototype */ }
+      if (B.music.stalled) B.music.start(); else B.music.toggle();
+      setTimeout(() => { if (titleOn) renderTitle(); renderDeck(); render(); }, 30);
+    }
+    else if (act === 'hint') toast(arg === 'plant' ? 'Plants live on the ground: land, tap one, and study it.' : 'Find it on the planet: zoom in close and tap it, or land and tap it on the ground.');
     else if (act === 'title') { B.loader(false); deck = null; titleOn = true; renderTitle(); }
     else if (act === 'arrive-signal') { arrival = false; nudgeUntil = performance.now() + 4000; setTimeout(render, 4100); }
     else if (act === 'arrive-close') { arrival = false; }
@@ -723,6 +792,15 @@ export function mount(root, B, { showStart }) {
     if (s.seed) lastSeed = s.seed;
     S = s;
     if (s.card || s.dialog) appWait = 0;
+    if (seenFound < 0 && !s.loading) seenFound = s.found;
+    // A find is announced when its card closes, so the toast never stands on the card.
+    if (!s.card && !s.dialog) {
+      const finds = B.takeFinds();
+      if (finds.length) {
+        const f = finds[finds.length - 1];
+        toast(f.type === 'creature' ? `✦ New in your field guide: ${f.name} · ${f.n} of ${f.of} creatures` : `✦ New in your field guide: ${f.name}`, 3200);
+      }
+    }
     if (deck && !(s.card || s.dialog)) renderDeck();
     render();
   });

@@ -9,6 +9,83 @@ const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 
 export const numWord = (n) => (n < 20 ? NUM[n] : n < 100 ? TENS[Math.floor(n / 10)] + (n % 10 ? '-' + NUM[n % 10] : '') : String(n));
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// The cards and the dialogs of the app take the size and the type of the windows of the concepts:
+// almost the whole screen, a serif for names and prose, and a mono for labels. The arrows of the card
+// go, because they would step to a creature the reader has not found yet.
+const CARDS = `
+  #creature { padding: 16px !important; background: rgba(4, 6, 16, .62) !important;
+    backdrop-filter: blur(12px) saturate(1.1) !important; -webkit-backdrop-filter: blur(12px) saturate(1.1) !important; }
+  #creature .cnav { display: none !important; }
+  #creature .ccard { border-radius: 28px; border: 1px solid rgba(140, 200, 255, .16);
+    background: linear-gradient(180deg, #11162d, #0a0d1d) !important; box-shadow: 0 40px 120px rgba(0, 0, 0, .6); }
+  #creature .cclose { top: 16px; right: 16px; width: 44px; height: 44px; border-radius: 14px; font-size: 22px;
+    background: rgba(10, 14, 30, .7); z-index: 3; }
+  #creature .cname { font-family: Fraunces, Georgia, serif; font-weight: 400; letter-spacing: -.01em; }
+
+  /* a creature and a plant: the preview is the left half, the text the right */
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ccard {
+    width: min(1180px, 100%); height: min(820px, calc(100dvh - 32px)); max-height: none; overflow: hidden;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0; padding: 0; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .cview { width: 100%; height: 100%; border-radius: 0;
+    background: radial-gradient(circle at 50% 58%, rgba(124, 196, 255, .14), rgba(4, 6, 16, .2) 55%, rgba(4, 6, 16, .7)); }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctext { overflow: auto; padding: 64px 48px 40px; overscroll-behavior: contain; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctext::before { content: attr(data-kicker); display: block; margin-bottom: 12px;
+    font: 10.5px 'IBM Plex Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: #9fd6ff; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .cname { font-size: 46px; line-height: 1.04; margin: 0 40px 8px 0; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .clatin { font-family: Fraunces, Georgia, serif; font-size: 19px; color: #ffb86b; margin: 0 0 28px; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctags { grid-template-columns: 120px minmax(0, 1fr); gap: 0; margin: 0 0 30px;
+    border-top: 1px solid rgba(140, 200, 255, .16); font-size: 16px; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctags dt,
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctags dd { padding: 12px 0; border-bottom: 1px solid rgba(140, 200, 255, .16); }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .ctags dt { font: 10.5px 'IBM Plex Mono', monospace; letter-spacing: .16em; text-transform: uppercase; padding-top: 15px; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .cstory { font-family: Fraunces, Georgia, serif; font-weight: 300; font-size: 19px; line-height: 1.65; color: #e9e3f2; }
+  #creature:is([data-subject="animal"], [data-subject="plant"]) .cstory::first-letter { float: left; font-size: 3.3em; line-height: .86; padding: 6px 10px 0 0; color: #ffb86b; font-weight: 400; }
+
+  /* the log of the wreck and the card of the ruin keep their layout, at the size of the window */
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .ccard {
+    --side: 340px; width: min(1180px, 100%); height: min(820px, calc(100dvh - 32px)); max-height: none; min-height: 0;
+    padding: 44px 12px 0 calc(var(--side) + 72px); }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .cview { left: 36px; top: 36px; border-radius: 20px; }
+  #creature[data-subject="source"] .ccrew { left: 36px; top: calc(var(--side) + 56px); font-size: 14px; }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .cname { font-size: 42px; line-height: 1.05; margin: 0 56px 4px 0; }
+  #creature:is([data-subject="source"], [data-subject="ruin"]) .clatin { font-family: 'IBM Plex Mono', monospace; font-style: normal; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 18px; }
+  #creature .clog-entry p, #creature .crow dd { font-family: Fraunces, Georgia, serif; font-weight: 300; font-size: 17.5px; line-height: 1.7; color: #ece6d8; }
+  #creature .clog-entry h3, #creature .crow dt { font-family: 'IBM Plex Mono', monospace; font-weight: 400; letter-spacing: .14em; }
+  #creature .crow { grid-template-columns: 120px minmax(0, 1fr); padding: 14px 0; }
+
+  /* the dialogs */
+  #about, #carrier-brief, #carrier-lost, #talk, #home { width: min(640px, calc(100vw - 32px)); }
+  #carrier-brief { width: min(720px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(4, 6, 16, .62) !important; backdrop-filter: blur(12px) !important; -webkit-backdrop-filter: blur(12px) !important; }
+  .about-card { padding: 44px 44px 34px; border-radius: 28px; text-align: left;
+    background: linear-gradient(180deg, rgba(17, 22, 45, .97), rgba(10, 13, 29, .97)); border: 1px solid rgba(140, 200, 255, .16); }
+  #about .about-card { text-align: center; }
+  .about-card h2, #about h2, #carrier-brief h2, #carrier-lost h2, #home h2 { font-family: Fraunces, Georgia, serif; font-weight: 400; font-size: 38px; letter-spacing: -.01em; margin-bottom: 18px; }
+  .about-card p, .brief-steps { font-size: 16px; line-height: 1.6; }
+  .about-card .cclose { top: 16px; right: 16px; width: 44px; height: 44px; border-radius: 14px; font-size: 22px; }
+  .talk-line { font-family: Fraunces, Georgia, serif; font-weight: 300; font-size: 21px; line-height: 1.6; }
+
+  @media (max-width: 720px) {
+    #creature { padding: 0 !important; }
+    #creature .ccard { border-radius: 0; border: 0; }
+    #creature:is([data-subject="animal"], [data-subject="plant"]) .ccard { width: 100%; height: 100dvh; grid-template-columns: minmax(0, 1fr); grid-template-rows: 42dvh minmax(0, 1fr); }
+    #creature:is([data-subject="animal"], [data-subject="plant"]) .ctext { padding: 22px 20px 48px; }
+    #creature:is([data-subject="animal"], [data-subject="plant"]) .cname { font-size: 32px; margin-right: 0; }
+    #creature:is([data-subject="animal"], [data-subject="plant"]) .clatin { font-size: 16px; margin-bottom: 18px; }
+    #creature:is([data-subject="animal"], [data-subject="plant"]) .cstory { font-size: 17px; }
+    #creature:is([data-subject="source"], [data-subject="ruin"]) .ccard { width: 100%; height: 100dvh; max-height: none; padding: calc(16px + env(safe-area-inset-top)) 6px 0 16px; }
+    #creature:is([data-subject="source"], [data-subject="ruin"]) .cview { left: auto; top: auto; height: clamp(110px, 22vh, 190px); border-radius: 16px; }
+    #creature[data-subject="source"] .ccrew { left: auto; top: auto; }
+    #creature:is([data-subject="source"], [data-subject="ruin"]) .cname { font-size: 30px; margin-right: 52px; }
+    #creature .clog-entry p, #creature .crow dd { font-size: 16px; }
+    #creature .crow { grid-template-columns: minmax(0, 1fr); }
+    #about, #carrier-brief, #carrier-lost, #talk, #home { width: calc(100vw - 16px); }
+    .about-card { padding: 34px 22px 24px; }
+    .about-card h2, #about h2, #carrier-brief h2, #carrier-lost h2, #home h2 { font-size: 30px; }
+  }
+`;
+const FONTS = 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=IBM+Plex+Mono:wght@400;500&display=swap';
+
 // The chrome of the app that every concept replaces. The probe overlay, the cards, the dialogs, the
 // loading orb, and the dive stay: they are content, and the brief says the probe view is fine.
 const HIDE = `
@@ -22,7 +99,7 @@ const HIDE = `
   #probe-hud .hud-frame { right: var(--proto-hud-right, 22px) !important; }
   #probe-hud .hud-bar { right: calc(var(--proto-hud-right, 22px) + 16px) !important; }
   #probe-hud .hud-ladder { right: calc(var(--proto-hud-right, 22px) + 18px) !important; }
-`;
+` + CARDS;
 
 export const CONTROLS = {
   orbit: [
@@ -50,6 +127,43 @@ export function makeBridge(frame, { seed, showStart }) {
   const ready = new Promise((r) => (resolveReady = r));
 
   const shots = new Map();
+  // The field guide: the creatures and the plants the reader has studied, by world. A creature or a
+  // plant is undiscovered until the reader finds it on the planet and opens its card.
+  const FOUND_KEY = 'myworlds.proto.found.v1';
+  const guide = () => { try { return JSON.parse(localStorage.getItem(FOUND_KEY) || '{}'); } catch { return {}; } };
+  const foundOf = (seedNow) => { const g = guide()[seedNow] || {}; return { fauna: g.fauna || [], flora: g.flora || {} }; };
+  const fresh = [];   // the finds the concept has not announced yet
+  function noteFind() {
+    const card = doc.getElementById('creature');
+    if (!card || card.hidden) return;
+    const subject = card.dataset.subject, kind = +card.dataset.kind;
+    if (subject !== 'animal' && subject !== 'plant') return;
+    const w = mw.current.world;
+    const all = guide();
+    const g = all[w.seed] || (all[w.seed] = { fauna: [], flora: {} });
+    g.fauna = g.fauna || []; g.flora = g.flora || {};
+    if (subject === 'animal' && !g.fauna.includes(kind)) {
+      g.fauna.push(kind);
+      fresh.push({ type: 'creature', name: w.species[kind].lore.name, n: g.fauna.length, of: (w.faunaKinds || []).length });
+    } else if (subject === 'plant' && !(kind in g.flora)) {
+      const p = (mw.plants || []).find((x) => x.kind === kind);
+      if (!p) return;
+      g.flora[kind] = p.lore.name;
+      fresh.push({ type: 'plant', name: p.lore.name, n: Object.keys(g.flora).length });
+    } else return;
+    try { localStorage.setItem(FOUND_KEY, JSON.stringify(all)); } catch { /* prototype */ }
+  }
+  // The line over the name of the card: what kind of subject, and where it stands in the guide.
+  function kickCard() {
+    const card = doc.getElementById('creature');
+    if (!card || card.hidden) return;
+    const text = card.querySelector('.ctext');
+    const f = foundOf(mw.current.world.seed);
+    const k = card.dataset.subject === 'animal'
+      ? `Creature · ${f.fauna.length} of ${(mw.current.world.faunaKinds || []).length} in your field guide`
+      : card.dataset.subject === 'plant' ? `Plant · ${Object.keys(f.flora).length} in your field guide` : '';
+    if (text && text.dataset.kicker !== k) text.dataset.kicker = k;
+  }
   const saved = () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; } };
   const first = seed || (saved().length ? saved()[saved().length - 1].seed : 'Auralis');
   frame.src = `../index.html#${encodeURIComponent(first)}`;
@@ -60,6 +174,20 @@ export function makeBridge(frame, { seed, showStart }) {
     s.textContent = HIDE;
     doc.head.appendChild(s);
     if (api._loader === false) doc.documentElement.classList.add('proto-noloader');
+    const font = doc.createElement('link');
+    font.rel = 'stylesheet'; font.href = FONTS;
+    doc.head.appendChild(font);
+    // The record of the incident speaks before the find, so it names no wreck: nobody knows yet
+    // what sends the signal. Prototype only; app.js keeps its own words.
+    const lost = doc.querySelector('#carrier-lost .about-card');
+    if (lost) {
+      lost.querySelectorAll('p').forEach((p) => p.remove());
+      lost.insertAdjacentHTML('beforeend', `
+        <p>The registry holds one open incident for this world. A carrier called for help from here, and no crew came back. Nobody knows what became of it.</p>
+        <p>The beacon still transmits. It is weak, and it reaches about a third of the way round the planet, so most of this world hears nothing at all.</p>
+        <p>Send a probe to the surface. A landing inside that reach catches the beacon, and the instrument reads a bearing to it, never a distance. A landing that hears nothing states a fact of its own: the source lies more than a third of the way round from there.</p>
+        <p>Each bearing the probe catches stands on the globe as a wedge from the cell it was read from. Land again far to one side, and the second wedge crosses the first over the source.</p>`);
+    }
     win.addEventListener('keydown', (e) => keySubs.forEach((f) => f(e)));
     const wait = () => {
       mw = win.__mw;
@@ -80,6 +208,11 @@ export function makeBridge(frame, { seed, showStart }) {
     const card = doc.getElementById('creature');
     const anyDialog = [...doc.querySelectorAll('dialog')].some((d) => d.open);
     const mode = mw.mode;
+    // The button of the app names the marked creature or plant. Before the find it names nothing.
+    let ctx = cf && cf.classList.contains('show') ? cf.textContent : '';
+    const m = mw.marked, f = foundOf(w.seed);
+    if (ctx && m.animal !== null && !f.fauna.includes(m.animal)) ctx = 'Study this creature';
+    else if (ctx && m.plant !== null && !(m.plant in f.flora)) ctx = 'Study this plant';
     return {
       loading: false,
       busy: !!(overlay && overlay.classList.contains('show')),
@@ -89,7 +222,8 @@ export function makeBridge(frame, { seed, showStart }) {
       mode,                                   // orbit, descending, ground, ascending
       dive: !!mw.probe.dive,
       aiming: !!(aimEl && !aimEl.hidden),
-      ctx: cf && cf.classList.contains('show') ? cf.textContent : '',
+      ctx,
+      found: f.fauna.length + Object.keys(f.flora).length,
       ceiling: !!(pf && pf.classList.contains('show') && mode === 'ground'),
       card: !!(card && !card.hidden),
       dialog: anyDialog,
@@ -104,6 +238,7 @@ export function makeBridge(frame, { seed, showStart }) {
     return JSON.stringify([v.row, v.chapters.map((ch) => [ch.state, ch.fixes.length, ch.held]), v.tuner, v.way, c.stage && [c.stage.n, c.stage.next, c.stage.cells]]);
   }
   function tick() {
+    if (mw && mw.current) { noteFind(); kickCard(); }
     const s = state();
     const k = JSON.stringify(s);
     if (k === last) return;
@@ -114,6 +249,7 @@ export function makeBridge(frame, { seed, showStart }) {
   // ------------------------------------------------------------ the world
   function world() {
     const w = mw.current.world, s = w.stats;
+    const found = foundOf(w.seed);
     const facts = [
       { k: 'radius', label: 'Radius', value: s.radius },
       { k: 'gravity', label: 'Gravity', value: s.gravity },
@@ -129,8 +265,9 @@ export function makeBridge(frame, { seed, showStart }) {
       seed: w.seed, designation: w.designation, typeLabel: w.typeLabel, type: w.type, gas: w.type === 'gas',
       tiltDeg: parseFloat(s.tilt) || 0,
       facts,
-      fauna: (w.faunaKinds || []).map((k) => ({ kind: k, name: w.species[k].lore.name })),
-      flora: (mw.plants || []).map((p) => ({ kind: p.kind, name: p.lore.name })),
+      fauna: (w.faunaKinds || []).map((k) => ({ kind: k, name: w.species[k].lore.name, found: found.fauna.includes(k) })),
+      flora: (mw.plants || []).map((p) => ({ kind: p.kind, name: p.lore.name, found: p.kind in found.flora })),
+      floraKnown: Object.entries(found.flora).map(([kind, name]) => ({ kind: +kind, name })),
       thumb: (saved().find((x) => x.seed === w.seed) || {}).thumb || '',
       palette: w.palette,
     };
@@ -155,7 +292,7 @@ export function makeBridge(frame, { seed, showStart }) {
     }
     const intro = {
       years: log.years, ship: log.probe, crew: log.crew.length, band: '406.025 MHz',
-      text: `${cap(numWord(log.years))} years ago a distress signal reached us from ${w.designation}. The carrier ${log.probe} went down here with a crew of ${numWord(log.crew.length)}. Nobody came back. You came to find out what happened.`,
+      text: `${cap(numWord(log.years))} years ago a distress signal reached us from ${w.designation}. It came from the carrier ${log.probe}, with a crew of ${numWord(log.crew.length)} aboard. Nobody came back. You came to find out what happened.`,
     };
     const [wr, ru, way] = v.chapters;
     const stage = mw.mode === 'ground' ? c.stage : null;
@@ -172,7 +309,7 @@ export function makeBridge(frame, { seed, showStart }) {
         return 'The probe hears it. Go back to orbit and land again, far to one side.';
       }
       const n = ch.fixes.length;
-      if (n === 0) return `Land the probe anywhere to listen for the ${thing === 'wreck' ? 'beacon' : 'signal'}.`;
+      if (n === 0) return `Land the probe anywhere to listen for the ${ch.id === 'wreck' ? 'beacon' : 'signal'}.`;
       if (n === 1) return 'One wedge on the globe. Land again, far to one side of it.';
       return 'The wedges cross. Land where they meet.';
     };
@@ -187,7 +324,7 @@ export function makeBridge(frame, { seed, showStart }) {
     const chapters = [];
     chapters.push({
       id: 'wreck', n: 1, title: 'The distress signal', state: wr.state,
-      goal: `Find the wreck of the ${log.probe}.`,
+      goal: wr.state === 'done' ? `The wreck of the ${log.probe} is found.` : `Find where the signal of the ${log.probe} comes from.`,
       status: wr.state === 'done' ? 'Found. The log is read.' : wr.fixes.length ? `${wr.fixes.length === 1 ? '1 fix' : wr.fixes.length + ' fixes'} on the globe` : 'Not heard yet',
       fixes: wr.fixes, actions: actions(wr), band: '406.025 MHz',
     });
@@ -221,7 +358,7 @@ export function makeBridge(frame, { seed, showStart }) {
     // the objective: the first chapter that is not done
     const open = chapters.find((ch) => ch.state === 'open');
     let objective;
-    if (open && open.id === 'wreck') objective = { kicker: 'Chapter 1 of ' + chapters.length, title: 'The distress signal', line: searchLine(wr, 'wreck'), chapter: 'wreck' };
+    if (open && open.id === 'wreck') objective = { kicker: 'Chapter 1 of ' + chapters.length, title: 'The distress signal', line: searchLine(wr, 'source of the signal'), chapter: 'wreck' };
     else if (open && open.id === 'ruin') objective = open.tune
       ? { kicker: 'Chapter 2 of ' + chapters.length, title: 'The second signal', line: 'The log ends on a frequency. Tune the receiver to it.', chapter: 'ruin', tune: true }
       : { kicker: 'Chapter 2 of ' + chapters.length, title: 'The second signal', line: searchLine(ru, 'source'), chapter: 'ruin' };
@@ -253,6 +390,7 @@ export function makeBridge(frame, { seed, showStart }) {
     get doc() { return doc; },
     seed: () => (mw && mw.current ? mw.current.world.seed : first),
     state, world, story, worlds,
+    takeFinds: () => fresh.splice(0, fresh.length),
     subscribe(f) { subs.add(f); if (mw) f(state()); return () => subs.delete(f); },
     onFrameKey(f) { keySubs.add(f); },
     refresh() { last = ''; tick(); },
@@ -288,6 +426,9 @@ export function makeBridge(frame, { seed, showStart }) {
     inspectPlant(kind) { mw.inspectPlant(kind); },
     music: {
       get on() { return mw ? !mw.music.settings.muted : false; },
+      // on, but the browser has not let the sound start yet
+      get stalled() { return !!mw && !mw.music.settings.muted && !!mw.music.ctx && mw.music.ctx.state !== 'running'; },
+      start() { mw.music.setMuted(false); mw.music.unlock(); },
       get vol() { return mw ? mw.music.settings.vol : 0.5; },
       toggle() { mw.music.setMuted(!mw.music.settings.muted); },
       set(v) { mw.music.setVolume(v); },
