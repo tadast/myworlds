@@ -79,13 +79,15 @@ export function chaptersOf(world) {
 //
 // The first search reads a distress signal. Every later search reads an unknown signal, and it
 // takes the second sheet of the drawings of the brief in index.html.
+// The words name the source and never the kind of source, so one stage reads the same for the wreck
+// and for the ruin. The hint is the line at the foot of the signal block of the overlay.
 const BRIEF_TITLE = {
-  1: ['', 'Distress signal', 'Stronger signal', 'Carrier in reach'],
-  2: ['', 'Unknown signal', 'Stronger signal', 'Carrier in reach'],
+  1: ['', 'Distress signal', 'Stronger signal', 'Source in reach'],
+  2: ['', 'Unknown signal', 'Stronger signal', 'Source in reach'],
 };
 const BRIEF_HINT = {
-  1: ['', 'New signal · tap', 'Stronger signal · tap', 'Carrier in reach · tap'],
-  2: ['', 'Unknown signal · tap', 'Stronger signal · tap', 'Carrier in reach · tap'],
+  1: ['', 'New signal', 'Stronger signal', 'Source in reach'],
+  2: ['', 'Unknown signal', 'Stronger signal', 'Source in reach'],
 };
 
 // The words of the brief of one stage `n` of the chapter at `index`: `{ sheet, title, hint }`.

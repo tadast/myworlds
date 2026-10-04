@@ -15,6 +15,7 @@
 // arrives early reads as a fault of the app and not as a fact of the world. Under that band the
 // canvas is cleared and hidden, and it costs nothing.
 import { WRECK_FREQ } from './carrier.js';
+import { wave } from './icons.js';
 
 const BARS = 5;                 // the bars of the signal block
 const GRAIN_DIV = 2;            // the grain is drawn at this fraction of the frame and scaled up
@@ -44,6 +45,8 @@ const TEXT_MS = 120;            // ms between two writes of the numbers. The eye
 const CARRIER_HERE = 0.001;     // radians of arc, which is a tenth of a cell
 const CARRIER_STRONG = 0.06;    // radians of arc, which is 6 cells
 const CARRIER_CLEAR = 0.6;      // radians of arc, which is 60 cells, a fifth of the half circle
+// The height of the wave of the block for each word of the strength, as a part of its full height.
+const WAVE_AMP = { Faint: 0.3, Clear: 0.55, Strong: 0.8, Here: 1 };
 
 // The seconds of a countdown as hours and minutes. A landing lasts minutes and a day lasts hours,
 // so the minutes carry the change the reader sees and the hours carry the fact.
@@ -78,6 +81,8 @@ export class ProbeHud {
     this.elStrength = root.querySelector('#hud-strength');
     this.elRange = root.querySelector('#hud-range');
     this.elHint = root.querySelector('#hud-hint');
+    this.elWave = root.querySelector('#hud-wave');
+    if (this.elWave) this.elWave.innerHTML = wave();
     if (this.elCarrier && onCarrier) this.elCarrier.addEventListener('click', onCarrier);
     this.bars = [];
     if (this.elBars) {
@@ -91,6 +96,7 @@ export class ProbeHud {
     this._grainAt = 0;
     this._textAt = 0;
     this._needleAt = null;   // the turn the needle of the carrier stands at. See _writeCarrier().
+    this._word = '';         // the word of the strength the wave last took
     this._lit = -1;
     this._state = '';
     this._w = 0; this._h = 0;
@@ -227,9 +233,13 @@ export class ProbeHud {
     if (this.elBrg) this.elBrg.textContent = `${String(Math.round(c.brg) % 360).padStart(3, '0')}°`;
     if (this.elErr) this.elErr.textContent = `±${Math.round(c.err)}°`;
     if (this.elFreq) this.elFreq.textContent = `${c.freq || WRECK_FREQ} MHz`;
-    if (this.elStrength) {
-      this.elStrength.textContent = c.arc < CARRIER_HERE ? 'Here'
-        : c.arc < CARRIER_STRONG ? 'Strong' : c.arc < CARRIER_CLEAR ? 'Clear' : 'Faint';
+    const word = c.arc < CARRIER_HERE ? 'Here'
+      : c.arc < CARRIER_STRONG ? 'Strong' : c.arc < CARRIER_CLEAR ? 'Clear' : 'Faint';
+    if (this.elStrength) this.elStrength.textContent = word;
+    // The wave grows with the strength, so the block shows the word before the reader reads it.
+    if (word !== this._word) {
+      this._word = word;
+      this.elCarrier.style.setProperty('--hud-amp', WAVE_AMP[word]);
     }
     if (this.elRange) {
       const text = c.range != null ? `${Math.round(c.range)} u`

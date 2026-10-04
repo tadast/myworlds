@@ -2,6 +2,7 @@
 //
 //   icon(name, size, stroke)   the markup of one icon, as a string
 //   fillIcons(root)            puts the icon into every [data-icon] element under root
+//   wave(stroke)               the wave of a signal, an SVG twice as wide as its box
 const PATHS = {
   planet: '<circle cx="12" cy="12" r="6.5"/><path d="M3.2 15.6c-1.4 2.2-1.2 3.7 1.1 3.9 3 .3 8.6-1.6 12.7-4.6 3.8-2.7 5.3-5.6 3.6-6.6-.7-.4-1.8-.4-3.1-.1"/>',
   signal: '<path d="M12 13v8"/><circle cx="12" cy="11" r="2"/><path d="M8.2 7.2a5.4 5.4 0 0 0 0 7.6M15.8 7.2a5.4 5.4 0 0 1 0 7.6M5.3 4.3a9.5 9.5 0 0 0 0 13.4M18.7 4.3a9.5 9.5 0 0 1 0 13.4"/>',
@@ -32,3 +33,20 @@ export const icon = (name, size = 22, stroke = 1.8) =>
 export function fillIcons(root) {
   for (const el of root.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon, +el.dataset.size || 22);
 }
+
+// The wave of a signal: one path, twice as wide as its box. The style slides it by half its width,
+// so it runs without a seam. The arrival draws it in orange, and the signal block of the probe
+// overlay draws it in the colour of its chapter, through currentColor.
+const WAVE_PATH = (() => {
+  const w = 800, h = 40;
+  let d = `M0 ${h / 2}`;
+  for (let i = 0; i <= 192; i++) {
+    const x = (i / 192) * w;
+    const y = h / 2 + Math.sin((i / 8) * Math.PI * 2) * 13 * (0.35 + 0.65 * Math.abs(Math.sin(i * 0.37) * Math.cos(i * 0.11)));
+    d += ` L${x.toFixed(1)} ${y.toFixed(1)}`;
+  }
+  return d;
+})();
+
+export const wave = (stroke = 'currentColor') =>
+  `<svg viewBox="0 0 800 40" preserveAspectRatio="none" aria-hidden="true"><path d="${WAVE_PATH}" fill="none" stroke="${stroke}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;

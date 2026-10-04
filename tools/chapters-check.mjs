@@ -134,7 +134,7 @@ ok('bound', !v.chapters[0].fixes.some((f) => f.lat === W.cellSite(W.siteCell(far
 p.briefed(2); p.briefed(1);
 ok('brief', p.view().chapters[0].briefed === 2, 'the mark of the brief fell');
 h = p.land(sourceCell(w.source));
-ok('brief', h.stage.n === 3 && h.stage.pulse && h.stage.title === 'Carrier in reach', 'the cell of the wreck is not stage 3');
+ok('brief', h.stage.n === 3 && h.stage.pulse && h.stage.title === 'Source in reach', 'the cell of the wreck is not stage 3');
 p.briefed(3);
 ok('brief', !p.land(sourceCell(w.source)).stage.pulse, 'a read brief still pulses');
 

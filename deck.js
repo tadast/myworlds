@@ -24,7 +24,7 @@
 // stage, plants, guide, tuner, and music. It holds what the interface does: generate(), random(),
 // worlds(), forget(), probe(), aim(), stopAim(), openStudy(), inspect(), inspectPlant(), brief(),
 // lost(), about(), clear(), aimAt(), shareUrl(), snapshot(), and hold().
-import { icon, fillIcons } from './icons.js';
+import { icon, fillIcons, wave } from './icons.js';
 import { storyOf } from './story.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -59,17 +59,8 @@ const CONTROLS = {
     ['Esc', 'Close the window or the card', null],
   ],
 };
-// The wave of the distress signal: one path, twice as wide as its box, that slides by half its width.
-const WAVE = (() => {
-  const w = 800, h = 40;
-  let d = `M0 ${h / 2}`;
-  for (let i = 0; i <= 192; i++) {
-    const x = (i / 192) * w;
-    const y = h / 2 + Math.sin((i / 8) * Math.PI * 2) * 13 * (0.35 + 0.65 * Math.abs(Math.sin(i * 0.37) * Math.cos(i * 0.11)));
-    d += ` L${x.toFixed(1)} ${y.toFixed(1)}`;
-  }
-  return `<div class="wave"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="#ffb86b" stroke-width="1.6"/></svg></div>`;
-})();
+// The wave of the distress signal. See wave() in icons.js.
+const WAVE = `<div class="wave">${wave('#ffb86b')}</div>`;
 const thumb = (src) => (src ? `<img alt="" src="${src}">` : '<span class="ph"></span>');
 const fixLine = (x, i) => `Landing ${i + 1} · ${String(Math.round(x.brg) % 360).padStart(3, '0')}° ±${Math.round(x.err)}° · `
   + `${Math.abs(x.lat).toFixed(1)}${x.lat < 0 ? 'S' : 'N'} ${Math.abs(x.lon).toFixed(1)}${x.lon < 0 ? 'W' : 'E'}`;
