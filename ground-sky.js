@@ -39,9 +39,15 @@ export const GROUND_DAY = 1800;       // seconds of real time for one turn of th
 // world with a fast moon still has the faster one and no moon crosses the sky in a hurry.
 const MOON_SLOW = 4;
 const MOON_TURNS = [0.25, 2];         // the band a moon must stay inside, in turns per day
-export const MOON_DIST = 4000;        // metres, the draw distance of a moon on the dome
+// The ring and the moons stand behind the far edge of the rim of the ground, RIM in tiers.js, which
+// reaches 5,657 m at a corner. So the depth test lets every part of the ground hide them, and the
+// horizon is the true silhouette of the ground. They used to stand at 4,000 and 4,250 m, inside the
+// rim, so a plane at the eye line had to cut them. From a probe over the ground the edge of the
+// ground stands well under the eye line, and the ring and the moons ended over the ground in a hard
+// line. Both stay under the far plane of the ground camera, 11,000 m. tools/sky-check.mjs.
+export const MOON_DIST = 7000;        // metres, the draw distance of a moon on the dome
 export const MOON_GAIN = 3;           // the true angular size is too small to read, so it grows 3x
-export const RING_REACH = 4250;       // metres, the far edge of the ring band
+export const RING_REACH = 7500;       // metres, the far edge of the ring band
 export const CLOUD_LOW = 900;         // metres, the floor of the cloud deck
 export const CLOUD_HIGH = 1100;       // metres, the roof of the cloud deck
 export const CLOUD_SPAN = 1800;       // metres, the half width of the field the clouds drift in
@@ -162,10 +168,6 @@ export class Sky {
     // stay behind, because they hang at a true height and the camera does climb toward them.
     this.far = new THREE.Group();
     this.group.add(this.far);
-    // Everything under the eye line belongs to the ground, not to the sky. One clipping plane at
-    // the height of the camera cuts the ring and the moons there, so a moon sets at the horizon.
-    this.clip = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    if (renderer) renderer.localClippingEnabled = true;   // only materials with planes feel this
     this.moons = [];
     this.clouds = [];
     this.cloudMesh = null;
@@ -366,8 +368,12 @@ export class Sky {
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
       color: md.color, flatShading: true, roughness: 1, metalness: 0, fog: false,
-      clippingPlanes: [this.clip],
+      // The sea can be clear, and the sea is drawn with the clear things. An opaque moon is drawn
+      // before it, so a moon under the horizon would show through the water. As a clear thing at
+      // full opacity, after the sea and before the ring, the moon takes the depth of the sea.
+      transparent: true,
     }));
+    mesh.renderOrder = 0.5;
     // the angular radius from the site, then the radius it needs at the draw distance
     mesh.scale.setScalar(Math.tan(Math.atan2(md.size, md.dist) * MOON_GAIN) * MOON_DIST);
     const moon = { ...md, mesh };
@@ -415,7 +421,6 @@ export class Sky {
     geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
     const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
       vertexColors: true, transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false,
-      clippingPlanes: [this.clip],
     }));
     // move the origin from the planet centre to the site, then grow the ring to sky size
     const k = RING_REACH / (r.outer + 1);
@@ -471,10 +476,7 @@ export class Sky {
   }
 
   update(t, dt, camera) {
-    if (camera) {
-      this.far.position.copy(camera.position);
-      this.clip.constant = -camera.position.y;   // the eye line is the horizon of the sky
-    }
+    if (camera) this.far.position.copy(camera.position);
     // The sky turns. The star moves first, because the colours of the hour come from where it
     // stands, and every other part of the sky and of the ground reads those colours.
     const step = this.rate * this.turnSign * dt;
