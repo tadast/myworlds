@@ -517,8 +517,8 @@ body {
 /* The overlay stands over a lit sky as often as over a dark one, so the labels carry their own
    contrast: a lighter grey than the window uses, and a shadow under every line. */
 #probe-hud .k {
-  display: block; color: rgba(226, 232, 255, 0.72); font-size: 9px;
-  letter-spacing: 0.2em; text-transform: uppercase;
+  display: block; color: rgba(226, 232, 255, 0.72); font-family: var(--mono); font-size: 9.5px;
+  letter-spacing: 0.16em; text-transform: uppercase;
 }
 /* a block label beats the display of the hidden attribute, so the attribute needs its own rule */
 #probe-hud .k[hidden] { display: none; }
@@ -554,30 +554,48 @@ body {
 }
 .hud-ladder .k { position: absolute; right: 0; bottom: -18px; }
 
-/* The carrier block of issue 34, under the top strip on the left. It stands on the left and not
-   on the right because the right edge already carries the altitude ladder, and a landscape phone
+/* The signal block of issue 34, under the top strip on the left. It stands on the left and not on
+   the right because the right edge already carries the altitude ladder, and a landscape phone
    leaves no room for the two. The bottom left belongs to the uplink block and the bottom middle to
-   the study chip, so this corner is the one free corner of the frame. */
-/* The block is a button, so it drops the styling a browser gives one and keeps the styling of the
-   overlay. It is the one part of the overlay that takes a pointer event: #probe-hud holds
-   pointer-events: none, so every other gesture still reaches the ground under it, and the press on
-   this block never starts a look drag and never picks a plant. The padding gives a finger a target
-   of about 44 px on a phone without moving the readings. */
+   the study chip, so this corner is the one free corner of the frame.
+
+   It takes the look of the interface, deck.js: a glass panel, a label in mono with a dot, and the
+   wave of the arrival. The panel holds the readings against a bright sky, so they need no shadow.
+   --hud-tint is the colour of the chapter: the blue of the overlay in chapter 1, and the colour of
+   the wedges of the ruin in chapter 2, which probe-hud.js writes (p2-39). The dot, the needle, the
+   bearing, the wave, and the pulse take it. --hud-amp is the height of the wave, from the strength. */
+/* The block is a button, so it drops the styling a browser gives one. It is the one part of the
+   overlay that takes a pointer event: #probe-hud holds pointer-events: none, so every other gesture
+   still reaches the ground under it, and the press on this block never starts a look drag and never
+   picks a plant. */
 .hud-carrier {
+  --hud-tint: var(--accent);
   position: absolute; top: calc(var(--hud-top) + 54px); left: calc(var(--hud-left) + 8px);
-  display: flex; align-items: center; gap: 10px;
+  display: flex; flex-direction: column; gap: 9px; width: 200px;
   pointer-events: auto; cursor: pointer; text-align: left;
-  margin: 0; padding: 8px; border: 1px solid transparent; border-radius: 12px;
-  background: none; color: inherit; font: inherit; letter-spacing: inherit;
+  margin: 0; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 18px;
+  background: rgba(10, 14, 30, 0.74); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  color: var(--text); font: inherit; letter-spacing: normal; text-shadow: none;
   -webkit-tap-highlight-color: transparent;
-  transition: border-color 0.2s, background-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
-.hud-carrier:hover { border-color: rgba(124, 196, 255, 0.45); background: rgba(7, 10, 22, 0.28); }
-.hud-carrier:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hud-carrier:hover { border-color: color-mix(in srgb, var(--hud-tint) 50%, transparent); }
+.hud-carrier:focus-visible { outline: 2px solid var(--hud-tint); outline-offset: 2px; }
 .hud-carrier[hidden] { display: none; }
+.hud-carrier > span { display: block; }
+.hud-carrier .hud-kick {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--hud-tint) 45%, #fff);
+}
+.hud-kick i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--hud-tint); }
+.hud-more { margin-left: auto; font-size: 16px; line-height: 1; letter-spacing: 0; color: var(--muted); }
+.hud-carrier .hud-fix { display: flex; align-items: center; gap: 12px; }
 .hud-dial {
-  position: relative; flex: none; width: 38px; height: 38px;
-  border: 1px solid rgba(124, 196, 255, 0.3); border-radius: 50%;
+  position: relative; display: block; flex: none; width: 40px; height: 40px;
+  border: 1px solid color-mix(in srgb, var(--hud-tint) 35%, transparent); border-radius: 50%;
+  background: color-mix(in srgb, var(--hud-tint) 7%, transparent);
 }
 /* The needle. The square turns about the middle of the dial and the arrow stands at the top of it,
    so 0 points the way the view points and probe-hud.js turns it by the bearing less that view. */
@@ -587,43 +605,52 @@ body {
 .hud-dial i::before {
   content: ''; position: absolute; left: 50%; top: 4px; margin-left: -4px; width: 0; height: 0;
   border-left: 4px solid transparent; border-right: 4px solid transparent;
-  border-bottom: 13px solid var(--accent);
+  border-bottom: 14px solid var(--hud-tint);
 }
-.hud-read b { display: block; color: var(--accent); text-shadow: 0 0 10px rgba(124, 196, 255, 0.45); }
-.hud-sub { display: flex; gap: 8px; }
-/* The band the receiver holds, p2-38: under the bearing, in the size of the error. The unit keeps
-   its case, because MHz is the unit and MHZ is not, and the digits keep one width so two bands
-   compare at a glance. */
-#probe-hud #hud-freq { text-transform: none; font-variant-numeric: tabular-nums; }
+.hud-read { display: block; min-width: 0; }
+#probe-hud .hud-read b {
+  display: block; font-size: 26px; font-weight: 600; line-height: 1.05; color: var(--hud-tint);
+}
+/* The band the receiver holds, p2-38: under the bearing. The unit keeps its case, because MHz is
+   the unit and MHZ is not, and the digits keep one width so two bands compare at a glance. */
+#probe-hud #hud-freq { margin-top: 3px; text-transform: none; letter-spacing: 0.06em; }
+/* The wave of the arrival, in the colour of the chapter. The path is twice as wide as its box and
+   slides by half its width; `scale` is a property of its own, so the height of the wave and the
+   slide of the animation do not fight over `transform`. */
+.hud-carrier .hud-wave {
+  position: relative; height: 24px; border-radius: 9px; overflow: hidden; color: var(--hud-tint);
+  background: color-mix(in srgb, var(--hud-tint) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hud-tint) 16%, transparent);
+}
+.hud-wave svg {
+  position: absolute; left: 0; top: 0; width: 200%; height: 100%;
+  scale: 1 var(--hud-amp, 0.3); transition: scale 0.6s ease;
+  animation: ui-wave 2.4s linear infinite;
+}
+.hud-wave::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(10, 14, 30, 0.9), transparent 18%, transparent 82%, rgba(10, 14, 30, 0.9));
+}
+.hud-carrier .hud-sub { display: flex; gap: 12px; }
+#probe-hud .hud-sub .k { color: #c5cbe6; }
 
 /* Risk 4 of issue 34: a reader may never look at the fifth block. The block pulses on every landing
-   that hears the carrier until the reader opens the brief, and it then stands quiet on that world
+   that hears the source until the reader opens the brief, and it then stands quiet on that world
    for good. One flash on one landing is a thing a reader can miss, so the pulse does not stop. It
    is a calm pulse of the border and the glow and it moves nothing, so it does not pull the eye off
-   the world. No text says a word about it. */
+   the world. The dot of the label blinks with it. */
 @keyframes hud-carrier-pulse {
-  0%, 100% { border-color: rgba(124, 196, 255, 0.35); box-shadow: 0 0 0 rgba(124, 196, 255, 0); }
-  50% { border-color: rgba(124, 196, 255, 1); box-shadow: 0 0 22px rgba(124, 196, 255, 0.7); }
+  0%, 100% { border-color: color-mix(in srgb, var(--hud-tint) 35%, transparent); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.35); }
+  50% { border-color: var(--hud-tint); box-shadow: 0 0 24px color-mix(in srgb, var(--hud-tint) 60%, transparent); }
 }
-/* The dark plate holds the block against a bright sky, where the glow alone does not read. */
-.hud-carrier.pulse { background: rgba(7, 10, 22, 0.55); animation: hud-carrier-pulse 1.8s ease-in-out infinite; }
-/* The hint states that the block is a control. It shows only while the block pulses. */
-.hud-hint { display: none; color: var(--accent); }
-.hud-carrier.pulse .hud-hint { display: block; }
-/* Chapter 2, p2-39. After the tune the block takes the colour of the wedges of the ruin, which
-   probe-hud.js writes to --hud-tint: the needle, the bearing, the ring of the dial, and the pulse.
-   The labels and the hint keep their grey, and the rest of the overlay keeps its blue. */
-.hud-carrier[data-chapter="2"] .hud-dial { border-color: color-mix(in srgb, var(--hud-tint) 30%, transparent); }
-.hud-carrier[data-chapter="2"] .hud-dial i::before { border-bottom-color: var(--hud-tint); }
-.hud-carrier[data-chapter="2"] .hud-read b {
-  color: var(--hud-tint); text-shadow: 0 0 10px color-mix(in srgb, var(--hud-tint) 45%, transparent);
-}
-.hud-carrier[data-chapter="2"]:hover { border-color: color-mix(in srgb, var(--hud-tint) 45%, transparent); }
-.hud-carrier[data-chapter="2"].pulse { animation-name: hud-carrier-pulse-2; }
-@keyframes hud-carrier-pulse-2 {
-  0%, 100% { border-color: color-mix(in srgb, var(--hud-tint) 35%, transparent); box-shadow: 0 0 0 transparent; }
-  50% { border-color: var(--hud-tint); box-shadow: 0 0 22px color-mix(in srgb, var(--hud-tint) 70%, transparent); }
-}
+.hud-carrier.pulse { animation: hud-carrier-pulse 1.8s ease-in-out infinite; }
+.hud-carrier.pulse .hud-kick i { animation: ui-blink 1s steps(2) infinite; }
+/* The hint states that the block is a control, and the stage the probe hears. It shows only while
+   the block pulses, and it then takes the place of the arrow of the label. */
+.hud-carrier .hud-hint { display: none; justify-content: space-between; gap: 8px; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
+#hud-hint { font-weight: 500; color: color-mix(in srgb, var(--hud-tint) 55%, #fff); }
+.hud-carrier.pulse .hud-hint { display: flex; }
+.hud-carrier.pulse .hud-more { visibility: hidden; }
 
 /* the uplink block, inside the bottom left corner of the frame, clear of the study chip */
 .hud-link {
@@ -646,23 +673,38 @@ body {
 }
 .hud-warn.show { opacity: 1; }
 
+/* A short window, as a phone on its side, leaves the frame about 110 px tall, and the corner under
+   the top strip has no room for the block. The block then stands in the middle of the top strip,
+   between the hour and the link, with no wave: the strength and the error stand beside the
+   bearing. The altitude ladder shrinks for the same reason. */
+@media (max-height: 520px) {
+  .hud-carrier {
+    top: calc(var(--hud-top) + 8px); left: 50%; transform: translateX(-50%); width: auto;
+    display: grid; grid-template-columns: auto auto; column-gap: 16px; row-gap: 6px; padding: 9px 12px;
+  }
+  .hud-carrier .hud-kick, .hud-carrier .hud-hint { grid-column: 1 / -1; }
+  .hud-carrier .hud-wave { display: none; }
+  .hud-carrier .hud-sub { flex-direction: column; justify-content: center; gap: 4px; }
+  .hud-dial { width: 34px; height: 34px; }
+  .hud-dial i::before { border-bottom-width: 12px; }
+  #probe-hud .hud-read b { font-size: 22px; }
+  /* the ladder shrinks to fit under the link */
+  .hud-ladder { height: 40px; bottom: calc(var(--hud-bottom) + 30px); }
+}
 @media (max-width: 600px) {
   #probe-hud { --hud-in: 12px; }
   .hud-ladder { height: 150px; bottom: calc(var(--hud-bottom) + 74px); }
   .hud-warn { white-space: normal; text-align: center; max-width: calc(100vw - 48px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hud-ladder b, .hud-warn, .hud-dial i, .hud-carrier { transition: none; }
+  .hud-ladder b, .hud-warn, .hud-dial i, .hud-carrier, .hud-wave svg { transition: none; }
   /* A reader who asks for less motion still has to find the block, so the pulse becomes a static
-     highlight: the same border and the same glow, and nothing that moves. */
+     highlight: the same border and the same glow, and nothing that moves. The wave stands still. */
   .hud-carrier.pulse {
     animation: none;
-    border-color: rgba(124, 196, 255, 1); box-shadow: 0 0 22px rgba(124, 196, 255, 0.7);
+    border-color: var(--hud-tint); box-shadow: 0 0 24px color-mix(in srgb, var(--hud-tint) 60%, transparent);
   }
-  .hud-carrier[data-chapter="2"].pulse {
-    animation: none;
-    border-color: var(--hud-tint); box-shadow: 0 0 22px color-mix(in srgb, var(--hud-tint) 70%, transparent);
-  }
+  .hud-carrier.pulse .hud-kick i, .hud-wave svg { animation: none; }
 }
 
 /* ---------- chapter 3, the way on

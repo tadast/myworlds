@@ -62,6 +62,19 @@ The guide keeps a creature by its species in `world.species`, and a plant by the
 
 The sound button stands on the planet, top right. Until the reader first uses the sound, it is a warm button that says "Turn on the music". While the music plays, it shows a moving equaliser, and a hover gives the volume. When the browser has not let the sound start, a press starts it. The Menu window holds the same control and the volume.
 
+## The signal block
+
+On the ground, the probe overlay shows the signal block under the top strip, on the left. It takes the look of the window: a glass panel, and a label in mono with a dot.
+
+- The label says "Signal source" in every chapter. The source is the wreck in chapter 1 and the ruin in chapter 2, and the block names neither.
+- The needle, the bearing, and the band stand under the label. The strength, the error, and the range stand at the foot.
+- The wave of the arrival runs between them. It grows with the strength: Faint, Clear, Strong, and Here.
+- The colour of the chapter marks the dot, the needle, the bearing, the wave, and the pulse. It is blue in chapter 1, and the colour of the wedges of the ruin in chapter 2.
+- While the block pulses, the dot blinks, and the foot shows the stage and "Brief ›". The stages are the same for each source: "Stronger signal" and "Source in reach".
+- In a short window, as a phone on its side, the block stands in the middle of the top strip, with no wave.
+
+A press on the block opens the brief. The brief also says "the source", and never "the carrier", because the same words serve the wreck and the ruin.
+
 ## The cards and the dialogs
 
 The study card and the dialogs take the size and the type of the window: almost the whole screen, Fraunces for names and prose, and IBM Plex Mono for labels. A creature and a plant take the preview as the left half and the text as the right; on a phone the preview is a band across the top. The card of the wreck and the card of the ruin keep the layout of a reader. The card has no arrows, because an arrow would step to a creature the reader has not found yet.
