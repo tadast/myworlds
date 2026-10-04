@@ -6,8 +6,8 @@
 // transition through its interface and nothing else: descend(), patchDone(), ascend(), hear(),
 // step(), and abort(). The clock is a number the check moves by hand.
 //
-// 1. A landing. The descent closes the cover, waits for the patch, switches, and opens the cover on
-//    the ground. The ascent closes the cover, switches, and opens it over the globe. The fix of the
+// 1. A landing. The descent closes the cover, waits for the patch and for ENTRY_MS, switches, and
+//    opens the cover on the ground. The ascent closes the cover, switches, and opens it over the globe. The fix of the
 //    landing waits for the end of the ascent.
 // 2. The guard. A patch that never comes lets the probe land after PATCH_WAIT, on no patch.
 // 3. The refusals. A descent while the probe is not in orbit, an ascent while it is not on the
@@ -18,7 +18,7 @@
 //    the cover opens over JUMP_OUT_MS to `landed`. The fix, the stage, and the key of the landing go.
 import { root } from './three-hook.mjs';
 
-const { Probe, DIVE_MS, FADE_MS, PATCH_WAIT, JUMP_MS, JUMP_OUT_MS } = await import(root + 'probe.js');
+const { Probe, DIVE_MS, ENTRY_MS, FADE_MS, PATCH_WAIT, JUMP_MS, JUMP_OUT_MS } = await import(root + 'probe.js');
 
 let fails = 0;
 function ok(part, cond, msg) {
@@ -51,12 +51,14 @@ ok('cover', s.kind === 'descend' && s.phase === 'in' && s.path === path && Math.
 s = p.step(DIVE_MS + 100);
 ok('wait', s.event === null && s.cover === 1 && p.mode === 'descending', 'the switch did not wait for the patch');
 p.patchDone(p.job, { patch: 'P' });
-s = p.step(DIVE_MS + 200);
+s = p.step(ENTRY_MS - 16);
+ok('entry', s.event === null && p.mode === 'descending', 'the switch did not wait for the floor of the entry with the patch done');
+s = p.step(ENTRY_MS + 16);
 ok('enter', s.event === 'enter' && s.patch.patch === 'P' && s.view.kind === 'ground' && p.mode === 'ground' && p.view === null, `the switch gives ${JSON.stringify(s)}`);
 p.hear({ fix: FIX, stage: { n: 1 }, heard: 'wreck:open' });
 ok('hear', p.fix === FIX && p.stage.n === 1 && p.heard === 'wreck:open', 'the probe on the ground did not keep what the landing heard');
-ok('ascend', !p.ascend(DIVE_MS + 300), 'an ascent ran while the cover still opened');
-let ev = run(p, DIVE_MS + 216, DIVE_MS + 200 + FADE_MS + 32);
+ok('ascend', !p.ascend(ENTRY_MS + 100), 'an ascent ran while the cover still opened');
+let ev = run(p, ENTRY_MS + 32, ENTRY_MS + 16 + FADE_MS + 32);
 ok('landed', ev.length === 1 && ev[0][0] === 'landed' && ev[0][2].cover === 0 && p.dive === null && p.mode === 'ground', `the opening of the cover gives ${JSON.stringify(ev.map((e) => e[0]))}`);
 let t = 5000;
 ok('ascend', p.ascend(t), 'the ascent was refused on the ground');
@@ -97,7 +99,7 @@ ok('refuse', !new Probe().descend(null, 0), 'a descent with no site ran');
 const MODES = {
   orbit: () => new Probe(),
   descending: () => { const q = new Probe(); q.descend(SITE, 0, { view: { kind: 'ground' } }); return q; },
-  ground: () => { const q = new Probe(); q.descend(SITE, 0); q.patchDone(q.job, {}); run(q, 0, DIVE_MS + FADE_MS + 64); q.hear({ fix: FIX, stage: { n: 2 }, heard: 'k' }); return q; },
+  ground: () => { const q = new Probe(); q.descend(SITE, 0); q.patchDone(q.job, {}); run(q, 0, ENTRY_MS + FADE_MS + 64); q.hear({ fix: FIX, stage: { n: 2 }, heard: 'k' }); return q; },
   ascending: () => { const q = MODES.ground(); q.ascend(10000); run(q, 10000, 10000 + FADE_MS + 16); return q; },
 };
 for (const [name, make] of Object.entries(MODES)) {
@@ -129,7 +131,7 @@ for (const [name, make] of Object.entries(MODES)) {
   ok('jump', r.abort() && clean(r), 'an abort during the jump did not return to a clean orbit');
 }
 
-console.log(`  landing   the descent waits for the patch, the ascent gives the fix at its end; ${DIVE_MS} ms dive, ${FADE_MS} ms cover`);
+console.log(`  landing   the descent waits for the patch and ${ENTRY_MS} ms of entry, the ascent gives the fix at its end; ${DIVE_MS} ms dive, ${FADE_MS} ms cover`);
 console.log(`  guard     no patch lands the probe after ${PATCH_WAIT} ms, on no patch`);
 console.log('  refusals  a second descent, an early ascent, a hear off the ground, and an older patch change nothing');
 console.log(`  jump      from the ground to the twin: the cover closes over ${JUMP_MS} ms, waits for the patch, swaps, and opens over ${JUMP_OUT_MS} ms`);

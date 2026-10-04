@@ -12,7 +12,7 @@ import { sameCell, siteCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector, RuinInspector } from './ground-source.js';
 import { makeTuner } from './tuner.js';
-import { Probe, DIVE_MS, FADE_MS } from './probe.js';
+import { Probe, DIVE_MS, FADE_MS, ENTRY_MS } from './probe.js';
 import { wayKey, sendName, nameOf, homeOf, FATE_IDS } from './way-types.js';   // chapter 3
 import { readCodex, writeCodex } from './carrier-store.js';
 import { makeDecoder } from './decoder.js';
@@ -1125,9 +1125,9 @@ let ground = null;        // the Ground instance while the probe is down
 function requestPatch(label = null) {
   const t0 = performance.now();
   const job = probe.job, target = probe.site;
-  if (diveLabel) diveLabel.textContent = label || 'Sending the probe';
+  if (diveLabel) diveLabel.textContent = label || '';
   patchJob = {
-    progress: (msg) => { if (diveLabel && !label) diveLabel.textContent = msg.label; },
+    progress: () => {},   // the cover shows the entry, and no line about the build
     done: (result) => {
       patchJob = null;
       probe.patchDone(job, result);
@@ -1186,11 +1186,12 @@ function ascend() {
 // The entry. The cover of a descent is a fall through the air of the world: the sky runs from the
 // black of space to the colour of the air, the cloud layers rush up past the probe, the heat of the
 // entry glows over the first second and a half, and the altitude falls to CAM_START, the height of
-// the camera the cover opens on. The altitude falls fast and then slower, so it is still falling
-// when a slow patch arrives. A recall plays it backward. The patch builds under the whole fall.
+// the camera the cover opens on. The fall lasts ENTRY_MS at least, and it falls fast and then
+// slower, so it is still falling when a slow patch arrives. A recall plays it backward. The patch
+// builds under the whole fall. No line of text tells the reader what the worker builds.
 const ENTRY_TOP = 80000;   // metres, the altitude at the start of a descent and the end of a recall
-const ENTRY_TAU = 900;     // ms: each ENTRY_TAU of the fall takes away two thirds of what is left
-const ENTRY_HEAT = 1600;   // ms, the glow of the entry
+const ENTRY_TAU = ENTRY_MS / 5;   // ms: each ENTRY_TAU of the fall takes two thirds of what is left
+const ENTRY_HEAT = 2400;   // ms, the glow of the entry
 const ENTRY_LOG = Math.log(ENTRY_TOP / CAM_START);
 let entry = null;          // the entry that runs: { up, t0, alt }
 
