@@ -12,7 +12,7 @@ import { sameCell, siteCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector, RuinInspector } from './ground-source.js';
 import { makeTuner } from './tuner.js';
-import { Probe, DIVE_MS, FADE_MS, ENTRY_MS, EXIT_MS } from './probe.js';
+import { Probe, BURST_MS, FADE_MS, ENTRY_MS, EXIT_MS } from './probe.js';
 import { wayKey, sendName, nameOf, homeOf, FATE_IDS } from './way-types.js';   // chapter 3
 import { readCodex, writeCodex } from './carrier-store.js';
 import { makeDecoder } from './decoder.js';
@@ -21,7 +21,7 @@ import { hullOf } from './wreck-geometry.js';
 import { Ground, CAM_START } from './ground.js';
 import { TIERS, worldOpts, patchOpts } from './tiers.js';
 import { skyView } from './ground-sky.js';
-import { ProbeHud } from './probe-hud.js';
+import { ProbeHud, Static } from './probe-hud.js';
 import { perf, Hud } from './perf.js';
 import { rollStar, StarSystem } from './star.js';
 import { makeDeck } from './deck.js';
@@ -74,6 +74,10 @@ const overlayBar = $('#overlay-bar');
 // control, and a press on it opens the brief of the distress signal; see openBrief() below.
 const probeHud = new ProbeHud($('#probe-hud'), { onCarrier: () => openBrief() });
 const diveEl = $('#dive');
+// The static over each cut of a dive: the signal of the probe drops, the view cuts under it, and
+// it comes back. It is the static of the overlay, solid at its peak. See _stepDive() in probe.js.
+const diveStatic = new Static($('#dive-static'), { alpha: 255, solid: true, tear: true });
+diveStatic.resize(innerWidth, innerHeight, 1);
 const diveLabel = $('#dive-label');
 const diveAlt = $('#dive-alt');
 
@@ -1180,7 +1184,7 @@ function descend(target = site, view = null) {
 function ascend() {
   if (!probe.ascend(performance.now())) return;
   ground.controls.enabled = false;
-  ground.depart(DIVE_MS);   // the camera climbs away from the ground while the cover closes
+  ground.depart(BURST_MS);   // the camera climbs away from the ground while the static rises
   startEntry(true);
 }
 
@@ -1189,42 +1193,33 @@ function ascend() {
 // entry glows over the first second and a half, and the altitude falls to CAM_START, the height of
 // the camera the cover opens on. The fall lasts ENTRY_MS at least, and it falls fast and then
 // slower, so it is still falling when a slow patch arrives. A recall plays it backward. The patch
-// builds under the whole fall. No line of text tells the reader what the worker builds.
+// builds under the whole fall. No line of text tells the reader what the worker builds. The cover
+// cuts on and off under the static of the probe, and never fades.
 const ENTRY_TOP = 80000;   // metres, the altitude at the start of a descent and the end of a recall
 const ENTRY_TAU = ENTRY_MS / 5;   // ms: each ENTRY_TAU of the fall takes two thirds of what is left
 const ENTRY_HEAT = 2400;   // ms, the glow of the entry
 const ENTRY_LOG = Math.log(ENTRY_TOP / CAM_START);
 let entry = null;          // the entry that runs: { up, t0, alt }
 
-// The colour of the air of the world, and the colour of the haze of the ground. The cover of a
-// descent turns from the first to the second as it opens, and an ascent the other way, so each end
-// of the cover meets the view it opens on. The style of #dive blends the colour.
-const airColor = () => current.world.palette.atmo || '#8fb7ff';
-const hazeColor = () => (ground && ground.scene.fog ? `#${ground.scene.fog.color.getHexString()}` : airColor());
-
 function startEntry(up) {
   entry = { up, t0: performance.now(), alt: up ? CAM_START : ENTRY_TOP };
-  diveEl.style.background = up ? hazeColor() : airColor();
+  diveEl.style.background = current.world.palette.atmo || '#8fb7ff';
   diveEl.classList.add('entry');
   diveEl.classList.toggle('up', up);
-  stepEntry(entry.t0, null);
+  stepEntry(entry.t0);
 }
 
-function stepEntry(now, s) {
+function stepEntry(now) {
   if (!entry) return;
   const t = now - entry.t0;
   let alt;
   if (entry.up) {
-    // the recall climbs over the time the cover takes to close and to open
-    alt = CAM_START * Math.exp(ENTRY_LOG * Math.min(1, t / (EXIT_MS + FADE_MS)));
-  } else if (s && s.phase === 'out') {
-    alt = CAM_START + (entry.alt - CAM_START) * (1 - s.k);   // the last of the fall, as the cover opens
+    // the recall climbs over the time the cover stands
+    alt = CAM_START * Math.exp(ENTRY_LOG * Math.min(1, t / (EXIT_MS + BURST_MS)));
   } else {
     alt = entry.alt = CAM_START + (ENTRY_TOP - CAM_START) * Math.exp(-t / ENTRY_TAU);
   }
   const depth = 1 - Math.log(alt / CAM_START) / ENTRY_LOG;    // 0 in space, 1 at the camera
-  // the readout goes over the first half of the opening, before the view comes up
-  diveEl.style.setProperty('--open', s && s.phase === 'out' ? s.k.toFixed(3) : '0');
   diveEl.style.setProperty('--depth', depth.toFixed(3));
   diveEl.style.setProperty('--air', THREE.MathUtils.smoothstep(depth, 0.25, 0.6).toFixed(3));
   diveEl.style.setProperty('--heat', entry.up ? '0' : Math.sin(Math.PI * Math.min(1, t / ENTRY_HEAT)).toFixed(3));
@@ -1246,16 +1241,14 @@ function stepDive(now) {
     camera.lookAt(s.path.look);
   }
   diveEl.style.opacity = String(s.cover);
-  stepEntry(now, s);
+  diveStatic.draw(s.noise, now);
+  stepEntry(now);
   if (s.event === 'landed' || s.event === 'surfaced') endEntry();
   if (s.event === 'enter') {
     enterGround(s.patch, s.view);
-    // the fall runs on into the ground while the cover opens, and the cover takes the haze
-    if (ground) { ground.arrive(FADE_MS); diveEl.style.background = hazeColor(); }
-  } else if (s.event === 'leave') {
-    leaveGround();
-    diveEl.style.background = airColor();
-  }
+    // the fall runs on into the ground while the static clears
+    if (ground) ground.arrive(FADE_MS);
+  } else if (s.event === 'leave') leaveGround();
   else if (s.event === 'landed') { if (ground) ground.controls.enabled = !deckHolds; }
   else if (s.event === 'surfaced') surface(s.fix);
   if ((s.event === 'enter' || s.event === 'leave') && diveLabel) diveLabel.textContent = '';
@@ -1387,6 +1380,7 @@ function abortProbe() {
   controls.enabled = true;
   setCarrierLevel();       // the probe is off the ground, so the motif takes its orbit level
   diveEl.style.opacity = '0';
+  diveStatic.clear();
   endEntry();
   if (diveLabel) diveLabel.textContent = '';
 }
@@ -2059,6 +2053,7 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   if (ground) ground.resize(innerWidth, innerHeight);
   probeHud.resize(innerWidth, innerHeight, Q.dpr);
+  diveStatic.resize(innerWidth, innerHeight, 1);
 });
 // The preview of the card follows the box of its canvas, not the window. Each subject lays the card
 // out in its own way, and the box of the canvas changes after show() measured it: the subject flips
