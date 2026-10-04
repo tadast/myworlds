@@ -16,6 +16,7 @@
 //   storyOf(world, view, here)   the story of the world on the screen; see below
 //   numWord(n)                   a count under a hundred in words: 'sixteen', 'forty-two'
 import { WRECK_FREQ } from './carrier.js';
+import { rollCall } from './way-types.js';
 
 const NUM = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven',
   'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
@@ -32,15 +33,20 @@ const bearing = (b) => `${String(Math.round(b) % 360).padStart(3, '0')}°`;
 //   here    `{ mode, stage }`: the mode of the probe, and the stage of the landing from land() of
 //           chapters.js, or null where the landing heard nothing
 //
-// Gives `{ has, intro, chapters, objective, done, of }`. `has` is false on a world with no story,
-// which is every gas giant and every world with no source: then only `objective` holds words.
+// Gives `{ has, intro, chapters, objective, done, of, complete, roll }`. `has` is false on a world
+// with no story, which is every gas giant and every world with no source: then only `objective`
+// holds words.
 //
 //   intro       `{ years, ship, crew, band, text }`: the distress signal that brought the reader here
 //   chapters    `{ id, n, state, locked, title, goal, status, band, fixes, actions }` for each chapter.
 //               An action is `{ id, label, chapter, orbitOnly }`: 'aim' turns the globe to a found
-//               source, 'clear' drops the wedges, 'brief' opens the brief, 'lost' opens the record
+//               source, 'clear' drops the wedges, 'brief' opens the brief, 'lost' opens the record,
+//               and 'log' opens the card of the chapter again after the end of the story
 //   objective   `{ kicker, title, line, chapter, tune }`: the next step of the reader. `tune` is true
 //               while the band of the open chapter waits for the tuner
+//   complete    the story is over; see view() of chapters.js
+//   roll        the roll call of rollCall() of way-types.js once the story is over on a world with a
+//               twin, or null
 export function storyOf(world, view, here = {}) {
   const log = world && world.source && world.source.log;
   if (!view || !log || !view.chapters.length) {
@@ -80,9 +86,16 @@ export function storyOf(world, view, here = {}) {
     if (n === 1) return 'One wedge on the globe. Land again, far to one side of it.';
     return 'The wedges cross. Land where they meet.';
   };
+  // After the end of the story the reader can read the card of each chapter again, from anywhere.
+  const logLabel = {
+    wreck: 'Read the log of the wreck',
+    ruin: world.ruin && world.ruin.log ? 'Read the log at the ruin' : 'Read the card of the ruin',
+    way: world.twin && world.twin.log ? 'Read the log at the twin' : 'Read the card of the twin',
+  };
   const actions = (ch) => {
     const a = [];
     if (ch.state === 'done') a.push({ id: 'aim', label: `Find the ${ch.id === 'way' ? 'twin' : ch.id} on the globe`, chapter: ch.id, orbitOnly: true });
+    if (ch.state === 'done' && view.complete) a.push({ id: 'log', label: logLabel[ch.id], chapter: ch.id });
     if (ch.state === 'open' && ch.kind === 'search' && ch.fixes.length) a.push({ id: 'clear', label: 'Clear the wedges' });
     if (ch.state === 'open' && ch.kind === 'search') a.push({ id: 'brief', label: 'How the search works' });
     if (ch.id === 'wreck' && view.row && view.row.lost) a.push({ id: 'lost', label: 'Read the incident record' });
@@ -124,6 +137,8 @@ export function storyOf(world, view, here = {}) {
   }
 
   // The objective: the first chapter that is open, or the end of the story.
+  const roll = view.complete && world.twin ? rollCall(world, { home: !!(view.way && view.way.home) }) : null;
+  const names = (list) => (list.length === 1 ? list[0] : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
   const open = chapters.find((ch) => ch.state === 'open');
   const of = chapters.length;
   const kicker = (n) => `Chapter ${n} of ${of}`;
@@ -136,13 +151,19 @@ export function storyOf(world, view, here = {}) {
       : { kicker: kicker(2), title: 'The second signal', line: searchLine(ru, 'source'), chapter: 'ruin' };
   } else if (open && open.id === 'way') {
     objective = { kicker: kicker(3), title: 'The way on', line: 'Land at the ruin. Read the name on it, and send it.', chapter: 'way' };
-  } else if (view.way && view.way.home) {
-    objective = { kicker: 'Mission complete', title: 'The crew is home', line: 'Every chapter of this world is done. Find another world.' };
-  } else if (view.way && view.way.state === 'done') {
-    objective = { kicker: kicker(3), title: 'At the twin', line: view.way.crew ? 'Somebody waits at the twin. Take the crew home.' : 'Read the third log at the twin.', chapter: 'way' };
+  } else if (view.way && view.way.state === 'done' && !view.complete) {
+    objective = { kicker: kicker(3), title: 'At the twin', line: 'Open the card of the twin, and read what waits there.', chapter: 'way' };
+  } else if (view.way) {
+    // The read of the card of the twin ends the story. A person who lived waits to go home.
+    const waits = roll.people.filter((p) => p.status === 'alive').map((p) => p.name);
+    objective = view.way.home
+      ? { kicker: 'Story complete', title: 'The crew is home', line: 'Every chapter of this world is done. Share it with a friend, or find another world.' }
+      : waits.length
+        ? { kicker: 'Story complete', title: 'Somebody waits', line: `${names(waits)} ${waits.length === 1 ? 'waits' : 'wait'} at the twin. Take the crew home.`, chapter: 'way' }
+        : { kicker: 'Story complete', title: roll.title, line: `${roll.end} Read every log again in the Story window.`, chapter: 'way' };
   } else {
-    objective = { kicker: 'Found', title: 'The wreck is found', line: 'Read the log again any time.', chapter: 'wreck' };
+    objective = { kicker: 'Story complete', title: ru ? 'The ruin is found' : 'The wreck is found', line: 'Read the log again any time.', chapter: ru ? 'ruin' : 'wreck' };
   }
   const done = chapters.filter((ch) => ch.state === 'done').length;
-  return { has: true, intro, chapters, objective, done, of };
+  return { has: true, intro, chapters, objective, done, of, complete: !!view.complete, roll };
 }

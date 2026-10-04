@@ -364,6 +364,22 @@ body {
 .cruin-goers .ckeeper i::after { content: ' · keeps this log'; color: var(--ruin, var(--accent)); opacity: 1; }
 .cruin-goers.cnote .ckeeper i::after { content: ' · left this note'; }
 .cruin-log { padding: 2px 0 0 6px; }
+/* The roll call, the last entry of the card of the twin: the line of the probe, then one row for
+   each person. The name and the role read as the crew of the wreck reads; the end stands as a word
+   at the right, in a colour of its own, and as a sentence under the name. */
+.croll ul { list-style: none; margin: 12px 0 0; padding: 0; max-width: 62ch; }
+.croll li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline;
+  padding: 9px 2px; border-top: 1px solid var(--line);
+}
+.croll li:last-child { border-bottom: 1px solid var(--line); }
+.croll .croll-who { color: var(--text); font-size: 15px; }
+.croll .croll-who i { margin-left: 8px; font-style: normal; font-size: 13px; color: var(--muted); }
+.croll li b { font: 500 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.croll li p { grid-column: 1 / -1; font-size: 15.5px; line-height: 1.55; color: #cfd6ea; }
+.croll .croll-alive b, .croll .croll-home b { color: #8fe3a8; }
+.croll .croll-dead b { color: #ff9f8f; }
+.croll .croll-gone b, .croll .croll-changed b { color: var(--ruin, var(--accent)); }
 .cruin-log .clog-entry.ctitled h3 { color: var(--ruin, var(--accent)); }
 .cruin-log .clog-entry.ctitled h3::before { background: var(--ruin, var(--accent)); }
 #creature[data-subject="ruin"] .ctags,
@@ -837,6 +853,10 @@ body {
 .home-card h2 { margin-bottom: 12px; }
 .home-lost { color: var(--muted); }
 .home-lost:empty { display: none; }
+/* The end card holds the share: the button, and a line under it that says why. */
+.home-share { margin-top: 18px; }
+.about-card .home-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
+.home-note:empty { display: none; }
 
 /* ---------- the interface, deck.js
    The title, the dock, the window, and the chrome of the planet. #ui takes no pointer event, so a
@@ -1147,6 +1167,8 @@ body {
 #ui .now { margin-top: 18px; padding: 18px 20px; border-radius: 20px; background: rgba(124, 196, 255, 0.06); border: 1px solid rgba(124, 196, 255, 0.22); }
 #ui .now h3 { margin: 6px 0; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 26px; }
 #ui .now p { margin: 0 0 14px; color: #d7def5; font-size: 15px; line-height: 1.5; }
+/* The end of the story: the share, and a line under it that says why. */
+#ui .now .share-note { margin: 10px 0 0; color: var(--muted); font-size: 12.5px; }
 #ui .wander { display: flex; gap: 14px; align-items: flex-start; margin-top: 18px; padding: 16px 18px; border-radius: 20px; background: rgba(167, 227, 160, 0.05); border: 1px solid rgba(167, 227, 160, 0.18); }
 #ui .wander .ico { flex: none; margin-top: 2px; color: #a7e3a0; }
 #ui .wander p { margin: 0 0 10px; color: #d4e5d2; font-size: 14.5px; line-height: 1.5; }

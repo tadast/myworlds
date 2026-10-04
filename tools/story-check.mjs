@@ -170,10 +170,22 @@ p.arrive();
 st = storyOf(w, p.view(), orbit);
 ok('way', st.done === 3 && st.objective.title === 'At the twin', `after the arrival the objective reads ${JSON.stringify(st.objective)}`);
 ok('way', st.chapters[2].actions.some((a) => a.label === 'Find the twin on the globe'), 'the twin offers no way back');
+ok('way', !st.complete && !st.roll && st.objective.line === 'Open the card of the twin, and read what waits there.'
+  && !st.chapters.some((c) => c.actions.some((a) => a.id === 'log')), `before the read of the card of the twin the story reads ${JSON.stringify(st.objective)}`);
+// The read of the card of the twin ends the story: the objective says so, every chapter offers its
+// card again, and the roll call names each person of the crew once.
 p.readLog();
+st = storyOf(w, p.view(), orbit);
+ok('end', st.complete && st.objective.kicker === 'Story complete', `after the read the objective reads ${JSON.stringify(st.objective)}`);
+ok('end', st.chapters.every((c) => c.actions.some((a) => a.id === 'log' && a.chapter === c.id && !a.orbitOnly)), 'a chapter offers no way to read its card again');
+ok('end', st.roll && JSON.stringify(st.roll.people.map((x) => x.name)) === JSON.stringify(log.crew.map((c) => c.name)), `the roll call reads ${JSON.stringify(st.roll)}`);
+const waits = st.roll.people.filter((x) => x.status === 'alive');
+ok('end', waits.length ? st.objective.title === 'Somebody waits' && st.objective.line.endsWith('Take the crew home.')
+  : st.objective.title === 'The fate of the crew' && st.objective.line.startsWith(st.roll.end), `the end reads ${JSON.stringify(st.objective)}`);
 if (p.view().way.crew && p.goHome()) {
   st = storyOf(w, p.view(), orbit);
-  ok('home', st.objective.kicker === 'Mission complete' && st.objective.title === 'The crew is home', `the end reads ${JSON.stringify(st.objective)}`);
+  ok('home', st.objective.kicker === 'Story complete' && st.objective.title === 'The crew is home', `the end reads ${JSON.stringify(st.objective)}`);
+  ok('home', st.roll.people.every((x) => x.status !== 'alive') && st.roll.people.some((x) => x.status === 'home'), `the roll call after the way home reads ${JSON.stringify(st.roll)}`);
 }
 rows.push(`  story     ${w.seed} (${w.type}): ${log.probe}, ${log.years} years; no spoiler and no wreck before the find, at every step`);
 

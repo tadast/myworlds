@@ -85,8 +85,16 @@ One of the six ways the third log ends: `pact`, `trek`, `split`, `sour`, `mad`, 
 _Avoid_: ending (an ending is the last entry of the first log)
 
 **Home**:
-The end of the mission: the reader takes the crew home from the twin.
+The end of the mission: the reader takes the crew home from the twin. It comes after the end of the story, and only where a person of the crew lives at the twin.
 _Avoid_: rescue (in the code)
+
+**End of the story**:
+The read of the card of the twin: the third log when the crew left one, or the line that nobody of the crew stood there. `view().complete` of `chapters.js` holds it. After it each chapter offers its card again in the Story window, and the Story window offers the share of the world.
+_Avoid_: mission complete (that is the home), finish
+
+**Roll call**:
+The last entry of the story: the end of each person of the crew of the wreck, in plain words, from the last log that names the person. The card of the twin shows it under the third log. `rollCall()` of `way-types.js`. The page heads it "The fate of the crew".
+_Avoid_: fate (a fate is one of the six ways the third log ends), record (the record is the shape on disk)
 
 **Progress**:
 The state of the chapters of one world for the reader: the state of each chapter, the fixes and the briefs of each search, and the bands the receiver holds. The carrier store keeps it by seed.

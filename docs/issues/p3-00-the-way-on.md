@@ -239,5 +239,11 @@ species of each world, and a kin, as the herd: 2,284 logs.
 - **Open:** `tools/lore-audit/audit.mjs` does not sweep the pools of the third log yet; the lint of
   `way-sample.mjs` holds the same rules. A crew that stayed at the wreck (`went: 'none'`, about 40 per
   cent of the worlds) leaves no third log, and the twin then holds the herd alone.
+- **The end of the story**, 2026-10-04. The read of the card of the twin ends the story, on a twin with a
+  third log and on a twin with none. Before, a twin with no third log never took the read, and the
+  objective said "Read the third log at the twin" for ever. The roll call of `way-types.js` is the last
+  entry of the card of the twin: the end of each person of the crew of the wreck. After the end the
+  Story window opens the card of each chapter again and offers the share. The way home follows the
+  end of the story where a person lives at the twin.
 - **The frame.** On HIGH at 1280 by 800, 60 renders at the twin of `audit-2` with the tent and two
   people shown and hidden in turn, six rounds: 6.00 ms against 5.94 ms, inside the noise.

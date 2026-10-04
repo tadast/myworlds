@@ -10,7 +10,8 @@
 //    of the maker, or the kin of a rolled maker, which lives nowhere else. The fate is null exactly
 //    where nobody reached the ruin, and it is a fate the crew allows.
 // 3. The third log: the crew of the second log with an end each, the ends by the table of the fate,
-//    the days, and the voice. way-sample.mjs --check tests the words.
+//    the days, and the voice. way-sample.mjs --check tests the words. The roll call: each person of the
+//    crew of the wreck once, with the end of the third log where the person went through the way.
 // 4. The patch of the twin on some worlds: the twin on its cell with the proto of the ruin, the tent
 //    exactly where a crew came, what stands by the tent from the ends of the people, the tent inside
 //    the soft edge and off the flat disc, no plant on its pad, and the herd around the stones.
@@ -54,7 +55,7 @@ ok('graves', W.gravesOf({ crew: [{ end: 'lost' }, { end: 'lost' }] }) === 1 && W
 // ---------------------------------------------------------------- 2 to 5. the worlds
 const OPTS = { detail: 24, maxFlora: 200, maxFauna: 40 };
 const tier = TIERS.LOW;
-const counts = { worlds: 0, ruins: 0, twins: 0, logs: 0, kin: 0, patches: 0, fates: {}, forms: {}, bands: {}, kmMin: Infinity, kmMax: 0 };
+const counts = { worlds: 0, ruins: 0, twins: 0, logs: 0, kin: 0, patches: 0, fates: {}, forms: {}, bands: {}, roll: {}, kmMin: Infinity, kmMax: 0 };
 let twinCount = 0;
 for (let i = 0; i < SEEDS; i++) {
   const seed = 'way-' + i;
@@ -134,6 +135,32 @@ for (let i = 0; i < SEEDS; i++) {
     }
   }
 
+  // the roll call: each person of the crew once, in the order of the crew, with an end that follows
+  // the third log where the person went through the way, and the people at home where they live
+  const roll = W.rollCall(w);
+  const crew0 = w.source.log.crew;
+  ok('roll', roll && roll.people.length === crew0.length && roll.people.every((x, j) => x.name === crew0[j].name && x.role === crew0[j].role),
+    `${seed}: the roll call does not name the crew of the wreck`);
+  ok('roll', roll.people.every((x) => W.ROLL_WORDS[x.status] === x.word && x.line && /[.]$/.test(x.line) && !/undefined|NaN|\{/.test(x.line)),
+    `${seed}: a row of the roll call reads ${JSON.stringify(roll.people)}`);
+  const alive = W.homeOf(t.log).map((c) => c.name);
+  ok('roll', JSON.stringify(roll.people.filter((x) => x.status === 'alive').map((x) => x.name)) === JSON.stringify(alive)
+    && (alive.length ? !roll.end.startsWith('Nobody') : roll.end === 'Nobody comes home.') && roll.text.endsWith(roll.end),
+    `${seed}: the roll call does not follow the people at home: ${roll.text}`);
+  if (t.log) {
+    for (const c of t.log.crew) {
+      const x = roll.people.find((r) => r.name === c.name);
+      const want = { home: 'alive', lost: 'dead', gone: 'gone', changed: 'changed' }[c.end];
+      ok('roll', x && x.status === want, `${seed}: ${c.name} ends ${c.end} in the third log and ${x && x.status} in the roll call`);
+    }
+  }
+  if (alive.length) {
+    const back = W.rollCall(w, { home: true });
+    ok('roll', back.people.filter((x) => x.status === 'home').length === alive.length && !back.people.some((x) => x.status === 'alive'),
+      `${seed}: the roll call after the way home reads ${JSON.stringify(back.people)}`);
+  }
+  for (const x of roll.people) counts.roll[x.status] = (counts.roll[x.status] || 0) + 1;
+
   // 5. the card of the twin
   const card = W.twinCard(w);
   ok('card', card && JSON.stringify(card.rows.slice(0, 4).map((r) => r.key)) === JSON.stringify(['size', 'name', 'herd', 'back'])
@@ -180,6 +207,7 @@ for (let i = 0; i < SEEDS; i++) {
 console.log(`  rules     the call sign, the send, the fates, the forms, and the graves`);
 console.log(`  twins     ${counts.twins} twins on ${counts.ruins} worlds with a ruin of ${counts.worlds} seeds; bands ${JSON.stringify(counts.bands)}; ${counts.kmMin} to ${counts.kmMax} km from the ruin; ${counts.kin} kin`);
 console.log(`  logs      ${counts.logs} third logs; fates ${JSON.stringify(counts.fates)}; forms ${JSON.stringify(counts.forms)}`);
+console.log(`  roll      the ends of every person of the roll calls: ${JSON.stringify(counts.roll)}`);
 console.log(`  patches   ${counts.patches} patches of the twin: the stones, the tent, and the herd`);
 console.log('');
 if (fails) { console.log(`FAIL: ${fails} checks`); process.exit(1); }

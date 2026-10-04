@@ -22,7 +22,7 @@ Title ──name / dice / a saved world──▶ Arrival ──▶ the planet
 - **The dock** is the only navigation. Its four tabs open one window. The probe button stands raised in its middle: "Send probe" in orbit, "Cancel" while the reader aims, "Recall probe" on the ground, "No surface" on a gas giant, and "Close" while the window stands open.
 - **The window** fills the screen above the dock, over a veil of the planet. Its pages:
   - **Worlds**: a field for a new name with the dice, and every saved world as a card, with its marks.
-  - **Story**: the distress signal, the Now panel with the next step and its button, and the chapters. The tuner stands in the Now panel while the band waits for it.
+  - **Story**: the distress signal, the Now panel with the next step and its button, and the chapters. The tuner stands in the Now panel while the band waits for it. After the end of the story the Now panel holds the share of the world and the roll call, and each chapter offers its card again.
   - **Planet**: the globe, a line about the world, the facts, and the field guide. On the ground the field guide comes first.
   - **Menu**: the sound and the volume, About, the title screen, and the controls.
 
@@ -76,5 +76,9 @@ On the ground, the probe overlay shows the signal block under the top strip, on 
 A press on the block opens the brief. The brief also says "the source", and never "the carrier", because the same words serve the wreck and the ruin.
 
 ## The cards and the dialogs
+
+**The end of the story.** The read of the card of the twin ends the story, with a third log or with none. The roll call stands as the last entry of that card. When nobody waits to go home, the end card follows the close of the card of the twin; else the end card follows the way home. The end card holds the share.
+
+**The share** names the world and no place on it, so a friend starts at the distress signal. It uses the share sheet of the device, `navigator.share()`, and puts the link on the clipboard where the browser has none. The end card, the Now panel at the end of the story, and the Planet window hold it.
 
 The study card and the dialogs take the size and the type of the window: almost the whole screen, Fraunces for names and prose, and IBM Plex Mono for labels. A creature and a plant take the preview as the left half and the text as the right; on a phone the preview is a band across the top. The card of the wreck and the card of the ruin keep the layout of a reader. The card has no arrows, because an arrow would step to a creature the reader has not found yet.
