@@ -1106,6 +1106,7 @@ export class Ground {
     this.controls.update();
     this._brakeEdge(bx, bz, cx, cz);     // the drag eases to a stop at the reach, it does not hit a wall
     if (this.glide) this._stepGlide(dt);
+    if (this._dolly) this._stepDolly(dt);
     // Issue 23: a press that holds still, and does not move, becomes a walk.
     const tap = this._tap;
     if (tap && !tap.walk && performance.now() - tap.t > WALK_HOLD) tap.walk = true;
@@ -1624,6 +1625,34 @@ export class Ground {
       p.x += dx; p.y += dy; p.z += dz;
       tg.x += dx; tg.y += dy; tg.z += dz;
     }
+  }
+
+  // ---------------------------------------------------------------- the camera of a dive
+  // app.js calls these while the cover of a dive moves, and the controls stay off for both.
+  // arrive() starts the camera `far` times its distance out along its view line and brings it in to
+  // its pose over `ms`, with an ease-out: the fall of the entry runs on into the ground while the
+  // cover opens, so the end of the entry is a cross fade and not a cut. depart() takes the camera
+  // out along the same line with an ease-in while the cover of an ascent closes.
+  arrive(ms, far = 1.6) {
+    const d = this.camera.position.distanceTo(this.controls.target);
+    this._dolly = { t: 0, dur: ms / 1000, d0: d * far, d1: d, out: true };
+    this._stepDolly(0);
+  }
+
+  depart(ms, far = 3) {
+    const d = this.camera.position.distanceTo(this.controls.target);
+    this._dolly = { t: 0, dur: ms / 1000, d0: d, d1: d * far, out: false };
+  }
+
+  _stepDolly(dt) {
+    const d = this._dolly;
+    d.t = Math.min(d.dur, d.t + dt);
+    const k = d.dur > 0 ? d.t / d.dur : 1;
+    const e = d.out ? 1 - (1 - k) ** 3 : k * k * k;
+    const tg = this.controls.target;
+    _off.copy(this.camera.position).sub(tg).setLength(THREE.MathUtils.lerp(d.d0, d.d1, e));
+    this.camera.position.copy(tg).add(_off);
+    if (k >= 1) this._dolly = null;
   }
 
   // ---------------------------------------------------------------- the glide
