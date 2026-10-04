@@ -5,7 +5,7 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, sourceSite } from './site.js';
+import { groundRadius, groundHides, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, sourceSite } from './site.js';
 import { progressOf, marksOf, briefWords, motifLevel, CLOSED_LINE } from './chapters.js';
 import { makeCarrierGroup, addWedge, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, carrierColour, showMarker } from './carrier-globe.js';
 import { sameCell, siteCell } from './cell-grid.js';
@@ -2011,20 +2011,26 @@ if (window.ResizeObserver) {
   for (const cv of previews.keys()) ro.observe(cv);
 }
 
-// pick a creature under a screen point: nearest projected instance on the visible hemisphere
+// pick a creature under a screen point: nearest projected instance that the ground does not hide
 const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pn = new THREE.Vector3(), _pm = new THREE.Matrix4();
 // tolerance grew with the 30% smaller creatures, so a finger still finds one
 function creatureAt(px, py, tolerance = 34) {
   if (!current) return null;
   let best = null, bestD = tolerance;
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  const { world, heightMap } = current;
   for (const inst of current.faunaMeshes) {
     inst.updateWorldMatrix(true, false);
     for (let j = 0; j < inst.count; j++) {
       inst.getMatrixAt(j, _pm);
-      _pv.setFromMatrixPosition(_pm).applyMatrix4(inst.matrixWorld);
-      // hidden behind the planet if the surface normal there faces away from the camera
-      if (_pv.x * (_pv.x - camera.position.x) + _pv.y * (_pv.y - camera.position.y) + _pv.z * (_pv.z - camera.position.z) > 0) continue;
+      // The ground under the animal hides it, and not a sphere at its own height: a flyer over
+      // the horizon stands against the sky. A test at its height hid the whale, and the tap opened
+      // a small animal near it. See groundHides() in site.js.
+      _pv.setFromMatrixPosition(_pm);
+      const r = _pv.length();
+      const floor = Math.min(r, Math.max(groundRadius(world, heightMap, _pn.copy(_pv).divideScalar(r)), world.seaRadius || 0));
+      _pv.applyMatrix4(inst.matrixWorld);
+      if (groundHides(camera.position, _pv, floor * (_pv.length() / r))) continue;
       // project the base and a point one body-height up, then measure to that segment
       const sc = Math.hypot(_pm.elements[0], _pm.elements[1], _pm.elements[2]);
       _pt.copy(_pv).addScaledVector(_pn.copy(_pv).normalize(), sc * 1.1);
