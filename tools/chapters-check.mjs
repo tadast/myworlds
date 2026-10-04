@@ -209,14 +209,18 @@ ok('way', wayState(v) === 'done' && v.way.text === 'At the twin' && v.way.crew, 
 ok('way', JSON.stringify(v.row.aims.map((a) => a.id)) === JSON.stringify(['wreck', 'ruin', 'way']), `the aims read ${JSON.stringify(v.row.aims)}`);
 ok('way', marksOf().get(seed).text === '✦✦✦', 'the thumb does not carry three marks');
 ok('way', !pw.goHome(), 'the crew went home before the read of the log');
+ok('way', !v.complete, 'the story ended with the arrival, before the read of the card of the twin');
 ok('way', pw.readLog() && !pw.readLog() && progressOf(withCrew).view().way.text === 'Somebody waits', 'the read of the third log did not stand');
+ok('way', progressOf(withCrew).view().complete && marksOf().get(seed).complete
+  && marksOf().get(seed).title === 'The story of this world is complete', 'the read of the third log did not end the story');
 ok('way', pw.goHome() && !pw.goHome() && progressOf(withCrew).view().way.home, 'the crew did not go home');
 ok('way', marksOf().get(seed).text === '✦✦✦ ⌂' && marksOf().get(seed).home, 'the thumb of a world whose crew went home takes no house');
 ok('way', disk(seed).way && disk(seed).way.found && disk(seed).way.read && disk(seed).way.home, `the store holds ${JSON.stringify(disk(seed).way)}`);
 const noCrew = { ...w, seed: w.seed + '-alone', twin: { ...w.twin, log: null } };
 pw = progressOf(noCrew);
-pw.read('wreck'); pw.read('ruin'); pw.arrive(); pw.readLog();
-ok('way', !pw.goHome() && pw.view().way.text === 'Nobody came' && !pw.view().way.crew, 'a twin with no crew took the crew home');
+pw.read('wreck'); pw.read('ruin'); pw.arrive();
+ok('way', !pw.view().complete && pw.readLog() && pw.view().complete, 'the read of the card of a twin with no third log did not end the story');
+ok('way', !pw.goHome() && pw.view().way.text === 'Found. Nobody of the crew came.' && !pw.view().way.crew, 'a twin with no crew took the crew home');
 rows.push(`  way       the way on opens with the find of the ruin; the arrival, the read of the log, and the way home stand in order`);
 
 // ---------------------------------------------------------------- 3. the follow rule

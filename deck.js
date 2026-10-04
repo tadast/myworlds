@@ -23,7 +23,7 @@
 // `app` holds what the interface reads: world, mode, dive, busy, aiming, card, modal, study, view,
 // stage, plants, guide, tuner, and music. It holds what the interface does: generate(), random(),
 // worlds(), forget(), probe(), aim(), stopAim(), openStudy(), inspect(), inspectPlant(), brief(),
-// lost(), about(), clear(), aimAt(), shareUrl(), snapshot(), and hold().
+// lost(), about(), clear(), aimAt(), share(), openLog(), snapshot(), and hold().
 import { icon, fillIcons, wave } from './icons.js';
 import { storyOf } from './story.js';
 
@@ -188,7 +188,7 @@ export function makeDeck(app, { title = false } = {}) {
         <div><span class="kick">${esc(w.designation)} · ${esc(w.typeLabel)}</span>
           <h1 id="book-title">${esc(w.seed)}</h1>
           <p class="lede">${esc(lede)}</p>
-          <button type="button" class="pill" data-act="share">${icon('share', 15)}Copy a link to ${esc(w.seed)}</button></div>
+          <button type="button" class="pill" data-act="share">${icon('share', 15)}<span class="t">Share ${esc(w.seed)}</span></button></div>
       </header>
       ${ground ? life : ''}
       <h2 class="h">At a glance</h2>
@@ -199,7 +199,7 @@ export function makeDeck(app, { title = false } = {}) {
   function pageStory() {
     const st = story(), w = app.world;
     seenStory = storyKey(st);
-    const wander = `<div class="wander">${icon('paw', 22)}<div><p>The story can wait. Every creature of ${esc(w.seed)} is on the Planet page, and the probe can land anywhere just to look around.</p>
+    const wander = `<div class="wander">${icon('paw', 22)}<div><p>${st.complete ? 'The story is over, and the planet stays.' : 'The story can wait.'} Every creature of ${esc(w.seed)} is on the Planet page, and the probe can land anywhere just to look around.</p>
       <button type="button" class="pill" data-act="window:planet:life">Meet the creatures ${icon('arrow', 14, 2)}</button></div></div>`;
     if (!st.has) {
       return `<span class="kick">Story</span><h1 id="book-title">${esc(st.objective.title)}</h1><p class="sub">${esc(st.objective.kicker)} · ${esc(w.designation)}</p>
@@ -212,8 +212,14 @@ export function makeDeck(app, { title = false } = {}) {
     const o = st.objective;
     const cur = st.chapters.find((c) => c.id === o.chapter) || {};
     let cta = '';
+    // The end of the story: the share comes first, and the roll call is one press away.
     if (o.tune) cta = '<div class="tune-slot"></div>';
-    else if (cur.state === 'open' && app.mode === 'orbit') cta = `<button type="button" class="btn primary big" data-act="land">${icon('down', 18, 2.2)}Send the probe</button>`;
+    else if (st.complete) {
+      cta = `<div class="acts end"><button type="button" class="btn primary" data-act="share">${icon('share', 16)}<span class="t">Share ${esc(w.seed)}</span></button>`
+        + `${st.roll ? `<button type="button" class="btn" data-act="log:way:roll">Read the fate of the crew</button>` : ''}`
+        + `${app.mode === 'ground' ? `<button type="button" class="btn" data-act="close">${icon('target', 16)}Back to the probe</button>` : ''}</div>`
+        + `<p class="share-note">Send ${esc(w.seed)} to a friend. The same name finds the same world, and the same signal.</p>`;
+    } else if (cur.state === 'open' && app.mode === 'orbit') cta = `<button type="button" class="btn primary big" data-act="land">${icon('down', 18, 2.2)}Send the probe</button>`;
     else if (app.mode === 'ground') cta = `<button type="button" class="btn big" data-act="close">${icon('target', 18)}Back to the probe</button>`;
     const entries = st.chapters.map((c) => (c.locked ? `
       <div class="entry closed"><div class="num">${ROMAN[c.n]}</div><div><h3>${icon('lock', 16)} Locked</h3><p>${esc(c.goal)}</p></div></div>` : `
@@ -224,7 +230,7 @@ export function makeDeck(app, { title = false } = {}) {
         ${c.fixes.length ? `<div class="fixes mono">${c.fixes.map((x, i) => `<span>${fixLine(x, i)}</span>`).join('')}</div>` : ''}
         ${c.actions.length ? `<div class="acts">${c.actions.filter((a) => !(a.orbitOnly && app.mode !== 'orbit')).map((a) => `<button type="button" class="pill ${a.id === 'aim' ? 'warm' : ''}" data-act="${a.id}${a.chapter ? ':' + a.chapter : ''}">${esc(a.label)}</button>`).join('')}</div>` : ''}
       </div></div>`)).join('');
-    return `<span class="kick">Story · ${st.done} of ${st.of} chapters</span><h1 id="book-title">The signal from <em>${esc(w.seed)}</em></h1><p class="sub">${esc(w.designation)} · ${esc(w.typeLabel)}</p>
+    return `<span class="kick">Story · ${st.complete ? 'complete' : `${st.done} of ${st.of} chapters`}</span><h1 id="book-title">The signal from <em>${esc(w.seed)}</em></h1><p class="sub">${esc(w.designation)} · ${esc(w.typeLabel)}</p>
       <div class="cols">
         <div>
           <div class="transmission"><span class="kick"><i></i>Received ${esc(st.intro.years)} years ago · ${esc(st.intro.band)}</span>${WAVE}
@@ -322,7 +328,7 @@ export function makeDeck(app, { title = false } = {}) {
         <p>${esc(st.intro.text)}</p>${wander}
         <div class="acts"><button type="button" class="btn primary" data-act="arrive-signal">${icon('signal', 16)}Follow the signal</button><button type="button" class="btn" data-act="arrive-close">Just explore</button></div>`;
     } else if (st.has) {
-      h = `<div class="kick blue">Welcome back · ${st.done} of ${st.of} chapters</div>
+      h = `<div class="kick blue">Welcome back · ${st.complete ? 'story complete' : `${st.done} of ${st.of} chapters`}</div>
         <h2>${esc(w.seed)}</h2><p><b>${esc(st.objective.title)}.</b> ${esc(st.objective.line)}</p>
         <div class="acts"><button type="button" class="btn primary" data-act="arrive-close">Continue</button><button type="button" class="btn" data-act="window:story">Open the story</button></div>`;
     } else {
@@ -493,10 +499,9 @@ export function makeDeck(app, { title = false } = {}) {
     else if (act === 'about') app.about();
     else if (act === 'clear') app.clear();
     else if (act === 'aim') { page = null; render(); app.aimAt(arg); }
-    else if (act === 'share') {
-      const url = app.shareUrl();
-      navigator.clipboard.writeText(url).then(() => toast('Link copied'), () => toast(url, 6000));
-    } else if (act === 'sound') { soundPress(); return; }
+    else if (act === 'share') { app.share(t.querySelector('.t')); return; }
+    else if (act === 'log') app.openLog(arg, sub);
+    else if (act === 'sound') { soundPress(); return; }
     else if (act === 'hint') {
       toast(arg === 'plant' ? 'Plants live on the ground: land, tap one, and study it.'
         : 'Find it on the planet: zoom in close and tap it, or land and tap it on the ground.', 3200);

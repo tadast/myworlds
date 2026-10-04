@@ -836,8 +836,16 @@ export function glyphSvg(glyphs) {
 // entry of that log, and an end of the kind `cut` takes the note of p2-37. One person left one note,
 // and the row marks that person as its writer. A world where nobody went holds no second log, so the
 // slot stays empty and takes no room: the reader is the first to stand at the ruin.
-function ruinCrewHtml(log, head = 'The crew at the ruin') {
-  if (!log || !log.entries || !log.entries.length) return '';
+//
+// The card of the twin takes the roll call of way-types.js as the last entry of its log: the end of
+// each person of the crew, in plain words. A twin where nobody of the crew stood holds no log, and
+// the roll call then stands alone under a head of its own.
+function ruinCrewHtml(log, head = 'The crew at the ruin', roll = null) {
+  const alone = !log || !log.entries || !log.entries.length;
+  const last = roll ? rollHtml(roll, alone) : '';
+  if (alone) {
+    return last ? `<h3 class="cruin-head">${esc(roll.title)}</h3><div class="cruin-log">${last}</div>` : '';
+  }
   const note = log.went === 'one';
   const rows = (log.crew || []).map((c) =>
     `<span${c.name === log.keeper ? ' class="ckeeper"' : ''}>${esc(c.name)}<i>${esc(c.role)}</i></span>`).join('');
@@ -845,7 +853,16 @@ function ruinCrewHtml(log, head = 'The crew at the ruin') {
     + `<h3>Day ${e.day}${e.title ? ' · ' + esc(e.title) : ''}</h3><p>${esc(e.text)}</p>`
     + `${e.slot === ABRUPT_SLOT ? `<p class="cabrupt">${ABRUPT}</p>` : ''}</div>`).join('');
   return `<h3 class="cruin-head">${esc(head)}</h3>`
-    + `<div class="cruin-goers${note ? ' cnote' : ''}">${rows}</div><div class="cruin-log">${entries}</div>`;
+    + `<div class="cruin-goers${note ? ' cnote' : ''}">${rows}</div><div class="cruin-log">${entries}${last}</div>`;
+}
+
+// The roll call as an entry of the log: the line of the probe, then one row for each person, with
+// the end of that person as a word and as a sentence. An entry that stands alone takes the title of
+// the roll call as its head, so the entry does not say it twice.
+function rollHtml(roll, alone = false) {
+  const rows = roll.people.map((p) => `<li class="croll-${p.status}"><span class="croll-who">${esc(p.name)}<i>${esc(p.role)}</i></span>`
+    + `<b>${esc(p.word)}</b><p>${esc(p.line)}</p></li>`).join('');
+  return `<div class="clog-entry ctitled croll"><h3>Mission record${alone ? '' : ` · ${esc(roll.title)}`}</h3><p>${esc(roll.text)}</p><ul>${rows}</ul></div>`;
 }
 
 // Chapter 3: the way on holds the line of glyphs and, while the chapter is open, the decoder under
@@ -888,8 +905,9 @@ export class RuinInspector {
   //
   // Chapter 3: `twin` shows the card of the twin, with the third log. `way` is the row of the way
   // on of the card of the ruin: `{ el, word, text }`, the decoder while the chapter is open, and the
-  // name the glyphs spell after the arrival.
-  show(world, { glow, accent, groundColor, twin = false, way = null } = {}) {
+  // name the glyphs spell after the arrival. `roll` is the roll call of rollCall() in way-types.js,
+  // the last entry of the card of the twin, and `at` 'roll' scrolls the card to it.
+  show(world, { glow, accent, groundColor, twin = false, way = null, roll = null, at = null } = {}) {
     const text = twin ? twinCard(world) : ruinCard(world);
     if (!text) return;
     if (!this.renderer) this.renderer = cardRenderer(this.canvas);
@@ -905,8 +923,14 @@ export class RuinInspector {
     this.rowsEl.innerHTML = text.rows.map((r) => ruinRowHtml(r, way)).join('');
     const slot = this.rowsEl.querySelector('.cdecoder');
     if (slot && way && way.el) slot.appendChild(way.el);
-    if (this.crewEl) this.crewEl.innerHTML = twin ? ruinCrewHtml(world.twin.log, 'The crew at the twin') : ruinCrewHtml(world.ruin.log);
+    if (this.crewEl) this.crewEl.innerHTML = twin ? ruinCrewHtml(world.twin.log, 'The crew at the twin', roll) : ruinCrewHtml(world.ruin.log);
     if (this.scrollEl) this.scrollEl.scrollTop = 0;
+    const mark = at === 'roll' && this.crewEl && this.scrollEl ? this.crewEl.querySelector('.croll') : null;
+    if (mark) {
+      requestAnimationFrame(() => {
+        this.scrollEl.scrollTop += mark.getBoundingClientRect().top - this.scrollEl.getBoundingClientRect().top - 12;
+      });
+    }
     this.card.hidden = false;
     requestAnimationFrame(() => this.card.classList.add('show'));
     if (!this.open) { this.open = true; this.clock.start(); this.loop(); }

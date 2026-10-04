@@ -121,11 +121,13 @@ export function marksOf() {
     const finds = statesOf(ORDER.map((id) => parts[id].found)).filter((s) => s === 'done').length;
     if (!finds) continue;
     // Chapter 3: the arrival at the twin makes the third mark, and the end of the mission a house.
+    // The read of the card of the twin ends the story.
     const home = finds === ORDER.length && parts.way.home;
+    const complete = finds === ORDER.length && parts.way.read;
     out.set(seed, {
-      finds, home,
+      finds, home, complete,
       text: '✦'.repeat(finds) + (home ? ' ⌂' : ''),
-      title: home ? 'The crew of this world went home'
+      title: home ? 'The crew of this world went home' : complete ? 'The story of this world is complete'
         : finds === 1 ? 'A source of this world is found' : `${finds} sources of this world are found`,
     });
   }
@@ -208,6 +210,8 @@ class Progress {
   //             `band` is the band of the tuner after the lock, and null before it. So the page
   //             never holds the band before the reader types it. See tuner.js.
   //   finds     the count of searches that are done, of `of` searches
+  //   complete  the story of the world is over: the last chapter is done, and on a world with the
+  //             way on the reader has read the card of the twin
   //   row       the Carrier row: the state of the search in a few words, or null; see rowOf()
   view() {
     const states = this._states();
@@ -231,10 +235,12 @@ class Progress {
       seed: this.seed, id: this.chapters[t].id, held, band: held ? this.chapters[t].freq : null,
     };
     const searches = chapters.filter((c) => c.kind === 'search');
+    const last = chapters[chapters.length - 1];
     const v = {
       seed: this.seed, chapters, follow, found, tuner,
       finds: searches.filter((c) => c.state === 'done').length, of: searches.length,
       way: this._way(states),
+      complete: !!last && last.state === 'done' && (last.id !== 'way' || this.parts.way.read),
     };
     v.row = rowOf(v);
     return v;
@@ -244,7 +250,8 @@ class Progress {
   //
   //   state   'closed', 'open', or 'done'. It opens with the find of the ruin, and the arrival at
   //           the twin ends it
-  //   read    the reader opened the card of the twin, which holds the third log
+  //   read    the reader opened the card of the twin: the third log, or the line that nobody of
+  //           the crew stood there. The read ends the story
   //   home    the reader took the crew home. The mission is over
   //   crew    the third log holds a person whose end is `home`, so the tent has somebody to take
   //   text    the status of chapter 3 in the Story window
@@ -259,7 +266,7 @@ class Progress {
       : state === 'open' ? 'A name to read'
         : p.home ? 'The crew is home'
           : !p.read ? 'At the twin'
-            : crew ? 'Somebody waits' : log ? 'Log read' : 'Nobody came';
+            : crew ? 'Somebody waits' : log ? 'Found. The log is read.' : 'Found. Nobody of the crew came.';
     return { state, read: p.read, home: p.home, crew, text };
   }
 
@@ -370,8 +377,9 @@ class Progress {
     return { found: true };
   }
 
-  // Chapter 3. The reader read the third log on the card of the twin. The people of the tent walk
-  // out after it. Gives true when this read is new.
+  // Chapter 3. The reader read the card of the twin: the third log when the crew left one, and the
+  // roll call under it. The read ends the story, and the people of the tent walk out after it.
+  // Gives true when this read is new.
   readLog() {
     this._reload();
     const i = this.ids.indexOf('way');

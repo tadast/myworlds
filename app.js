@@ -13,7 +13,7 @@ import { PlantInspector } from './flora-card.js';
 import { SourceInspector, RuinInspector } from './ground-source.js';
 import { makeTuner } from './tuner.js';
 import { Probe, BURST_MS, FADE_MS, ENTRY_MS, EXIT_MS } from './probe.js';
-import { wayKey, sendName, nameOf, homeOf, FATE_IDS } from './way-types.js';   // chapter 3
+import { wayKey, sendName, nameOf, homeOf, rollCall, FATE_IDS } from './way-types.js';   // chapter 3
 import { readCodex, writeCodex } from './carrier-store.js';
 import { makeDecoder } from './decoder.js';
 import { protoRow } from './ruin-types.js';
@@ -1940,6 +1940,8 @@ function closeCard() {
   // Chapter 3: the reader has read the third log, and the people of the tent come out.
   if (crewWaits && ground && ground.crew) ground.crew.release(true);
   crewWaits = false;
+  // The read of the card of the twin ended the story, and nobody waits to go home: the end card.
+  if (endWaits) { endWaits = false; setTimeout(showEnd, 450); }
 }
 function discColor() {
   const pal = current.world.palette;
@@ -2215,7 +2217,8 @@ const deck = makeDeck({
     const c = v && v.chapters.find((ch) => ch.id === id);
     if (c) aimAtSource(c.source);
   },
-  shareUrl: () => location.origin + location.pathname + viewHash(),
+  share: sharePress,
+  openLog,
   snapshot,
   hold: holdGround,
 }, { title: !location.hash });
@@ -2272,6 +2275,8 @@ const chapterOfKind = (kind) => (kind === 'twin' ? 'way' : kind);
 
 // The reader read the third log, and the people of the tent wait for the close of the card.
 let crewWaits = false;
+// The read of the card of the twin ended the story, and the end card waits for the close of the card.
+let endWaits = false;
 
 // The row of the way on of the card of the ruin: the decoder while the chapter is open, and the
 // name the glyphs spell after the arrival. Null while the chapter is closed.
@@ -2396,13 +2401,47 @@ function inspectTwin() {
   creatureCard.hidden = false;
   creatureCanvas.hidden = true; plantCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = false;
   creatureCard.dataset.subject = 'ruin';
+  const way = progress.view().way;
   ruinInspector.show(current.world, {
     glow: carrierColour(current.world, 2), accent: briefColour(current.world), groundColor: discColor(), twin: true,
+    roll: rollCall(current.world, { home: !!(way && way.home) }),
   });
-  if (twin.log && progress.readLog()) {
-    crewWaits = !!(ground.crew && homeOf(twin.log).length);
+  // The first read ends the story, with a third log or with none. A person who lived walks out of
+  // the tent when the card closes; else the end card follows.
+  if (progress.readLog()) {
+    crewWaits = !!(twin.log && ground.crew && homeOf(twin.log).length);
+    endWaits = !crewWaits;
     showProgress();
   }
+}
+
+// The card of a chapter again, from the Story window after the end of the story: the log of the
+// wreck, the card of the ruin, or the card of the twin with the roll call. No find runs here, and
+// the card opens in orbit as well as on the ground. `at` 'roll' scrolls the card of the twin to the
+// roll call.
+function openLog(id, at = null) {
+  const w = current && current.world;
+  const v = carrierView();
+  if (!w || !v || !v.complete || !w.source || !w.source.log) return;
+  inspector.hide(); plantInspector.hide(); sourceInspector.hide(); ruinInspector.hide();
+  creatureCard.classList.add('show');
+  creatureCard.hidden = false;
+  creatureCanvas.hidden = true; plantCanvas.hidden = true;
+  if (id === 'wreck') {
+    ruinCanvas.hidden = true; sourceCanvas.hidden = false;
+    creatureCard.dataset.subject = 'source';
+    const pal = w.palette || {};
+    sourceInspector.show(w.source.log, (pal.fauna && pal.fauna.accent) || '#ffd27f', discColor(), music.motif(w), hullOf(w));
+    return;
+  }
+  if (!w.ruin || (id === 'way' && !w.twin)) return;
+  sourceCanvas.hidden = true; ruinCanvas.hidden = false;
+  creatureCard.dataset.subject = 'ruin';
+  const twin = id === 'way';
+  ruinInspector.show(w, {
+    glow: carrierColour(w, 2), accent: briefColour(w), groundColor: discColor(), twin,
+    way: twin ? null : wayRow(w), roll: twin ? rollCall(w, { home: !!(v.way && v.way.home) }) : null, at,
+  });
 }
 
 // ---------------------------------------------------------------- the talk, and the way home
@@ -2433,7 +2472,11 @@ if (talkDlg) {
   talkDlg.addEventListener('close', () => { if (probe.mode === 'ground' && ground && !probe.dive && !homeRun) ground.controls.enabled = true; });
   talkDlg.querySelector('.talk-home').addEventListener('click', () => { talkDlg.close(); takeHome(); });
 }
-if (homeDlg) homeDlg.addEventListener('click', (e) => { if (e.target === homeDlg) homeDlg.close(); });
+if (homeDlg) {
+  homeDlg.addEventListener('click', (e) => { if (e.target === homeDlg) homeDlg.close(); });
+  homeDlg.addEventListener('close', () => { if (probe.mode === 'ground' && ground && !probe.dive && !homeRun && !deckHolds) ground.controls.enabled = true; });
+  homeDlg.querySelector('.home-share').addEventListener('click', (e) => sharePress(e.currentTarget.querySelector('.t')));
+}
 
 // The way home: the mission ends. The twin flares, the people of the tent rise in its light, and the
 // probe climbs to orbit with them. The card of the end stands over the globe.
@@ -2466,12 +2509,72 @@ function showHome(run) {
   const log = run.log;
   const home = homeOf(log).map((c) => c.name);
   const names = home.length === 1 ? home[0] : `${home.slice(0, -1).join(', ')} and ${home[home.length - 1]}`;
-  homeDlg.querySelector('#home-title').textContent = `The crew of ${log.probe} is going home`;
-  homeDlg.querySelector('.home-text').textContent = `${names} waited ${log.years} years on ${run.world.designation}. The probe carries ${home.length === 1 ? 'that person' : 'them'} up to the ship.`;
-  const lost = log.crew.filter((c) => c.end !== 'home');
-  homeDlg.querySelector('.home-lost').textContent = lost.length
-    ? `${lost.map((c) => c.name).join(', ')} did not come home.` : '';
+  // The people who do not come home: from the roll call, so a person who stayed at the wreck counts too.
+  const roll = rollCall(run.world, { home: true });
+  const lost = roll ? roll.people.filter((p) => p.status !== 'home').map((p) => p.name) : [];
+  fillEnd({
+    kicker: 'Mission complete',
+    title: `The crew of ${log.probe} is going home`,
+    text: `${names} waited ${log.years} years on ${run.world.designation}. The probe carries ${home.length === 1 ? 'that person' : 'them'} up to the ship.`,
+    note: lost.length ? `${lost.length === 1 ? lost[0] : `${lost.slice(0, -1).join(', ')} and ${lost[lost.length - 1]}`} did not come home.` : '',
+  });
   setTimeout(() => { if (!homeDlg.open) homeDlg.showModal(); }, 1400);
+}
+
+// The end card of a story where nobody waits to go home: the roll call in two sentences, and the
+// share. It follows the close of the card of the twin.
+function showEnd() {
+  const w = current && current.world;
+  const roll = w && rollCall(w);
+  if (!homeDlg || !roll || homeDlg.open || modalOpen()) return;
+  fillEnd({
+    kicker: 'Story complete',
+    title: `The fate of the ${w.source.log.probe}`,
+    text: roll.text,
+    note: 'Every log of this world stays in the Story window.',
+  });
+  if (ground && probe.mode === 'ground') ground.controls.enabled = false;
+  homeDlg.showModal();
+}
+
+function fillEnd({ kicker, title, text, note }) {
+  homeDlg.querySelector('.home-kicker').textContent = kicker;
+  homeDlg.querySelector('#home-title').textContent = title;
+  homeDlg.querySelector('.home-text').textContent = text;
+  homeDlg.querySelector('.home-lost').textContent = note;
+  const seed = current ? current.world.seed : '';
+  homeDlg.querySelector('.home-share .t').textContent = `Share ${seed}`;
+  homeDlg.querySelector('.home-note').textContent = `Send ${seed} to a friend. The same name finds the same world, and the same signal.`;
+}
+
+// The share of the world on the screen: the share sheet of the device, or the link on the
+// clipboard where the browser has no share sheet. The link names the world and no place on it, so
+// a friend starts at the distress signal, and not at the twin. Gives 'shared', 'copied', or null
+// when the reader closed the sheet or nothing worked.
+async function shareWorld() {
+  if (!current) return null;
+  const w = current.world;
+  const url = location.origin + location.pathname + viewToUrl(w.seed, null, null);
+  const v = carrierView();
+  const text = v && v.complete
+    ? `I followed the distress signal from ${w.seed} and found out what happened to its crew. Can you?`
+    : `Every name hides a planet. This one is ${w.seed}.`;
+  const data = { title: `${w.seed} · My Worlds`, text, url };
+  if (navigator.share && (!navigator.canShare || navigator.canShare(data))) {
+    try { await navigator.share(data); return 'shared'; } catch (e) { if (e && e.name === 'AbortError') return null; }
+  }
+  try { await navigator.clipboard.writeText(url); return 'copied'; } catch (e) { return null; }
+}
+
+// A press on a share button: the share, and "Link copied" on the button for a moment when the link
+// went to the clipboard. `label` is the element of the words of the button.
+async function sharePress(label) {
+  const r = await shareWorld();
+  if (r !== 'copied' || !label || !label.isConnected) return r;
+  const was = label.textContent;
+  label.textContent = 'Link copied';
+  setTimeout(() => { label.textContent = was; }, 2000);
+  return r;
 }
 
 // Give the reader the finds of chapters 1 and 2 of `world`, so chapter 3 opens: the debug option
@@ -2527,6 +2630,8 @@ const wayHooks = {
   talk(name) { openTalk(name || (homeOf(current.world.twin.log)[0] || {}).name); },
   home() { takeHome(); return !!homeRun; },
   log() { return current && current.world.twin ? current.world.twin.log : null; },
+  roll() { const v = carrierView(); return current ? rollCall(current.world, { home: !!(v && v.way && v.way.home) }) : null; },
+  openLog(id, at) { openLog(id, at); return cardOpen(); },
   // Wait for the dive and the way home that run, and step the frames of a hidden page meanwhile.
   async settle() {
     const t0 = performance.now();

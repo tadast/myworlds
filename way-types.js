@@ -238,6 +238,83 @@ export function gravesOf(log) {
   return homeOf(log).length || log.crew.some((c) => c.end === 'changed') ? lost : Math.max(0, lost - 1);
 }
 
+// ---------------------------------------------------------------- the roll call
+// The last entry of the story: the end of each person of the crew, in plain words. Each log tells
+// its part in the voice of the crew, and a log can stop in the middle of a sentence or fall apart
+// into the sounds of the call. So the story ends on one entry that states what happened to each
+// person. The card of the twin shows it under the third log, and the Story window shows it again.
+//
+// The end of a person comes from the last log that names that person:
+//
+//   the third log   a person who went through the way: the end of that person in the third log
+//   the first log   the person a thread took out (`lost`): dead, or gone from the wreck for good.
+//                   A person who stayed at the wreck ends by the kind of the last entry: dead under
+//                   the doom, in the failed climb, or as the keeper of a log in a second hand; else
+//                   missing, because the probe found nobody at the wreck
+//
+// `home` says that the reader took the crew home. Gives `{ title, text, end, people }`, or null for a
+// world with no log. A person is `{ name, role, status, word, line }`. `status` is 'alive', 'home',
+// 'dead', 'missing', 'gone', or 'changed', and `word` is the status as the card prints it.
+export const ROLL_WORDS = Object.freeze({
+  alive: 'Alive', home: 'Going home', dead: 'Dead', missing: 'Missing', gone: 'Gone', changed: 'Changed',
+});
+
+export function rollCall(world, { home = false } = {}) {
+  const first = world && world.source && world.source.log;
+  if (!first || !first.crew || !first.crew.length) return null;
+  const third = world.twin && world.twin.log;
+  const form = third && third.fate === 'change' ? (third.form || formOf(world)) : null;
+  const last = first.entries && first.entries.length ? first.entries[first.entries.length - 1].slot : '';
+  const ending = String(last).replace(/^end\./, '');
+  const years = first.years || 0;
+
+  const endOf = (c) => {
+    const t = third && third.crew.find((x) => x.name === c.name);
+    if (t) {
+      switch (t.end) {
+        case 'home': return home
+          ? ['home', `Waited ${numberWords(years)} years at the twin. Goes home with the probe.`]
+          : ['alive', 'Went through the way. Waits at the twin to go home.'];
+        case 'lost': return ['dead', 'Went through the way, and died at the twin.'];
+        case 'changed': return ['changed', form === 'sleep'
+          ? 'Sleeps in the den of the herd at the twin.'
+          : 'Lives in the herd at the twin now, and will not leave it.'];
+        default: return ['gone', third.fate === 'split' ? 'Went on with the herd from the twin, and did not come back.'
+          : third.fate === 'mad' ? 'Answered the call of the stones at the twin, and walked into their light.'
+            : 'Went into the light of the stones at the twin.'];
+      }
+    }
+    if (first.lost && first.lost.name === c.name) {
+      return first.lost.how === 'dead'
+        ? ['dead', `Died at the wreck on day ${first.lost.day}.`]
+        : ['missing', `Left the wreck and did not come back after day ${first.lost.day}. Presumed dead.`];
+    }
+    if (ending === 'second' && c.name === first.keeper) return ['dead', 'Died at the wreck. Another hand wrote the last entry.'];
+    if (ending === 'doom') return ['dead', 'Stayed with the wreck to the end, and died there.'];
+    if (ending === 'launch') return ['dead', 'Died in the climb on the patched feed line.'];
+    if (ending === 'stay') return ['missing', 'Stayed to make a life by the wreck. Not found.'];
+    return ['missing', 'Stayed at the wreck. Not found, and presumed dead.'];
+  };
+
+  const people = first.crew.map((c) => {
+    const [status, line] = endOf(c);
+    return { name: c.name, role: c.role, status, word: ROLL_WORDS[status], line };
+  });
+  const live = people.filter((p) => p.status === 'alive' || p.status === 'home').length;
+  const n = people.length;
+  const count = (k) => (k === n && n > 1 ? `All ${numberWords(k)}` : cap(numberWords(k)));
+  const end = !live ? 'Nobody comes home.'
+    : home ? `${count(live)} ${live === 1 ? 'goes' : 'go'} home with the probe.`
+      : `${count(live)} ${live === 1 ? 'is' : 'are'} alive at the twin.`;
+  return {
+    title: 'The fate of the crew',
+    text: `The ${first.probe} came down on ${world.designation} with ${numberWords(n)} people aboard. ${end}`,
+    end,
+    people,
+  };
+}
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 // ---------------------------------------------------------------- the card of the twin
 // The card the reader opens at the twin: the name of the proto, a line under it, and the rows, as
 // ruinCard() of ruin-types.js writes the card of the ruin. It holds no DOM, so the Node checks read
