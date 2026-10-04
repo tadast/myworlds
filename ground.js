@@ -129,7 +129,9 @@ const LOD_MIN = 40;         // metres, the floor of the knob
 // to 220 for a while.
 const LOD_MAX = 400;
 
-export const CAM_START = 450;        // metres, the height the camera starts at over the site
+// The entry camera stands 100 m over the ground and looks out to the horizon, a little down, so the
+// probe lands in the world and not over a map of it. It stood 450 m up and looked down at 27 deg.
+export const CAM_START = 100;        // metres, the height the camera starts at over the site
 // The rim: the ground outside the patch. It must reach past the fog, or its outer edge shows. RIM
 // in tiers.js holds the reach, and the sum behind it reads CAM_START, CEILING, FOG_FAR, and
 // FOG_LIFT of this file. Keep the sum there true when one of them changes.
@@ -147,7 +149,7 @@ export const CAM_START = 450;        // metres, the height the camera starts at 
 // A camera that looks straight down therefore always shows the box, at any height. Issue 20 held
 // the tilt over that limit with a band that followed the height, and the flight keys replaced it:
 // a camera that flies in a straight line must not have its view turned under it. The reveal still
-// arrives at POLAR_HIGH, where tan(1.10) is 1.97 and the box stays hidden, and the ceiling still
+// arrives at POLAR_START, where tan(1.18) is 2.43 and the box stays hidden, and the ceiling still
 // holds the camera at 500 m. A reader who climbs to the ceiling and then looks out at the horizon
 // can see the edge. Measured on Auralis at -38.00,18.00, a flat inland cell: the square reads at
 // 1,200 m, it still reads at 800 m, and nothing reads at 500 m.
@@ -155,7 +157,7 @@ export const CAM_START = 450;        // metres, the height the camera starts at 
 // ---------------------------------------------------------------- the camera, issue 06
 const TARGET_LIFT = 1;      // metres, the target floats this far over the terrain
 const POLAR_DOWN = 0.05;    // rad, the steepest view down: a hair off straight down
-const POLAR_HIGH = 1.10;    // rad, the tilt of the reveal, which looks out and down over the patch
+const POLAR_START = 1.18;   // rad, the tilt of the reveal: 22.5 deg under the horizon, at the site
 // Issue 17: how far over the horizon the view may turn. The frame sets the limit. The view rises
 // until the horizon reaches the bottom edge and no further, so the reader always keeps the ground
 // in sight and cannot get lost in an empty sky. That is half the field of view over the horizon,
@@ -232,8 +234,8 @@ const WRECK_GRACE = 20;
 // The body of the source on its cell, by patch.source.kind. Each class has the same shape, so the
 // rest of this file reads this.source and does not care which kind stands there. p2-41.
 const SOURCE_KINDS = { wreck: SourceWreck, ruin: SourceRuin, twin: SourceRuin };
-// The fog opens with the height of the camera. The reader lands 450 m up, and a fog that is solid
-// at 750 m would show one flat colour there. FOG_MAX holds well under the reach of the rim, so
+// The fog opens with the height of the camera. The ceiling is 500 m, and a fog that is solid at
+// 750 m would show one flat colour from there. FOG_MAX holds well under the reach of the rim, so
 // the ground fades out before the rim ends and the reader never sees a cut edge. See RIM in
 // tiers.js. The ceiling of issue 20 keeps the fog under 1,325 m, so FOG_MAX no longer binds.
 //
@@ -631,9 +633,9 @@ export class Ground {
     this.hemi = new THREE.HemisphereLight(this.skyColor, this.groundColor, this.sky.hemiIntensity);
     this.content.add(this.hemi);
 
-    // The reveal: the camera starts CAM_START up and south of the site by the same tilt the
-    // ceiling holds, and it looks at the site. The reader sees the patch from over the fog and
-    // zooms in. The tilt keeps the edge of the box in the fog. See "the rectangle" above.
+    // The reveal: the camera starts CAM_START up and south of the site by POLAR_START, and it
+    // looks at the site, so the horizon stands in the top quarter of the frame. The tilt keeps the
+    // edge of the box in the fog. See "the rectangle" above.
     // The reveal stands inside the full uplink. On the LOW tier the tilt alone puts the camera on
     // the reach, and the probe then starts with a lost signal. So the offset stops where the
     // uplink starts to thin, and there the reveal looks a little steeper.
@@ -641,7 +643,7 @@ export class Ground {
     this.controls.target.set(0, this.base + TARGET_LIFT, 0);
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(0, this.base + CAM_START,
-      Math.min(CAM_START * Math.tan(POLAR_HIGH), this.reach - signalBand(this.reach)));
+      Math.min(CAM_START * Math.tan(POLAR_START), this.reach - signalBand(this.reach)));
     this.controls.update();
     return this;
   }

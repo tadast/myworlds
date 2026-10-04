@@ -79,6 +79,20 @@ export function groundRadius(world, hm, dir) {
   return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
 }
 
+// True when the ground hides `point` from `eye`: the line of sight between them dips under the
+// sphere of radius `ground` about the centre of the planet. All three are in one frame. Give the
+// ground under the point, and not the height of the point: a flyer over the horizon stands against
+// the sky. When `ground` is the length of `point`, this is the test of the tangent plane at it.
+// See tools/pick-check.mjs.
+const _ld = new THREE.Vector3(), _lc = new THREE.Vector3();
+export function groundHides(eye, point, ground) {
+  _ld.copy(point).sub(eye);
+  const t = THREE.MathUtils.clamp(-eye.dot(_ld) / _ld.lengthSq(), 0, 1);
+  // The line must dip a hair under the ground. A point on the ground has `ground` at its own
+  // length, and without the margin the rounding of the two squares alone would hide it.
+  return _lc.copy(eye).addScaledVector(_ld, t).lengthSq() < ground * ground * (1 - 1e-9);
+}
+
 // A unit direction in planet space from a site. See siteDir() in cell-grid.js.
 const _siteArr = [0, 0, 0];
 export function siteDir(lat, lon, out = new THREE.Vector3()) {

@@ -5,20 +5,20 @@ import { Music } from './music.js';
 import { buildActivity } from './phenomena.js';
 import { BASE_SCALE, buildCreature, faunaMaterial, makeAnyMover, stepAny, impulseBlocked, moverActivity, makeGait, stepGait, gaitLocked, anchorFits, Inspector } from './fauna.js';
 import { floraGeometry } from './flora-geometry.js';
-import { groundRadius, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, sourceSite } from './site.js';
+import { groundRadius, groundHides, faunaHomes, pickSite, pickDirs, pullSite, siteDir, dirToSite, viewToUrl, parseUrl, snapSite, cellTwist, sourceSite } from './site.js';
 import { progressOf, marksOf, briefWords, motifLevel, CLOSED_LINE } from './chapters.js';
 import { makeCarrierGroup, addWedge, updateCarrierGroup, disposeCarrierGroup, patchCarrierMaterial, pickCarrierColour, carrierColour, showMarker } from './carrier-globe.js';
 import { sameCell, siteCell } from './cell-grid.js';
 import { PlantInspector } from './flora-card.js';
 import { SourceInspector, RuinInspector } from './ground-source.js';
 import { makeTuner } from './tuner.js';
-import { Probe } from './probe.js';
+import { Probe, DIVE_MS, FADE_MS } from './probe.js';
 import { wayKey, sendName, nameOf, homeOf, FATE_IDS } from './way-types.js';   // chapter 3
 import { readCodex, writeCodex } from './carrier-store.js';
 import { makeDecoder } from './decoder.js';
 import { protoRow } from './ruin-types.js';
 import { hullOf } from './wreck-geometry.js';
-import { Ground } from './ground.js';
+import { Ground, CAM_START } from './ground.js';
 import { TIERS, worldOpts, patchOpts } from './tiers.js';
 import { skyView } from './ground-sky.js';
 import { ProbeHud } from './probe-hud.js';
@@ -75,6 +75,7 @@ const overlayBar = $('#overlay-bar');
 const probeHud = new ProbeHud($('#probe-hud'), { onCarrier: () => openBrief() });
 const diveEl = $('#dive');
 const diveLabel = $('#dive-label');
+const diveAlt = $('#dive-alt');
 
 // ---------------------------------------------------------------- renderer / scene
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -1171,7 +1172,7 @@ function descend(target = site, view = null) {
   probe.descend(target, performance.now(), { view, path });
   controls.enabled = false;
   writeHash();
-  diveEl.style.background = current.world.palette.atmo || '#8fb7ff';
+  startEntry(false);
   requestPatch();
 }
 
@@ -1179,6 +1180,50 @@ function descend(target = site, view = null) {
 function ascend() {
   if (!probe.ascend(performance.now())) return;
   ground.controls.enabled = false;
+  startEntry(true);
+}
+
+// The entry. The cover of a descent is a fall through the air of the world: the sky runs from the
+// black of space to the colour of the air, the cloud layers rush up past the probe, the heat of the
+// entry glows over the first second and a half, and the altitude falls to CAM_START, the height of
+// the camera the cover opens on. The altitude falls fast and then slower, so it is still falling
+// when a slow patch arrives. A recall plays it backward. The patch builds under the whole fall.
+const ENTRY_TOP = 80000;   // metres, the altitude at the start of a descent and the end of a recall
+const ENTRY_TAU = 900;     // ms: each ENTRY_TAU of the fall takes away two thirds of what is left
+const ENTRY_HEAT = 1600;   // ms, the glow of the entry
+const ENTRY_LOG = Math.log(ENTRY_TOP / CAM_START);
+let entry = null;          // the entry that runs: { up, t0, alt }
+
+function startEntry(up) {
+  entry = { up, t0: performance.now(), alt: up ? CAM_START : ENTRY_TOP };
+  diveEl.style.background = current.world.palette.atmo || '#8fb7ff';
+  diveEl.classList.add('entry');
+  diveEl.classList.toggle('up', up);
+  stepEntry(entry.t0, null);
+}
+
+function stepEntry(now, s) {
+  if (!entry) return;
+  const t = now - entry.t0;
+  let alt;
+  if (entry.up) {
+    // the recall climbs over the time the cover takes to close and to open
+    alt = CAM_START * Math.exp(ENTRY_LOG * Math.min(1, t / (DIVE_MS + FADE_MS)));
+  } else if (s && s.phase === 'out') {
+    alt = CAM_START + (entry.alt - CAM_START) * (1 - s.k);   // the last of the fall, as the cover opens
+  } else {
+    alt = entry.alt = CAM_START + (ENTRY_TOP - CAM_START) * Math.exp(-t / ENTRY_TAU);
+  }
+  const depth = 1 - Math.log(alt / CAM_START) / ENTRY_LOG;    // 0 in space, 1 at the camera
+  diveEl.style.setProperty('--depth', depth.toFixed(3));
+  diveEl.style.setProperty('--air', THREE.MathUtils.smoothstep(depth, 0.25, 0.6).toFixed(3));
+  diveEl.style.setProperty('--heat', entry.up ? '0' : Math.sin(Math.PI * Math.min(1, t / ENTRY_HEAT)).toFixed(3));
+  if (diveAlt) diveAlt.textContent = alt >= 1000 ? `${(alt / 1000).toFixed(alt >= 10000 ? 0 : 1)} km` : `${Math.round(alt)} m`;
+}
+
+function endEntry() {
+  entry = null;
+  diveEl.classList.remove('entry', 'up');
 }
 
 // One frame of the dive: the camera of the descent, the cover, and the event of the probe.
@@ -1191,6 +1236,8 @@ function stepDive(now) {
     camera.lookAt(s.path.look);
   }
   diveEl.style.opacity = String(s.cover);
+  stepEntry(now, s);
+  if (s.event === 'landed' || s.event === 'surfaced') endEntry();
   if (s.event === 'enter') enterGround(s.patch, s.view);
   else if (s.event === 'leave') leaveGround();
   else if (s.event === 'landed') { if (ground) ground.controls.enabled = !deckHolds; }
@@ -1324,6 +1371,7 @@ function abortProbe() {
   controls.enabled = true;
   setCarrierLevel();       // the probe is off the ground, so the motif takes its orbit level
   diveEl.style.opacity = '0';
+  endEntry();
   if (diveLabel) diveLabel.textContent = '';
 }
 
@@ -2011,20 +2059,26 @@ if (window.ResizeObserver) {
   for (const cv of previews.keys()) ro.observe(cv);
 }
 
-// pick a creature under a screen point: nearest projected instance on the visible hemisphere
+// pick a creature under a screen point: nearest projected instance that the ground does not hide
 const _pv = new THREE.Vector3(), _pt = new THREE.Vector3(), _pn = new THREE.Vector3(), _pm = new THREE.Matrix4();
 // tolerance grew with the 30% smaller creatures, so a finger still finds one
 function creatureAt(px, py, tolerance = 34) {
   if (!current) return null;
   let best = null, bestD = tolerance;
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  const { world, heightMap } = current;
   for (const inst of current.faunaMeshes) {
     inst.updateWorldMatrix(true, false);
     for (let j = 0; j < inst.count; j++) {
       inst.getMatrixAt(j, _pm);
-      _pv.setFromMatrixPosition(_pm).applyMatrix4(inst.matrixWorld);
-      // hidden behind the planet if the surface normal there faces away from the camera
-      if (_pv.x * (_pv.x - camera.position.x) + _pv.y * (_pv.y - camera.position.y) + _pv.z * (_pv.z - camera.position.z) > 0) continue;
+      // The ground under the animal hides it, and not a sphere at its own height: a flyer over
+      // the horizon stands against the sky. A test at its height hid the whale, and the tap opened
+      // a small animal near it. See groundHides() in site.js.
+      _pv.setFromMatrixPosition(_pm);
+      const r = _pv.length();
+      const floor = Math.min(r, Math.max(groundRadius(world, heightMap, _pn.copy(_pv).divideScalar(r)), world.seaRadius || 0));
+      _pv.applyMatrix4(inst.matrixWorld);
+      if (groundHides(camera.position, _pv, floor * (_pv.length() / r))) continue;
       // project the base and a point one body-height up, then measure to that segment
       const sc = Math.hypot(_pm.elements[0], _pm.elements[1], _pm.elements[2]);
       _pt.copy(_pv).addScaledVector(_pn.copy(_pv).normalize(), sc * 1.1);
@@ -2245,6 +2299,7 @@ function startJump() {
   markedKind = null; markedPlant = null; markedSource = false; markedPerson = null;
   if (ground.source) ground.source.unmark();
   ground.controls.enabled = false;
+  endEntry();
   diveEl.style.background = jumpWhite(current.world);
   requestPatch('The stones answer the name');
   return true;

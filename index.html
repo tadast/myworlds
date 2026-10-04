@@ -331,7 +331,19 @@
     </nav>
     <section class="title" hidden></section>
   </div>
-  <div id="dive" aria-hidden="true"><p id="dive-label"></p></div>
+  <!-- The cover of a landing. A descent and a recall show the entry: the sky from black to the air
+       of the world, the cloud layers that rush past the probe, the heat of the entry, and the
+       altitude. app.js writes --depth, --heat, and --air each frame, and the class `entry` shows
+       them; the white cover of the jump of chapter 3 shows none of them. -->
+  <div id="dive" aria-hidden="true">
+    <div class="dive-space"></div>
+    <div class="dive-clouds"><i></i><i></i><i></i></div>
+    <div class="dive-heat"></div>
+    <div class="dive-foot">
+      <div class="dive-read"><span>Altitude</span><b id="dive-alt"></b></div>
+      <p id="dive-label"></p>
+    </div>
+  </div>
 
   <div id="overlay">
     <div class="box">
