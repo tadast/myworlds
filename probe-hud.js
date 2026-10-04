@@ -56,6 +56,122 @@ function clock(s) {
   return h > 0 ? `${h} h ${String(m % 60).padStart(2, '0')} m` : `${m} m`;
 }
 
+// The static of the probe: grey grain, scanlines, and a vignette that closes in, on one canvas. The
+// overlay draws it over the last metres of the reach, and the dive draws it over each cut of the
+// view, where it reads as the signal of the probe that drops and comes back. draw() takes the
+// strength, 0 to 1. The options:
+//   alpha   the grain at full strength, out of 255. The overlay keeps the picture readable at 120.
+//   solid   the grain covers the picture at full strength, so a cut under it cannot be seen
+//   tear    light and dark bands break the frame near full strength, and a bright bar rolls down
+export class Static {
+  constructor(canvas, { alpha = 120, solid = false, tear = false } = {}) {
+    this.canvas = canvas || null;
+    this.ctx = canvas ? canvas.getContext('2d') : null;
+    this.alpha = alpha;
+    this.solid = solid;
+    this.tear = tear;
+    this._w = 0; this._h = 0;
+    this._grainAt = 0;
+    this._noise = 0;      // the strength the last frame drew, so a clear happens once
+    this.grain = null;    // the small canvas the grain is drawn into
+  }
+
+  resize(w, h, dpr) {
+    if (!this.canvas) return;
+    this._w = w; this._h = h;
+    this._dpr = Math.min(2, dpr || 1);
+    this.canvas.width = Math.round(w * this._dpr);
+    this.canvas.height = Math.round(h * this._dpr);
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+    this.ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+    this._noise = -1;     // the resize cleared the canvas, so the next frame draws again
+  }
+
+  clear() {
+    if (this.ctx && this._w) this.ctx.clearRect(0, 0, this._w, this._h);
+    this._noise = 0;
+  }
+
+  // `near` is the strength: for the overlay 0 inside the reach and 1 at it. The grain field is
+  // redrawn every GRAIN_MS and the canvas keeps it between two of them, so the flicker reads as a
+  // signal and the cost stays flat: one field of a quarter of the frame, scaled up with no smoothing.
+  draw(near, now) {
+    const ctx = this.ctx;
+    if (!ctx || !this._w) return;
+    const n = near <= 0.001 ? 0 : near;
+    if (n === 0) {
+      if (this._noise !== 0) { ctx.clearRect(0, 0, this._w, this._h); this._noise = 0; }
+      return;
+    }
+    if (now - this._grainAt < GRAIN_MS && this._noise === n) return;
+    this._grainAt = now;
+    this._noise = n;
+    const W = this._w, H = this._h;
+    ctx.clearRect(0, 0, W, H);
+
+    const gw = Math.max(1, Math.ceil(W / GRAIN_DIV)), gh = Math.max(1, Math.ceil(H / GRAIN_DIV));
+    if (!this.grain || this.grain.width !== gw || this.grain.height !== gh) {
+      this.grain = document.createElement('canvas');
+      this.grain.width = gw; this.grain.height = gh;
+      this._gctx = this.grain.getContext('2d');
+      this._gimg = this._gctx.createImageData(gw, gh);
+    }
+    // A solid static covers the picture at its peak: every grain takes most of the strength, and a
+    // dark fill under it closes the gaps. The static of the overlay lets the picture through.
+    const px = this._gimg.data, amp = n * n * this.alpha, solid = this.solid;
+    for (let i = 0; i < px.length; i += 4) {
+      const v = Math.random() * 255;
+      px[i] = v; px[i + 1] = v; px[i + 2] = v;
+      px[i + 3] = (solid ? 0.7 + 0.3 * Math.random() : Math.random()) * amp;
+    }
+    if (solid) {
+      ctx.fillStyle = `rgba(14, 16, 24, ${n * n * 0.9})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    this._gctx.putImageData(this._gimg, 0, 0);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.grain, 0, 0, W, H);
+    ctx.restore();
+
+    // The scanlines: one dark line every three, at a tenth of the ramp. They read as a picture
+    // carried by a machine and they cost one fill.
+    ctx.fillStyle = `rgba(0, 0, 0, ${n * 0.1})`;
+    for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+
+    // The vignette closes in as the link thins, so the picture narrows before it goes. It runs
+    // from the four edges of the screen and not from a circle around the middle: a circle wide
+    // enough to clear a wide frame darkens the corners and leaves the middle of the long edges
+    // open, and the reader then sees the effect sit in the corners instead of closing the view.
+    // Four bands, one per edge, hold the same depth on every screen and on every aspect.
+    const depth = Math.min(W, H) * VIGNETTE;
+    const band = (x0, y0, x1, y1, rx, ry, rw, rh) => {
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      for (const [at, k] of VIGNETTE_STOPS) g.addColorStop(at, `rgba(6, 9, 20, ${n * 0.72 * k})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(rx, ry, rw, rh);
+    };
+    band(0, 0, 0, depth, 0, 0, W, depth);
+    band(0, H, 0, H - depth, 0, H - depth, W, depth);
+    band(0, 0, depth, 0, 0, 0, depth, H);
+    band(W, 0, W - depth, 0, W - depth, 0, depth, H);
+
+    // The tear: near its peak a lost signal breaks into bands, light and dark, across the frame,
+    // and a bright bar rolls down it. A new set of bands comes with each grain field.
+    if (this.tear && n > 0.5) {
+      const k = (n - 0.5) * 2;
+      for (let i = 0; i < 5; i++) {
+        const y = Math.random() * H, h = 2 + Math.random() * 22;
+        ctx.fillStyle = i % 2 ? `rgba(4, 6, 14, ${0.45 * k})` : `rgba(226, 232, 255, ${0.06 + 0.22 * k * Math.random()})`;
+        ctx.fillRect(0, y, W, h);
+      }
+      const roll = (now * 0.9) % (H + 80) - 40;
+      ctx.fillStyle = `rgba(226, 232, 255, ${0.1 * k})`;
+      ctx.fillRect(0, roll, W, 40);
+    }
+  }}
+
 export class ProbeHud {
   // `onCarrier` runs when the reader presses the carrier block. The block is a real control: it
   // opens the brief of the distress signal. app.js owns the dialog, so the overlay only reports the
@@ -63,8 +179,7 @@ export class ProbeHud {
   constructor(root, { onCarrier } = {}) {
     this.root = root;
     if (!root) return;
-    this.canvas = root.querySelector('#probe-noise');
-    this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
+    this.static = new Static(root.querySelector('#probe-noise'));
     this.elTemp = root.querySelector('#hud-temp');
     this.elAlt = root.querySelector('#hud-alt');
     this.elSun = root.querySelector('#hud-sun');
@@ -93,15 +208,11 @@ export class ProbeHud {
         this.bars.push(b);
       }
     }
-    this._grainAt = 0;
     this._textAt = 0;
     this._needleAt = null;   // the turn the needle of the carrier stands at. See _writeCarrier().
     this._word = '';         // the word of the strength the wave last took
     this._lit = -1;
     this._state = '';
-    this._w = 0; this._h = 0;
-    this._noise = 0;      // the ramp the last frame drew, so a clear happens once
-    this.grain = null;    // the small canvas the grain is drawn into
   }
 
   show() {
@@ -138,28 +249,20 @@ export class ProbeHud {
   hide() {
     if (!this.root) return;
     this.root.hidden = true;
-    if (this.ctx && this._w) this.ctx.clearRect(0, 0, this._w, this._h);
-    this._noise = 0;
+    this.static.clear();
   }
 
   // The canvas of the noise follows the frame. It is drawn at the device pixels of the page, as
   // the renderer is, so a grain pixel is a pixel and not a blur.
   resize(w, h, dpr) {
-    if (!this.canvas) return;
-    this._w = w; this._h = h;
-    this._dpr = Math.min(2, dpr || 1);
-    this.canvas.width = Math.round(w * this._dpr);
-    this.canvas.height = Math.round(h * this._dpr);
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
-    this.ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+    if (this.static) this.static.resize(w, h, dpr);
   }
 
   // One frame. `tel` is the object ground.telemetry() returns.
   update(tel, now) {
     if (!this.root || this.root.hidden || !tel) return;
     this._writeText(tel, now);
-    this._drawNoise(tel.near, now);
+    this.static.draw(tel.near, now);
   }
 
   _writeText(tel, now) {
@@ -248,64 +351,5 @@ export class ProbeHud {
       this.elRange.hidden = !text;
       this.elRange.textContent = text;
     }
-  }
-
-  // The static. `near` is 0 inside the reach and 1 at it. The grain field is redrawn every
-  // GRAIN_MS and the canvas keeps it between two of them, so the flicker reads as a signal and
-  // the cost stays flat: one field of a quarter of the frame, scaled up with no smoothing.
-  _drawNoise(near, now) {
-    const ctx = this.ctx;
-    if (!ctx || !this._w) return;
-    const n = near <= 0.001 ? 0 : near;
-    if (n === 0) {
-      if (this._noise !== 0) { ctx.clearRect(0, 0, this._w, this._h); this._noise = 0; }
-      return;
-    }
-    if (now - this._grainAt < GRAIN_MS && this._noise === n) return;
-    this._grainAt = now;
-    this._noise = n;
-    const W = this._w, H = this._h;
-    ctx.clearRect(0, 0, W, H);
-
-    const gw = Math.max(1, Math.ceil(W / GRAIN_DIV)), gh = Math.max(1, Math.ceil(H / GRAIN_DIV));
-    if (!this.grain || this.grain.width !== gw || this.grain.height !== gh) {
-      this.grain = document.createElement('canvas');
-      this.grain.width = gw; this.grain.height = gh;
-      this._gctx = this.grain.getContext('2d');
-      this._gimg = this._gctx.createImageData(gw, gh);
-    }
-    const px = this._gimg.data, amp = n * n * 120;
-    for (let i = 0; i < px.length; i += 4) {
-      const v = Math.random() * 255;
-      px[i] = v; px[i + 1] = v; px[i + 2] = v;
-      px[i + 3] = Math.random() * amp;
-    }
-    this._gctx.putImageData(this._gimg, 0, 0);
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.grain, 0, 0, W, H);
-    ctx.restore();
-
-    // The scanlines: one dark line every three, at a tenth of the ramp. They read as a picture
-    // carried by a machine and they cost one fill.
-    ctx.fillStyle = `rgba(0, 0, 0, ${n * 0.1})`;
-    for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
-
-    // The vignette closes in as the link thins, so the picture narrows before it goes. It runs
-    // from the four edges of the screen and not from a circle around the middle: a circle wide
-    // enough to clear a wide frame darkens the corners and leaves the middle of the long edges
-    // open, and the reader then sees the effect sit in the corners instead of closing the view.
-    // Four bands, one per edge, hold the same depth on every screen and on every aspect.
-    const depth = Math.min(W, H) * VIGNETTE;
-    const band = (x0, y0, x1, y1, rx, ry, rw, rh) => {
-      const g = ctx.createLinearGradient(x0, y0, x1, y1);
-      for (const [at, k] of VIGNETTE_STOPS) g.addColorStop(at, `rgba(6, 9, 20, ${n * 0.72 * k})`);
-      ctx.fillStyle = g;
-      ctx.fillRect(rx, ry, rw, rh);
-    };
-    band(0, 0, 0, depth, 0, 0, W, depth);
-    band(0, H, 0, H - depth, 0, H - depth, W, depth);
-    band(0, 0, depth, 0, 0, 0, depth, H);
-    band(W, 0, W - depth, 0, W - depth, 0, depth, H);
   }
 }

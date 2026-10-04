@@ -27,17 +27,21 @@
 // stage and the key, and the end of the ascent gives the fix to the page. An abort drops all three,
 // because the ascent the fix waited for never comes.
 
-export const DIVE_MS = 1200;     // ms, the time the cover of a dive takes to close
+export const DIVE_MS = 1200;     // ms, the dive of the globe camera toward the site
 // ms, the floor of a descent: the switch to the ground waits at least this long, so the entry the
 // cover shows plays out even when the patch is quick. The patch build hides inside it.
 export const ENTRY_MS = 4000;
-// ms, the floor of an ascent: the switch to the globe waits this long, so the climb plays out, and
-// with the cover that opens after it the ascent takes four seconds.
-export const EXIT_MS = 2400;
+// ms, the floor of an ascent: the switch to the globe waits this long, so the climb plays out. With
+// the static before and after the switch the ascent takes four seconds.
+export const EXIT_MS = 2800;
 export const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
-// ms, the time the cover takes to open after the switch. It is a cross fade, not a cut: the cover
-// opens slowly while the camera still moves, so the new view comes up through the colour of the air.
-export const FADE_MS = 1600;
+// The cuts of a dive. A descent and an ascent each cut the view twice: from the scene to the cover
+// of the entry, and from the cover to the new scene. A fade between two pictures that do not match
+// reads as a fault of the app, so each cut happens under the static of the probe instead, the
+// static the overlay draws at the edge of the reach: the signal drops, and it comes back on the new
+// view. The static rises over BURST_MS, the view cuts at its peak, and it clears over FADE_MS.
+export const BURST_MS = 500;
+export const FADE_MS = 700;
 // Chapter 3: the jump from the ruin to the twin. The probe stays on the ground the whole time: the
 // ruin flares for JUMP_MS while the cover goes white, the ground switches under the cover, and the
 // twin flares and fades for JUMP_OUT_MS while the cover opens. See docs/issues/p3-00-the-way-on.md.
@@ -119,11 +123,69 @@ export class Probe {
     this.heard = heard;
   }
 
+  // One frame of a descent or an ascent. `cover` is 0 or 1, because the cover never fades: it cuts
+  // on and off under the static, and `noise` is the strength of the static, 0 to 1.
+  //
+  //   in    the static rises over BURST_MS while the old view still runs, the cover cuts on at its
+  //         peak, and the static clears over FADE_MS. The cover holds until the dive is ready: the
+  //         floor of ENTRY_MS or EXIT_MS, and for a descent the patch or the guard. Then the static
+  //         rises over BURST_MS again, and the switch comes at its peak, with the cover off.
+  //   out   the static clears over FADE_MS from the new view.
+  //
+  // `k` runs over `dur` as before, so the globe camera of a descent keeps its dive.
+  _stepDive(d, now) {
+    const t = now - d.t0;
+    const k = smooth(Math.min(1, Math.max(0, t / d.dur)));
+    const out = { kind: d.kind, phase: d.phase, path: d.path, k, cover: 0, noise: 0, event: null };
+    if (d.phase === 'out') {
+      out.noise = 1 - smooth(Math.min(1, t / FADE_MS));
+      if (t < FADE_MS) return out;
+      if (d.kind === 'ascend') {
+        out.event = 'surfaced';
+        out.fix = this.fix;
+        this._orbit();
+      } else {
+        out.event = 'landed';
+        this.dive = null;
+      }
+      return out;
+    }
+    out.cover = t >= BURST_MS ? 1 : 0;
+    out.noise = t < BURST_MS ? smooth(t / BURST_MS) : 1 - smooth(Math.min(1, (t - BURST_MS) / FADE_MS));
+    if (d.ready == null) {
+      const floor = d.kind === 'descend' ? ENTRY_MS : EXIT_MS;
+      // the switch waits for the patch, or for the guard, whichever comes first after the floor
+      const waits = d.kind === 'descend' && !this.patch.done && t < PATCH_WAIT;
+      if (t < floor || waits) return out;
+      d.ready = now;
+    }
+    const r = (now - d.ready) / BURST_MS;
+    out.noise = Math.max(out.noise, smooth(Math.min(1, r)));
+    if (r < 1) return out;
+    out.cover = 0;
+    out.noise = 1;
+    if (d.kind === 'descend') {
+      this.mode = 'ground';
+      out.event = 'enter';
+      out.patch = this.patch.result;
+      out.view = this.view;
+      this.view = null;
+    } else {
+      this.mode = 'ascending';
+      this.stage = null;
+      this.heard = null;
+      out.event = 'leave';
+    }
+    this.dive = { ...d, phase: 'out', t0: now, dur: FADE_MS, ready: null };
+    return out;
+  }
+
   // One frame of the dive at time `now`, or null with no dive. Gives:
   //
   //   kind, phase, path   the dive of this frame, before any switch
   //   k                   0 to 1 through the phase, eased
   //   cover               the opacity of the cover, 0 to 1
+  //   noise               the strength of the static over a cut, 0 to 1. A descent and an ascent only.
   //   event               null, or one of:
   //     'enter'     the descent switches to the ground. `patch` is the patch, or null when it
   //                 failed or the guard ran out, and `view` is the camera of a link, or null.
@@ -133,49 +195,30 @@ export class Probe {
   //                 that waited for this moment, or null.
   //     'swap'      the jump switches to the ground of the twin under the white cover. `patch` is
   //                 the patch, or null. The event 'landed' ends the jump.
+  //
+  // The jump of chapter 3 fades its white cover. The descent and the ascent cut under the static;
+  // see _stepDive().
   step(now) {
     const d = this.dive;
     if (!d) return null;
+    if (d.kind !== 'jump') return this._stepDive(d, now);
     const raw = Math.min(1, Math.max(0, (now - d.t0) / d.dur));
     const k = smooth(raw);
     const out = { kind: d.kind, phase: d.phase, path: d.path, k, cover: d.phase === 'in' ? k : 1 - k, event: null };
     if (raw < 1) return out;
     if (d.phase === 'in') {
       // the switch waits for the patch, or for the guard, whichever comes first after the floor
-      if ((d.kind === 'descend' || d.kind === 'jump') && !this.patch.done && now - d.t0 < PATCH_WAIT) return out;
-      if (d.kind === 'descend' && now - d.t0 < ENTRY_MS) return out;
-      if (d.kind === 'ascend' && now - d.t0 < EXIT_MS) return out;
-      if (d.kind === 'jump') {
-        out.event = 'swap';
-        out.patch = this.patch.result;
-        this.dive = { ...d, phase: 'out', t0: now, dur: JUMP_OUT_MS };
-        return out;
-      }
-      if (d.kind === 'descend') {
-        this.mode = 'ground';
-        out.event = 'enter';
-        out.patch = this.patch.result;
-        out.view = this.view;
-        this.view = null;
-      } else {
-        this.mode = 'ascending';
-        this.stage = null;
-        this.heard = null;
-        out.event = 'leave';
-      }
-      this.dive = { ...d, phase: 'out', t0: now, dur: FADE_MS };
+      if (!this.patch.done && now - d.t0 < PATCH_WAIT) return out;
+      out.event = 'swap';
+      out.patch = this.patch.result;
+      this.dive = { ...d, phase: 'out', t0: now, dur: JUMP_OUT_MS };
       return out;
     }
-    if (d.kind === 'ascend') {
-      out.event = 'surfaced';
-      out.fix = this.fix;
-      this._orbit();
-    } else {
-      out.event = 'landed';
-      this.dive = null;
-    }
+    out.event = 'landed';
+    this.dive = null;
     return out;
   }
+
 
   // A new world: the probe stands in orbit again, whatever ran. Gives false when it stood there.
   abort() {
