@@ -27,7 +27,10 @@
 // stage and the key, and the end of the ascent gives the fix to the page. An abort drops all three,
 // because the ascent the fix waited for never comes.
 
-export const DIVE_MS = 1200;     // ms, the floor of the dive. The patch build hides inside it.
+export const DIVE_MS = 1200;     // ms, the time the cover of a dive takes to close
+// ms, the floor of a descent: the switch to the ground waits at least this long, so the entry the
+// cover shows plays out even when the patch is quick. The patch build hides inside it.
+export const ENTRY_MS = 4000;
 export const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
 export const FADE_MS = 600;      // ms, the time the cover takes to open after the switch
 // Chapter 3: the jump from the ruin to the twin. The probe stays on the ground the whole time: the
@@ -135,6 +138,7 @@ export class Probe {
     if (d.phase === 'in') {
       // the switch waits for the patch, or for the guard, whichever comes first after the floor
       if ((d.kind === 'descend' || d.kind === 'jump') && !this.patch.done && now - d.t0 < PATCH_WAIT) return out;
+      if (d.kind === 'descend' && now - d.t0 < ENTRY_MS) return out;
       if (d.kind === 'jump') {
         out.event = 'swap';
         out.patch = this.patch.result;
