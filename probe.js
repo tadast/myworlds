@@ -31,8 +31,13 @@ export const DIVE_MS = 1200;     // ms, the time the cover of a dive takes to cl
 // ms, the floor of a descent: the switch to the ground waits at least this long, so the entry the
 // cover shows plays out even when the patch is quick. The patch build hides inside it.
 export const ENTRY_MS = 4000;
+// ms, the floor of an ascent: the switch to the globe waits this long, so the climb plays out, and
+// with the cover that opens after it the ascent takes four seconds.
+export const EXIT_MS = 2400;
 export const PATCH_WAIT = 12000; // ms, the guard on the patch. Past it the probe lands on flat ground.
-export const FADE_MS = 600;      // ms, the time the cover takes to open after the switch
+// ms, the time the cover takes to open after the switch. It is a cross fade, not a cut: the cover
+// opens slowly while the camera still moves, so the new view comes up through the colour of the air.
+export const FADE_MS = 1600;
 // Chapter 3: the jump from the ruin to the twin. The probe stays on the ground the whole time: the
 // ruin flares for JUMP_MS while the cover goes white, the ground switches under the cover, and the
 // twin flares and fades for JUMP_OUT_MS while the cover opens. See docs/issues/p3-00-the-way-on.md.
@@ -101,7 +106,7 @@ export class Probe {
   // Recall the probe at time `now`. Gives false unless it stands on the ground with no dive.
   ascend(now) {
     if (this.mode !== 'ground' || this.dive) return false;
-    this.dive = { kind: 'ascend', phase: 'in', t0: now, dur: FADE_MS, path: null };
+    this.dive = { kind: 'ascend', phase: 'in', t0: now, dur: DIVE_MS, path: null };
     return true;
   }
 
@@ -139,6 +144,7 @@ export class Probe {
       // the switch waits for the patch, or for the guard, whichever comes first after the floor
       if ((d.kind === 'descend' || d.kind === 'jump') && !this.patch.done && now - d.t0 < PATCH_WAIT) return out;
       if (d.kind === 'descend' && now - d.t0 < ENTRY_MS) return out;
+      if (d.kind === 'ascend' && now - d.t0 < EXIT_MS) return out;
       if (d.kind === 'jump') {
         out.event = 'swap';
         out.patch = this.patch.result;

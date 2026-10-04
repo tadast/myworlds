@@ -87,7 +87,9 @@ body {
    The label reports what the worker builds while the probe falls. */
 #dive {
   position: fixed; inset: 0; z-index: 9; opacity: 0; pointer-events: none; overflow: hidden;
-  --depth: 1; --air: 1; --heat: 0;
+  --depth: 1; --air: 1; --heat: 0; --open: 0;
+  /* app.js turns the air into the haze of the ground; the default keeps the first blend off clear */
+  background-color: #8fb7ff; transition: background-color 0.9s ease;
 }
 #dive-label {
   margin: 0; padding: 6px 14px; border-radius: 12px;
@@ -98,6 +100,7 @@ body {
 .dive-foot {
   position: absolute; left: 0; right: 0; bottom: 12vh;
   display: flex; flex-direction: column; align-items: center; gap: 12px;
+  opacity: calc(1 - 2 * var(--open));
 }
 
 /* The entry, app.js: startEntry(). Only a descent and a recall show it; the white of the jump shows
