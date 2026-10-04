@@ -85,13 +85,81 @@ body {
 /* ---------- the dive and the loading card
    The dive fades the screen to the atmosphere colour. The app sets the colour and the opacity.
    The label reports what the worker builds while the probe falls. */
-#dive { position: fixed; inset: 0; z-index: 9; opacity: 0; pointer-events: none; display: grid; place-items: end center; }
+#dive {
+  position: fixed; inset: 0; z-index: 9; opacity: 0; pointer-events: none; overflow: hidden;
+  --depth: 1; --air: 1; --heat: 0;
+}
 #dive-label {
-  margin: 0 0 12vh; padding: 6px 14px; border-radius: 12px;
+  margin: 0; padding: 6px 14px; border-radius: 12px;
   background: rgba(7, 10, 22, 0.28); color: #fff; font-size: 13px; letter-spacing: 0.02em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 #dive-label:empty { display: none; }
+.dive-foot {
+  position: absolute; left: 0; right: 0; bottom: 12vh;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+
+/* The entry, app.js: startEntry(). Only a descent and a recall show it; the white of the jump shows
+   none of it. --depth runs from 0 in space to 1 at the camera, on the log of the altitude. */
+#dive > :is(.dive-space, .dive-clouds, .dive-heat), .dive-read { display: none; }
+#dive.entry > :is(.dive-space, .dive-clouds, .dive-heat) { display: block; position: absolute; inset: 0; }
+#dive.entry .dive-read { display: flex; }
+/* Space over the air: black at the top, the limb of the air at the bottom. It fades as the probe
+   falls, and the cover ends in the plain colour of the air, which the fog of the ground opens from. */
+.dive-space {
+  background:
+    radial-gradient(1px 1px at 18% 22%, #fff, transparent), radial-gradient(1px 1px at 72% 14%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 44% 38%, #fff, transparent), radial-gradient(1px 1px at 86% 41%, #fff, transparent),
+    radial-gradient(1px 1px at 9% 55%, #fff, transparent), radial-gradient(1.5px 1.5px at 61% 8%, #fff, transparent),
+    linear-gradient(180deg, #02030a 0%, #070a16 35%, transparent 100%);
+  opacity: calc(1 - 1.6 * var(--depth));   /* gone at about 6 km: no star shows in the clouds */
+}
+/* The cloud layers. Each layer is twice the height of the screen and holds one screen of clouds
+   twice, so a slide of half its height loops with no seam. The near layer is larger, softer, and
+   faster. A descent slides them up past the probe, and a recall slides them down. */
+.dive-clouds { opacity: calc(var(--air) * 0.9); }
+.dive-clouds i {
+  position: absolute; left: -10%; right: -10%; top: 0; height: 200%;
+  background-size: 100% 50%; animation: dive-rush 1.6s linear infinite;
+  background-image:
+    radial-gradient(22% 4% at 18% 20%, rgba(255, 255, 255, 0.5), transparent 70%),
+    radial-gradient(30% 5% at 74% 48%, rgba(255, 255, 255, 0.42), transparent 70%),
+    radial-gradient(18% 3.5% at 40% 82%, rgba(255, 255, 255, 0.46), transparent 70%);
+}
+.dive-clouds i:nth-child(2) {
+  animation-duration: 1.05s; filter: blur(3px);
+  background-image:
+    radial-gradient(34% 6% at 62% 12%, rgba(255, 255, 255, 0.5), transparent 70%),
+    radial-gradient(28% 5% at 12% 58%, rgba(255, 255, 255, 0.4), transparent 70%),
+    radial-gradient(38% 7% at 86% 78%, rgba(255, 255, 255, 0.45), transparent 70%);
+}
+.dive-clouds i:nth-child(3) {
+  animation-duration: 0.6s; filter: blur(8px);
+  background-image:
+    radial-gradient(60% 9% at 30% 35%, rgba(255, 255, 255, 0.55), transparent 70%),
+    radial-gradient(52% 8% at 90% 88%, rgba(255, 255, 255, 0.5), transparent 70%);
+}
+#dive.up .dive-clouds i { animation-direction: reverse; }
+@keyframes dive-rush { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+/* The heat of the entry: a glow of plasma that closes in from the edges and climbs from the bottom,
+   and goes. A blend mode would wash it out over a pale air, so it is plain paint. */
+.dive-heat {
+  background:
+    radial-gradient(120% 60% at 50% 112%, rgba(255, 196, 120, 0.95), rgba(255, 110, 50, 0.6) 40%, transparent 72%),
+    radial-gradient(closest-corner at 50% 45%, transparent 55%, rgba(255, 96, 40, 0.5) 85%, rgba(220, 60, 30, 0.85) 100%);
+  opacity: var(--heat);
+}
+/* The altitude, in the type of the probe overlay. */
+.dive-read {
+  flex-direction: column; align-items: center; gap: 2px;
+  color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+.dive-read span { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; opacity: 0.8; }
+.dive-read b { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+@media (prefers-reduced-motion: reduce) {
+  .dive-clouds i { animation: none; }
+}
 
 /* ---------- overlay */
 #overlay {
