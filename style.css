@@ -797,8 +797,8 @@ body {
 /* ---------- chapter 3, the way on
    The decoder stands in the row of the way on of the card of the ruin: the reply, the sounds, and a
    field under each glyph of the name. A glyph that lit in a send takes the colour of the ruin, and a
-   glyph that stayed dark takes a dim mark. A letter the codex holds as proven shows in the colour of
-   the ruin on every world. decoder.js builds it; see docs/issues/p3-00-the-way-on.md. */
+   glyph that stayed dark takes a dim mark. A letter the codex of the world holds as proven shows in
+   the colour of the ruin. decoder.js builds it; see docs/issues/p3-00-the-way-on.md. */
 .cword { font-size: 15px; font-weight: 600; letter-spacing: 0.12em; color: var(--ruin, var(--accent)); }
 .cdecoder { margin-top: 12px; }
 .decoder { display: flex; flex-direction: column; gap: 12px; max-width: 62ch; }

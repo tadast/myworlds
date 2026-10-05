@@ -690,7 +690,7 @@ The card draws the line as inline SVG in the colour of the ruin, one glyph per l
 `portalSeed(world)`. The SVG holds no text, and no attribute holds the seed, so the page does not
 print the name the glyphs spell. One seed gives one line on every open, and two seeds of the way on
 give two lines: over the 1,482 seeds of the way on of `tools/ruin-check.mjs`, no two share a line.
-Chapter 3 reads the same script, and the codex of the reader keeps its letters on every world. Do not change a glyph.
+Chapter 3 reads the same script. The codex of the reader keeps the letters of each world apart. Do not change a glyph.
 
 ### The find of chapter 2
 
