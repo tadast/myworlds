@@ -1782,6 +1782,11 @@ export class Ground {
   // A tap glides. A drag does not, so a turn, a pan, and a pinch stay free of the glide. The
   // handlers never call preventDefault, so the page still hears every tap.
   _onDown(e) {
+    // A primary press starts a new gesture: no other pointer of its type is down. A release can miss
+    // the canvas: the pointer leaves the window, or a menu of the system takes the release. The count
+    // then stays high, and it would read every later tap as a second finger, so no tap would mark or
+    // glide again until a reload. So a primary press starts the count again.
+    if (e.isPrimary) { this._pointers = 0; this._touches.clear(); }
     this._pointers++;
     if (e.pointerType === 'touch') {
       this._touches.set(e.pointerId, { x: e.clientX, y: e.clientY });

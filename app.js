@@ -1943,8 +1943,15 @@ const ruinInspector = new RuinInspector({ card: creatureCard, canvas: ruinCanvas
 const cardOpen = () => inspector.open || plantInspector.open || sourceInspector.open || ruinInspector.open;
 function closeCard() {
   inspector.hide(); plantInspector.hide(); sourceInspector.hide(); ruinInspector.hide();
-  // Chapter 3: the reader has read the third log, and the people of the tent come out.
-  if (crewWaits && ground && ground.crew) ground.crew.release(true);
+  // Chapter 3: the reader has read the third log, and the people of the tent come out. The tap on the
+  // twin glided the view to it, so the people stand at the foot of the screen, under the study chip.
+  // So the mark of the twin goes, and the chip goes with it. A click on a person then reaches the
+  // person, and does not open the card of the twin again.
+  if (crewWaits && ground && ground.crew) {
+    ground.crew.release(true);
+    if (ground.source) ground.source.unmark();
+    markedSource = false;
+  }
   crewWaits = false;
   // The read of the card of the twin ended the story, and nobody waits to go home: the end card.
   if (endWaits) { endWaits = false; setTimeout(showEnd, 450); }
@@ -1966,6 +1973,7 @@ function inspect(kind) {
   creatureCard.hidden = false;
   plantCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = true; creatureCanvas.hidden = false;
   inspector.show(current.world.species[kind], current.world.palette, discColor(), 3 + kind);
+  cardText.scrollTop = 0;   // the text of a new subject starts at the top, as the log and the rows of a ruin do
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'animal';
   // The open is the find: the creature joins the field guide, and the line over the name counts it.
@@ -1987,6 +1995,7 @@ function inspectPlant(kind) {
   creatureCard.hidden = false;
   creatureCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = true; plantCanvas.hidden = false;
   plantInspector.show(p, current.world.palette, discColor(), groundVariant);
+  cardText.scrollTop = 0;
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'plant';
   const seed = current.world.seed;
@@ -2255,6 +2264,7 @@ addEventListener('keydown', (e) => {
   else if (markedKind !== null) { if (ground && ground.fauna) ground.fauna.unmark(); markedKind = null; }
   else if (markedPlant !== null) { if (ground && ground.flora) ground.flora.unmark(); markedPlant = null; }
   else if (markedSource) { if (ground && ground.source) ground.source.unmark(); markedSource = false; }
+  else if (markedPerson) { if (ground && ground.crew) ground.crew.unmark(); markedPerson = null; }
   else stopAim();
 });
 

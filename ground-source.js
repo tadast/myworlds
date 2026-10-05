@@ -714,7 +714,7 @@ export class SourceInspector {
     if (tail) this.logEl.appendChild(tail);
     this.logEl.scrollTop = 0;
     this.card.hidden = false;
-    requestAnimationFrame(() => this.card.classList.add('show'));
+    requestAnimationFrame(() => { if (this.open) this.card.classList.add('show'); });
     if (!this.open) { this.open = true; this.clock.start(); this.loop(); }
     this.resize();
   }
@@ -932,7 +932,7 @@ export class RuinInspector {
       });
     }
     this.card.hidden = false;
-    requestAnimationFrame(() => this.card.classList.add('show'));
+    requestAnimationFrame(() => { if (this.open) this.card.classList.add('show'); });
     if (!this.open) { this.open = true; this.clock.start(); this.loop(); }
     this.resize();
   }
