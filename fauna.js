@@ -2164,7 +2164,8 @@ export class Inspector {
       .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     this.storyEl.textContent = lore.story;
     this.card.hidden = false;
-    requestAnimationFrame(() => this.card.classList.add('show'));
+    // A close before the next frame leaves the card closed, so the frame must not show it again.
+    requestAnimationFrame(() => { if (this.open) this.card.classList.add('show'); });
     if (!this.open) { this.open = true; this.clock.start(); this.loop(); }
     this.resize();
   }
