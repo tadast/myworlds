@@ -77,6 +77,7 @@ export function makeDeck(app, { title = false } = {}) {
   const show = (e, on) => e.classList.toggle('gone', !on);
 
   let page = null;             // the page of the window: worlds, story, planet, menu, or null
+  let shown = null;            // the page and the world the window shows, while it stands open
   let titleOn = title;
   let arrival = false;         // the arrival card stands
   let arrivedSeed = null;      // the world the last arrival was for
@@ -290,17 +291,25 @@ export function makeDeck(app, { title = false } = {}) {
     const w = ready() && !titleOn ? app.world : null;
     el.head.innerHTML = `<div class="where">${w ? `${thumb((app.worlds().find((x) => x.seed === w.seed) || {}).thumb)}<span><b>${esc(w.seed)}</b> · ${esc(PAGES[page])}</span>` : `<span><b>My Worlds</b> · ${esc(PAGES[page])}</span>`}</div>
       <button type="button" class="close-btn" data-act="close" aria-label="Close">${icon('close', 18)}</button>`;
-    const same = el.window.dataset.page === page;
-    const top = same ? el.page.scrollTop : 0;
+    // A new render of the page that stands open keeps its scroll: a change of the story, or the
+    // close of a card over it. A page that opens, or the page of another world, starts at the top.
+    const now = `${page}|${w ? w.seed : ''}`;
+    const top = shown === now ? el.page.scrollTop : 0;
     // The Worlds and the Menu pages need no world; the Planet and the Story pages wait for one.
     const needs = page === 'planet' || page === 'story';
     el.page.innerHTML = needs && !w ? '' : page === 'planet' ? pagePlanet() : page === 'story' ? pageStory() : page === 'worlds' ? pageWorlds() : pageMenu();
     // The tuner of tuner.js stands in the Now panel of the Story page while the band waits for it.
     const slot = el.page.querySelector('.tune-slot');
     if (slot) { slot.appendChild(app.tuner.el); app.tuner.el.hidden = false; }
-    el.window.dataset.page = page;
+    shown = now;
+    scrollPage(top, anchor);
+  }
+
+  // The scroll of the page: `top`, or the section `anchor`. A hidden window takes no scroll.
+  function scrollPage(top, anchor) {
     el.page.scrollTop = top;
-    if (anchor) { const a = el.page.querySelector(`#${anchor}`); if (a) el.page.scrollTop = a.offsetTop - 16; }
+    const a = anchor && el.page.querySelector(`#${anchor}`);
+    if (a) el.page.scrollTop = a.offsetTop - 16;
   }
 
   function openPage(next, anchor) {
@@ -311,6 +320,8 @@ export function makeDeck(app, { title = false } = {}) {
     if (next === 'planet' && ready() && !titleOn) heroShot = { seed: app.world.seed, src: app.snapshot() };
     renderPage(anchor);
     render();
+    // The page rendered while the window was hidden, so the scroll is set again now that it stands.
+    scrollPage(0, anchor);
     const x = el.head.querySelector('.close-btn');
     if (x) x.focus({ preventScroll: true });
   }
@@ -346,6 +357,7 @@ export function makeDeck(app, { title = false } = {}) {
   // ------------------------------------------------------------ the frame
   function render() {
     const ok = ready();
+    if (!page) shown = null;   // the window closed, so the next open starts at the top
     // The arrival belongs to the orbit: a landing from a link or a script closes it.
     if (arrival && app.mode !== 'orbit') arrival = false;
     const L = layer();

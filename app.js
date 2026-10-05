@@ -1973,6 +1973,7 @@ function inspect(kind) {
   creatureCard.hidden = false;
   plantCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = true; creatureCanvas.hidden = false;
   inspector.show(current.world.species[kind], current.world.palette, discColor(), 3 + kind);
+  cardText.scrollTop = 0;   // the text of a new subject starts at the top, as the log and the rows of a ruin do
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'animal';
   // The open is the find: the creature joins the field guide, and the line over the name counts it.
@@ -1994,6 +1995,7 @@ function inspectPlant(kind) {
   creatureCard.hidden = false;
   creatureCanvas.hidden = true; sourceCanvas.hidden = true; ruinCanvas.hidden = true; plantCanvas.hidden = false;
   plantInspector.show(p, current.world.palette, discColor(), groundVariant);
+  cardText.scrollTop = 0;
   creatureCard.dataset.kind = kind;
   creatureCard.dataset.subject = 'plant';
   const seed = current.world.seed;
