@@ -32,7 +32,7 @@ Use these words and no other words for them. The terms of phase 2 stay.
 | name | The word the glyphs of the way on spell: `portalSeed(world)`, the name the makers gave the twin. | password, code, answer |
 | key | The call sign of the ship in the script of the makers, with its letters, and the sixteen sounds. | hint, cipher |
 | send | The reader sends a name to the ruin. The ruin lights each glyph that is right. | guess, submit |
-| codex | The letters the reader has given the glyphs, on every world. The script is one script. | dictionary |
+| codex | The letters the reader has given the glyphs of one world. Each world keeps its own. | dictionary |
 | jump | The move of the probe from the ruin to the twin. `probe.jump()`. | teleport, warp |
 | herd | The animals of the maker at the twin: the species of the maker, or the kin. | flock |
 | kin | The species that `rollKin()` rolls for a rolled maker. It lives only at the twin. | new species |
@@ -53,9 +53,12 @@ Use these words and no other words for them. The terms of phase 2 stay.
    the sounds of the call, and the card shows them as chips.
 4. **The send answers per glyph.** Each right glyph lights. The name with every glyph right carries
    the probe. There is no limit on the sends.
-5. **The codex outlives the world.** The script is one script on every world, so the letters the
-   reader gave the glyphs fill the fields of the next world. A glyph that lit in a send is proven.
-   `localStorage` key `myworlds.codex.v1`.
+5. **The codex belongs to one world.** The letters the reader gave the glyphs fill the fields of
+   the same world again, and the fields of a new world start empty. The language of the makers is
+   not the same on two worlds, and a codex shared by every world filled more fields on each new
+   world, until the reader had no puzzle left. A glyph that lit in a send is proven.
+   `localStorage` key `myworlds.codex.v2`, by seed. (Until 2026-10-05 one codex served every world,
+   under `myworlds.codex.v1`. The page now removes that key.)
 6. **The jump.** The ruin flares, a beam of light stands over it, and the cover goes white. Under
    the cover the page drops the ground of the ruin and lands on the cell of the twin. The twin flares
    and fades as the cover opens. The arrival at the twin ends chapter 3.

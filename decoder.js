@@ -13,8 +13,8 @@
 //   the send    the button sends the name. The ruin lights each glyph that is right, and the right
 //               name opens the way. There is no limit on the sends
 //
-// The letters belong to the reader and not to one world: the codex of carrier-store.js keeps them,
-// and the fields of the next world start with them. A glyph that lit in a send is proven, and its
+// The codex of carrier-store.js keeps the letters of this world, and the fields start with them when
+// the card opens again. Each world keeps its own codex, so the fields of a new world start empty. A glyph that lit in a send is proven, and its
 // field shows it in the colour of the ruin.
 //
 // The form never holds the name. sendName() of way-types.js runs in the page, and the form shows the
@@ -40,7 +40,7 @@ let serial = 0;
 // Build one decoder.
 //
 //   key       wayKey() of way-types.js: the glyphs and the slots of the name, the reply, the sounds
-//   codex     readCodex() of carrier-store.js: { letters, proven }
+//   codex     readCodex(seed) of carrier-store.js, the codex of this world: { letters, proven }
 //   probe     the name of the ship, for the label of the reply
 //   onChange  (codex) => void, after every letter the reader types
 //   onSend    (text) => the answer of sendName(): { kind, lit, text }

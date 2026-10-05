@@ -177,29 +177,40 @@ export function writeProgress(seed, ids, parts) {
 
 
 // ---------------------------------------------------------------- the codex, chapter 3
-// The makers write in one script on every world, so the letters the reader gives the glyphs belong
-// to the reader and not to a world. The codex keeps them under a key of its own: for each glyph of
-// the script, by its index 0 to 25, the letter the reader typed, and whether a send proved it. The
-// next world fills its fields from the codex. See docs/issues/p3-00-the-way-on.md.
+// The letters the reader gives the glyphs of one world. Each world keeps its own codex, so the name
+// of a new world starts with empty fields: the language of the makers is not the same on two worlds,
+// and the puzzle is for the reader to solve on each world. The codex of a seed holds, for each glyph
+// of the script by its index 0 to 25, the letter the reader typed, and whether a send proved it.
+// See docs/issues/p3-00-the-way-on.md.
 //
-//   { letters: { "10": "k", ... }, proven: { "10": true, ... } }
-export const CODEX_KEY = 'myworlds.codex.v1';
+//   { "<seed>": { letters: { "10": "k", ... }, proven: { "10": true, ... } }, ... }
+export const CODEX_KEY = 'myworlds.codex.v2';
+// The codex of v1 was one codex for every world. It goes, because its letters belong to no world.
+const CODEX_V1 = 'myworlds.codex.v1';
 
-export function readCodex() {
-  const out = { letters: {}, proven: {} };
+function readCodexAll() {
   try {
+    localStorage.removeItem(CODEX_V1);
     const raw = localStorage.getItem(CODEX_KEY);
-    const c = raw ? JSON.parse(raw) : null;
-    if (!c || typeof c !== 'object') return out;
-    for (let k = 0; k < 26; k++) {
-      const v = c.letters && c.letters[k];
-      if (typeof v === 'string' && /^[a-z]$/.test(v)) out.letters[k] = v;
-      if (c.proven && c.proven[k] === true && out.letters[k]) out.proven[k] = true;
-    }
-  } catch { /* a private window or a store that is switched off: the codex starts empty */ }
+    const all = raw ? JSON.parse(raw) : null;
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch { return {}; }   // a private window or a store that is switched off: every codex starts empty
+}
+
+export function readCodex(seed) {
+  const out = { letters: {}, proven: {} };
+  const c = readCodexAll()[seed];
+  if (!c || typeof c !== 'object') return out;
+  for (let k = 0; k < 26; k++) {
+    const v = c.letters && c.letters[k];
+    if (typeof v === 'string' && /^[a-z]$/.test(v)) out.letters[k] = v;
+    if (c.proven && c.proven[k] === true && out.letters[k]) out.proven[k] = true;
+  }
   return out;
 }
 
-export function writeCodex(codex) {
-  try { localStorage.setItem(CODEX_KEY, JSON.stringify(codex)); return true; } catch { return false; }
+export function writeCodex(seed, codex) {
+  const all = readCodexAll();
+  all[seed] = codex;
+  try { localStorage.setItem(CODEX_KEY, JSON.stringify(all)); return true; } catch { return false; }
 }

@@ -65,7 +65,7 @@ The reader sends a name to the ruin, and the ruin lights each glyph that is righ
 _Avoid_: guess, submit
 
 **Codex**:
-The letters the reader has given the glyphs, on every world, because the script is one script. `myworlds.codex.v1`.
+The letters the reader has given the glyphs of one world. Each world keeps its own codex, so the name of a new world starts with empty fields. `myworlds.codex.v2`, by seed.
 _Avoid_: dictionary
 
 **Jump**:

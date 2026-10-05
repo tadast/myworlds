@@ -2304,8 +2304,8 @@ function wayRow(world) {
   }
   const key = wayKey(world);
   const dec = makeDecoder({
-    key, codex: readCodex(), probe: world.source && world.source.log && world.source.log.probe,
-    onChange: (codex) => writeCodex(codex),
+    key, codex: readCodex(world.seed), probe: world.source && world.source.log && world.source.log.probe,
+    onChange: (codex) => writeCodex(world.seed, codex),
     onSend: (text) => {
       const a = sendName(text, nameOf(world));
       if (a.kind === 'open') setTimeout(() => startJump(), 1100);
