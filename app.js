@@ -1125,12 +1125,17 @@ const probe = new Probe();
 let ground = null;        // the Ground instance while the probe is down
 
 // The patch for the site the probe dives to. The dive holds the screen until the reply lands, so the
-// reader never sees the ground build. The reply goes to the descent that asked for it.
+// reader never sees the ground build. The reply goes to the descent that asked for it. Each request
+// has a new id, and the worker sends it back with the reply. A descent past PATCH_WAIT lands on flat
+// ground, but the worker still builds the patch, and its reply can come after the next request. The
+// id of that reply is not the id of the open job, so getWorker() drops it.
+let patchId = 0;
 function requestPatch(label = null) {
   const t0 = performance.now();
-  const job = probe.job, target = probe.site;
+  const job = probe.job, target = probe.site, id = ++patchId;
   if (diveLabel) diveLabel.textContent = label || '';
   patchJob = {
+    id,
     progress: () => {},   // the cover shows the entry, and no line about the build
     done: (result) => {
       patchJob = null;
@@ -1145,7 +1150,7 @@ function requestPatch(label = null) {
     },
   };
   getWorker().postMessage({
-    type: 'patch', seed: current.world.seed,
+    type: 'patch', id, seed: current.world.seed,
     site: { lat: target.lat, lon: target.lon, kind: target.kind ?? -1 }, opts: pOpts(),
   });
 }
@@ -1528,9 +1533,11 @@ function updateMovers(t, dt) {
   for (const inst of anchored) inst.geometry.attributes.aAnchor.needsUpdate = true;
 }
 // ---------------------------------------------------------------- worker / generation
-// One worker serves two jobs: the globe and the ground patch. Only one of them runs at a time,
-// because a new world always recalls the probe first, so progress and error belong to the job
-// that is open.
+// One worker serves two jobs: the globe and the ground patch. The page opens one job at a time,
+// because a new world always recalls the probe first. But the worker can still build a patch that
+// the page does not wait for now: the patch of a descent past PATCH_WAIT, or of a probe that a new
+// world recalled. So each reply goes by its id. A reply with an id belongs to a patch request, and
+// only the open patch job takes it. A reply with no id belongs to the globe.
 let worker = null;
 let busy = false;
 let genJob = null, patchJob = null;
@@ -1539,11 +1546,10 @@ function getWorker() {
   worker = new Worker('./worker.js', { type: 'module' });
   worker.onmessage = (e) => {
     const msg = e.data;
-    if (msg.type === 'done') { if (genJob) genJob.done(msg.result); return; }
-    if (msg.type === 'patch-done') { if (patchJob) patchJob.done(msg.result); return; }
-    const job = genJob || patchJob;
+    const job = msg.id == null ? genJob : patchJob && patchJob.id === msg.id ? patchJob : null;
     if (!job) return;
-    if (msg.type === 'progress') job.progress(msg);
+    if (msg.type === 'done' || msg.type === 'patch-done') job.done(msg.result);
+    else if (msg.type === 'progress') job.progress(msg);
     else if (msg.type === 'error') job.fail(msg.message);
   };
   return worker;
