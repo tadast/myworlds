@@ -45,6 +45,14 @@ class Perf {
   // the mean time the app spends inside one frame callback, in ms
   get avgWork() { return this.wn ? this.wsum / this.wn : 0; }
 
+  // the slowest frame interval of the window in ms, or 0 while the window is empty. A mean of 16 ms
+  // with one frame of 90 ms reads as smooth in the mean and as a stutter on the screen.
+  get worst() {
+    let m = 0;
+    for (let k = 0; k < this.n; k++) m = Math.max(m, this.ring[k]);
+    return m;
+  }
+
   // Both windows are full, so the averages are worth a decision.
   get ready() { return this.n >= WINDOW && this.wn >= WINDOW; }
 
@@ -100,6 +108,70 @@ class Perf {
 }
 
 export const perf = new Perf();
+
+// ---------------------------------------------------------------- the GPU clock
+// The work of the clock above is the time on the CPU. The graphics card runs the frame after the
+// CPU has sent it, so a frame can cost 4 ms of work and 45 ms on the card. This clock reads the
+// time on the card with a timer query, EXT_disjoint_timer_query_webgl2. A result comes back some
+// frames late, so the clock keeps a small pool of queries and reads each one when it is ready.
+//
+// The app builds this clock only with `?perf`. A browser without the extension gives `ok` false,
+// and the overlay then says so.
+const GPU_POOL = 6;        // queries in flight; a result comes back 2 to 4 frames late
+
+export class GpuClock {
+  constructor(gl) {
+    this.gl = gl;
+    this.ext = gl.getExtension && gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    this.ok = !!(this.ext && gl.createQuery);
+    this.free = [];
+    this.busy = [];          // queries that were ended and wait for a result, oldest first
+    this.active = null;
+    this.ring = new Float64Array(WINDOW);
+    this.n = 0; this.i = 0; this.sum = 0;
+  }
+
+  // the mean time of one frame on the card in ms, or 0 while no result has come back
+  get avg() { return this.n ? this.sum / this.n : 0; }
+
+  // At the head of the frame callback. A full pool skips the frame, and the mean reads the others.
+  begin() {
+    if (!this.ok || this.active) return;
+    this._poll();
+    const q = this.free.pop() || (this.busy.length + 1 < GPU_POOL ? this.gl.createQuery() : null);
+    if (!q) return;
+    this.gl.beginQuery(this.ext.TIME_ELAPSED_EXT, q);
+    this.active = q;
+  }
+
+  // At the foot of the same frame callback.
+  end() {
+    if (!this.active) return;
+    this.gl.endQuery(this.ext.TIME_ELAPSED_EXT);
+    this.busy.push(this.active);
+    this.active = null;
+  }
+
+  _poll() {
+    const gl = this.gl;
+    // A disjoint event (a change of clock, a sleep of the card) makes every result in flight
+    // worthless, so the clock drops them all.
+    const disjoint = gl.getParameter(this.ext.GPU_DISJOINT_EXT);
+    while (this.busy.length) {
+      const q = this.busy[0];
+      if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break;
+      this.busy.shift();
+      const ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+      this.free.push(q);
+      if (disjoint || ms > SPIKE_MS * 4) continue;
+      if (this.n < WINDOW) { this.ring[this.i] = ms; this.sum += ms; this.n++; }
+      else { this.sum += ms - this.ring[this.i]; this.ring[this.i] = ms; }
+      this.i = (this.i + 1) % WINDOW;
+    }
+  }
+
+  reset() { this.n = 0; this.i = 0; this.sum = 0; }
+}
 
 // ---------------------------------------------------------------- the overlay
 // The app builds this only with `?perf` in the query string, so the page pays nothing without the
