@@ -46,7 +46,11 @@ const MOON_TURNS = [0.25, 2];         // the band a moon must stay inside, in tu
 // ground stands well under the eye line, and the ring and the moons ended over the ground in a hard
 // line. Both stay under the far plane of the ground camera, 11,000 m. tools/sky-check.mjs.
 export const MOON_DIST = 7000;        // metres, the draw distance of a moon on the dome
-export const MOON_GAIN = 3;           // the true angular size is too small to read, so it grows 3x
+// The globe is a miniature: a moon there stands two to three planet radii out and is a tenth of
+// the planet wide. At that true size a moon fills 3 to 7 degrees of the sky, six to fourteen times
+// the moon of the Earth, so the ground draws it at its true size and does not grow it.
+export const MOON_GAIN = 1;
+const MOON_SHINE = 0.03;              // the light the planet throws on the dark side of a moon
 export const RING_REACH = 7500;       // metres, the far edge of the ring band
 export const CLOUD_LOW = 900;         // metres, the floor of the cloud deck
 export const CLOUD_HIGH = 1100;       // metres, the roof of the cloud deck
@@ -79,6 +83,21 @@ function hashSeed(s) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
+}
+
+// The colour of the dome in a direction, without the disc of the star. The dome draws it, and a
+// moon draws it under itself: a moon stands behind the air, so the light of the air adds to it.
+function skyGlsl() {
+  const glow = 2 - 2 * Math.cos(SUN_GLOW);
+  return `uniform vec3 uZenith; uniform vec3 uSunColor; uniform vec3 uSunDir; uniform float uGlowGain;
+    vec3 skyAt(vec3 sky, vec3 horizon) {
+      vec3 c = mix(horizon, uZenith, pow(clamp(sky.y, 0.0, 1.0), 0.75));
+      float a2 = 2.0 - 2.0 * dot(sky, uSunDir);
+      // the tint fades out at the horizon, so the dome ends at the plain fog colour and the
+      // horizon holds no step, even with the sun low over it
+      float low = smoothstep(0.0, 0.2, sky.y);
+      return mix(c, uSunColor, smoothstep(${glow.toFixed(6)}, 0.0, a2) * uGlowGain * low);
+    }`;
 }
 
 // ---------------------------------------------------------------- the frame of the site
@@ -199,6 +218,16 @@ export class Sky {
     this.low = 0;               // 0 over DAY_ANGLE, 1 with the star on the horizon
     this._dusk = new THREE.Color();
     this.sunElev = 0;
+    // The uniforms the dome and the moons share. They hold the colours by reference, so _relight()
+    // changes them in place and only the numbers need a write.
+    this.skyUniforms = {
+      uZenith: { value: this.zenith }, uHorizon: { value: this.horizon },
+      uSunColor: { value: this.glowColor }, uDiscColor: { value: this.discColor },
+      // the disc stands where the star stands, and not where the light comes from: the star sets
+      // and the light stays at the floor, so the two part company at dusk
+      uSunDir: { value: this.sunTrue },
+      uGlowGain: { value: 0 }, uNight: { value: 0 },
+    };
     // The axis of the turn, and how fast and which way the sky turns about it. The sign is the
     // turn of the planet, reversed: the ground stands on the planet, so the sky runs the other way.
     // A landing can therefore begin in the morning as easily as in the afternoon, and toHorizon()
@@ -290,8 +319,8 @@ export class Sky {
     this.discColor.copy(this.starTint).lerp(MOON_LIGHT, this.night).multiplyScalar(1 - 0.5 * this.night);
     this.glowColor.copy(this.discColor).lerp(this.horizon, 0.35);
     this.glowGain = 0.55 * (1 - 0.7 * this.night);
-    const sh = this.domeMat && this.domeMat.userData.shader;
-    if (sh) sh.uniforms.uGlowGain.value = this.glowGain;
+    this.skyUniforms.uGlowGain.value = this.glowGain;
+    this.skyUniforms.uNight.value = this.night;
     if (this.domeMat) this.domeMat.color.copy(this.horizon);
     if (this.cloudMat) {
       this.cloudMat.color.copy(this.cloudColor).lerp(this.horizon, 0.15 + 0.6 * this.night);
@@ -312,34 +341,23 @@ export class Sky {
     const mat = new THREE.MeshBasicMaterial({
       color: this.horizon, side: THREE.BackSide, depthWrite: false, fog: false, toneMapped: false,
     });
-    const glow = 2 - 2 * Math.cos(SUN_GLOW), disc = 2 - 2 * Math.cos(SUN_DISC);
+    const disc = 2 - 2 * Math.cos(SUN_DISC);
     mat.onBeforeCompile = (sh) => {
-      sh.uniforms.uZenith = { value: this.zenith };
-      sh.uniforms.uSunColor = { value: this.glowColor };
-      sh.uniforms.uDiscColor = { value: this.discColor };
-      // the disc stands where the star stands, and not where the light comes from: the star sets
-      // and the light stays at the floor, so the two part company at dusk
-      sh.uniforms.uSunDir = { value: this.sunTrue };
-      sh.uniforms.uGlowGain = { value: this.glowGain };
+      Object.assign(sh.uniforms, this.skyUniforms);
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vSky;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSky = normalize(position);');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>
-          varying vec3 vSky; uniform vec3 uZenith; uniform vec3 uSunColor; uniform vec3 uDiscColor;
-          uniform vec3 uSunDir; uniform float uGlowGain;`)
+          varying vec3 vSky; uniform vec3 uDiscColor;
+          ${skyGlsl()}`)
         .replace('#include <color_fragment>', `#include <color_fragment>
           vec3 sky = normalize(vSky);
-          diffuseColor.rgb = mix(diffuseColor.rgb, uZenith, pow(clamp(sky.y, 0.0, 1.0), 0.75));
+          diffuseColor.rgb = skyAt(sky, diffuseColor.rgb);
           float a2 = 2.0 - 2.0 * dot(sky, uSunDir);
-          // the tint fades out at the horizon, so the dome ends at the plain fog colour and the
-          // horizon holds no step, even with the sun low over it
-          float low = smoothstep(0.0, 0.2, sky.y);
-          diffuseColor.rgb = mix(diffuseColor.rgb, uSunColor, smoothstep(${glow.toFixed(6)}, 0.0, a2) * uGlowGain * low);
           // the disc fades out over the last degrees, so the star sets into the haze and leaves
           // no lit spot hanging under the eye line
-          diffuseColor.rgb = mix(diffuseColor.rgb, uDiscColor, smoothstep(${disc.toFixed(6)}, ${(disc * 0.35).toFixed(6)}, a2) * low);`);
-      mat.userData.shader = sh;
+          diffuseColor.rgb = mix(diffuseColor.rgb, uDiscColor, smoothstep(${disc.toFixed(6)}, ${(disc * 0.35).toFixed(6)}, a2) * smoothstep(0.0, 0.2, sky.y));`);
     };
     return mat;
   }
@@ -352,27 +370,76 @@ export class Sky {
     this.far.add(dome);
   }
 
-  // A moon on the dome, at the true angular size times three. The moon keeps its orbit speed, so it
-  // moves across the sky and sets at the eye line.
+  // A moon on the dome, at its true angular size. The moon keeps its orbit speed, so it moves
+  // across the sky and sets at the eye line.
+  //
+  // A moon is far out in space, behind all of the air. So the scene lights do not touch it: the star
+  // lights it alone, from where the star truly stands, and the phase follows. The air then adds its
+  // own light over the moon, as the dome draws it, and dims the light of the moon on the long path
+  // near the horizon. The dark side is therefore the colour of the sky, a moon by day is a pale
+  // shape in the blue, and a moon low on the horizon sinks into the haze the far terrain fades into.
   _addMoon(md) {
-    const geo = new THREE.IcosahedronGeometry(1, 2);
+    const geo = new THREE.IcosahedronGeometry(1, 3);
     const rng = mulberry32(md.seed);
-    const pa = geo.attributes.position;
-    const seen = new Map();
-    for (let i = 0; i < pa.count; i++) {
-      const key = `${pa.getX(i).toFixed(4)},${pa.getY(i).toFixed(4)},${pa.getZ(i).toFixed(4)}`;
-      let f = seen.get(key);
-      if (f === undefined) { f = 0.9 + rng() * 0.2; seen.set(key, f); }
-      pa.setXYZ(i, pa.getX(i) * f, pa.getY(i) * f, pa.getZ(i) * f);
+    // dark basins over the face, the seas of the moon
+    const basins = [];
+    for (let i = 0, n = 3 + Math.floor(rng() * 4); i < n; i++) {
+      const v = new THREE.Vector3(rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1).normalize();
+      basins.push({ v, cos: Math.cos(0.3 + rng() * 0.5), dark: 0.55 + rng() * 0.25 });
     }
-    geo.computeVertexNormals();
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      color: md.color, flatShading: true, roughness: 1, metalness: 0, fog: false,
+    const pa = geo.attributes.position;
+    const nor = geo.attributes.normal;
+    const col = new Float32Array(pa.count * 3);
+    const seen = new Map();
+    const p = new THREE.Vector3();
+    for (let i = 0; i < pa.count; i++) {
+      p.fromBufferAttribute(pa, i).normalize();
+      const key = `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`;
+      let v = seen.get(key);
+      if (v === undefined) {
+        let a = 0.9 + rng() * 0.1;
+        for (const b of basins) if (p.dot(b.v) > b.cos) a *= b.dark;
+        v = { f: 0.97 + rng() * 0.06, a };
+        seen.set(key, v);
+      }
+      // the outline keeps a little of the low-poly bump, and the light reads the round body, so
+      // the line between day and night runs soft and not along the facets
+      nor.setXYZ(i, p.x, p.y, p.z);
+      pa.setXYZ(i, p.x * v.f, p.y * v.f, p.z * v.f);
+      col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = v.a;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.MeshBasicMaterial({
+      color: md.color, vertexColors: true, fog: false,
+      // the moon carries the colour of the dome under it, so it takes no tone mapping, as the dome
+      toneMapped: false,
       // The sea can be clear, and the sea is drawn with the clear things. An opaque moon is drawn
       // before it, so a moon under the horizon would show through the water. As a clear thing at
       // full opacity, after the sea and before the ring, the moon takes the depth of the sea.
       transparent: true,
-    }));
+    });
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, this.skyUniforms);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vMoonN; varying vec3 vMoonW;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vMoonN = normalize(mat3(modelMatrix) * normal);
+          vMoonW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+          varying vec3 vMoonN; varying vec3 vMoonW; uniform vec3 uHorizon; uniform float uNight;
+          ${skyGlsl()}`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          vec3 view = normalize(vMoonW - cameraPosition);
+          float lit = max(dot(normalize(vMoonN), uSunDir), 0.0);
+          // the light of the moon through the air: most of it at the zenith, a third at 5 degrees,
+          // and none on the eye line
+          float air = exp(-0.1 / max(view.y, 0.004));
+          // by day the bright air takes most of the contrast, so a moon is pale; by night it shines
+          float gain = mix(0.5, 1.15, uNight);
+          diffuseColor.rgb = skyAt(view, uHorizon) + diffuseColor.rgb * (lit + ${MOON_SHINE.toFixed(3)}) * gain * air;`);
+    };
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 0.5;
     // the angular radius from the site, then the radius it needs at the draw distance
     mesh.scale.setScalar(Math.tan(Math.atan2(md.size, md.dist) * MOON_GAIN) * MOON_DIST);
