@@ -22,7 +22,7 @@ import { Ground, CAM_START } from './ground.js';
 import { TIERS, worldOpts, patchOpts } from './tiers.js';
 import { skyView } from './ground-sky.js';
 import { ProbeHud, Static } from './probe-hud.js';
-import { perf, Hud } from './perf.js';
+import { perf, Hud, GpuClock } from './perf.js';
 import { rollStar, StarSystem } from './star.js';
 import { makeDeck } from './deck.js';
 import { guideOf, noteAnimal, notePlant } from './field-guide.js';
@@ -848,7 +848,9 @@ function frame() {
   const now = performance.now();
   perf.frame(now, !!probe.dive || busy);
   if (hud && now - hudAt >= HUD_MS) { hudAt = now; hud.update(perfRows()); }
+  if (gpuClock) gpuClock.begin();
   step(now);
+  if (gpuClock) gpuClock.end();
   deck.sync();
   perf.work(performance.now() - now);
 }
@@ -954,15 +956,34 @@ async function warmShaders() {
 // The rows of `?perf`, read twice a second at the top of the frame. renderer.info holds the
 // numbers of the last frame the renderer drew, because the renderer clears them inside render().
 const hud = PERF ? new Hud() : null;
+// The time of a frame on the graphics card. The work row is the CPU alone, and a frame that the
+// card holds up shows a small work and a long frame. See GpuClock in perf.js.
+const gpuClock = PERF ? new GpuClock(renderer.getContext()) : null;
+// The device does not change while the page runs, so the overlay reads it once: the tier, the
+// cores the tier reads, the name of the graphics card, and the samples of the antialias.
+const perfDevice = PERF ? (() => {
+  const gl = renderer.getContext();
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER))
+    .replace(/^ANGLE \((.*)\)$/, '$1');
+  return { tier: LOW ? 'LOW' : 'HIGH', cores: navigator.hardwareConcurrency || 0, name, samples: gl.getParameter(gl.SAMPLES) };
+})() : null;
+const perfSize = new THREE.Vector2();
 let hudAt = 0;
 function perfRows() {
-  const r = renderer.info.render;
+  const r = renderer.info.render, m = renderer.info.memory;
   const fps = perf.avg > 0 ? 1000 / perf.avg : 0;
+  const px = renderer.getDrawingBufferSize(perfSize);
+  const heap = performance.memory ? `   heap ${(performance.memory.usedJSHeapSize / 1e6).toFixed(0)} MB` : '';
   const rows = [
     ['mode', probe.mode],
-    ['frame', `${perf.avg.toFixed(2)} ms   ${fps.toFixed(0)} fps`],
-    ['work', `${perf.avgWork.toFixed(2)} ms`],
+    ['frame', `${perf.avg.toFixed(2)} ms   ${fps.toFixed(0)} fps   worst ${perf.worst.toFixed(0)} ms`],
+    ['work', `${perf.avgWork.toFixed(2)} ms on the CPU`],
+    ['gpu', gpuClock.ok ? (gpuClock.n ? `${gpuClock.avg.toFixed(2)} ms on the card` : 'waiting') : 'no timer query in this browser'],
     ['target', `${perf.target.toFixed(2)} ms   ${perf.hz} Hz${perf.hzDone ? '' : ' (estimating)'}`],
+    ['canvas', `${px.x}x${px.y} px   ${(px.x * px.y / 1e6).toFixed(1)} Mpx   dpr ${renderer.getPixelRatio()}   msaa ${perfDevice.samples}x`],
+    ['device', `${perfDevice.tier}   ${perfDevice.cores} cores   ${perfDevice.name}`],
+    ['memory', `${m.geometries} geometries   ${m.textures} textures   ${renderer.info.programs.length} programs${heap}`],
   ];
   if (probe.mode === 'ground' && ground) {
     const f = ground.flora, a = ground.fauna, c = ground.cover;
@@ -1340,6 +1361,7 @@ function enterGround(result, view) {
   // because a reader who has read the log knows what the block is.
   showProgress();
   perf.reset();       // the orbit frames say nothing about the ground
+  if (gpuClock) gpuClock.reset();
   showMarker(null, current);
   writeHash();
 }
@@ -1354,6 +1376,7 @@ function dropGround() {
   crewWaits = false;
   groundPlants = []; groundVariant = 0;
   perf.reset();       // the ground frames say nothing about the globe
+  if (gpuClock) gpuClock.reset();
 }
 
 // The switch back to the globe, under the closed cover. The probe has dropped the stage of the
