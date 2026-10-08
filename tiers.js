@@ -42,7 +42,17 @@
 // 26 gave it the memory it needed to settle instead of ring. See _driveLod() in ground.js.
 //
 // `dprMax` caps the pixel ratio of the renderer. app.js takes the smaller of it and the ratio of
-// the display.
+// the display. Both tiers take 1.25. The frame fills every pixel of a full-screen canvas with 4x
+// MSAA, so its cost on the card grows with the square of the ratio. Measured on an M2 MacBook Air
+// at 1470x757 points, the frame interval in ms, with no backdrop-filter on the page:
+//
+//                              1.25    1.5     2
+//     ground, Bazinga@9.68     16.7    19.5    25.7
+//     orbit, near the ground   16.6    16.6    22.3
+//     orbit, home distance     16.6    17.7    23.9
+//
+// So 1.25 holds 60 fps everywhere, and 2 holds it nowhere. The edges stay smooth, because the MSAA
+// still runs.
 //
 // `fog` is the haze of the probe: where it starts and where it is solid at the ground, in metres,
 // and the widest it opens as the camera climbs. ground.js holds the ratio of the two ends as the
@@ -58,14 +68,14 @@
 // the site itself.
 export const TIERS = {
   HIGH: {
-    detail: 100, maxFlora: 10500, maxFauna: 160, shadows: true, dprMax: 2,
+    detail: 100, maxFlora: 10500, maxFauna: 160, shadows: true, dprMax: 1.25,
     ground: {
       grid: 2, size: 3000, maxFlora: 120000, maxFauna: 300, shadows: true, lodMax: 400,
       fog: { near: 300, far: 1200, max: 1500 },
     },
   },
   LOW: {
-    detail: 64, maxFlora: 2500, maxFauna: 70, shadows: false, dprMax: 1.5,
+    detail: 64, maxFlora: 2500, maxFauna: 70, shadows: false, dprMax: 1.25,
     ground: { grid: 4, size: 1500, maxFlora: 8400, maxFauna: 100, shadows: false, lodMax: 250 },
   },
 };
