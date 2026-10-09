@@ -106,9 +106,9 @@ Rules that limit the roll:
 - A gas giant always gets a whale as its first species.
 - Two species of one world do not share a locomotion when a different one is available.
 
-### The five forms
+### The forms
 
-Five bodies take a plan that their locomotion never draws. `FORM` in `species.js` holds them, and
+Ten bodies take a plan that their locomotion never draws. `FORM` in `species.js` holds them, and
 each one fills a gap of the matrix in `tools/fauna-lab.html`:
 
 | Form | Locomotion × plan | The body | Share |
@@ -118,19 +118,30 @@ each one fills a gap of the matrix in `tools/fauna-lab.html`:
 | hoop | `roller` × `disc` | A wheel on edge: a thin face, a tread round the rim, spokes on both faces, and a hub. It stands on its legs, folds them into the hub, and rolls on its rim | 34% |
 | mantle | `fins` × `disc` | A flat body between two wide fins, and a whip of a tail. `RIG.RIPPLE` bends each fin, so a wave runs along the edge from the brow to the tail | 35% |
 | parasol | `tripod` × `disc` | A cone of twelve panels on three stilts. A head with a lure hangs a lantern on a cord under the middle of the canopy | 30% |
+| choir | `periscope` × `swarm` | Seven to ten necks on one buried body, each out of its own mound, with one eye each. Every part of a neck carries the phase of its place in the colony, so the necks sink and rise in a wave across it | 40% |
+| scree | `flow` × `swarm` | A heap of loose stones in the shape of the drop. The FLOW carriage pours it as a sheet of flat stones, stands it up as a column, and throws it back up the rise. One stone in five is lit | 35% |
+| islet | `quad` × `disc` | A deck on four legs that stand under its rim, and a garden over the whole deck: moss, three small trees, and a lit spire. It rolls only on a world that grows plants | 30% |
+| listener | `biped` × `disc` | A dish on two legs. The head sits at the focus of the dish on three struts, and the dish nods and turns with the head, so the face of the animal is the whole dish | 30% |
+| wake | `plough` × `chain` | A row of humps that stand a little out of the ground, each over its own mound of soil. The RISE carriage runs a wave back along the row, so the humps break the ground one after another | 40% |
 
 **A form takes no draw.** `formHash()` of two genes that the roll already drew decides it, after
 the last draw that reads the plan. A species that takes no form keeps every number it drew, and
 so does every species after it. A chain form takes its segments from the hash for the same
-reason. A body that the caller forces keeps its plan: the whale of a gas giant stays a whale, and
+reason, and a choir takes three more necks than the segments of the neck it drew. A body that the caller forces keeps its plan: the whale of a gas giant stays a whale, and
 the kin keeps the walker of its carvings.
 
 Each form has its own nouns (`FORM_NOUN`), its own genus (`FORM_GENUS`), and its own origin pool
-(`FORM_ORIGIN`), as the swarm has. A ripple and a garland measure along the chain (`FORM_BODY`),
-and the factor grows with the segments, so one float or one pair of wings keeps its size.
+(`FORM_ORIGIN`), as the swarm has. A ripple, a garland, and a wake measure along the chain
+(`FORM_BODY`), and the factor grows with the segments, so one float, one pair of wings, or one
+hump keeps its size.
+
+**A swarm is not always a wheel.** The wheel of shards is the swarm of `wings`, and `wheel(G)`
+in `species.js` is the test for it. Its sociality (always a herd, with no draw), its names, its
+origin, and its herd line read that test. A choir and a scree are swarms on the ground: they draw
+their sociality as their locomotion does, and they take the names of their form.
 `Species.formOf(G)` names the form of a genome, and the lab labels the cell of a form with it.
 
-The coarse build of a form is 29 to 72 triangles. The full build reaches 1,400 triangles when the
+The coarse build of a form is 29 to 72 triangles. The full build reaches 1,600 triangles when the
 roll gives it every extra it can carry.
 
 ### Body parts
@@ -353,7 +364,7 @@ A carriage moves the whole body. `rigConstants(G)` picks it from the locomotion 
 | `WAVE` | serpent | A lateral wave runs from the head to the tail. Its amplitude grows toward the tail, and the head end moves as one piece. `FRONT` and `LEN` give the body extents |
 | `FLOAT` | sac, wings, fins | Slow vertical drift, plus a heave on each wing beat (`HEAVE`) and a tail wave for fins. The wave of a whale runs up and down (`WAVEV`), as the wave of a whale on Earth does. The whole body also banks into a turn by `LEAN` times `aTurn`, wings and all |
 | `ARCH` | arch | The loop rises and sinks in place |
-| `RISE` | periscope, plough | The body sinks below the ground on a slow cycle. `SINK` sets how often |
+| `RISE` | periscope, plough | The body sinks below the ground on a slow cycle. `SINK` sets how often, and `RISEK` how fast. With `RISEP` each part sinks on the phase in its own `aRig.y`, so the necks of a choir go down one at a time. With `RISEZ` the phase moves along `z`, so a wave runs back down the humps of a wake. A periscope and a plough take neither |
 | `ROLL` | roller | `aBurst` is the clock of the fold. The legs and the head fold to the hull over the charge, and the hull then drops `ROLLDROP` on to the ground and turns about the right axis of the animal by `aGait`. The recovery runs the same numbers backwards, so the unfold is the fold played in reverse. The hull is a body of revolution about that axis, so a ball that stops at any angle still stands right |
 | `FLOW` | flow | A stack of rings on one pivot at the ground point. The charge runs a clock of its own: the stack melts by `FLOWMELT` into a sheet `FLOWW` widths across, holds the sheet to `FLOWSET`, and stands up into a column `FLOWH` tall by `FLOWRISE`. The discharge is one hop: it lifts the whole body by `FLOWHOP` on a parabola, eases the column back to the rest shape, and spreads it by `FLOWSQ` as it lands. The sheet holds its `glow` at full, so the reader can find a bright sheet in the grass. `flowHold()` reads `FLOWMELT`, `FLOWSET`, and `FLOWRISE` too, so the animal covers ground only while the sheet is spread |
 | `SLING` | slinger | The charge hauls the body back along `-aim` by `SLINGB`, the discharge pitches it nose first along a ballistic arc of height `SLINGH`, which the gravity sets, and with no hold at all the body crawls low and slow. `RIG.TENDON` lays the cord from the nose to `aAnchor` |

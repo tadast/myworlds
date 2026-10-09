@@ -120,7 +120,7 @@ const INFO = {
     periscope: 'lifts a neck out of a hole', plough: 'travels under the surface',
   },
   plan: { blob: 'one round body', dome: 'a low, wide shell', spindle: 'a long body with tapered ends',
-    chain: 'a row of segments', disc: 'a flat, round body', swarm: 'a wheel of many small shards' },
+    chain: 'a row of segments', disc: 'a flat, round body', swarm: 'many small bodies that act as one' },
   head: { none: 'no head part', beak: 'a pointed beak', mandibles: 'a pair of pincers', stalks: 'eyes on two stalks',
     lure: 'a glowing lamp on a stalk', crest: 'a fan of plates on the head', tusks: 'two tusks' },
   extra: { sail: 'a membrane on spines along the back', spikes: 'spikes on the back', beads: 'glowing lamps in the skin',
@@ -132,7 +132,10 @@ const INFO = {
   whaleHead: { hull: 'one smooth hull with the head in it', bladder: 'the head is a cluster of gas bladders' },
   form: { ripple: 'a chain that flies on a pair of wings to every segment', garland: 'a string of floats on one cord, each with a lamp',
     hoop: 'a wheel that stands on its legs and rolls on its rim', mantle: 'a flat sky body that rows the air with a wave along each fin',
-    parasol: 'a wide canopy on three thin legs, with a lantern under it' },
+    parasol: 'a wide canopy on three thin legs, with a lantern under it',
+    choir: 'many necks on one buried body, which rise and sink in a wave', scree: 'a heap of loose stones that pours as one animal',
+    islet: 'a wide deck on four legs, with a garden on it', listener: 'a dish on two legs that nods and turns to listen',
+    wake: 'a row of humps that break the ground one after another' },
   lod: { full: 'the body near the camera', coarse: 'the far body: under 80 triangles' },
   view: { three: 'the camera turns about the creature', side: 'from the side', top: 'from above', front: 'from the front' },
 };
@@ -143,7 +146,8 @@ function genome(o, skin) {
   const loco = o.loco, cls = CLASS_OF[loco], plan = o.plan || 'blob';
   const bodyR = o.bodyR ?? MID.bodyR(loco);
   const extras = new Set([...(ALWAYS[loco] || []), ...(o.extras || [])]);
-  if (plan === 'swarm') { extras.delete('tail'); extras.delete('sail'); extras.delete('tendrils'); }
+  // the wheel of shards carries none of these; a swarm on the ground (a choir, a scree) keeps them
+  if (plan === 'swarm' && loco === 'wings') { extras.delete('tail'); extras.delete('sail'); extras.delete('tendrils'); }
   const G = {
     cls, niche: 'meadow', loco, plan, head: o.head || 'none', extras: [...extras],
     segs: o.segs ?? MID.segs(plan), bodyR,
@@ -235,7 +239,7 @@ function cellGenome(rv, cv) {
     const A = AXES[ax];
     if (S.strict && A.check && !A.check(g, v)) {
       const what = ax === 'extra' ? v : ax === 'plan' || ax === 'head' ? `${v} ${ax}` : A.name.replace(/ \(.*/, '');
-      return { g, na: `${g.plan === 'swarm' ? 'A swarm' : `A ${g.loco} creature`} has no ${what}.` };
+      return { g, na: `${g.plan === 'swarm' && g.loco === 'wings' ? 'A swarm' : `A ${g.loco} creature`} has no ${what}.` };
     }
   }
   return { g };

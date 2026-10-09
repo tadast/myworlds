@@ -209,6 +209,8 @@ function bodySections(G) {
       return { secs: [{ z: 0, y: 0, r: R, s: [1, 0.8, 1.35 * S] }], front: 1.3 * R * S, back: -1.3 * R * S, top: 0.8 * R, bot: -0.8 * R };
     case 'disc':
       if (G.loco === 'tripod') return parasolSections(G);
+      if (G.loco === 'quad') return isletSections(G);
+      if (G.loco === 'biped') return listenerSections(G);
       return { secs: [{ z: 0, y: 0, r: R, s: [1.3, 0.45, 1.3], d: 1 }], front: 1.25 * R, back: -1.25 * R, top: 0.45 * R, bot: -0.45 * R };
     case 'spindle': {
       const k = R / 0.3;
@@ -237,12 +239,14 @@ function bodySections(G) {
     case 'chain': {
       // ---- ripple and garland ---- A chain that flies is slim, so its wings carry it. The floats
       // of a garland stand apart on their cord, so the reader can count them.
-      const n = G.segs, secs = [];
-      const step = G.loco === 'sac' ? GARLAND_STEP : 1.3, k = G.loco === 'wings' ? RIPPLE_SLIM : 1;
-      const r0 = G.loco === 'sac' ? 0.55 : 0.7;
+      // ---- wake ---- The humps of a wake stand apart and lie low, as a back does that breaks the
+      // surface of the ground.
+      const n = G.segs, secs = [], wake = G.loco === 'plough';
+      const step = G.loco === 'sac' ? GARLAND_STEP : wake ? WAKE_STEP : 1.3, k = G.loco === 'wings' ? RIPPLE_SLIM : 1;
+      const r0 = G.loco === 'sac' ? 0.55 : wake ? 0.6 : 0.7, sh = wake ? [1, 0.8, 1.3] : [1, 0.9, 1.1];
       for (let i = 0; i < n; i++) {
         const u = i / (n - 1);
-        secs.push({ z: (0.5 - u) * (n - 1) * step * R, y: 0, r: R * k * (r0 + 0.3 * Math.sin(u * Math.PI)), s: [1, 0.9, 1.1], alt: i % 2 === 1, u, d: G.loco === 'sac' ? 1 : 0 });
+        secs.push({ z: (0.5 - u) * (n - 1) * step * R, y: 0, r: R * k * (r0 + 0.3 * Math.sin(u * Math.PI)), s: sh, alt: i % 2 === 1, u, d: G.loco === 'sac' ? 1 : 0 });
       }
       return { secs, front: secs[0].z + secs[0].r, back: secs[n - 1].z - secs[n - 1].r, top: R * 0.9 * k, bot: -R * 0.9 * k };
     }
@@ -278,7 +282,7 @@ function whaleSections(G) {
   return { secs, rings, zAt, k, front, back, top: rmax * WHALE_FLAT, bot: -rmax * WHALE_FLAT };
 }
 
-// ---------------------------------------------------------------- the five forms (see FORM in species.js)
+// ---------------------------------------------------------------- the forms (see FORM in species.js)
 // A ripple is a slim chain, and a garland spaces its floats along a cord.
 const RIPPLE_SLIM = 0.72;          // the radius of a ripple segment against a chain that walks
 const GARLAND_STEP = 2.1;          // body radii from one float of a garland to the next
@@ -339,6 +343,101 @@ function parasolSections(G) {
 // on the screen and the clock that turns it cannot drift apart, and the drop puts it on the
 // ground. See the hull in buildCreature().
 const ROLL_REACH = 0.9757;
+// ---- islet ----
+// The back of an islet is a deck several body radii wide, with the body slung under its middle.
+// The legs stand under the rim, as the legs of a table do; see the hips in buildCreature().
+const ISLET_W = 2.1;               // the radius of the deck, in body radii
+function isletSections(G) {
+  const R = G.bodyR, D = R * ISLET_W;
+  return {
+    secs: [{ z: 0, y: 0, r: D, s: [1, 0.2, 1], d: 1 }, { z: 0, y: -D * 0.12, r: R * 0.85, s: [1.3, 0.7, 1.5], second: true }],
+    deck: D, front: D, back: -D, top: D * 0.2, bot: -D * 0.12 - R * 0.6,
+  };
+}
+
+// ---- listener ----
+// A small body on two legs, and over it a dish that faces forward: a paraboloid of radius D whose
+// rim stands `depth` ahead of its middle. The head sits at the focus of the dish on three struts,
+// where the feed of a dish would sit. The dish, the struts, and the head all nod about the middle
+// of the dish, so the face of the animal is the whole dish.
+const LISTEN_W = 2.4;              // the radius of the dish, in body radii
+const LISTEN_DEPTH = 0.32;         // how far the rim stands ahead of the middle, against the radius
+function listenerSections(G) {
+  const R = G.bodyR, D = R * LISTEN_W;
+  return {
+    secs: [{ z: 0, y: 0, r: R, s: [0.9, 0.85, 1.05] }],
+    dish: { r: D, depth: D * LISTEN_DEPTH, y: R * 0.7 + D * 0.95, z: -R * 0.15 },
+    front: R * 1.05, back: -R * 1.05, top: R * 0.85, bot: -R * 0.85,
+  };
+}
+
+// ---- wake ----
+const WAKE_STEP = 1.6;             // body radii from one hump to the next
+const WAKE_LIFT = 0.35;            // body radii the middle of a hump stands over the ground
+const WAKE_WAVES = 1.5;            // the waves of RISE along the row at one time
+
+// ---- choir ----
+// A choir is a ring of necks on one buried body, each neck out of its own hole. The builder lays
+// the necks on a sunflower spiral, and each neck takes the phase of its place across the colony,
+// so the RISE carriage sinks them in a wave that sweeps from one side of the colony to the other.
+// Every part of one neck carries that one phase, so a head and its lamp go down with their neck.
+const CHOIR_SPREAD = 3.6;          // the radius of the colony, in body radii
+const CHOIR_TALL = 0.6;            // a choir neck against the neck of a periscope: a crowd, not a stand of poles
+const CHOIR_WAVE = 2.6;            // radians of the wave across the colony
+const CHOIR_COARSE = 5;            // the necks a coarse build keeps
+// The neck of a periscope of the same genes, which a choir neck takes as its middle height.
+const choirNeck = (G) => 0.05 + ((G.segs > 1 ? G.segs : 6) - 1) * G.bodyR * 1.15;
+function buildChoir(P, G, coarse, sand) {
+  const R = G.bodyR, { body, body2, accent, glow } = G.colors;
+  const n = G.necks || 9, Rc = R * CHOIR_SPREAD, hn = choirNeck(G);
+  const ball = coarse ? (r) => oct(r * ICO_REACH) : (r) => ico(r);
+  // A choir carries ten necks, so each neck takes the cheapest shape that reads: a four-sided
+  // tube, an octahedron for the eye and for the mound, and no collar.
+  const tube = (a, b, r, c, r2) => seg(a, b, r, c, r2, coarse ? 3 : 4, 0, coarse);
+  const PS = (sg, o) => P(sg.geo, sg.color, sg.matrix, o);
+  for (let j = 0; j < n && !(coarse && j >= CHOIR_COARSE); j++) {
+    const rr = Rc * Math.sqrt((j + 0.5) / n), a = j * 2.39996;
+    const x = Math.cos(a) * rr, z = Math.sin(a) * rr, ox = Math.cos(a), oz = Math.sin(a);
+    const h = hn * CHOIR_TALL * (0.7 + 0.45 * ((j * 0.618) % 1));
+    const ph = (x / Rc) * CHOIR_WAVE + (z / Rc) * 0.8;
+    const top = [x + ox * h * 0.12, h, z + oz * h * 0.12], head = [top[0], top[1] + R * 0.25, top[2]];
+    const still = { rig: [RIG.NONE, ph, 0, 1] }, nod = { rig: [RIG.NOD, ph, 0.1, 1], pivot: top };
+    PS(tube([x, 0.02, z], top, R * 0.3, j % 2 ? body2 : body, R * 0.2), still);
+    P(ball(R * 0.42), body2, M4(...head, 0.9, 0.85, 1.1), nod);
+    if (coarse) continue;
+    // one large eye that looks out of the colony, and the mound the neck comes out of
+    P(oct(R * 0.2), glow, M4(head[0] + ox * R * 0.32, head[1] + R * 0.05, head[2] + oz * R * 0.32), { ...nod, glow: 0.8 });
+    P(oct(R * 0.75), sand, M4(x, -0.02, z, 1.3, 0.25, 1.3, 0, 0, a), { rig: [RIG.STATIC, 0, 0, 1] });
+    if (G.head === 'lure') {
+      const L = [head[0], head[1] + R * 0.75, head[2]];
+      PS(seg(head, L, 0.01, body2, 0.012, 3), nod);
+      P(oct(R * 0.24), glow, M4(...L), { glow: 1, rig: [RIG.PULSE, ph, 0.15, 1], pivot: L });
+    } else if (G.head === 'beak') P(cone(R * 0.12, R * 0.45, 4), body2, M4(head[0] + ox * R * 0.45, head[1], head[2] + oz * R * 0.45, 1, 1, 1, 0, -Math.PI / 2, -a), nod);
+    else if (G.head === 'crest') P(cone(R * 0.14, R * 0.5, 4), accent, M4(head[0], head[1] + R * 0.45, head[2]), { ...nod, glow: 0.35 });
+    else if (G.head === 'stalks') {
+      for (const sx of [-1, 1]) {
+        const e = [head[0] - oz * sx * R * 0.3, head[1] + R * 0.55, head[2] + ox * sx * R * 0.3];
+        PS(seg(head, e, 0.008, body2), nod);
+        P(ico(R * 0.1), glow, M4(...e), { ...nod, glow: 0.7 });
+      }
+    }
+    for (const e of G.extras) {
+      if (e === 'beads') P(oct(R * 0.12), glow, M4(top[0] - ox * R * 0.25, h * 0.7, top[2] - oz * R * 0.25), { glow: 0.9, rig: [RIG.PULSE, ph, 0.3, 1], pivot: [x, h * 0.7, z] });
+      else if (e === 'antennae') {
+        for (const sx of [-1, 1]) {
+          const b = [head[0] - oz * sx * R * 0.4, head[1] + R * 0.9, head[2] + ox * sx * R * 0.4];
+          PS(seg(head, b, 0.007, body2, 0.007, 3), { rig: [RIG.SWAY, ph, 0.12, 1.5], pivot: head });
+        }
+      } else if (e === 'tendrils') {
+        for (let i = 0; i < 2; i++) {
+          const ta = a + (i - 0.5) * 1.2, t1 = [x + Math.cos(ta) * R * 0.9, 0.01, z + Math.sin(ta) * R * 0.9];
+          PS(seg([x, 0.05, z], t1, 0.008, body2, 0.011, 3), { rig: [RIG.SWAY, ph, 0.1, 1], pivot: [x, 0.05, z] });
+        }
+      }
+    }
+  }
+}
+
 // ---- hoop ----
 // A hoop rolls on its tread, a ring of HOOP_SIDES sides with a vertex at the radius of the body.
 // A polygon of n sides rests at cos(pi / n) to 1 of that radius as it turns, and HOOP_REACH is the
@@ -458,6 +557,7 @@ const FLOW_H = 2.6;            // how many body heights tall the column stands
 const FLOW_SLICK = 0.16;       // the height of the slick, as a part of the rest height
 const FLOW_NARROW = 0.5;       // the width of the column, as a part of the rest width
 const FLOW_SQUASH = 0.25;      // how much the body spreads as it lands
+const SCREE_COARSE = 7;        // the stones of a coarse scree
 // ---- flow (issue 29) ----
 // The clock of the charge, as parts of it. The body melts by FLOW_MELT, runs as a sheet until
 // FLOW_SET, and stands as a column by FLOW_RISE. The shader reads the three to shape the stack and
@@ -522,10 +622,16 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   let yc;
   if (land) yc = G.legLen > 0 ? G.legLen - B.bot : -B.bot * 0.95;
   else if (air) yc = 0.5;
-  else yc = G.loco === 'plough' ? -B.bot * 0.55 : 0;
+  // A wake stands a little out of the ground, so its humps clear the grass of a meadow.
+  else yc = G.loco === 'plough' ? (G.plan === 'chain' ? R * WAKE_LIFT : -B.bot * 0.55) : 0;
 
   // ---- body
-  if (G.plan === 'swarm') {
+  if (G.plan === 'swarm' && G.loco === 'periscope') {
+    // ---- choir ---- every part of it, its extras among them, is a part of one neck
+    buildChoir(P, G, coarse, sand);
+    return mergeGeos(parts);
+  }
+  if (G.plan === 'swarm' && G.loco === 'wings') {
     // a glowing core and nine two-winged shards wheeling around it
     const core = [0, yc, 0];
     P(ball(0.05 + R * 0.15), glow, M4(...core), { glow: 1, rig: [RIG.PULSE, 0, 0.15, 1], pivot: core });
@@ -564,16 +670,30 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     // the reader can see the body has no skin to hold, which is the strange thing about it. The cap
     // at the top is the one closed piece: without it the reader looks straight down the stack.
     // A coarse build keeps three rings; the outline of a stack does not need more at that size.
-    const F = flowBody(G), n = coarse ? FLOW_COARSE : F.n, sides = coarse ? 4 : 8;
+    const F = flowBody(G), n = coarse ? FLOW_COARSE : F.n, sides = coarse ? 4 : 8, scree = G.plan === 'swarm';
     yc = 0; B.secs = [];
     for (let i = 0; i < n; i++) {
       const u0 = i / n, u1 = (i + 1) / n, um = (u0 + u1) * 0.5;
       const r0 = flowR(F.r, u0), r1 = flowR(F.r, u1), hr = F.h / n, rm = (r0 + r1) * 0.5;
       // The rings overlap a little, so the slick shows no gap between them when it flattens.
-      P(cyl(r1, r0, hr * 1.08, sides, true), i % 2 ? accent : body, M4(0, um * F.h, 0), { glow: i % 2 ? 0.35 : 0.1 });
+      if (!scree) P(cyl(r1, r0, hr * 1.08, sides, true), i % 2 ? accent : body, M4(0, um * F.h, 0), { glow: i % 2 ? 0.35 : 0.1 });
       B.secs.push({ z: 0, y: um * F.h, r: rm, s: [1, (hr * 0.5) / rm, 1] });
     }
-    P(ball(flowR(F.r, 1) * 1.15), body2, M4(0, F.h, 0, 1, 0.55, 1));
+    if (scree) {
+      // ---- scree ---- A heap of loose stones in the shape of the drop, more of them low down,
+      // and one on the top. The FLOW carriage scales every one of them about the ground point, so
+      // the heap pours as a sheet of flat stones and stands up as a column of them. One stone in
+      // five is lit, so a heap at rest shows a few sparks and a spread one shows all of them.
+      const N = coarse ? SCREE_COARSE : 14 + 2 * F.n;
+      for (let i = 0; i < N; i++) {
+        const last = i === N - 1, v = last ? 0.93 : 1 - Math.sqrt(1 - (i + 0.5) / N), a = i * 2.39996;
+        const rad = last ? 0 : flowR(F.r, v) * (i % 3 === 0 ? 0.45 : 0.82);
+        const sz = F.r * (0.26 + 0.14 * ((i * 0.618) % 1)) * (1 - 0.3 * v);
+        const lit = i % 5 === 0;
+        const color = lit ? glow : i % 3 === 0 ? accent : i % 2 ? body2 : body;
+        P(ball(sz), color, M4(Math.cos(a) * rad, v * F.h, Math.sin(a) * rad, 1.15, 0.75, 1, i * 0.9, i * 1.7, i * 0.5), { glow: lit ? 0.7 : 0.05 });
+      }
+    } else P(ball(flowR(F.r, 1) * 1.15), body2, M4(0, F.h, 0, 1, 0.55, 1));
     B.front = F.r * 0.5; B.back = -F.r * 0.5; B.top = F.h; B.bot = 0;
   } else if (B.mantle) {
     // ---- mantle ----
@@ -619,9 +739,9 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     // few pixels wide.
     const a = B.secs[0], b = B.secs[B.secs.length - 1];
     PS(bone([0, yc, a.z + a.r * ICO_REACH], [0, yc, b.z - b.r * ICO_REACH], R * RIPPLE_SLIM * 0.8, body, b.r * ICO_REACH));
-  } else if (coarse && G.plan === 'chain' && G.loco !== 'sac') {
-    // (A garland keeps its floats apart at any distance: the generic branch below gives each one
-    // an octahedron, and the gaps on the cord are what the reader counts.)
+  } else if (coarse && G.plan === 'chain' && G.loco !== 'sac' && G.loco !== 'plough') {
+    // (A garland keeps its floats apart at any distance, and a wake its humps: the generic branch
+    // below gives each one an octahedron, and the gaps are what the reader counts.)
     // A chain of seven balls is the widest body in the set. The coarse build joins the section
     // centres with tapered tubes instead: one tube per joint, and the two end tubes reach out by
     // the end radius, so the body holds the length the full build has.
@@ -668,11 +788,35 @@ export function buildCreature(G, pal, flora, detail = 'full') {
         : G.loco === 'slinger' ? { rig: [RIG.SWAY, 0, SLING_SWAY, 1], pivot: [0, yc, B.back] }
           : {};
       P(geo, color, M4(0, yc + s.y, s.z, ...s.s), o);
+      // ---- wake ---- the ground each hump breaks through. It holds still while the hump sinks.
+      if (G.loco === 'plough' && G.plan === 'chain' && !coarse) P(ico(s.r * 0.95), sand, M4(0, -0.03, s.z, 1.25, 0.2, 0.85), { rig: [RIG.STATIC, 0, 0, 1] });
     }
   }
 
   // the body as ellipsoids, so parts can be put on its surface
   const probe = bodyProbe(B.secs, yc);
+
+  // ---- listener ---- the dish, the neck that holds it, the ribs and the lamps of the face, and
+  // the struts that hold the head at the focus. Every part of the face nods with the head.
+  let dishC = null, dishNod = null;
+  if (B.dish) {
+    const { r: D, depth } = B.dish, c = [0, yc + B.dish.y, B.dish.z], focal = (D * D) / (4 * depth);
+    dishC = c; dishNod = { rig: [RIG.NOD, 0, 0.12, 1], pivot: c };
+    const nu = coarse ? 1 : 4, nv = coarse ? 6 : 14;
+    const at = (u, v) => [Math.cos(v * TAU) * u * D, c[1] + Math.sin(v * TAU) * u * D, c[2] + depth * u * u];
+    P(gridGeo(nu, nv, at), accent, M4(0, 0, 0), { ...dishNod, glow: 0.15 });
+    P(gridGeo(nu, nv, at, true), body2, M4(0, 0, 0), dishNod);
+    PS(bone([0, yc + B.top * 0.5, 0], [0, c[1] - D * 0.15, c[2] - 0.01], R * 0.2, body2, R * 0.15));
+    B.focus = [0, c[1], c[2] + focal];
+    if (!coarse) {
+      for (let k = 0; k < 8; k++) {
+        const v = k / 8, a0 = at(0.12, v), a1 = at(1, v);
+        PS(seg([a0[0], a0[1], a0[2] + 0.004], [a1[0], a1[1], a1[2] + 0.004], R * 0.035, body, R * 0.025, 3), dishNod);
+        if (k % 2 === 0) P(ico(R * 0.08), glow, M4(...a1), { ...dishNod, glow: 0.8 });
+      }
+      for (let k = 0; k < 3; k++) PS(seg(at(1, k / 3 + 1 / 12), B.focus, R * 0.025, body2, R * 0.02, 3), dishNod);
+    }
+  }
 
   // ---- legs: two bones per leg. LEG mode swings the leg about the hip and folds the shin about the knee
   // while the foot is in the air. The hip is inside the belly, so the thigh never leaves the body.
@@ -691,7 +835,9 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     let hy = yc + B.bot * 0.55;
     let hw = 0;
     for (let k = 0; k <= 4; k++) hw = Math.max(hw, probe.hw(hy + (yc - hy) * k * 0.25, L.z));
-    const hx = dx * Math.max(hw * 0.75, th);
+    // ---- islet ---- The legs of an islet stand under the rim of the deck, as the legs of a table
+    // do. The body under the deck is narrow, and legs from its flanks would stand in one bunch.
+    const hx = B.deck ? dx * B.deck * 0.5 : dx * Math.max(hw * 0.75, th);
     const hb = probe.bot(hx, L.z), ht = probe.top(hx, L.z);
     if (hb !== null && hb > hy) hy = hb + (ht - hb) * 0.35; // the hull is thin here: lift the hip into it
     const hip = [hx, hy, L.z];
@@ -753,6 +899,8 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   let H, neckBase;
   if (G.loco === 'periscope') { H = [0, yc + R * 0.9, R * 0.3]; neckBase = [0, yc, 0]; }
   else if (B.canopy) { neckBase = [0, yc, B.canopy * 0.6]; H = [0, yc - B.canopy * 0.08, B.canopy * 0.9]; }
+  // ---- listener ---- the head is the feed at the focus of the dish, and it nods with the dish
+  else if (B.focus) { neckBase = dishC; H = B.focus; }
   else if (tall) {
     neckBase = [0, yc + B.top * 0.4, B.front * 0.85];
     H = [0, yc + B.top + headR * 0.6, B.front + headR * 0.6];
@@ -999,7 +1147,7 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   for (const e of G.extras) {
     // A coarse creature keeps only the sail and the plates. Every other extra is a bead, a spike,
     // a feeler, or a mound of a few centimetres, and none of them reaches the outline at distance.
-    if (coarse && e !== 'sail' && e !== 'plates' && e !== 'flukes') continue;
+    if (coarse && e !== 'sail' && e !== 'plates' && e !== 'flukes' && !(e === 'garden' && B.deck)) continue;
     // ---- roller (issue 28) ----
     // Anything the hull carries rides the tread, so it rings the body about the spin axis. Placed
     // along the body, as every other locomotion places it, one of these would stand on the ground
@@ -1152,6 +1300,24 @@ export function buildCreature(G, pal, flora, detail = 'full') {
         break;
       }
       case 'garden': {
+        if (B.deck) {
+          // ---- islet ---- Mounds of moss, three small trees, and a lit spire over the whole deck.
+          // The trees are the outline of an islet, so the coarse build keeps two of them.
+          const D = B.deck, onDeck = (x, z) => (probe.top(x, z) ?? top) - D * 0.02;
+          for (let i = 0; i < 8; i++) {
+            const tree = i % 3 === 1;
+            if (coarse && !(tree && i < 5)) continue;
+            const rr = D * 0.74 * Math.sqrt((i + 0.5) / 8), a = i * 2.39996 + 0.6;
+            const x = Math.cos(a) * rr, z = Math.sin(a) * rr, y = onDeck(x, z), f = (i * 0.618) % 1;
+            if (tree) {
+              const th2 = D * (0.4 + 0.2 * f);
+              PS(bone([x, y, z], [x, y + th2, z], D * 0.035, trunk, D * 0.025));
+              P(ball(D * (0.16 + 0.05 * f)), moss, M4(x, y + th2, z, 1, 0.85, 1));
+            } else if (i === 4) P(cone(D * 0.06, D * 0.3, 4), accent, M4(x, y + D * 0.13, z), { glow: 0.35 });
+            else P(ico(D * (0.14 + 0.06 * f)), moss, M4(x, y, z, 1.3, 0.55, 1.3));
+          }
+          break;
+        }
         const at = (x, z) => (probe.top(x, z) ?? top) - R * 0.05;
         for (const [x, z, r] of [[-0.3, -0.2, 0.4], [0.35, 0.3, 0.32], [0.1, -0.8, 0.28]]) P(ico(R * r), moss, M4(x * R, at(x * R, z * R), z * R, 1, 0.7, 1));
         const tz = -0.35 * R, tb = at(-0.12 * R, tz), th2 = 0.2 + R * 0.3;
@@ -1439,7 +1605,11 @@ const RIG_GLSL = `
     transformed.y *= 0.85 + 0.15 * sin(sb);
     transformed.x += 0.05 * sin(sb * 0.6) * clamp(transformed.y, 0.0, 1.0);
   #elif CARRY == 5
-    transformed.y -= RISE * (1.0 - smoothstep(SINK, SINK + 0.4, sin(sb * 0.35)));
+    // RISEP 1: each part sinks on the phase of its own neck (a choir). RISEZ: the phase moves along
+    // the body, so a wave runs back down a row of humps (a wake). A periscope and a plough take
+    // neither, and the whole body sinks as one.
+    float rs = sb * RISEK + (RISEP > 0.5 ? aRig.y : 0.0) + position.z * RISEZ;
+    transformed.y -= RISE * (1.0 - smoothstep(SINK, SINK + 0.4, sin(rs)));
   #elif CARRY == 7
     // ---- flow (issue 28, reshaped by issue 29) ----
     // A flow holds no shape of its own, so the carriage is the whole of its body. aBurst says what
@@ -1586,8 +1756,12 @@ function rigConstants(G) {
   const airChain = G.plan === 'chain' && (G.loco === 'wings' || G.loco === 'sac');
   const wave = G.loco === 'fins' ? 0.08 : airChain ? (G.loco === 'wings' ? 0.05 : 0.04) : 0;
   const wavek = G.loco === 'fins' ? 2.0 : G.loco === 'serpent' ? (2 * Math.PI) / (len * 1.1) : airChain ? -rippleK(B) : 5.0;
-  const rise = G.loco === 'periscope' ? 0.05 + (G.segs - 1) * G.bodyR * 1.15 + G.bodyR * 2.4 : G.loco === 'plough' ? G.bodyR * 1.1 : 0;
-  const sink = G.loco === 'plough' ? -0.97 : -0.3; // the plough dives only now and then; the periscope hides half the time
+  // ---- choir and wake ---- A choir hides its tallest neck and the lamp on it, and keeps its necks up
+  // a little more than half the time. A wake hides one hump, and keeps half of its row down.
+  const choir = G.loco === 'periscope' && G.plan === 'swarm', wake = G.loco === 'plough' && G.plan === 'chain';
+  const rise = choir ? choirNeck(G) * CHOIR_TALL * 1.15 + G.bodyR * 1.5 : wake ? G.bodyR * (WAKE_LIFT + 0.95)
+    : G.loco === 'periscope' ? 0.05 + (G.segs - 1) * G.bodyR * 1.15 + G.bodyR * 2.4 : G.loco === 'plough' ? G.bodyR * 1.1 : 0;
+  const sink = choir ? -0.5 : wake ? 0 : G.loco === 'plough' ? -0.97 : -0.3; // the plough dives only now and then; the periscope hides half the time
   const heave = G.loco === 'wings' ? 0.03 : 0; // body lift on each wing beat
   const glide = G.loco === 'wings' ? 0 : 1; // only true wings hold still and glide now and then
   // the form of the wing; a swarm and every other flyer take the numbers of the old paddle
@@ -1610,6 +1784,7 @@ function rigConstants(G) {
     ['SKEW', legged ? 0.35 : 0], ['LEAN', LEAN_K[G.loco] ?? (legged ? 0.1 : 0)], ['ROLLY', rolly],
     ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
     ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
+    ['RISEK', choir ? 0.6 : wake ? 1.2 : 0.35], ['RISEP', choir ? 1 : 0], ['RISEZ', wake ? (WAKE_WAVES * TAU) / len : 0],
     ['HEAVE', heave], ['GLIDE', glide], ['GLO', WF.glo], ['LAG', WF.lag], ['ELB', WF.elb], ['FOLD', WF.fold],
     ['HOLDA', WF.hold[0]], ['HOLDB', WF.hold[1]], ['WAVEV', G.loco === 'fins' || airChain ? 1 : 0],
     // ---- mantle ---- one wave along the root chord of a fin; see RIG.RIPPLE

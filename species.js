@@ -167,11 +167,15 @@ import { Lore } from './lore.js';
   // sizeText() is the right text for it and it takes no case of its own there.
   BODY.roller = { k: 2.4, axis: 'height' };
 
-  // A ripple and a garland are measured along the chain. Each segment adds the same length, so the
-  // factor grows with the segments and one float or one pair of wings keeps its size.
+  // A ripple, a garland, and a wake are measured along the chain. Each segment adds the same length,
+  // so the factor grows with the segments and one float, one pair of wings, or one hump keeps its size.
   const FORM_BODY = {
     ripple: (G) => ({ k: 0.6 * G.segs, axis: 'length' }),
     garland: (G) => ({ k: 0.8 * G.segs, axis: 'length' }),
+    // The tallest neck of a choir, the deck of an islet from rim to rim, and the row of a wake.
+    choir: () => ({ k: 1.3, axis: 'height' }),
+    islet: () => ({ k: 3.4, axis: 'length' }),
+    wake: (G) => ({ k: 1.1 * G.segs, axis: 'length' }),
   };
 
   function bodyMetres(G) {
@@ -210,7 +214,7 @@ import { Lore } from './lore.js';
 
   function rollSocial(rng, G) {
     let kind;
-    if (G.plan === 'swarm') kind = 'herd'; // a swarm is a group by definition
+    if (wheel(G)) kind = 'herd'; // a wheel of shards is a group by definition
     else {
       let r = rng();
       const table = SOCIAL[G.loco];
@@ -264,8 +268,8 @@ import { Lore } from './lore.js';
     return x - Math.floor(x);
   }
 
-  // ---------------------------------------------------------------- the five forms that fill a gap
-  // Five bodies take a plan that their locomotion never draws:
+  // ---------------------------------------------------------------- the forms that fill a gap
+  // Ten bodies take a plan that their locomotion never draws:
   //   ripple:  a chain that flies, with a pair of wings on every segment. The pairs beat one after
   //            the other, so a wave runs down the wings from the head to the tail.
   //   garland: a string of sacs on one cord, each sac with its own lamp.
@@ -273,17 +277,33 @@ import { Lore } from './lore.js';
   //            on its rim.
   //   mantle:  a flat sky body as wide as it is long. It rows the air with a wave along each edge.
   //   parasol: a wide disc held high on three thin legs. A lantern hangs under it on a cord.
+  //   choir:   a periscope with many necks on one buried body. The necks rise and sink in a wave.
+  //   scree:   a flow that is a heap of loose stones. The stones pour down as a sheet and climb
+  //            back on to one another.
+  //   islet:   a quad whose back is a wide deck, and the deck is a garden.
+  //   listener: a biped whose face is a dish. The dish nods, and it turns before the feet do.
+  //   wake:    a plough that is a row of humps. A wave runs back along the row, so the humps
+  //            break the surface one after another.
   // The form comes from a hash of two genes the roll already drew, and not from a draw. A species
   // that does not take a form therefore keeps every number it drew before, and so does every
   // species after it. `p` is the part of the species of the locomotion that take the form, and
-  // `from` limits the plans a form may replace: a swarm keeps its own body.
+  // `from` limits the plans a form may replace: a swarm keeps its own body. A form with `flora`
+  // needs a world that grows plants, because its body carries a garden.
   const FORM = {
     wings: { plan: 'chain', key: 'ripple', p: 0.3, from: ['blob', 'spindle'] },
     sac: { plan: 'chain', key: 'garland', p: 0.34 },
     roller: { plan: 'disc', key: 'hoop', p: 0.34 },
     fins: { plan: 'disc', key: 'mantle', p: 0.35 },
     tripod: { plan: 'disc', key: 'parasol', p: 0.3 },
+    periscope: { plan: 'swarm', key: 'choir', p: 0.4 },
+    flow: { plan: 'swarm', key: 'scree', p: 0.35 },
+    quad: { plan: 'disc', key: 'islet', p: 0.3, flora: true },
+    biped: { plan: 'disc', key: 'listener', p: 0.3 },
+    plough: { plan: 'chain', key: 'wake', p: 0.4 },
   };
+  // The wheel of shards: the one swarm that flies. A choir and a scree are swarms on the ground, and
+  // nothing written for the wheel (its sociality, its names, its origin) holds for them.
+  const wheel = (G) => G.loco === 'wings' && G.plan === 'swarm';
   // The form of a genome, or null. No locomotion of FORM draws the plan of its form, so the plan
   // alone tells a form from a drawn body.
   const formOf = (G) => (FORM[G.loco] && FORM[G.loco].plan === G.plan ? FORM[G.loco].key : null);
@@ -351,15 +371,19 @@ import { Lore } from './lore.js';
     if (type === 'gas' && loco !== 'fins') G.size *= 1.5;
     if (loco === 'fins') { G.density = niche === 'cloud' ? 0.02 : 0.0025; G.fsign = 1; G.fcut = 0.3; }
     if (plan === 'swarm') G.move.shadow = false;
-    // One of the five forms. It takes no draw, so it must come after the last draw that reads the
+    // One of the forms. It takes no draw, so it must come after the last draw that reads the
     // plan: a chain draws its segments above, and a form that is a chain takes them from the hash.
     // A body the caller forces keeps its plan, so the whale of a gas giant stays a whale and the
     // kin keeps the walker of its carvings.
     const F = FORM[loco];
-    if (F && !forceLoco && (!F.from || F.from.includes(plan)) && formHash(G, 3) < F.p) {
+    if (F && !forceLoco && (!F.from || F.from.includes(plan)) && (!F.flora || hasFlora) && formHash(G, 3) < F.p) {
       G.plan = F.plan;
       G.stretch = 1;
       if (F.plan === 'chain') G.segs = 4 + Math.floor(formHash(G, 4) * 4);
+      // A choir keeps the segments of the neck it drew and grows three more necks than that.
+      if (F.key === 'choir') G.necks = G.segs + 3;
+      // The deck of an islet is a garden, and a sail would stand in the middle of it.
+      if (F.key === 'islet') G.extras = [...new Set([...G.extras.filter((e) => e !== 'sail'), 'garden'])];
     }
     // The form of a wing and of the head of a whale. Each one comes from a hash of two numbers the
     // roll already drew, so the form takes no draw and no species of any world moves.
@@ -629,7 +653,7 @@ import { Lore } from './lore.js';
     { t: 'The shards fly apart in the dark and find the core again at first light. On a night of {night} some never do.', tags: 'longday' },
   ]);
 
-  // ---------------------------------------------------------------- the five forms (see FORM)
+  // ---------------------------------------------------------------- the forms (see FORM)
   // A form has a name, a genus, and an origin of its own, as the swarm has. The origin replaces
   // the origin of the locomotion, because the strange thing about each of them is the form.
   const FORM_NOUN = {
@@ -638,8 +662,14 @@ import { Lore } from './lore.js';
     hoop: ['hoop', 'wheel', 'rim'],
     mantle: ['mantle', 'sky mantle', 'veil'],
     parasol: ['parasol', 'canopy', 'stilt-shade'],
+    choir: ['choir', 'colony', 'stand of necks'],
+    scree: ['scree', 'heap', 'spill'],
+    islet: ['islet', 'terrace', 'walking garden'],
+    listener: ['listener', 'dish', 'ear'],
+    wake: ['wake', 'swell', 'heave'],
   };
-  const FORM_GENUS = { ripple: 'Scalaptera', garland: 'Catenocystis', hoop: 'Trochovolva', mantle: 'Pallicetus', parasol: 'Umbellipes' };
+  const FORM_GENUS = { ripple: 'Scalaptera', garland: 'Catenocystis', hoop: 'Trochovolva', mantle: 'Pallicetus', parasol: 'Umbellipes',
+    choir: 'Chorospeculum', scree: 'Glareodefluxus', islet: 'Hortipes', listener: 'Auscultator', wake: 'Undifossor' };
   const FORM_ORIGIN = {
     ripple: pool([
       'Every segment carries its own pair of wings, and no two pairs beat together. A wave runs down the wings from the head to the tail, and the body rides it.',
@@ -684,6 +714,50 @@ import { Lore } from './lore.js';
       { t: 'At {temp} it is the only shade for a long way, and smaller animals walk under it to keep out of the light.', tags: 'hot|searing' },
       { t: 'When the rain comes it tips the disc into a bowl and drinks from the middle.', tags: 'rainy waterliquid' },
       { t: 'At {grav} the legs are long and the disc is wide, and the whole of it moves like a thing on a string.', tags: 'lowgrav' },
+    ]),
+    // A choir never travels, so no line here may have it go anywhere. The watcher does the walking.
+    choir: pool([
+      'It is one body under the {ground} and a dozen necks above it. Each neck rises and sinks on its own, and a wave runs through them that no single neck starts.',
+      'The necks come up one after another, like a breath going round a ring of watchers, and they go down the same way.',
+      'Walk toward it and the nearest necks go under first. The far ones stay up and watch you come.',
+      'Nobody has seen the whole of it. The body under the {ground} is broad and blind, and it holds every neck up from below.',
+      { t: 'Each neck carries a small lamp. At night the colony is a field of slow lights that go up and down.', if: (c) => c.G.head === 'lure' },
+      { t: 'In the heat of the day every neck stays under. At dusk they come up all at once, and the {ground} looks planted.', tags: 'hot|searing' },
+      { t: 'The necks come up through holes it keeps open in the frozen crust.', tags: 'frozen' },
+    ]),
+    scree: pool([
+      'It is a heap of loose stones that is one animal. When it lets go, the stones pour down the fall of the {ground} as a sheet, and at the foot they climb back on to one another.',
+      'No stone in it touches another for long. It holds together the way a crowd does: every stone knows where the edge is.',
+      'A watcher counts the stones and gets a different number every time.',
+      'It spends most of its life piled on a high point, and it looks like what it is made of.',
+      { t: 'Every stone in it is still hot. At {temp} the heap glows at the seams, and a pour of it runs down the slope like a lit fuse.', tags: 'molten', w: 4 },
+      { t: 'The damp between the stones is the animal. Dried out, it would be a heap of gravel and nothing else.', tags: 'waterliquid' },
+      { t: 'At {grav} the stones climb back up the rise in one long arc, and they land in a heap that is the right way up.', tags: 'lowgrav' },
+    ]),
+    // An islet only rolls on a world that grows plants, so every line may name its garden.
+    islet: pool([
+      'Its back is a deck as wide as a room, and the deck is a garden. It walks slowly, and nothing that grows on the deck has ever had to notice.',
+      'Seed falls on it and stays. An old one carries a patch of every ground it has walked, and it takes the long way round to keep the patch in the light.',
+      'It stops where the light is best and stands there for days. The garden leans toward the light before the animal turns its feet.',
+      { t: 'The roots of the small trees on its back run down into the deck. Cut one, and the whole animal flinches.', tags: 'woody' },
+      { t: 'The caps on its back open at night, and the deck breathes spores into the dark behind it.', tags: 'fungal flora' },
+      { t: 'At {grav} the deck rides low and the legs are columns. It carries the garden the way a floor carries a house.', tags: 'highgrav' },
+    ]),
+    listener: pool([
+      'Its face is a dish as wide as it is tall, and it holds the dish up on two thin legs. It hears with the whole of it.',
+      'It turns the dish before it turns its feet, and it walks only toward what it has already heard.',
+      'At night it stands still with the dish up and does not move until first light. Whatever it listens to talks only in the dark.',
+      'Some days it holds the dish on one point of the sky for hours, and nobody has found what is there.',
+      { t: 'They all face one way. A watcher learns to look where the dishes look.', if: grouped },
+      { t: 'Before a storm it turns the dish down to the {ground} and waits for the storm to pass.', tags: 'stormy' },
+    ]),
+    wake: pool([
+      'Only its back ever shows: a row of humps that come up through the {ground} one after another and go down again, so the animal swims through it.',
+      'It moves the way a wave moves. No hump goes anywhere. The rise passes from one to the next, and the animal goes with it.',
+      'A watcher counts the humps and is always wrong by one. There is always one more under the {ground} than shows.',
+      'It leaves a seam of turned {ground} behind it that takes days to settle.',
+      { t: 'It works under the frozen crust, and the crust heaves in a line as it passes.', tags: 'frozen' },
+      { t: 'On a still day the humps are the only thing that moves on the whole of the flat.', tags: 'dryworld|desert' },
     ]),
   };
 
@@ -780,6 +854,8 @@ import { Lore } from './lore.js';
   const PLOUGH_MOUNDS = {
     plough: pool(['The mound ahead of it is not dug. It is pushed, and it has not stopped pushing since it hatched.']),
     periscope: pool(['The ring of {ground} around the neck is what it breathes out. Step inside the ring and the neck goes down.']),
+    choir: pool(['Each neck comes up out of its own ring of {ground}. Step inside one ring and that neck goes down, and the rest stay up and watch.']),
+    wake: pool(['Every hump leaves a low mound where it went down, and the row of mounds settles flat again behind it.']),
   };
   // The line for an animal with no nameable part left over.
   const PLAIN_FEATURE = pool([
@@ -1081,7 +1157,7 @@ import { Lore } from './lore.js';
   const socialTemper = (s) => (s.kind === 'herd' ? `herds of ${L.num(s.n)}` : s.kind === 'pair' ? 'in pairs' : 'solitary');
   const HERD_STORY = pool([
     'A herd of {n} moves at the pace of its slowest member and has never once left one behind.',
-    { t: '{n} wheels work one stretch of {ground} about {spread} metres across. They drift apart and rejoin all day, and nobody has seen one wheel join another.', if: (c) => c.G.plan === 'swarm', w: 6 },
+    { t: '{n} wheels work one stretch of {ground} about {spread} metres across. They drift apart and rejoin all day, and nobody has seen one wheel join another.', if: (c) => wheel(c.G), w: 6 },
     'It moves in herds of {n}. The herd holds a ring about {spread} metres across, and the young keep to the middle of it.',
     'A herd of {n} feeds together and moves together over about {spread} metres of {ground}. One animal alone is a lost animal.',
     { t: 'A herd of {n} spreads over about {spread} metres and closes up at dusk, every animal touching the next.', tags: 'moonless|longday' },
@@ -1239,6 +1315,8 @@ import { Lore } from './lore.js';
       case 'ripple': return `${m} m long, with ${L.num(G.segs)} pairs of wings`;
       case 'garland': return `${m} m of cord and ${L.num(G.segs)} floats`;
       case 'mantle': return `${m} m from brow to tail`;
+      case 'choir': return `${m} m tall, ${L.num(G.necks)} necks to one body`;
+      case 'islet': return `${m} m across the deck`;
     }
     switch (G.loco) {
       case 'quad': return `${m} m at the shoulder`;
@@ -1278,13 +1356,14 @@ import { Lore } from './lore.js';
     const N = NICHE[G.niche];
     const tokens = tokensFor(G, N, env, world);
     const ctx = { G, env, tags: env.tags, world, still: still(G) };
+    const form = formOf(G);
     const say = (p, seen, strict) => { const e = L.line(rng, p, ctx, seen, strict); return e ? L.fill(e.t, tokens) : ''; };
 
     // name: an optional place word, an adjective, and a noun. The adjective is normally a part the
     // animal really has. One name in four takes its adjective from the world instead.
     const adjKeys = [...G.extras.filter((e) => e !== 'mounds' && e !== 'flukes'),
       ...(G.head !== 'none' ? [G.head] : []), ...(G.extras.includes('flukes') ? ['flukes'] : [])];
-    const adjPool = adjKeys.length ? adjKeys : [G.plan === 'swarm' ? 'shard' : 'smooth'];
+    const adjPool = adjKeys.length ? adjKeys : [wheel(G) ? 'shard' : 'smooth'];
     // Prefer a word this world has not used. Two species called "lamp-flanked" read as one species.
     const freshAdj = adjPool.filter((k) => !used.words.has(ADJ[k]));
     const adjKey = L.pick(rng, freshAdj.length ? freshAdj : adjPool);
@@ -1295,8 +1374,7 @@ import { Lore } from './lore.js';
     // The place word must not echo the adjective: "Cinder cinder worm" is not a name.
     const places = L.candidates(PLACE[G.niche], ctx).map((e) => e.t)
       .filter((p) => !p || (p !== adj && !adj.includes(p) && !p.includes(adj)));
-    const form = formOf(G);
-    const nouns = G.plan === 'swarm' ? ['swarm', 'wheel'] : form ? FORM_NOUN[form] : G.wingStyle ? WING_NOUN[G.wingStyle] : NOUN[G.loco];
+    const nouns = wheel(G) ? ['swarm', 'wheel'] : form ? FORM_NOUN[form] : G.wingStyle ? WING_NOUN[G.wingStyle] : NOUN[G.loco];
     const freshNouns = nouns.filter((x) => !used.words.has(x));
     const name = L.unique((i) => {
       const place = i === 0 ? L.pick(rng, places) : i < 4 ? L.pick(rng, places.filter(Boolean).concat('')) : '';
@@ -1317,15 +1395,15 @@ import { Lore } from './lore.js';
     if (habit === 'herd' && G.social.kind !== 'herd') habit = 'wary';
 
     // the feature: a part that the name did not already use.
-    const featureKeys = [...G.extras, ...(G.head !== 'none' ? [G.head] : [])]
+    const featureKeys = [...G.extras, ...(G.head !== 'none' && form !== 'choir' ? [G.head] : [])]
       .filter((k) => k !== adjKey && FEATURE[k]);
     const featureKey = featureKeys.length ? L.pick(rng, featureKeys) : null;
     let featurePool = PLAIN_FEATURE;
-    if (featureKey === 'mounds' && G.loco !== 'arch') featurePool = PLOUGH_MOUNDS[G.loco] || PLAIN_FEATURE;
+    if (featureKey === 'mounds' && G.loco !== 'arch') featurePool = PLOUGH_MOUNDS[form] || PLOUGH_MOUNDS[G.loco] || PLAIN_FEATURE;
     else if (featureKey) featurePool = FEATURE[featureKey];
 
     const parts = {
-      origin: say(G.plan === 'swarm' ? SWARM_ORIGIN : form ? FORM_ORIGIN[form] : ORIGIN[G.loco], seen),
+      origin: say(wheel(G) ? SWARM_ORIGIN : form ? FORM_ORIGIN[form] : ORIGIN[G.loco], seen),
       feature: say(featurePool, seen),
       habit: say(HABIT[habit], seen),
       // The three optional slots take a fresh line or nothing. trimStory() keeps two of them, so a

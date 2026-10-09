@@ -202,7 +202,7 @@ The page has a form on the left and a grid on the right:
 - **Compare**: the `Rows` and `Columns` fields each select one value to change across the grid. Set both to "—" to see one creature in one large cell.
 - **View**: the colours, the detail (`coarse` is the far body of the ground), the camera, and a time that stops the clock.
 
-The lists come from `Species.CATALOGUE` in `species.js`, so a new locomotion, plan, head, or extra shows in the lab with no edit to the page. A cell of one of the five forms (the ripple, the garland, the hoop, the mantle, and the parasol) carries the name of the form; see "The five forms" in `docs/fauna.md`. When "Only forms a world can roll" is set, a dashed cell shows a combination that no world can make. Clear it to build every combination. Click a cell to copy its creature to the form. A gold border marks the creature of the form.
+The lists come from `Species.CATALOGUE` in `species.js`, so a new locomotion, plan, head, or extra shows in the lab with no edit to the page. A cell of one of the ten forms (the ripple, the garland, the hoop, the mantle, the parasol, the choir, the scree, the islet, the listener, and the wake) carries the name of the form; see "The forms" in `docs/fauna.md`. When "Only forms a world can roll" is set, a dashed cell shows a combination that no world can make. Clear it to build every combination. Click a cell to copy its creature to the form. A gold border marks the creature of the form.
 
 Each field that is not at its default is a URL parameter, so the address shares the view. For example, `tools/fauna-lab.html?loco=wings&rows=wingStyle&cols=extra&t=1.3` compares the three wing forms with each extra. Headless Chrome can save a still for a review:
 
