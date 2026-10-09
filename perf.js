@@ -1,8 +1,13 @@
 // myworlds — the frame clock and the perf overlay.
 //
 // One clock measures the frame time for the whole page. The adaptive LOD of the ground reads it,
-// and the overlay of `?perf` shows it. The clock holds a rolling average of the last 30 frames,
-// and it estimates the refresh rate of the display over the first 60 frames it counts.
+// and the overlay of `?perf` shows it. The clock holds a rolling average of the last 30 frames.
+//
+// The LOD controller aims at 60 fps on every display. The clock once estimated the refresh rate
+// from the first 60 frames it counted, and it took the target from that. A slow start, such as a
+// shader build or a weak card, then read as a slow display: an M2 estimated 24 Hz, and the
+// controller added plants until the ground ran at 24 fps. The target was already capped at 60 Hz
+// on a fast display, so the estimate could only make the target worse.
 //
 // Three kinds of frame do not count. A frame during the dive draws two scenes and a fade, so it
 // says nothing about the ground. A frame in the first second after load carries the build of the
@@ -16,11 +21,8 @@
 // controller needs both: the interval to know it must come down, the work to know it may go out.
 
 const WINDOW = 30;         // frames in the rolling average
-const HZ_FRAMES = 60;      // frames the estimate of the refresh rate reads
 const WARMUP_MS = 1000;    // the first second after load carries the build of the world
 const SPIKE_MS = 100;      // a frame over this is a tab switch
-const HZ_QUANTILE = 0.2;   // a low quantile of the intervals: the display cannot draw faster
-const RATES = [30, 50, 60, 75, 90, 100, 120, 144, 165, 240, 360];
 
 class Perf {
   constructor() {
@@ -33,10 +35,7 @@ class Perf {
     this.wring = new Float64Array(WINDOW);
     this.wn = 0; this.wi = 0; this.wsum = 0;
     this.counts = false;                 // the frame that runs now goes into the window
-    this.hz = 60;                        // the estimate of the refresh rate
     this.target = 1000 / 60;             // ms, the frame time the LOD controller aims at
-    this.hzDone = false;
-    this.hzList = [];
   }
 
   // the mean frame time of the window in ms, or 0 while the window is empty
@@ -77,7 +76,6 @@ class Perf {
     if (this.n < WINDOW) { this.ring[this.i] = ms; this.sum += ms; this.n++; }
     else { this.sum += ms - this.ring[this.i]; this.ring[this.i] = ms; }
     this.i = (this.i + 1) % WINDOW;
-    if (!this.hzDone) this._estimate(ms);
   }
 
   // The work of one frame, at the foot of the same frame callback.
@@ -86,24 +84,6 @@ class Perf {
     if (this.wn < WINDOW) { this.wring[this.wi] = ms; this.wsum += ms; this.wn++; }
     else { this.wsum += ms - this.wring[this.wi]; this.wring[this.wi] = ms; }
     this.wi = (this.wi + 1) % WINDOW;
-  }
-
-  // The refresh rate, from a low quantile of the first HZ_FRAMES intervals. The mean would read
-  // the load of the machine as well; a low quantile reads the fastest frames, and no frame can
-  // come faster than the display. The value snaps to the nearest common rate within 12% of it.
-  _estimate(ms) {
-    this.hzList.push(ms);
-    if (this.hzList.length < HZ_FRAMES) return;
-    const s = this.hzList.slice().sort((a, b) => a - b);
-    const q = s[Math.floor(s.length * HZ_QUANTILE)];
-    let hz = q > 0 ? 1000 / q : 60;
-    let near = RATES[0];
-    for (const r of RATES) if (Math.abs(hz - r) < Math.abs(hz - near)) near = r;
-    if (Math.abs(hz - near) < near * 0.12) hz = near;
-    this.hz = Math.min(360, Math.max(24, Math.round(hz)));
-    this.target = 1000 / Math.min(60, this.hz);
-    this.hzDone = true;
-    this.hzList.length = 0;
   }
 }
 
