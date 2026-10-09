@@ -980,7 +980,7 @@ function perfRows() {
     ['frame', `${perf.avg.toFixed(2)} ms   ${fps.toFixed(0)} fps   worst ${perf.worst.toFixed(0)} ms`],
     ['work', `${perf.avgWork.toFixed(2)} ms on the CPU`],
     ['gpu', gpuClock.ok ? (gpuClock.n ? `${gpuClock.avg.toFixed(2)} ms on the card` : 'waiting') : 'no timer query in this browser'],
-    ['target', `${perf.target.toFixed(2)} ms   ${perf.hz} Hz${perf.hzDone ? '' : ' (estimating)'}`],
+    ['target', `${perf.target.toFixed(2)} ms`],
     ['canvas', `${px.x}x${px.y} px   ${(px.x * px.y / 1e6).toFixed(1)} Mpx   dpr ${renderer.getPixelRatio()}   msaa ${perfDevice.samples}x`],
     ['device', `${perfDevice.tier}   ${perfDevice.cores} cores   ${perfDevice.name}`],
     ['memory', `${m.geometries} geometries   ${m.textures} textures   ${renderer.info.programs.length} programs${heap}`],
