@@ -14,7 +14,8 @@ import { floraGeometry, FLORA } from './flora-geometry.js';
 export const BASE_SCALE = 0.0077; // 30% smaller than the first pass, so the globe reads as a miniature
 
 // part modes. TENDON stretches one part from its pivot to aAnchor; the slinger hooks a plant with it.
-const RIG = { NONE: 0, LEG: 1, WING: 2, SWAY: 3, PULSE: 4, NOD: 5, SPIN: 6, STATIC: 7, FLUKE: 8, TENDON: 9 };
+// RIPPLE bends a fin of the mantle with a wave that runs back along its chord.
+const RIG = { NONE: 0, LEG: 1, WING: 2, SWAY: 3, PULSE: 4, NOD: 5, SPIN: 6, STATIC: 7, FLUKE: 8, TENDON: 9, RIPPLE: 10 };
 // Whole-body carriages. HOP, ROLL, FLOW, and SLING are the four impulse carriages: each one reads
 // aBurst, which the impulse mover writes, so the body and the steering cannot drift apart.
 const CARRY = { WALK: 0, HOP: 1, WAVE: 2, FLOAT: 3, ARCH: 4, RISE: 5, ROLL: 6, FLOW: 7, SLING: 8 };
@@ -97,6 +98,20 @@ function sheetGeo(st) {
 function trisGeo(tris) {
   const pos = [];
   for (const [a, b, c] of tris) pos.push(...a, ...b, ...c, ...a, ...c, ...b);
+  return geoOf(pos);
+}
+// A one-sided sheet on a grid of nu by nv cells. at(u, v) gives the point, with u and v in [0, 1].
+// A sheet that has to bend inside one span needs the inner points a station list does not have.
+// `flip` turns the face over, so two calls give the two faces of a sheet in two colours.
+function gridGeo(nu, nv, at, flip = false) {
+  const pos = [];
+  for (let i = 0; i < nu; i++) {
+    for (let j = 0; j < nv; j++) {
+      const a = at(i / nu, j / nv), b = at((i + 1) / nu, j / nv), c = at((i + 1) / nu, (j + 1) / nv), d = at(i / nu, (j + 1) / nv);
+      if (flip) pos.push(...a, ...c, ...b, ...a, ...d, ...c);
+      else pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+    }
+  }
   return geoOf(pos);
 }
 // A lofted hull along z. A ring is [z, y, rx, ry]. Only the faces whose angle lies in [a0, a1)
@@ -188,11 +203,12 @@ function bodySections(G) {
   const R = G.bodyR, S = G.stretch;
   // ---- roller (issue 28) ----
   if (G.loco === 'roller') return rollerSections(G);
-  if (G.loco === 'fins') return whaleSections(G);
+  if (G.loco === 'fins') return G.plan === 'disc' ? mantleSections(G) : whaleSections(G);
   switch (G.plan) {
     case 'blob':
       return { secs: [{ z: 0, y: 0, r: R, s: [1, 0.8, 1.35 * S] }], front: 1.3 * R * S, back: -1.3 * R * S, top: 0.8 * R, bot: -0.8 * R };
     case 'disc':
+      if (G.loco === 'tripod') return parasolSections(G);
       return { secs: [{ z: 0, y: 0, r: R, s: [1.3, 0.45, 1.3], d: 1 }], front: 1.25 * R, back: -1.25 * R, top: 0.45 * R, bot: -0.45 * R };
     case 'spindle': {
       const k = R / 0.3;
@@ -219,12 +235,16 @@ function bodySections(G) {
       };
     }
     case 'chain': {
+      // ---- ripple and garland ---- A chain that flies is slim, so its wings carry it. The floats
+      // of a garland stand apart on their cord, so the reader can count them.
       const n = G.segs, secs = [];
+      const step = G.loco === 'sac' ? GARLAND_STEP : 1.3, k = G.loco === 'wings' ? RIPPLE_SLIM : 1;
+      const r0 = G.loco === 'sac' ? 0.55 : 0.7;
       for (let i = 0; i < n; i++) {
         const u = i / (n - 1);
-        secs.push({ z: (0.5 - u) * (n - 1) * 1.3 * R, y: 0, r: R * (0.7 + 0.3 * Math.sin(u * Math.PI)), s: [1, 0.9, 1.1], alt: i % 2 === 1, u });
+        secs.push({ z: (0.5 - u) * (n - 1) * step * R, y: 0, r: R * k * (r0 + 0.3 * Math.sin(u * Math.PI)), s: [1, 0.9, 1.1], alt: i % 2 === 1, u, d: G.loco === 'sac' ? 1 : 0 });
       }
-      return { secs, front: secs[0].z + secs[0].r, back: secs[n - 1].z - secs[n - 1].r, top: R * 0.9, bot: -R * 0.9 };
+      return { secs, front: secs[0].z + secs[0].r, back: secs[n - 1].z - secs[n - 1].r, top: R * 0.9 * k, bot: -R * 0.9 * k };
     }
   }
   return { secs: [], front: R, back: -R, top: R, bot: -R };
@@ -241,7 +261,8 @@ const WHALE_PROFILE = [
 ];
 const WHALE_FLAT = 0.82;          // the height of the hull against its width
 // the head of a whale: 'hull' or 'bladder'. A genome built before the form existed takes the hull.
-export const whaleHead = (G) => (G.loco === 'fins' ? G.whaleHead || 'hull' : null);
+// A mantle has no head to swap: its brow is the front of the disc.
+export const whaleHead = (G) => (G.loco === 'fins' && G.plan !== 'disc' ? G.whaleHead || 'hull' : null);
 function whaleSections(G) {
   const k = G.bodyR / 0.3, front = 1.15 * k, back = -1.35 * k, rmax = 0.3 * k;
   const zAt = (t) => front + (back - front) * t;
@@ -257,6 +278,54 @@ function whaleSections(G) {
   return { secs, rings, zAt, k, front, back, top: rmax * WHALE_FLAT, bot: -rmax * WHALE_FLAT };
 }
 
+// ---------------------------------------------------------------- the five forms (see FORM in species.js)
+// A ripple is a slim chain, and a garland spaces its floats along a cord.
+const RIPPLE_SLIM = 0.72;          // the radius of a ripple segment against a chain that walks
+const GARLAND_STEP = 2.1;          // body radii from one float of a garland to the next
+const RIPPLE_WING = [0.62, 0.38];  // the size of the first and the last pair of a ripple, against one wing
+
+// ---- mantle ----
+// A mantle is a flat body down the middle of two wide fins, as wide as it is long, and a whip of a
+// tail. The body is one lofted hull, as the whale is, and it runs on into the tail, so the wave of
+// the FLOAT carriage reads along the whole length. Each fin is one sheet that RIG.RIPPLE bends, so
+// a wave runs along the edge from the brow to the tail. A ring is [z, y, rx, ry], in units of k.
+const MANTLE_RINGS = [[0.95, 0, 0, 0], [0.85, 0.01, 0.12, 0.05], [0.6, 0.02, 0.24, 0.09], [0.25, 0.02, 0.3, 0.11],
+  [-0.15, 0.01, 0.28, 0.1], [-0.55, 0, 0.18, 0.07], [-0.85, 0, 0.08, 0.04], [-1.3, 0, 0.035, 0.03], [-1.9, 0, 0.01, 0.01]];
+const MANTLE_SPAN = 1.05;          // k: from the middle line to the tip of a fin
+const MANTLE_CHORD = 1.5;          // k: the root chord of a fin, which holds one wave of RIG.RIPPLE
+// The wave number of the body of a ripple or a garland: one wave from the head to the tail.
+const rippleK = (B) => (2 * Math.PI) / (B.front - B.back);
+// The phase of the breath, in radians, from the first float of a garland to the last
+const GARLAND_BREATH = 3.5;
+function mantleSections(G) {
+  const k = G.bodyR / 0.3;
+  const rings = MANTLE_RINGS.map(([z, y, rx, ry]) => [z * k, y * k, rx * k, ry * k]);
+  // ellipsoids along the hull, for the probe. The tail carries none, so nothing grows on it.
+  const secs = [0.6, 0.25, -0.15, -0.55].map((z) => {
+    const r = rings.find((q) => q[0] <= z * k + 1e-9);
+    return { z: z * k, y: r[1], r: r[2], s: [1, r[3] / r[2], 0.22 * k / r[2]] };
+  });
+  return { secs, rings, k, mantle: true, front: 0.95 * k, back: -0.85 * k, top: 0.11 * k, bot: -0.11 * k };
+}
+
+// ---- parasol ----
+// The body of a tripod is small, and the canopy of a parasol is what makes it read. It is a lens
+// several body radii wide, with a knob on the top and the body hanging under its middle, and the
+// legs grow out of the underside.
+const PARASOL_W = 3.4;             // the radius of the canopy, in body radii
+const PARASOL_H = 0.42;            // the height of the cone of the canopy, against its radius
+const PARASOL_RIBS = 12;           // the canopy is a cone of this many panels, one rib between two
+function parasolSections(G) {
+  const R = G.bodyR, C = R * PARASOL_W;
+  // The first section is the cone of the canopy, as the probe reads it. The builder draws the cone
+  // itself, so the panels and the ribs line up; see `canopy` in buildCreature().
+  const secs = [
+    { z: 0, y: 0, r: C, s: [1, 0.3, 1], canopy: true },
+    { z: 0, y: -C * 0.15, r: R * 1.1, s: [1, 0.85, 1], second: true },
+  ];
+  return { secs, canopy: C, front: C, back: -C, top: C * PARASOL_H, bot: -C * 0.15 - R * 0.95 };
+}
+
 // ---- roller (issue 28) ----
 // The hull of a roller turns about the right axis of the animal, so it has to be round about that
 // axis: every section sits on the axis and holds one radius in the y and the z. A hull longer than
@@ -270,9 +339,24 @@ function whaleSections(G) {
 // on the screen and the clock that turns it cannot drift apart, and the drop puts it on the
 // ground. See the hull in buildCreature().
 const ROLL_REACH = 0.9757;
-export const rollRadius = (G) => G.bodyR * ROLL_REACH;
+// ---- hoop ----
+// A hoop rolls on its tread, a ring of HOOP_SIDES sides with a vertex at the radius of the body.
+// A polygon of n sides rests at cos(pi / n) to 1 of that radius as it turns, and HOOP_REACH is the
+// mean, sin(pi / n) / (pi / n). The coarse build is a drum of HOOP_COARSE sides, made wider by the
+// ratio of the two means, so the two builds roll on one radius.
+const HOOP_SIDES = 18, HOOP_COARSE = 8;
+const polyReach = (n) => Math.sin(Math.PI / n) / (Math.PI / n);
+const HOOP_REACH = polyReach(HOOP_SIDES);
+const HOOP_TREAD = 0.16;           // the radius of the tube of the tread, in body radii
+export const rollRadius = (G) => G.bodyR * (G.plan === 'disc' ? HOOP_REACH : ROLL_REACH);
 function rollerSections(G) {
   const R = G.bodyR;
+  // A hoop is a wheel on edge: thin along its axis, which is the right axis of the animal, and
+  // round about it. The hub stands out of both faces.
+  if (G.plan === 'disc') {
+    return { secs: [{ z: 0, y: 0, r: R, s: [0.24, 1, 1] }, { z: 0, y: 0, r: R * 0.3, s: [1.5, 1, 1], second: true }],
+      front: R, back: -R, top: R, bot: -R };
+  }
   // The hull is drawn in buildCreature(), which holds the two levels of detail. The two sections
   // give the reader the axis the hull turns about: a `dome` is a wheel on a wide hub, and a `blob`
   // is a ball with the hub showing at each pole. Without a mark of some kind on the axis a turning
@@ -281,6 +365,33 @@ function rollerSections(G) {
     ? [{ z: 0, y: 0, r: R, s: [0.62, 1, 1] }, { z: 0, y: 0, r: R * 0.55, s: [1.7, 1, 1], second: true }]
     : [{ z: 0, y: 0, r: R, s: [1, 1, 1] }, { z: 0, y: 0, r: R * 0.5, s: [2.8, 1, 1], second: true }];
   return { secs, front: R, back: -R, top: R, bot: -R };
+}
+// ---- hoop ----
+// The hull of a hoop, about the right axis (x): a thin lens for the face, a hard tread round the
+// rim, spokes in relief on both faces, and a hub with a lamp at each end of the axle. All of it
+// takes no part mode, so the ROLL carriage turns it as one hull. The spokes are what the reader
+// watches: a disc of one colour that turns shows nothing.
+function hoopHull(P, G, yc, coarse) {
+  const R = G.bodyR, { body, body2, accent, glow } = G.colors;
+  const quarter = Math.PI / 2;   // turns a part built about y or z on to the axis x
+  if (coarse) {
+    // A drum of eight sides, wide enough to roll on the radius of the full tread.
+    P(cyl(R * (HOOP_REACH / polyReach(HOOP_COARSE)), R * (HOOP_REACH / polyReach(HOOP_COARSE)), R * 0.36, HOOP_COARSE), body, M4(0, yc, 0, 1, 1, 1, 0, quarter));
+    return;
+  }
+  const t = R * HOOP_TREAD;
+  P(new THREE.TorusGeometry(R - t, t, 4, HOOP_SIDES), body, M4(0, yc, 0, 1, 1, 1, 0, 0, quarter));
+  P(ico(R - t * 1.2), body2, M4(0, yc, 0, 0.2, 1, 1));
+  P(ico(R * 0.3), body2, M4(0, yc, 0, 1.5, 1, 1));
+  for (const sx of [-1, 1]) {
+    P(ico(R * 0.11), glow, M4(sx * R * 0.45, yc, 0), { glow: 0.9 });
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + (sx > 0 ? 0 : Math.PI / 6);
+      const ri = R * 0.28, ro = R - t * 1.6, x = sx * R * 0.14;
+      const s = seg([x, yc + Math.cos(a) * ri, Math.sin(a) * ri], [x * 0.6, yc + Math.cos(a) * ro, Math.sin(a) * ro], R * 0.05, accent, R * 0.03, 4);
+      P(s.geo, s.color, s.matrix, { glow: 0.25 });
+    }
+  }
 }
 
 // How far a leg swings, and how much of one cycle its foot stays on the ground (the duty factor).
@@ -464,6 +575,13 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     }
     P(ball(flowR(F.r, 1) * 1.15), body2, M4(0, F.h, 0, 1, 0.55, 1));
     B.front = F.r * 0.5; B.back = -F.r * 0.5; B.top = F.h; B.bot = 0;
+  } else if (B.mantle) {
+    // ---- mantle ----
+    // One lofted hull from the brow to the tip of the tail, dark on the back and pale on the belly.
+    // The coarse build keeps six rings and four sides, so the tail still reads past the LOD distance.
+    const rings = coarse ? [0, 2, 3, 5, 6, 8].map((i) => B.rings[i]) : B.rings;
+    const hull = (a0, a1, color) => P(loftGeo(rings.map((r) => [r[0], yc + r[1], r[2], r[3]]), coarse ? 4 : 10, a0, a1), color, M4(0, 0, 0));
+    hull(0, 0.3, body); hull(0.7, 1, body); hull(0.3, 0.7, body2);
   } else if (G.loco === 'fins') {
     // The sky whale: one lofted hull with a darker back and a lighter belly. A bladder head starts
     // the hull behind the head and hides the blunt front in a cluster of gas bladders.
@@ -495,7 +613,15 @@ export function buildCreature(G, pal, flora, detail = 'full') {
         }
       }
     }
-  } else if (coarse && G.plan === 'chain') {
+  } else if (coarse && G.plan === 'chain' && G.loco === 'wings') {
+    // ---- ripple ---- One tapered tube from the head to the tail. The wings carry the outline of a
+    // far ripple, and a tube per joint would spend half the budget of the coarse build on a body a
+    // few pixels wide.
+    const a = B.secs[0], b = B.secs[B.secs.length - 1];
+    PS(bone([0, yc, a.z + a.r * ICO_REACH], [0, yc, b.z - b.r * ICO_REACH], R * RIPPLE_SLIM * 0.8, body, b.r * ICO_REACH));
+  } else if (coarse && G.plan === 'chain' && G.loco !== 'sac') {
+    // (A garland keeps its floats apart at any distance: the generic branch below gives each one
+    // an octahedron, and the gaps on the cord are what the reader counts.)
     // A chain of seven balls is the widest body in the set. The coarse build joins the section
     // centres with tapered tubes instead: one tube per joint, and the two end tubes reach out by
     // the end radius, so the body holds the length the full build has.
@@ -514,18 +640,31 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     // no reader can see. The coarse octahedron takes the radius the full hull rolls on, so the two
     // builds hold one outline through the LOD swap. It bounces, but it only draws past the LOD
     // distance, where the whole animal is a dozen pixels, as COARSE_SWING does for a leg.
-    for (const s of B.secs) {
+    if (G.plan === 'disc') hoopHull(P, G, yc, coarse);
+    else for (const s of B.secs) {
       const geo = coarse ? oct(s.r * ROLL_REACH) : ico(s.r, 1);
       P(geo, s.second ? body2 : body, M4(0, yc + s.y, s.z, ...s.s));
     }
   } else {
     for (const s of B.secs) {
+      if (s.canopy) {
+        // ---- parasol ---- An open cone of panels over a flat underside. The cone alone would show
+        // nothing from below, because a face drawn on one side only is not seen from the other.
+        const C = B.canopy, h = C * PARASOL_H, n = coarse ? 6 : PARASOL_RIBS;
+        P(cone(C, h, n, true), body, M4(0, yc + h * 0.5, 0));
+        P(new THREE.CircleGeometry(C * 0.99, n), body2, M4(0, yc + 0.002, 0, 1, 1, 1, Math.PI / 2, 0), { glow: 0.12 });
+        continue;
+      }
       const color = s.second || s.alt ? body2 : (G.loco === 'sac' ? accent : body);
       const geo = s.shape === 'dodeca' ? block(s.r) : ball(s.r, s.d || 0);
       // A slinger has no legs. With nothing in reach it crawls, and a rigid body dragged over the
       // ground reads as a sledge, so its sections take SWAY about the tail: the tail end holds its
       // place and the front ripples, which is the end that reaches for a hold. See CARRY.SLING.
-      const o = G.loco === 'sac' ? { glow: 0.35, rig: [RIG.PULSE, 0, 0.05, 1], pivot: [0, yc, 0] }
+      // ---- garland ---- Each float breathes about its own centre, a little later than the one
+      // ahead of it, so the breath runs down the string. One pivot for the whole string would
+      // scale the cord too and pull the floats in and out like a spring.
+      const o = G.loco === 'sac' && G.plan === 'chain' ? { glow: 0.35, rig: [RIG.PULSE, -s.u * GARLAND_BREATH, 0.09, 1], pivot: [0, yc + s.y, s.z] }
+        : G.loco === 'sac' ? { glow: 0.35, rig: [RIG.PULSE, 0, 0.05, 1], pivot: [0, yc, 0] }
         : G.loco === 'slinger' ? { rig: [RIG.SWAY, 0, SLING_SWAY, 1], pivot: [0, yc, B.back] }
           : {};
       P(geo, color, M4(0, yc + s.y, s.z, ...s.s), o);
@@ -569,12 +708,14 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       if (!coarse) P(ico(th * 1.9), body2, M4(foot[0], th * 0.5, foot[2], 1.3, 0.5, 1.3), rigR);
       continue;
     }
-    const splay = { hexapod: 1.0, tripod: 0.7, quad: 0.25, biped: 0.2, monopod: 0 }[G.loco];
+    // A parasol stands on stilts under its canopy, more upright than a tripod that carries a body.
+    const splay = B.canopy ? 0.42 : { hexapod: 1.0, tripod: 0.7, quad: 0.25, biped: 0.2, monopod: 0 }[G.loco];
     const foot = [hip[0] + dx * h * splay, 0, hip[2] + dz * h * splay + h * 0.05];
     let knee;
     if (knees) {
-      const kOut = insect ? 0.8 : G.loco === 'tripod' ? 0.5 : 0.35;
-      knee = [hip[0] + dx * h * kOut, insect ? hy + h * 0.15 : h * 0.55, hip[2] + dz * h * kOut + h * (insect ? 0.05 : 0.22)];
+      // The knee of a parasol stays inside its foot, so each stilt reads as one long bow.
+      const kOut = insect ? 0.8 : B.canopy ? 0.3 : G.loco === 'tripod' ? 0.5 : 0.35;
+      knee = [hip[0] + dx * h * kOut, insect ? hy + h * 0.15 : h * 0.55, hip[2] + dz * h * kOut + h * (insect ? 0.05 : B.canopy ? 0.08 : 0.22)];
     } else knee = [(hip[0] + foot[0]) / 2, (hip[1] + foot[1]) / 2, (hip[2] + foot[2]) / 2];
     const rig = (w) => ({ rig: [RIG.LEG, L.phase, stride, w * bend], pivot: hip, pivot2: knee });
     if (coarse) {
@@ -606,10 +747,12 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   // A tall walker carries its head on a neck above the body. A flow carries its head on the top of
   // the stack for the same reason, so the throw takes the head up the column with it. A flow with
   // no head grows no neck: a bare stub above an empty stack reads as a fault. Issue 28.
-  const tall = G.loco === 'biped' || G.loco === 'monopod' || G.loco === 'tripod'
+  // A parasol carries its head under the front of the canopy, where the brim shades it.
+  const tall = G.loco === 'biped' || G.loco === 'monopod' || (G.loco === 'tripod' && !B.canopy)
     || (G.loco === 'flow' && G.head !== 'none');
   let H, neckBase;
   if (G.loco === 'periscope') { H = [0, yc + R * 0.9, R * 0.3]; neckBase = [0, yc, 0]; }
+  else if (B.canopy) { neckBase = [0, yc, B.canopy * 0.6]; H = [0, yc - B.canopy * 0.08, B.canopy * 0.9]; }
   else if (tall) {
     neckBase = [0, yc + B.top * 0.4, B.front * 0.85];
     H = [0, yc + B.top + headR * 0.6, B.front + headR * 0.6];
@@ -624,7 +767,9 @@ export function buildCreature(G, pal, flora, detail = 'full') {
   const nodG = (g) => ({ ...nod, glow: g });
   const eyeR = clamp(headR * 0.25, 0.02, 0.05);
   const eyes = () => { if (G.loco !== 'fins') for (const sx of [-1, 1]) P(ico(eyeR), glow, M4(H[0] + sx * headR * 0.55, H[1] + headR * 0.25, H[2] + headR * 0.8), nodG(0.6)); };
-  if ((G.head !== 'none' || G.loco === 'periscope') && G.loco !== 'fins') P(ball(headR), G.plan === 'chain' ? body : body2, M4(H[0], H[1], H[2], 0.85, 0.85, 1.25), nod);
+  // The lantern of a parasol hangs from the middle of the canopy, so it grows no head at the brim.
+  const lantern = B.canopy && G.head === 'lure';
+  if ((G.head !== 'none' || G.loco === 'periscope') && G.loco !== 'fins' && !lantern) P(ball(headR), G.plan === 'chain' ? body : body2, M4(H[0], H[1], H[2], 0.85, 0.85, 1.25), nod);
   // the head furniture and the eyes measure a fraction of a metre: past the LOD distance the head
   // is a ball of a few pixels and none of them can be told apart from it
   switch (coarse ? 'coarse' : G.head) {
@@ -641,6 +786,20 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       }
       break;
     case 'lure': {
+      if (lantern) {
+        // ---- parasol ---- A cord from the underside of the body, a cap, and a lamp that swings
+        // under the canopy. SWAY on a walker follows the stride, so the lamp swings with the walk.
+        const top = [0, yc + B.bot, 0], L = [0, top[1] - G.legLen * 0.45, 0];
+        const sw = { rig: [RIG.SWAY, 0, 0.12, 2], pivot: top };
+        PS(seg(top, L, 0.008, body2, 0.011, 3), sw);
+        P(cone(headR * 0.95, headR * 0.6, 6), body2, M4(L[0], L[1] + headR * 0.15, L[2]), sw);
+        P(ico(headR * 1.1, 1), glow, M4(L[0], L[1] - headR * 0.7, L[2], 1, 1.25, 1), { glow: 1, ...sw });
+        for (let i = 0; i < 3; i++) {
+          const a2 = (i / 3) * Math.PI * 2;
+          P(ico(0.02), glow, M4(Math.cos(a2) * R * 0.8, yc + B.bot * 0.75, Math.sin(a2) * R * 0.8), { glow: 0.7 });
+        }
+        break;
+      }
       const a = add(H, [0, headR * 0.6, headR * 0.3]), L = add(H, [0, headR * 2.6, headR * 1.2]);
       const s = seg(a, L, 0.014, body2, 0.018); P(s.geo, s.color, s.matrix, nod);
       P(ico(headR * 0.9), glow, M4(L[0], L[1], L[2], 1, 1.3, 1), { glow: 1, rig: [RIG.PULSE, 0, 0.12, 1], pivot: L });
@@ -677,7 +836,14 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     // A flitter on a spindle carries a second, smaller pair on a later phase.
     const F = WING_FORM[style], plan = wingPlan(style, coarse);
     const zw = style === 'glide' && G.plan === 'spindle' ? B.front * 0.25 : B.front * 0.05;
-    const pairs = style === 'flit' && G.plan === 'spindle' ? [[B.front * 0.3, 1, 0], [B.back * 0.3, 0.72, 1.4]] : [[zw, 1, 0]];
+    // ---- ripple ---- A pair on every segment, smaller toward the tail. Each pair beats later
+    // than the one ahead of it by the phase the body wave of the FLOAT carriage has moved along the
+    // same gap (see rippleK), so the wings ride the wave that runs down the body. A coarse build
+    // keeps every third pair: the sheets are the outline, and a dozen of them is the cost of a body.
+    const ripple = G.plan === 'chain'
+      ? B.secs.filter((s, i) => !coarse || i % 3 === 0).map((s) => [s.z, RIPPLE_WING[0] + (RIPPLE_WING[1] - RIPPLE_WING[0]) * s.u, -(B.secs[0].z - s.z) * rippleK(B)])
+      : null;
+    const pairs = ripple || (style === 'flit' && G.plan === 'spindle' ? [[B.front * 0.3, 1, 0], [B.back * 0.3, 0.72, 1.4]] : [[zw, 1, 0]]);
     for (const [z, kw, ph] of pairs) for (const sx of [-1, 1]) {
       const yw = yc + B.top * 0.35, span = R * F.span * kw, chord = R * F.chord * kw;
       const root = [sx * Math.max(probe.hw(yw, z) * 0.8, R * 0.3), yw, z];
@@ -686,8 +852,9 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       const pt = (u, c, y = 0) => [u * span, y, c * chord];   // a point of the planform, in the frame of the wing
       const inWing = (geo, color, oo) => P(geo, color, m.clone(), oo);
       inWing(sheetGeo(plan.map(([u, l, t]) => [u * span, 0, l * chord, t * chord])), accent, o);
-      // one sheet per wing at distance: the sheet is the silhouette
-      if (coarse) continue;
+      // one sheet per wing at distance: the sheet is the silhouette. The paddles of a ripple keep
+      // no veins: a dozen pairs of them is the cost of a whole body.
+      if (coarse || ripple) continue;
       const bone = (a, b, r0, r1) => { const s = seg(a, b, r0, body2, r1, 4); P(s.geo, s.color, s.matrix.premultiply(m), { ...o, glow: 0 }); };
       if (style === 'flap') {
         // an arm along the leading edge to the wrist, three fingers from the wrist, and a claw
@@ -718,7 +885,30 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       }
     }
   }
-  if (G.loco === 'fins') {
+  if (B.mantle) {
+    // ---- mantle ---- Two wide fins from the flanks, each one sheet on a grid, so the RIPPLE mode
+    // can bend it along the chord: a fin of whole strips would crack open between two strips. The
+    // fin is widest at its root, from the brow back to the middle of the hull, and it runs out to a
+    // rounded tip just behind the widest point. Lamps on the underside ride the same rig.
+    const k = B.k, span = MANTLE_SPAN * k, yf = yc + 0.01 * k;
+    const nu = coarse ? 1 : 6, nv = coarse ? 2 : 8;
+    const lead = (u) => (0.85 - 0.95 * u ** 1.3) * k, trail = (u) => (-0.65 + 0.5 * u ** 0.7) * k;
+    for (const sx of [-1, 1]) {
+      const xr = sx * probe.hw(yf, 0.1 * k) * 0.9, pivot = [xr, yf, 0];
+      const at = (u, v) => [xr + sx * u * (span - Math.abs(xr)), yf - 0.04 * k * u * u, lead(u) + (trail(u) - lead(u)) * v];
+      const o = { glow: 0.15, rig: [RIG.RIPPLE, 0, 0.3, sx * span], pivot };
+      // The back of a fin takes the colour of the back of the hull, and the belly is pale and lit.
+      // The grid faces up on the left fin and down on the right one, because x runs the other way.
+      P(gridGeo(nu, nv, at, sx < 0), body, M4(0, 0, 0), { ...o, glow: 0 });
+      P(gridGeo(nu, nv, at, sx > 0), accent, M4(0, 0, 0), { ...o, glow: 0.3 });
+      if (coarse) continue;
+      for (const [u, v] of [[0.3, 0.3], [0.5, 0.45], [0.7, 0.4], [0.45, 0.75], [0.25, 0.65]]) {
+        const p = at(u, v);
+        P(oct(0.025 * k), glow, M4(p[0], p[1] - 0.012 * k, p[2]), { ...o, glow: 0.9 });
+      }
+    }
+    if (!coarse) for (const sx of [-1, 1]) P(ico(0.03 * k), glow, M4(sx * 0.1 * k, yc + 0.09 * k, 0.62 * k), { glow: 0.8 });
+  } else if (G.loco === 'fins') {
     const k = B.k, bladder = whaleHead(G) === 'bladder';
     // Pectoral flippers: long, narrow, and swept back, with knobs along the leading edge. They
     // droop below the flank and row slowly.
@@ -766,12 +956,42 @@ export function buildCreature(G, pal, flora, detail = 'full') {
       }
     }
   }
-  if (G.loco === 'sac') {
+  if (G.loco === 'sac' && G.plan === 'chain') {
+    // ---- garland ---- The cord runs from float to float, one piece per gap, so it bends with the
+    // wave of the carriage. Under each float hangs a lamp that breathes with it. The coarse build
+    // keeps one cord and no lamps: at that size the floats are the outline.
+    const S = B.secs, n = S.length;
+    const at = (s) => [0, yc + s.y, s.z];
+    if (coarse) PS(bone(at(S[0]), at(S[n - 1]), R * 0.05, body2));
+    else {
+      for (let i = 0; i < n - 1; i++) PS(bone(at(S[i]), at(S[i + 1]), R * 0.045, body2, R * 0.045, 4));
+      for (const s of S) {
+        const p = [0, yc + s.y - s.r * 0.85, s.z];
+        P(ico(s.r * 0.3), glow, M4(...p), { glow: 1, rig: [RIG.PULSE, -s.u * GARLAND_BREATH, 0.25, 1], pivot: p });
+      }
+    }
+  } else if (G.loco === 'sac') {
     const base = [0, yc + B.bot - 0.02, 0];
     P(cyl(R * 0.33, R * 0.2, 0.09, coarse ? 3 : 6, coarse), body2, M4(base[0], base[1] - 0.02, base[2]));
     P(ball(R * 0.18), glow, M4(base[0], base[1] - 0.07, base[2]), { glow: 1, rig: [RIG.PULSE, 1, 0.2, 1], pivot: [base[0], base[1] - 0.07, base[2]] });
     P(ball(R * 0.17), body2, M4(0, yc + B.top + 0.02, 0.02));
     for (const [sx, dz] of [[-1, 0.04], [1, -0.05]]) P(ball(R * 0.4), accent, M4(sx * R * 0.9, yc + R * 0.2, dz, 1, 1.2, 1), { glow: 0.25, rig: [RIG.PULSE, 2, 0.05, 1], pivot: [0, yc, 0] });
+  }
+
+  // ---- parasol ---- Ribs over the top of the canopy, and a fringe of short points round the rim
+  // that swings with the stride. The canopy alone is the outline, so the coarse build keeps neither.
+  if (B.canopy && !coarse) {
+    // The ribs run along the edges of the cone, from the apex to the rim. A three.js cone puts its
+    // first edge on +z and turns toward +x, so a rib at angle a lies at (sin a, cos a).
+    const C = B.canopy, h = C * PARASOL_H, n = PARASOL_RIBS, apex = [0, yc + h + 0.004, 0];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU, sa = Math.sin(a), ca = Math.cos(a);
+      const rim = [sa * C * 1.01, yc + 0.004, ca * C * 1.01];
+      PS(seg(apex, rim, R * 0.05, body2, R * 0.04, 3));
+      P(cone(R * 0.12, R * 0.5, 4), accent, M4(sa * C * 0.99, yc - R * 0.25, ca * C * 0.99, 1, 1, 1, Math.PI, 0),
+        { glow: 0.3, rig: [RIG.SWAY, i, 0.08, 1], pivot: [sa * C, yc, ca * C] });
+    }
+    P(ico(R * 0.4), accent, M4(...apex, 1, 1.4, 1), { glow: 0.35 });
   }
 
   // ---- extras
@@ -785,6 +1005,24 @@ export function buildCreature(G, pal, flora, detail = 'full') {
     // along the body, as every other locomotion places it, one of these would stand on the ground
     // at one stop of the ball and point at the sky at the next. The feelers are the exception:
     // they grow on the head, and the head folds away before the hull turns.
+    if (G.loco === 'roller' && e !== 'antennae' && G.plan === 'disc') {
+      // ---- hoop ---- A part on the tread of a wheel would sit inside the tube of the tread, so the
+      // lamps ring the rim on both faces, the plates sit on the faces, and the spikes stand out of
+      // the faces, sideways. None of them reaches the radius the hoop rolls on, and none of them
+      // takes a part mode, so the ROLL carriage turns them with the hull. At the LOD distance a
+      // face is a few pixels, so the coarse build keeps none of them.
+      if (coarse) continue;
+      const t = R * HOOP_TREAD, n = e === 'beads' ? 8 : 4;
+      for (const sx of [-1, 1]) {
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * TAU + (sx > 0 ? 0 : Math.PI / n), cy = Math.cos(a), cz = Math.sin(a);
+          if (e === 'beads') P(ico(clamp(R * 0.09, 0.015, 0.035)), glow, M4(sx * t * 1.05, yc + cy * (R - t), cz * (R - t)), { glow: 0.9 });
+          else if (e === 'spikes') P(spike(R * 0.08, R * 0.3, 4), accent, M4(sx * R * 0.27, yc + cy * R * 0.55, cz * R * 0.55, 1, 1, 1, 0, -sx * Math.PI / 2), { glow: 0.4 });
+          else if (e === 'plates') P(block(R * 0.22), body, M4(sx * R * 0.1, yc + cy * R * 0.55, cz * R * 0.55, 0.4, 1, 1));
+        }
+      }
+      continue;
+    }
     if (G.loco === 'roller' && e !== 'antennae') {
       // The hull rolls on RR, so nothing here may reach past it: a stud that stood proud of the
       // tread would cut into the ground every time it came round to the bottom of the turn.
@@ -877,6 +1115,17 @@ export function buildCreature(G, pal, flora, detail = 'full') {
             P(s.geo, s.color, s.matrix, { rig: [RIG.SWAY, i, 0.1, 1], pivot: t0 });
             P(ico(0.016), glow, M4(...t1), { glow: 0.8, rig: [RIG.SWAY, i, 0.1, 1], pivot: t0 });
           }
+          break;
+        }
+        if (G.loco === 'sac' && G.plan === 'chain') {
+          // ---- garland ---- one tendril under each float, each a different length
+          B.secs.forEach((s, i) => {
+            const t0 = [0, yc + s.y - s.r * 0.9, s.z];
+            const t1 = [((i % 3) - 1) * R * 0.25, t0[1] - (0.3 + R) * (0.7 + 0.6 * ((i * 0.618) % 1)), s.z - R * 0.3];
+            const sw = { rig: [RIG.SWAY, i, 0.14, 1], pivot: t0 };
+            PS(seg(t0, t1, 0.009, body, 0.013, 3), sw);
+            P(ico(0.016), glow, M4(...t1), { glow: 0.8, ...sw });
+          });
           break;
         }
         if (air) {
@@ -982,7 +1231,8 @@ export function buildCreature(G, pal, flora, detail = 'full') {
         // A crescent flat to the ground on the end of the stock, with a notch in the middle of the
         // trailing edge. It pitches on the beat.
         const k = B.k || R / 0.3, end = B.rings ? B.rings[B.rings.length - 1] : [B.back * 0.85, 0];
-        const root = [0, yc + end[1], end[0] + 0.02 * k], hs = 0.45 * k;
+        // A mantle carries small flukes on the tip of its whip; a whale carries its whole stroke there.
+        const root = [0, yc + end[1], end[0] + 0.02 * k], hs = (B.mantle ? 0.2 : 0.45) * k;
         const st = coarse ? [[0, 0, -0.3], [1, -0.64, -0.65]]
           : [[0, 0, -0.3], [0.25, -0.08, -0.4], [0.5, -0.2, -0.46], [0.75, -0.36, -0.52], [0.92, -0.52, -0.58], [1, -0.64, -0.65]];
         const geo = () => sheetGeo(st.map(([x, l, t]) => [x * hs, 0, l * hs, t * hs]));
@@ -1116,6 +1366,15 @@ const RIG_GLSL = `
   } else if (mode == 8.0) {     // FLUKE: pitch at the beat, lagging the body
     th = sin(f - 1.2) * amp; c = cos(th); sn = sin(th);
     d.yz = vec2(d.y * c - d.z * sn, d.y * sn + d.z * c);
+    transformed = aPivot + d;
+  } else if (mode == 10.0) {    // RIPPLE: a fin rolls about its root, and the roll runs back along the chord
+    // The angle grows with the distance out from the root, and its phase moves with the place on
+    // the chord, so the sheet bends smoothly and a wave runs along the edge from the brow to the
+    // back. The phase grows with z, so a crest moves toward -z, which is the tail.
+    float span = abs(w), side = w < 0.0 ? -1.0 : 1.0;
+    float u = clamp(abs(d.x) / span, 0.0, 1.0);
+    th = sin(f + d.z * RIPK) * amp * (0.25 + 0.75 * u) * side; c = cos(th); sn = sin(th);
+    d.xy = vec2(d.x * c - d.y * sn, d.x * sn + d.y * c);
     transformed = aPivot + d;
   } else if (mode == 9.0) {     // TENDON: one tube laid from its pivot to the hold on the plant
     // The part is built as a stub running back from the pivot along -z, so d.z gives the place of
@@ -1321,8 +1580,12 @@ function rigConstants(G) {
   const gait = G.loco === 'monopod' ? hopGait(G) : G.gait;
   const hopH = clamp(0.45 / grav, 0.15, 0.9), crouch = G.legLen * 0.25, ext = G.legLen * 0.25;
   const bob = { biped: 0.03, tripod: 0.02, quad: 0.02, hexapod: 0.008, serpent: G.bodyR * 0.9, sac: 0.1, wings: 0.05, fins: 0.06 }[G.loco] || 0;
-  const wave = G.loco === 'fins' ? 0.08 : 0;
-  const wavek = G.loco === 'fins' ? 2.0 : G.loco === 'serpent' ? (2 * Math.PI) / (len * 1.1) : 5.0;
+  // ---- ripple and garland ---- A chain in the air takes an up-and-down wave that runs from the
+  // head to the tail: one wave over the whole body, and a negative WAVEK moves the crest toward
+  // the tail. The wings of a ripple beat on the same phase; see rippleK().
+  const airChain = G.plan === 'chain' && (G.loco === 'wings' || G.loco === 'sac');
+  const wave = G.loco === 'fins' ? 0.08 : airChain ? (G.loco === 'wings' ? 0.05 : 0.04) : 0;
+  const wavek = G.loco === 'fins' ? 2.0 : G.loco === 'serpent' ? (2 * Math.PI) / (len * 1.1) : airChain ? -rippleK(B) : 5.0;
   const rise = G.loco === 'periscope' ? 0.05 + (G.segs - 1) * G.bodyR * 1.15 + G.bodyR * 2.4 : G.loco === 'plough' ? G.bodyR * 1.1 : 0;
   const sink = G.loco === 'plough' ? -0.97 : -0.3; // the plough dives only now and then; the periscope hides half the time
   const heave = G.loco === 'wings' ? 0.03 : 0; // body lift on each wing beat
@@ -1348,7 +1611,9 @@ function rigConstants(G) {
     ['HEADYAW', legged || G.loco === 'serpent' ? 0.3 : G.cls === 'air' ? 0.15 : 0], ['SWAYG', legged ? 1 : 0],
     ['WAVE', wave], ['WAVEK', wavek], ['RISE', rise], ['SINK', sink],
     ['HEAVE', heave], ['GLIDE', glide], ['GLO', WF.glo], ['LAG', WF.lag], ['ELB', WF.elb], ['FOLD', WF.fold],
-    ['HOLDA', WF.hold[0]], ['HOLDB', WF.hold[1]], ['WAVEV', G.loco === 'fins' ? 1 : 0], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext]];
+    ['HOLDA', WF.hold[0]], ['HOLDB', WF.hold[1]], ['WAVEV', G.loco === 'fins' || airChain ? 1 : 0],
+    // ---- mantle ---- one wave along the root chord of a fin; see RIG.RIPPLE
+    ['RIPK', B.mantle ? TAU / (MANTLE_CHORD * B.k) : 0], ['FRONT', B.front], ['LEN', len], ['HOPH', hopH], ['CHARGE', CHARGE_END], ['CROUCH', crouch], ['EXT', ext]];
   // ---- roller (issue 28) ----
   // The ball the animal rolls on: its radius, the height of its centre while the animal stands on
   // its legs, and the drop that puts it on the ground when the legs go in. The radius is the one

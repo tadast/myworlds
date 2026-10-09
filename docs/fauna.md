@@ -106,6 +106,33 @@ Rules that limit the roll:
 - A gas giant always gets a whale as its first species.
 - Two species of one world do not share a locomotion when a different one is available.
 
+### The five forms
+
+Five bodies take a plan that their locomotion never draws. `FORM` in `species.js` holds them, and
+each one fills a gap of the matrix in `tools/fauna-lab.html`:
+
+| Form | Locomotion × plan | The body | Share |
+|---|---|---|---|
+| ripple | `wings` × `chain` | A slim chain with a pair of paddle wings on every segment. Each pair beats later than the pair ahead of it, on the phase of the body wave, so a wave runs down the wings from the head to the tail | 30% of the blobs and the spindles |
+| garland | `sac` × `chain` | A string of floats on one cord. Each float breathes a little later than the one ahead of it, and each one carries a lamp and a tendril | 34% |
+| hoop | `roller` × `disc` | A wheel on edge: a thin face, a tread round the rim, spokes on both faces, and a hub. It stands on its legs, folds them into the hub, and rolls on its rim | 34% |
+| mantle | `fins` × `disc` | A flat body between two wide fins, and a whip of a tail. `RIG.RIPPLE` bends each fin, so a wave runs along the edge from the brow to the tail | 35% |
+| parasol | `tripod` × `disc` | A cone of twelve panels on three stilts. A head with a lure hangs a lantern on a cord under the middle of the canopy | 30% |
+
+**A form takes no draw.** `formHash()` of two genes that the roll already drew decides it, after
+the last draw that reads the plan. A species that takes no form keeps every number it drew, and
+so does every species after it. A chain form takes its segments from the hash for the same
+reason. A body that the caller forces keeps its plan: the whale of a gas giant stays a whale, and
+the kin keeps the walker of its carvings.
+
+Each form has its own nouns (`FORM_NOUN`), its own genus (`FORM_GENUS`), and its own origin pool
+(`FORM_ORIGIN`), as the swarm has. A ripple and a garland measure along the chain (`FORM_BODY`),
+and the factor grows with the segments, so one float or one pair of wings keeps its size.
+`Species.formOf(G)` names the form of a genome, and the lab labels the cell of a form with it.
+
+The coarse build of a form is 29 to 72 triangles. The full build reaches 1,400 triangles when the
+roll gives it every extra it can carry.
+
 ### Body parts
 
 Each locomotion has its own lists in `PLAN`, `HEAD`, `EXTRAS`, and `ALWAYS`.
@@ -313,6 +340,7 @@ The rig record tells the shader what a part does. The modes are in `RIG`:
 | `STATIC` | 7 | No motion at all. Used for mounds |
 | `FLUKE` | 8 | Pitch at the flap rate with a lag |
 | `TENDON` | 9 | Stretch one tube from `aPivot` to `aAnchor`, in the frame of the instance. The part collapses on to its pivot when `aAnchor` is the zero vector, so an animal with no hold shows no cord |
+| `RIPPLE` | 10 | Roll about the root of a fin. The angle grows with the distance out from the root, and its phase grows with `z` by `RIPK`, so the sheet bends smoothly and a crest runs back along the chord. A fin of separate strips would crack open between two strips. Only the mantle uses it |
 
 ### Carriages
 
@@ -763,5 +791,6 @@ holds none of it.
 - Draw a number for one locomotion only: put the draw in a branch of its own in `rollGenome()`, and never as a row in one of the `{...}[loco]` tables there. Each of those tables is one object literal, so every entry in it draws from the generator for every species of every world, and one more row would move every animal of every seed.
 - Change how far a leg swings, or how long its foot stays down: the gait clock reads both, so the stride and the rate follow on their own. Check the new stride against the body size before you keep it.
 - Add a niche: add it to `NICHE` and `WORLD_NICHES` in `species.js`, and a test in `makeFauna()` in `generate.js`.
+- Add a form: add its row to `FORM`, and its entries to `FORM_NOUN`, `FORM_GENUS`, and `FORM_ORIGIN` in `species.js`. Pick a plan that the locomotion never draws, so `formOf()` can tell the form from a drawn body. Draw nothing for it: take every number from `formHash()` with a new salt. The audit sweeps every row of `FORM` on its own.
 - Test generation without a browser: run `node tools/lore-audit/audit.mjs --seeds 200 --show 8`. It imports `generate.js` in Node and reports every finding with an example world.
 - Test the geometry in Chrome: open the page, then call `__mw.inspect(k)` for each species index and look at the card.

@@ -204,6 +204,13 @@ function auditPools(env, f) {
       need(P.ORIGIN[loco], ctx, `ORIGIN.${loco}.${social}`);
     }
     need(P.SWARM_ORIGIN, { ...base, G: genome('wings', 'beak', '', 'meadow', 'swarm', social) }, 'SWARM_ORIGIN');
+    // A form takes the origin of its own pool, so each pool must answer for every head its
+    // locomotion can have: a line may test the lure of a parasol.
+    for (const [loco, F] of Object.entries(Species.CATALOGUE.FORM)) {
+      for (const head of HEADS) {
+        need(P.FORM_ORIGIN[F.key], { ...base, G: genome(loco, head, '', 'meadow', F.plan, social) }, `FORM_ORIGIN.${F.key}.${head}.${social}`);
+      }
+    }
   }
   // the sociality lines, each against the gene it belongs to
   need(P.HERD_STORY, { ...base, G: genome('quad', 'beak', '', 'meadow', null, 'herd'), still: false }, 'HERD_STORY');
@@ -239,6 +246,7 @@ function auditLines(env, f) {
   add(P.PAIR_STORY, 'PAIR_STORY'); add(P.ALONE_STORY, 'ALONE_STORY');
   add(P.WORLD_ADJ, 'WORLD_ADJ'); add(P.WORLD_EPITHET, 'WORLD_EPITHET');
   for (const k of Object.keys(P.ORIGIN)) add(P.ORIGIN[k], 'ORIGIN.' + k);
+  for (const k of Object.keys(P.FORM_ORIGIN)) add(P.FORM_ORIGIN[k], 'FORM_ORIGIN.' + k);
   for (const k of Object.keys(P.FEATURE)) add(P.FEATURE[k], 'FEATURE.' + k);
   for (const k of Object.keys(P.HABIT)) add(P.HABIT[k], 'HABIT.' + k);
   for (const k of Object.keys(P.CLOSE)) add(P.CLOSE[k], 'CLOSE.' + k);

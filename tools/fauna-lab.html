@@ -93,7 +93,8 @@ const uniq = (a) => [...new Set(a)];
 const CLASS_OF = Object.fromEntries(Object.entries(CAT.LOCO).flatMap(([c, ls]) => ls.map((l) => [l, c])));
 const ALL = {
   loco: Object.values(CAT.LOCO).flat(),
-  plan: uniq(Object.values(CAT.PLAN).flat()),
+  // A fixed order, so a plan a form adds to one locomotion does not move the columns.
+  plan: uniq(['blob', 'dome', 'spindle', 'chain', 'disc', 'swarm', ...Object.values(CAT.PLAN).flat()]),
   head: uniq(['none', ...Object.values(CAT.HEAD).flat()]),
   extra: uniq([...Object.values(CAT.EXTRAS).flat(), ...Object.values(ALWAYS).flat()]),
 };
@@ -129,6 +130,9 @@ const INFO = {
   wingStyle: { flit: 'veined paddles, fast beats', flap: 'skin on an arm and three fingers, folds on the upstroke',
     glide: 'long narrow wings, beats only to climb' },
   whaleHead: { hull: 'one smooth hull with the head in it', bladder: 'the head is a cluster of gas bladders' },
+  form: { ripple: 'a chain that flies on a pair of wings to every segment', garland: 'a string of floats on one cord, each with a lamp',
+    hoop: 'a wheel that stands on its legs and rolls on its rim', mantle: 'a flat sky body that rows the air with a wave along each fin',
+    parasol: 'a wide canopy on three thin legs, with a lantern under it' },
   lod: { full: 'the body near the camera', coarse: 'the far body: under 80 triangles' },
   view: { three: 'the camera turns about the creature', side: 'from the side', top: 'from above', front: 'from the front' },
 };
@@ -152,7 +156,14 @@ function genome(o, skin) {
   };
   if (loco === 'fins') Object.assign(G, { density: 0.0025, fsign: 1, fcut: 0.3 });
   for (const k of ['wingStyle', 'whaleHead']) if (o[k]) G[k] = o[k];
+  // a ripple flies on paddles, as species.js gives it
+  if (loco === 'wings' && plan === 'chain') G.wingStyle = 'flit';
   return G;
+}
+// The name of the form a genome takes, or null. species.js rolls five of them; see FORM there.
+function formOf(g) {
+  const F = CAT.FORM[g.loco];
+  return F && F.plan === g.plan ? F.key : null;
 }
 
 // ---------------------------------------------------------------- state
@@ -184,8 +195,8 @@ const AXES = {
     patch: (v, g) => (v === '(base)' ? {} : { extras: [...g.extras, v] }),
     check: (g, v) => v === '(base)' || allowed('extra', g.loco, v),
   },
-  wingStyle: { name: 'wing form (wings)', field: 'wingStyle', values: ['flit', 'flap', 'glide'], patch: (v) => ({ wingStyle: v }), check: (g) => g.loco === 'wings' && g.plan !== 'swarm' },
-  whaleHead: { name: 'whale head (fins)', field: 'whaleHead', values: ['hull', 'bladder'], patch: (v) => ({ whaleHead: v }), check: (g) => g.loco === 'fins' },
+  wingStyle: { name: 'wing form (wings)', field: 'wingStyle', values: ['flit', 'flap', 'glide'], patch: (v) => ({ wingStyle: v }), check: (g) => g.loco === 'wings' && g.plan !== 'swarm' && g.plan !== 'chain' },
+  whaleHead: { name: 'whale head (fins)', field: 'whaleHead', values: ['hull', 'bladder'], patch: (v) => ({ whaleHead: v }), check: (g) => g.loco === 'fins' && g.plan !== 'disc' },
   bodyR: { name: 'body radius', field: 'bodyR', values: [0.1, 0.16, 0.22, 0.28, 0.34], label: (v) => 'radius ' + v, patch: (v) => ({ bodyR: v }) },
   legLen: { name: 'leg length (legs)', field: 'legLen', values: [0.12, 0.25, 0.4, 0.55, 0.8], label: (v) => 'legs ' + v, patch: (v) => ({ legLen: v }), check: (g) => LEGGED.includes(g.loco) },
   jointed: { name: 'knees (legs)', field: 'jointed', values: [true, false], label: (v) => (v ? 'knees' : 'straight legs'), patch: (v) => ({ jointed: v }), check: (g) => LEGGED.includes(g.loco) },
@@ -359,7 +370,7 @@ function drawForm() {
       ${row('loco', 'Locomotion', `<select name="loco">${locos}</select>`, `How it moves. ${cap(INFO.loco[l])}`)}
       ${row('plan', 'Body plan', select('plan', plans, undefined, INFO.plan, g.plan), `The shape of the body. ${cap(INFO.plan[g.plan])}`)}
       ${row('head', 'Head', select('head', heads, undefined, INFO.head, g.head), `The part at the front. ${cap(INFO.head[g.head])}`)}
-      ${l === 'wings' ? row('wingStyle', 'Wing form', select('wingStyle', AXES.wingStyle.values, undefined, INFO.wingStyle),
+      ${l === 'wings' && g.plan !== 'chain' ? row('wingStyle', 'Wing form', select('wingStyle', AXES.wingStyle.values, undefined, INFO.wingStyle),
         g.plan === 'swarm' ? 'A swarm has no wing form: each shard is a stiff blade.' : cap(INFO.wingStyle[S.wingStyle])) : ''}
       ${l === 'fins' ? row('whaleHead', 'Whale head', select('whaleHead', AXES.whaleHead.values, undefined, INFO.whaleHead), cap(INFO.whaleHead[S.whaleHead])) : ''}
       <div class="row"><label>Extras</label>
@@ -444,10 +455,11 @@ function drawMatrix() {
       const el = add('cell', '');
       const { g, na: why } = cellGenome(rv, cv);
       const parts = [S.rows !== 'none' && lab(R, rv), S.cols !== 'none' && lab(C, cv)].filter(Boolean);
-      const label = parts.length ? parts.join(' · ') : `${g.loco} · ${g.plan} · ${g.head}`;
+      const form = formOf(g);
+      const label = (parts.length ? parts.join(' · ') : `${g.loco} · ${g.plan} · ${g.head}`) + (form ? ` — ${form}` : '');
       if (why) { el.classList.add('na'); el.innerHTML = `<b>${label}</b><i>${why}</i>`; na++; return; }
       if (JSON.stringify(g) === base) el.classList.add('base');
-      el.title = `${g.loco} · ${g.plan} · head: ${g.head}${g.extras.length ? ' · ' + g.extras.join(', ') : ''}\nClick to copy this creature to the form.`;
+      el.title = `${form ? `The ${form}: ${INFO.form[form]}.\n` : ''}${g.loco} · ${g.plan} · head: ${g.head}${g.extras.length ? ' · ' + g.extras.join(', ') : ''}\nClick to copy this creature to the form.`;
       el.onclick = () => { Object.assign(S, pick(g)); update(); };
       if (++n > MAX_CELLS) { el.innerHTML = `<b>${label}</b><i>not drawn: over ${MAX_CELLS} cells</i>`; return; }
       const c = makeCell(el, genome(g, g.skin), g.lod, label, (ri * cols.length + ci) * 0.37);
